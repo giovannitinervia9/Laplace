@@ -1,0 +1,41 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "cpu",
+      "displayName": "CPU (Kokkos Serial/OpenMP), Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "cpu-debug",
+      "inherits": "cpu",
+      "displayName": "CPU (Kokkos Serial/OpenMP), Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "cuda",
+      "inherits": "cpu",
+      "displayName": "GPU (Kokkos CUDA), Release",
+      "cacheVariables": {
+        "CMAKE_CUDA_ARCHITECTURES": "native"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "cpu", "configurePreset": "cpu" },
+    { "name": "cpu-debug", "configurePreset": "cpu-debug" },
+    { "name": "cuda", "configurePreset": "cuda" }
+  ],
+  "testPresets": [
+    { "name": "cpu", "configurePreset": "cpu", "output": { "outputOnFailure": true } },
+    { "name": "cpu-debug", "configurePreset": "cpu-debug", "output": { "outputOnFailure": true } },
+    { "name": "cuda", "configurePreset": "cuda", "output": { "outputOnFailure": true } }
+  ]
+}
