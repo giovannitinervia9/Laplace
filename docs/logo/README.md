@@ -16,6 +16,7 @@ outlines.
 | `laplace-icon-{light,dark}.svg`, `laplace-icon-{light,dark}-{16,...,512}.png` | symbol only |
 | `laplace-icon-{black,white}.svg`, `-512.png` | symbol only, single colour |
 | `favicon.ico` | 16, 32, 48 and 64 px |
+| `laplace-social-preview.png` | 1280×640, the repository's social preview |
 
 PNG files have a transparent background. Colours: blue `#3a6fd6` (upper face)
 and `#1d3f8f` (lower face), orange `#e69a2e` and `#a8650c`, text `#1d2433`; on
