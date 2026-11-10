@@ -35,7 +35,7 @@ host and on the device, each one measured against 200-bit
 | `incomplete_beta_deriv.hpp` | derivatives of log I_x(a, b) and log(1 - I_x(a, b)) in a and b, orders 1 to 5 |
 | `student.hpp` | log of the Student t cdf with real degrees of freedom, and its derivatives to order 5 |
 | `owen.hpp` | Owen's T function, log of the skew-normal cdf and its derivatives to order 5 |
-| `bessel_i.hpp` | `log_bessel_i0`, `log_bessel_i0_scaled`, the ratio I1/I0 and its inverse (von Mises), with derivatives to order 6 |
+| `bessel_i.hpp` | `log_bessel_i0`, `log_bessel_i0_scaled`, the ratio I1/I0 and its inverse (von Mises), with derivatives to order 6, and the ratios I_j/I_0 (`bessel_i_ratios`) |
 
 Every function is a separate function per derivative order, takes and returns
 `double`, throws no exception and allocates no memory. The measured accuracy

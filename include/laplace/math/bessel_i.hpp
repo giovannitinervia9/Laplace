@@ -16,6 +16,12 @@
 //                             not rho: a von Mises distribution in (mu, rho)
 //                             computes kappa = K(rho) once, and kappa keeps
 //                             the information that rho loses near 1.
+//   bessel_i_ratios(k, m, out) I_j(k) / I_0(k) for j = 1..m, the coefficients
+//                             of the series of the von Mises distribution
+//                             function, by Miller's backward recurrence
+//                             (measured against statmodels7's continued
+//                             fraction with running products, and against
+//                             double-double versions, in math_bessel)
 //
 // Arguments below 0 or NaN give NaN (rho outside [0, 1] also); A(0) = 0,
 // K(0) = 0, K(1) = +inf.
@@ -503,6 +509,46 @@ LAPLACE_HD double log_i0(double k, bool scaled) {
   return scaled ? l : k + l;
 }
 
+
+// R_j = I_j(k)/I_0(k), j = 1..m, into out[0..m-1], by Miller's backward
+// recurrence y_(j-1) = (2j/k) y_j + y_(j+1) from y_(n0+1) = 0 and a tiny
+// y_(n0), rescaled against overflow, with R_j = y_j / y_0. The start
+// n0 = m + max(30, ceil(sqrt(40 m))) + ceil(k) is statmodels7's; the cost is
+// O(m + k) operations.
+LAPLACE_HD void ratios(double k, int m, double* out) {
+  if (m < 1) return;
+  if (!(k >= 0.0)) {
+    for (int i = 0; i < m; ++i) out[i] = nan();
+    return;
+  }
+  if (k == 0.0 || !(k < 1e308)) {  // I_j(0) = 0; I_j/I_0 -> 1 as k -> inf
+    for (int i = 0; i < m; ++i) out[i] = k == 0.0 ? 0.0 : 1.0;
+    return;
+  }
+  if (k < 1e-8) {
+    // R_j = (k/2)^j / j! (1 + O(k^2)), the correction below k^2/4 < 1e-16
+    // relative; here the factor 2j/k of the recurrence would overflow y in
+    // one step
+    double r = 0.5 * k;
+    out[0] = r;
+    for (int j = 2; j <= m; ++j) out[j - 1] = r = r * (0.5 * k) / j;
+    return;
+  }
+  const int s = int(Kokkos::ceil(Kokkos::sqrt(40.0 * m)));
+  const int n0 = m + (s > 30 ? s : 30) + int(Kokkos::ceil(k));
+  double y1 = 0.0, y = 1e-280;  // y_(j+1), y_j
+  for (int j = n0; j >= 1; --j) {
+    const double ym = (2.0 * j) / k * y + y1;  // y_(j-1)
+    y1 = y, y = ym;
+    if (j - 1 >= 1 && j - 1 <= m) out[j - 2] = y;
+    if (y > 1e250) {
+      y *= 1e-250, y1 *= 1e-250;
+      for (int i = (j - 1 > 1 ? j - 1 : 1); i <= m; ++i) out[i - 1] *= 1e-250;
+    }
+  }
+  for (int i = 0; i < m; ++i) out[i] /= y;
+}
+
 }  // namespace detail_bessel
 
 LAPLACE_HD double log_bessel_i0(double k) { return detail_bessel::log_i0(k, false); }
@@ -524,6 +570,10 @@ LAPLACE_HD double bessel_i_ratio_inv_d4(double kappa) { return detail_bessel::ra
 LAPLACE_HD double bessel_i_ratio_inv_d5(double kappa) { return detail_bessel::ratio_inv_dn<5>(kappa, detail_bessel::params{}); }
 LAPLACE_HD double bessel_i_ratio_inv_d6(double kappa) { return detail_bessel::ratio_inv_dn<6>(kappa, detail_bessel::params{}); }
 
+// I_j(k)/I_0(k) for j = 1..m into out[0..m-1] (out has room for m values):
+// the coefficients of the series of the von Mises distribution function
+LAPLACE_HD void bessel_i_ratios(double k, int m, double* out) { detail_bessel::ratios(k, m, out); }
+
 }  // namespace own
 
 using own::bessel_i_ratio;
@@ -541,6 +591,7 @@ using own::bessel_i_ratio_inv_d4;
 using own::bessel_i_ratio_inv_d5;
 using own::bessel_i_ratio_inv_d6;
 using own::log_bessel_i0;
+using own::bessel_i_ratios;
 using own::log_bessel_i0_scaled;
 
 }  // namespace laplace::math

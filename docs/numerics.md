@@ -818,8 +818,64 @@ on both builds (bounds: measured error plus about half).
 
 **Open.** The value of A in the continued fraction range is computed in double
 (3.3-3.5 ulp); in double-double it would be at the last bit for about four
-times the cost. The von Mises cdf needs the ratios I_j/I_0 for j up to about
-8.5 sqrt(kappa) + 10 (statmodels7's `bessel_i_ratios`), not done yet. Any other
+times the cost. The ratios I_j/I_0 of the von Mises cdf are in the next entry. Any other
 double-double code on the device must use the intrinsics of
 `detail/double_double.hpp`; the `two_prod` in `normal.hpp` is still the
 contractible form.
+
+## The ratios I_j(k)/I_0(k) of the von Mises distribution function
+
+**What.** `bessel_i_ratios(k, m, out)` in `include/laplace/math/bessel_i.hpp`:
+R_j = I_j(k)/I_0(k) for j = 1..m, the coefficients of the series of the von
+Mises distribution function,
+F(x) = (x + pi)/(2 pi) + (1/pi) sum_j (R_j / j) [sin(j(x - mu)) + sin(j(pi + mu))],
+truncated in statmodels7 at m = max(20, ceil(8.5 sqrt k) + 10) terms. The
+caller supplies room for m values.
+
+**How.** Miller's backward recurrence y_(j-1) = (2j/k) y_j + y_(j+1) from
+y_(n0+1) = 0 and a tiny y_(n0), rescaled by 1e-250 when it passes 1e250, with
+R_j = y_j / y_0; statmodels7's start n0 = m + max(30, ceil(sqrt(40 m))) + ceil(k).
+Below k = 1e-8 the factor 2j/k would overflow y in one step, so there
+R_j = R_(j-1) (k/2) / j, whose neglected correction is below k^2/4 < 1e-16
+relative. k = 0 gives zeros, k = +inf ones, k < 0 or NaN NaNs.
+
+**Measurement.** References `bessel_i_ratios.csv` (tools/reference/bessel.py
+ratios): 7416 rows (k, j), k log-uniform on (2^-30, 2^10) and uniform on
+(0, 100), j = 1, 2, 3, m, m/2 and four random orders up to m, at 200 and 264
+bits; values below 1e-300 left out. Each candidate computes all m ratios of
+the cdf series (m at least j) and returns R_j; timing for the whole vector,
+k uniform on (0, 50). Max ulp (max ulp for R_j > 1e-3), gcc / CUDA; ns/call
+on one gcc thread, CUDA:
+
+| candidate | max ulp | R_j > 1e-3 | ulp1 | ns/call |
+|---|---|---|---|---|
+| Miller (chosen) | 15.3 / 12.5 | 3.7 / 4.3 | 1.9 | 182 / 11.8 |
+| Miller, start m + 5 + ceil(k) | 13.3 / 13.3 | 5.3 | 2.3 | 130 / 9.8 |
+| statmodels7: continued fraction for I_j/I_(j-1) in double, running products | 14.9 / 14.9 | 6.1 | 2.7 | 472 / 9.1 |
+| the same, products in double-double | 10.6 / 10.6 | 5.3 | 2.7 | 741 / 10.9 |
+| fraction and products in double-double | 0.50 / 0.50 | 0.50 | 0.25 | 5690 / 96 |
+
+**What this says.** In double every candidate loses about one rounding per
+order, so the relative error grows along j: the largest errors (10-15 ulp)
+sit at orders whose R_j lies between 1e-30 and 1e-3, where they move the cdf
+by less than 1e-18. In units of max(R_j, 1), which is what the cdf sees, all
+are within 3 ulp. The double-double version is exact to the last bit but
+twelve times slower on the CPU. Miller's recurrence multiplies where the
+fraction divides, hence its speed on the CPU; on CUDA the two cost the same.
+A start closer to m would do for the cdf's m but not for every m, so
+statmodels7's start is kept.
+
+**Chosen.** Miller's recurrence with statmodels7's start, on both backends.
+Tested in `tests/math/test_bessel.cpp` (23 ulp, 3 ulp1) on both builds.
+
+**Open.** The derivatives of the ratios in k, which the derivatives of the cdf
+in kappa will need, are not done; the cost grows linearly with k (the start is
+above k), and statmodels7 does not use the series for large k.
+
+**Checked at the same time.** The `two_prod` of `normal.hpp` and
+`detail/ibeta_expansions.hpp` is still the form that nvcc may contract. In
+`normal.hpp` and `owen.hpp` it only splits x^2/2 for an exponent, where a
+contraction would cost at most an ulp. `lambda_of` in `ibeta_expansions.hpp`
+does rely on the exact identity, but ibeta_hard on CUDA matches the CPU to the
+digit (1325 ulp, ulpL 18.83 on both), and the general set has the same mean
+and ulpL (12.9 against 12.7). Left as they are.

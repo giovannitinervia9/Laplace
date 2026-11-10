@@ -13,6 +13,8 @@ Files (format as in special.py: the argument, then hi, lo in hexadecimal):
     bessel_i_ratio_d{n}.csv     k     A^(n)(k), n = 1..6
     bessel_i_ratio_inv.csv      rho   K(rho), the inverse of A (A(K(rho)) = rho)
     bessel_i_ratio_inv_d{n}.csv kappa K^(n)(rho) at rho = A(kappa), n = 1..6
+    bessel_i_ratios.csv         k, j  I_j(k)/I_0(k) for orders j up to the length of the
+                                      von Mises cdf series, max(20, ceil(8.5 sqrt k) + 10)
 
 The derivatives of the inverse take kappa, not rho, as their argument: the
 caller of a von Mises distribution in (mu, rho) computes kappa = K(rho) once,
@@ -180,6 +182,30 @@ def row_inverse(rho):
     except (ValueError, ZeroDivisionError):
         return None
     return (rho, v) if agree(u, v) else None
+
+
+def cdf_terms(k):
+    """the number of ratios the von Mises cdf series uses at kappa"""
+    return max(20, math.ceil(8.5 * math.sqrt(k)) + 10)
+
+
+def row_ratios(k):
+    """(k, j, I_j(k)/I_0(k)) for j = 1, 2, 3, the last term of the cdf series
+    and a few orders in between; values below 1e-300 are left out"""
+    m = cdf_terms(k)
+    rng = random.Random(hash(k))
+    js = sorted({1, 2, 3, m, m // 2} | {rng.randint(1, m) for _ in range(4)})
+    out = []
+    for p in (200, 264):
+        with mpmath.workprec(p):
+            kk = mpmath.mpf(k)
+            i0 = mpmath.besseli(0, kk)
+            out.append([mpmath.besseli(j, kk) / i0 for j in js])
+    rows = []
+    for j, u, v in zip(js, out[0], out[1]):
+        if v > mpmath.mpf(1e-300) and agree(u, v):
+            rows.append((k, j, v))
+    return rows
 
 
 def rho_sample(rng):
@@ -355,7 +381,7 @@ def main():
     for a in sys.argv[1:]:
         if a.startswith("--workers="):
             workers = int(a.split("=")[1])
-    want = set(args) or {"log_i0", "ratio", "inverse", "inverse_derivs"}
+    want = set(args) or {"log_i0", "ratio", "inverse", "inverse_derivs", "ratios"}
     rng = random.Random(SEED)
     ks = sorted(set(kappa_sample(rng)))
     with Pool(workers) as pool:
@@ -370,6 +396,18 @@ def main():
         if "inverse" in want:
             rhos = sorted(set(rho_sample(random.Random(SEED + 1))))
             write("bessel_i_ratio_inv", run(pool, row_inverse, rhos))
+        if "ratios" in want:
+            rk = random.Random(SEED + 2)
+            ks = [log_uniform(rk, -30, 10) for _ in range(600)] + [rk.uniform(0.0, 100.0) for _ in range(300)]
+            ks += [0.5, 1.0, 10.0, 30.0, 100.0, 500.0, 1000.0]
+            rows = [r for rs in pool.map(row_ratios, ks, chunksize=4) for r in rs]
+            path = OUT / "bessel_i_ratios.csv"
+            with open(path, "w", newline="\n") as f:
+                f.write("k,j,hi,lo\n")
+                for k, j, v in rows:
+                    hi, lo = dd(v)
+                    f.write(f"{float(k).hex()},{float(j).hex()},{hi.hex()},{lo.hex()}\n")
+            print(f"{path.name}: {len(rows)} rows")
         if "inverse_derivs" in want:
             rows = run(pool, row_inverse_derivs, ks)
             for n in range(1, NMAX + 1):

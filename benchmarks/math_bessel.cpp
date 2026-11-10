@@ -95,6 +95,98 @@ db::params with(double small, double large, int extra) {
   return p;
 }
 
+
+// ---------------------------------------------------------------- the ratios I_j/I_0 (von Mises cdf)
+// R_j = I_j(k)/I_0(k), j = 1..m, for the series of the von Mises distribution
+// function, m = max(20, ceil(8.5 sqrt k) + 10). Candidates (method):
+//   0  statmodels7: r_j = I_j/I_(j-1) by the continued fraction backwards in
+//      double from n0, R_j = r_1 ... r_j in double;
+//   1  the same fraction, the products in double-double;
+//   2  the fraction and the products in double-double;
+//   3  Miller's backward recurrence y_(j-1) = (2j/k) y_j + y_(j+1), rescaled
+//      against overflow, R_j = y_j / y_0.
+// n0 = m + max(30, ceil(sqrt(40 m)), ceil(k)) (statmodels7's start) when
+// start = 0, else m + start + ceil(k).
+constexpr int max_terms = 512;
+KOKKOS_INLINE_FUNCTION int cdf_terms(double k) {
+  const int m = int(Kokkos::ceil(8.5 * Kokkos::sqrt(k))) + 10;
+  return m > 20 ? m : 20;
+}
+KOKKOS_INLINE_FUNCTION void ratios(double k, int m, double* out, int method, int start) {
+  using laplace::math::detail::ddm::dd;
+  namespace ddm = laplace::math::detail::ddm;
+  int n0 = m + (start > 0 ? start : 30);
+  if (start == 0) {
+    const int s = int(Kokkos::ceil(Kokkos::sqrt(40.0 * m)));
+    n0 = m + (s > 30 ? s : 30);
+  }
+  n0 += int(Kokkos::ceil(k));
+  if (method == 0 || method == 1) {
+    double r = 0.0;
+    for (int j = n0; j >= 1; --j) {
+      r = k / (2.0 * j + k * r);
+      if (j <= m) out[j - 1] = r;
+    }
+    if (method == 0) {
+      for (int j = 1; j < m; ++j) out[j] *= out[j - 1];
+    } else {
+      dd p(out[0]);
+      for (int j = 1; j < m; ++j) {
+        p = p * out[j];
+        out[j] = p.hi;
+      }
+    }
+  } else if (method == 2) {
+    dd r(0.0), rr[max_terms];
+    for (int j = n0; j >= 1; --j) {
+      r = dd(k) / (k * r + 2.0 * j);
+      if (j <= m) rr[j - 1] = r;
+    }
+    dd p = rr[0];
+    out[0] = p.hi;
+    for (int j = 1; j < m; ++j) {
+      p = p * rr[j];
+      out[j] = p.hi;
+    }
+  } else {
+    double y1 = 0.0, y = 1e-280;  // y_(j+1), y_j
+    for (int j = n0; j >= 1; --j) {
+      const double ym = (2.0 * j) / k * y + y1;  // y_(j-1)
+      y1 = y, y = ym;
+      if (j - 1 >= 1 && j - 1 <= m) out[j - 2] = y;
+      if (y > 1e250) {
+        y *= 1e-250, y1 *= 1e-250;
+        for (int i = j - 1; i <= m; ++i)
+          if (i >= 1) out[i - 1] *= 1e-250;
+      }
+    }
+    for (int i = 0; i < m; ++i) out[i] /= y;
+  }
+}
+struct RatiosOwn {  // the header's (Miller, statmodels7's start)
+  KOKKOS_INLINE_FUNCTION double operator()(double k, double jd) const {
+    const int j = int(jd);
+    int m = cdf_terms(k);
+    if (j > m) m = j;
+    if (m > max_terms) return k * NAN;
+    double out[max_terms];
+    laplace::math::bessel_i_ratios(k, m, out);
+    return out[j - 1];
+  }
+};
+struct RatiosF {
+  int method, start;
+  KOKKOS_INLINE_FUNCTION double operator()(double k, double jd) const {
+    const int j = int(jd);
+    int m = cdf_terms(k);
+    if (j > m) m = j;
+    if (m > max_terms) return k * NAN;
+    double out[max_terms];
+    ratios(k, m, out, method, start);
+    return out[j - 1];
+  }
+};
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -151,6 +243,14 @@ int main(int argc, char* argv[]) {
     run("bessel_i_ratio_inv_d4", s.tag, InvDOwn<4>{s.p}, t_k);
     run("bessel_i_ratio_inv_d5", s.tag, InvDOwn<5>{s.p}, t_k);
     run("bessel_i_ratio_inv_d6", s.tag, InvDOwn<6>{s.p}, t_k);
+  }
+
+  {  // the ratios: time the whole array of the cdf series (k uniform on (0, 50))
+    const auto t_kj = bench::make_time_args(n / 16, [&] { return bench::Args{50.0 * u01(gen), 1.0, 0.0}; });
+    run("bessel_i_ratios", "own", RatiosOwn{}, t_kj);
+    const char* tag[] = {"sm7", "ddprod", "ddall", "miller"};
+    for (int meth = 0; meth < 4; ++meth) run("bessel_i_ratios", tag[meth], RatiosF{meth, 0}, t_kj);
+    run("bessel_i_ratios", "mils5", RatiosF{3, 5}, t_kj);
   }
   return 0;
 }

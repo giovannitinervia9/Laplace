@@ -2,7 +2,8 @@
 // against the mpmath references, evaluated in a Kokkos kernel on the default
 // execution space: log I0 and its scaled form, the ratio A = I1/I0 and its
 // derivatives to order six, the inverse K of A and its derivatives to order
-// six. Bounds: the errors measured on 2026-11-10 on the gcc/OpenMP and CUDA
+// six, and the ratios I_j/I_0 of the von Mises cdf series. Bounds: the errors
+// measured on 2026-11-10 on the gcc/OpenMP and CUDA
 // builds (docs/numerics.md) with a margin of about half again.
 #include <doctest/doctest.h>
 
@@ -54,6 +55,21 @@ struct Inverse {
   }
 };
 
+// R_j = I_j/I_0 as the von Mises cdf series uses them: all m ratios at once,
+// m = max(20, ceil(8.5 sqrt k) + 10), and the one asked for returned
+struct Ratios {
+  KOKKOS_INLINE_FUNCTION double operator()(double k, double jd) const {
+    const int j = int(jd);
+    int m = int(Kokkos::ceil(8.5 * Kokkos::sqrt(k))) + 10;
+    if (m < 20) m = 20;
+    if (j > m) m = j;
+    double out[512];
+    if (m > 512) return k * NAN;
+    lm::bessel_i_ratios(k, m, out);
+    return out[j - 1];
+  }
+};
+
 void check(const std::string& name, auto f, double max_ulp) {
   const auto r = bench::read_ref(refdir + "/" + name + ".csv");
   const auto y = bench::eval_kernel(r.x, f);
@@ -82,6 +98,16 @@ TEST_CASE("the inverse of A and its derivatives against mpmath") {
   for (int n = 1; n <= 6; ++n) check("bessel_i_ratio_inv_d" + std::to_string(n), Inverse{n}, bound[n]);
 }
 
+TEST_CASE("the ratios I_j/I_0 of the von Mises cdf series against mpmath") {
+  const auto r = bench::read_ref(refdir + "/bessel_i_ratios.csv");
+  const auto y = bench::eval_kernel(r.x, Ratios{});
+  const auto a = bench::accuracy(r, y);
+  INFO("bessel_i_ratios: max ", a.max_ulp, " ulp, ", a.max_ulp1, " ulp1 at k = ", a.worst[0], ", j = ", a.worst[1]);
+  CHECK(a.n_bad == 0);
+  CHECK(a.max_ulp <= 23.0);
+  CHECK(a.max_ulp1 <= 3.0);
+}
+
 TEST_CASE("special arguments of the von Mises Bessel functions") {
   CHECK(lm::bessel_i_ratio(0.0) == 0.0);
   CHECK(lm::bessel_i_ratio_inv(0.0) == 0.0);
@@ -90,6 +116,14 @@ TEST_CASE("special arguments of the von Mises Bessel functions") {
   CHECK(std::isnan(lm::bessel_i_ratio(-1.0)));
   CHECK(std::isnan(lm::bessel_i_ratio_inv(1.5)));
   CHECK(std::isnan(lm::log_bessel_i0(-1.0)));
+  double out[3];
+  lm::bessel_i_ratios(0.0, 3, out);
+  CHECK((out[0] == 0.0 && out[2] == 0.0));
+  lm::bessel_i_ratios(1e-200, 3, out);  // I_1/I_0 = k/2 at tiny k; the rest underflow
+  CHECK(out[0] == 5e-201);
+  CHECK(out[2] == 0.0);
+  lm::bessel_i_ratios(2.0, 3, out);  // the first ratio is A
+  CHECK(std::fabs(out[0] - lm::bessel_i_ratio(2.0)) <= 4e-16 * out[0]);
   // A(K(rho)) = rho to within the conditioning of K
   for (double rho : {1e-10, 0.1, 0.5, 0.9, 0.999, 1.0 - 1e-12}) {
     const double k = lm::bessel_i_ratio_inv(rho);
