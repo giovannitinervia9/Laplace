@@ -15,6 +15,7 @@ set(LAPLACE_TEST_SOURCES
   math/test_beta_deriv.cpp
   math/test_student.cpp
   math/test_owen.cpp
+  math/test_bessel.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

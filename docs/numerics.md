@@ -736,3 +736,90 @@ builds.
 **Open.** Speed (about 35 nodes per call, each with about 4 transcendentals and
 a 21-coefficient polynomial exp and log; the region switch calls beta_inc,
 0.5 us); nu below 2^-4 is not covered by the references.
+
+## Von Mises Bessel functions: log I0, A = I1/I0 and its inverse, derivatives to order 6
+
+**What.** `include/laplace/math/bessel_i.hpp`, the Bessel functions the von
+Mises distributions use: `log_bessel_i0(k)`, `log_bessel_i0_scaled(k)`
+(log I0(k) - k), the ratio `bessel_i_ratio(k)` = A(k) = I1(k)/I0(k) with
+`bessel_i_ratio_d1..d6`, its inverse `bessel_i_ratio_inv(rho)` = K(rho) and
+`bessel_i_ratio_inv_d1..d6(kappa)` = K^(n)(rho) at rho = A(kappa). Orders to
+six because the fifth derivative of the expected information -A' (von Mises
+in kappa) or -K' (in rho) needs them. The derivatives of the inverse take
+kappa, which the distribution in (mu, rho) computes once and which keeps the
+information that rho loses near 1. New shared header
+`detail/double_double.hpp` (sum, product, quotient).
+
+**How.** A and K are ported from statmodels7's own `bessel_ratio.cpp` and
+extended from order four to six. A: power series for k < 0.25; continued
+fraction for 0.25 <= k < 30 (backwards in double for the value, forwards in
+double-double for the derivatives, which follow from the Riccati identity
+A' = 1 - A/k - A^2 differentiated n times, in double-double); asymptotic
+series in u = 1/k for k >= 30, summed with Neumaier compensation (about fifty
+terms above the last bit near k = 30) and corrected to first order for the
+rounding of u, with u^M in double-double. K: Newton's method (in double until
+the step is below 1e-9 k, then double-double for the last steps). K^(n): power
+series in k for k < 0.25 and normalized asymptotic series
+K^(n) = n! 2^n k^(n+1) (1 + sum_m e_(n,m) k^-m) for k >= 30, both with exact
+rational coefficients (`tools/reference/bessel.py coefs`); in between, the
+inverse function rule as a polynomial in r_j = A^(j)/A' evaluated in
+double-double. log I0: Boost's rational approximations of I0 for double
+(Holoborodko's forms, Boost Software License), rewritten in log form:
+log1p(a P(a)) with a = k^2/4 below 7.75, log P(1/k) - log(k)/2 + k above (no
+exponential, no overflow).
+
+**Measurement.** References from `tools/reference/bessel.py` (mpmath, every
+row at two precisions that must agree to 2^-110; none dropped): 4150 points in
+k from 2^-60 to 2^45, concentrated around 0.5, 1, 20, 30, 50, 100; 4842 points
+in rho for the inverse, 1 - rho down to 2^-53. The derivatives of A from the
+Riccati recursion at 160 + (n + 2)(|log2 k| + 4) bits; those of K by reversion
+of the Taylor series of A (independent of the closed forms in the library).
+Max ulp, gcc (OpenMP) / CUDA; ns/call on one gcc thread, OpenMP with 16
+threads, CUDA:
+
+| function | own | alternatives | ns/call |
+|---|---|---|---|
+| log I0 | 2.31 / 2.15 | own series and asymptotic expansion 4.16; log of Boost's I0 9e15 near 0, overflows from k = 713 | 65 / 5.1 / 0.72 |
+| log I0 - k | 3.0 / 3.0 | series 6.0 | 64 / 5.0 / 0.72 |
+| A | 3.30 / 3.48 | Boost I1/I0 6.27, overflows from k = 713 | 60 / 5.6 / 3.8 |
+| A' ... A^(6) | 2.04, 2.23, 2.00, 2.42, 2.08, 2.42 (both) | first port: up to 10.5 | 290-495 / 28-47 / 18-26 |
+| K | 1.80 / 1.80 | | 609 / 54 / 39 |
+| K' ... K^(6) | 1.99, 2.14, 2.31, 1.96, 2.54, 2.92 (both) | first port: 8, 22, 40, 82, 155, 4171 | 292-542 / 29-50 / 16-25 |
+
+The first port (statmodels7's algorithm extended to order six, with the
+polynomial in r_j in double everywhere and the asymptotic series summed
+plainly) lost accuracy in three places, each found by splitting the errors by
+regime: the polynomial cancels (its terms reach a hundred times the result at
+order six, near k = 30 and above); the rounding of u = 1/k is amplified M + 1
+times in u^M S_M(u); the forward sum of the asymptotic series accumulates one
+rounding per term near k = 30. Switch points: the large-k switch at 20 costs
+up to 1.7e6 ulp at order six (the asymptotic series is not yet accurate), at
+40 or 60 it gains nothing and costs 20-50 per cent; the small-k switch at 0.25
+instead of 0.5 lowers the worst errors from 4.0-5.4 to 2.0-2.9 ulp at the same
+cost; truncating the continued fraction at floor(k) + 30 instead of + 20
+changes nothing.
+
+On the GPU the double-double arithmetic first lost up to 1.4e4 ulp at orders
+4-6 (2.4 on the CPU): nvcc contracted a product and the sum after it into an
+FMA after inlining, which breaks the exact identities of two_sum and
+quick_two_sum. The double-double operations now go through the intrinsics
+`__dadd_rn`, `__dsub_rn`, `__dmul_rn` on the device, which nvcc never
+contracts; then CUDA matches the CPU to the digit.
+
+**What this says.** Every function is within 3.5 ulp over the whole range on
+both backends, and the derivatives of the inverse, which lost hundreds to
+thousands of ulp in the straightforward form, are now as accurate as A's. The
+cost is the continued fraction in double-double for 0.25 <= k < 30: about
+0.3-0.6 us on one gcc thread (the host product is Dekker's split), about
+20 ns on CUDA.
+
+**Chosen.** As above, on both backends. Tested in `tests/math/test_bessel.cpp`
+on both builds (bounds: measured error plus about half).
+
+**Open.** The value of A in the continued fraction range is computed in double
+(3.3-3.5 ulp); in double-double it would be at the last bit for about four
+times the cost. The von Mises cdf needs the ratios I_j/I_0 for j up to about
+8.5 sqrt(kappa) + 10 (statmodels7's `bessel_i_ratios`), not done yet. Any other
+double-double code on the device must use the intrinsics of
+`detail/double_double.hpp`; the `two_prod` in `normal.hpp` is still the
+contractible form.
