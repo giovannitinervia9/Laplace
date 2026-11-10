@@ -512,9 +512,11 @@ LAPLACE_HD double log_i0(double k, bool scaled) {
 
 // R_j = I_j(k)/I_0(k), j = 1..m, into out[0..m-1], by Miller's backward
 // recurrence y_(j-1) = (2j/k) y_j + y_(j+1) from y_(n0+1) = 0 and a tiny
-// y_(n0), rescaled against overflow, with R_j = y_j / y_0. The start
-// n0 = m + max(30, ceil(sqrt(40 m))) + ceil(k) is statmodels7's; the cost is
-// O(m + k) operations.
+// y_(n0), rescaled against overflow, with R_j = y_j / y_0. The start is
+// n0 = m + max(30, ceil(sqrt(40 m))) + ceil(7 sqrt(k)): the recurrence damps
+// its starting value by about (I_n0 / I_m)^2, and for large k
+// I_j/I_0 ~ exp(-j^2 / (2k)), so 7 sqrt(k) above m damps it by e^-49 whatever
+// m is (statmodels7 added ceil(k), which costs O(k) instead of O(sqrt k)).
 LAPLACE_HD void ratios(double k, int m, double* out) {
   if (m < 1) return;
   if (!(k >= 0.0)) {
@@ -535,7 +537,7 @@ LAPLACE_HD void ratios(double k, int m, double* out) {
     return;
   }
   const int s = int(Kokkos::ceil(Kokkos::sqrt(40.0 * m)));
-  const int n0 = m + (s > 30 ? s : 30) + int(Kokkos::ceil(k));
+  const int n0 = m + (s > 30 ? s : 30) + int(Kokkos::ceil(7.0 * Kokkos::sqrt(k)));
   double y1 = 0.0, y = 1e-280;  // y_(j+1), y_j
   for (int j = n0; j >= 1; --j) {
     const double ym = (2.0 * j) / k * y + y1;  // y_(j-1)

@@ -122,8 +122,14 @@ TEST_CASE("special arguments of the von Mises Bessel functions") {
   lm::bessel_i_ratios(1e-200, 3, out);  // I_1/I_0 = k/2 at tiny k; the rest underflow
   CHECK(out[0] == 5e-201);
   CHECK(out[2] == 0.0);
-  lm::bessel_i_ratios(2.0, 3, out);  // the first ratio is A
-  CHECK(std::fabs(out[0] - lm::bessel_i_ratio(2.0)) <= 4e-16 * out[0]);
+  // the first ratio is A, also with m = 1 at large k, where the start of the
+  // recurrence (m + 30 + 7 sqrt k) is far below k; the recurrence rounds once
+  // per step (5.6 eps measured at k = 1e4, 4.9 with statmodels7's start k + 31)
+  for (double k : {2.0, 100.0, 1000.0, 1e4, 1e5}) {
+    lm::bessel_i_ratios(k, 1, out);
+    INFO("k = ", k);
+    CHECK(std::fabs(out[0] - lm::bessel_i_ratio(k)) <= 2e-15 * out[0]);
+  }
   // A(K(rho)) = rho to within the conditioning of K
   for (double rho : {1e-10, 0.1, 0.5, 0.9, 0.999, 1.0 - 1e-12}) {
     const double k = lm::bessel_i_ratio_inv(rho);

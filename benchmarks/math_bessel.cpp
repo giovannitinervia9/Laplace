@@ -112,7 +112,7 @@ KOKKOS_INLINE_FUNCTION int cdf_terms(double k) {
   const int m = int(Kokkos::ceil(8.5 * Kokkos::sqrt(k))) + 10;
   return m > 20 ? m : 20;
 }
-KOKKOS_INLINE_FUNCTION void ratios(double k, int m, double* out, int method, int start) {
+KOKKOS_INLINE_FUNCTION void ratios(double k, int m, double* out, int method, int start, double csq = 0.0) {
   using laplace::math::detail::ddm::dd;
   namespace ddm = laplace::math::detail::ddm;
   int n0 = m + (start > 0 ? start : 30);
@@ -120,7 +120,7 @@ KOKKOS_INLINE_FUNCTION void ratios(double k, int m, double* out, int method, int
     const int s = int(Kokkos::ceil(Kokkos::sqrt(40.0 * m)));
     n0 = m + (s > 30 ? s : 30);
   }
-  n0 += int(Kokkos::ceil(k));
+  n0 += csq > 0.0 ? int(Kokkos::ceil(csq * Kokkos::sqrt(k))) : int(Kokkos::ceil(k));
   if (method == 0 || method == 1) {
     double r = 0.0;
     for (int j = n0; j >= 1; --j) {
@@ -176,13 +176,14 @@ struct RatiosOwn {  // the header's (Miller, statmodels7's start)
 };
 struct RatiosF {
   int method, start;
+  double csq = 0.0;  // > 0: start m + max(30, ceil(sqrt(40 m))) + ceil(csq sqrt(k))
   KOKKOS_INLINE_FUNCTION double operator()(double k, double jd) const {
     const int j = int(jd);
     int m = cdf_terms(k);
     if (j > m) m = j;
     if (m > max_terms) return k * NAN;
     double out[max_terms];
-    ratios(k, m, out, method, start);
+    ratios(k, m, out, method, start, csq);
     return out[j - 1];
   }
 };
@@ -251,6 +252,15 @@ int main(int argc, char* argv[]) {
     const char* tag[] = {"sm7", "ddprod", "ddall", "miller"};
     for (int meth = 0; meth < 4; ++meth) run("bessel_i_ratios", tag[meth], RatiosF{meth, 0}, t_kj);
     run("bessel_i_ratios", "mils5", RatiosF{3, 5}, t_kj);
+    for (double c : {3.0, 5.0, 7.0, 9.0}) {
+      char tag2[16];
+      std::snprintf(tag2, sizeof tag2, "milq%g", c);
+      run("bessel_i_ratios", tag2, RatiosF{3, 0, c}, t_kj);
+    }
+    // large concentrations: k uniform on (500, 1000)
+    const auto t_big = bench::make_time_args(n / 64, [&] { return bench::Args{500.0 + 500.0 * u01(gen), 1.0, 0.0}; });
+    run("bessel_i_ratios", "own-big", RatiosOwn{}, t_big);
+    run("bessel_i_ratios", "milq7-big", RatiosF{3, 0, 7.0}, t_big);
   }
   return 0;
 }

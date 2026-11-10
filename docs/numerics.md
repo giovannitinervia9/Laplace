@@ -834,7 +834,8 @@ caller supplies room for m values.
 
 **How.** Miller's backward recurrence y_(j-1) = (2j/k) y_j + y_(j+1) from
 y_(n0+1) = 0 and a tiny y_(n0), rescaled by 1e-250 when it passes 1e250, with
-R_j = y_j / y_0; statmodels7's start n0 = m + max(30, ceil(sqrt(40 m))) + ceil(k).
+R_j = y_j / y_0, from n0 = m + max(30, ceil(sqrt(40 m))) + ceil(7 sqrt(k))
+(statmodels7 added ceil(k); see the start below).
 Below k = 1e-8 the factor 2j/k would overflow y in one step, so there
 R_j = R_(j-1) (k/2) / j, whose neglected correction is below k^2/4 < 1e-16
 relative. k = 0 gives zeros, k = +inf ones, k < 0 or NaN NaNs.
@@ -865,12 +866,30 @@ fraction divides, hence its speed on the CPU; on CUDA the two cost the same.
 A start closer to m would do for the cdf's m but not for every m, so
 statmodels7's start is kept.
 
-**Chosen.** Miller's recurrence with statmodels7's start, on both backends.
-Tested in `tests/math/test_bessel.cpp` (23 ulp, 3 ulp1) on both builds.
+**The start.** The recurrence damps its starting value by about
+(I_n0 / I_m)^2, and for large k I_j/I_0 ~ exp(-j^2 / (2k)), so a start
+c sqrt(k) above m damps it by about e^-(c^2) whatever m is; c = 7 gives e^-49.
+statmodels7 added ceil(k) instead, which makes the cost O(k). With the cdf's m
+(which already holds 8.5 sqrt(k)) the gain is modest: unchanged for k below 50,
+1435 to 763 ns on one gcc thread for k uniform on (500, 1000). Accuracy is the
+same for c = 3, 5, 7, 9 and for statmodels7's start (max 12.5-16.3 ulp, 1.9-2.6
+ulp1, on the cdf's m); the differences are rounding along different paths,
+not truncation: replayed in Python against mpmath, m = 1 at k = 1e4 is off by
+4.9 eps from statmodels7's start, 5.6 from 7 sqrt(k), 1.6 from 9 sqrt(k) and
+3.4 from 12 sqrt(k). With the new start: 13.8 ulp, 4.7 ulp for R_j > 1e-3,
+2.3 ulp1, on both backends; CUDA 11.8 ns (k in (0, 50)) and 67 ns (k in
+(500, 1000)).
 
-**Open.** The derivatives of the ratios in k, which the derivatives of the cdf
-in kappa will need, are not done; the cost grows linearly with k (the start is
-above k), and statmodels7 does not use the series for large k.
+**Chosen.** Miller's recurrence from m + max(30, ceil(sqrt(40 m))) +
+ceil(7 sqrt(k)), on both backends. Tested in `tests/math/test_bessel.cpp`
+(23 ulp, 3 ulp1; and m = 1 against A up to k = 1e5) on both builds.
+
+**Open.** The derivatives of the ratios in k, which a cdf differentiated
+through its series would need, are not done: they follow from
+R_j' = (R_(j-1) + R_(j+1))/2 - R_1 R_j (R_0 = 1) differentiated n times, which
+cancels at large k as the Riccati identity of A does; whether the von Mises
+cdf is differentiated through the series or, as in statmodels7, by
+quadrature of its integral is to be decided with the cdf (phase 4).
 
 **Checked at the same time.** The `two_prod` of `normal.hpp` and
 `detail/ibeta_expansions.hpp` is still the form that nvcc may contract. In
