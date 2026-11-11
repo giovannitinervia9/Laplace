@@ -1367,3 +1367,35 @@ call on one gcc thread in that band.
 for its cost. The Poisson-inverse Gaussian, which uses exactly nu = y - 1/2,
 gets a closed form for half-integer orders in phase 4: K_(n+1/2)(x) =
 sqrt(pi/(2x)) e^-x times a polynomial in 1/x, exact and cheaper than the series.
+
+## Edge cases found while writing the manual (2026-11-12)
+
+**What.** Reviewing the manual's text against the code turned up three
+defects at the edges of the domains; none affected the measured accuracy.
+
+**Faa di Bruno.** `bell_partial(n, k, g)` switched on the key n * 8 + k, so a
+pair outside 1 <= k <= n <= 7 could alias a valid case (n = 1, k = 9 returned
+g_2). An explicit check now returns 0 outside the domain; the test adds
+(1, 9), (2, -7), (0, 9), (8, 1), (0, 0).
+
+**Normal block.** At extreme arguments the exact square (two_prod, half
+square) overflows from |x| = 1.3e154, and exp(a^2) from a = 26.64, which gave
+NaN where the result is a constant: erfcx(x) for x <= -26.629 (now +inf; finite
+down to -26.628), erfc(x) for |x| > 27.3 (now 0 or 2), Phi beyond +-40 (now 0
+or 1; Phi underflows below -38.5), log Phi below -1.8961e154 = -sqrt(2 DBL_MAX)
+(now -inf) and above 40 (now -0), Phi_inv_logp(-inf) (now -inf). The checks sit
+where the result is already constant, so the measured accuracy is unchanged;
+`tests/math/test_normal.cpp` checks every boundary ("normal block at the ends
+of the range"), on CPU and CUDA.
+
+**Quadrature conventions (decided with Giovanni).** The rules disagreed on
+reversed, empty and invalid arguments: `tanh_sinh` with b < a returned 0 with
+`converged` = true and error NaN, while `gauss_kronrod` returned the negated
+integral; `sinh_sinh` with s < 0 flipped the sign of an integral that does not
+depend on it. Now every rule follows int_a^b = -int_b^a (tanh_sinh,
+gauss_kronrod, gauss_legendre, panels); an empty interval gives exactly 0,
+error 0, converged; a NaN or infinite end or centre, or a scale that is not
+positive and finite, gives NaN and `converged` = false (NaN for the fixed Gauss
+rules). Valid inputs give the same results as before. Tested in
+`tests/math/test_quadrature.cpp` ("reversed, empty and invalid arguments"), on
+CPU and CUDA.

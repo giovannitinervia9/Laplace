@@ -1,0 +1,271 @@
+/**
+\defgroup bessel_i Modified Bessel function of the first kind
+\ingroup special
+\brief Logarithm of the modified Bessel function of the first kind, \f$\log I_0(k)\f$, its scaled form, the ratio \f$A(k) = I_1(k)/I_0(k)\f$ and its derivatives to order 6, its inverse and the inverse's derivatives to order 6, and the ratios \f$I_j(k)/I_0(k)\f$.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Mathematical definitions
+
+The modified Bessel function of the first kind of integer order \f$j \ge 0\f$ and non-negative real argument \f$k \ge 0\f$, denoted \f$I_j(k)\f$, is defined by the power series
+\f[
+I_j(k) = \sum_{m=0}^\infty \frac{1}{m! \, (m + j)!} \left(\frac{k}{2}\right)^{2m + j}
+\f]
+where \f$m\f$ is the summation index. In particular, for orders \f$j = 0\f$ and \f$j = 1\f$:
+\f[
+I_0(k) = \sum_{m=0}^\infty \frac{1}{(m!)^2} \left(\frac{k}{2}\right)^{2m}, \quad
+I_1(k) = \sum_{m=0}^\infty \frac{1}{m! \, (m + 1)!} \left(\frac{k}{2}\right)^{2m + 1}.
+\f]
+
+The function \f$I_0(k)\f$ is positive and strictly increasing for \f$k \ge 0\f$, with \f$I_0(0) = 1\f$. As \f$k \to \infty\f$, it grows exponentially:
+\f[
+I_0(k) \sim \frac{e^k}{\sqrt{2 \pi k}} \left(1 + \frac{1}{8k} + \dots \right).
+\f]
+
+## Logarithmic scale and scaled form
+
+Direct evaluation of \f$I_0(k)\f$ in IEEE 754 binary64 double precision overflows from \f$k = 713\f$. Laplace provides two representations that avoid intermediate overflow:
+1. **Logarithm of** \f$I_0\f$: \f$\log I_0(k)\f$, computed by \ref laplace::math::own::log_bessel_i0 "log_bessel_i0()".
+2. **Scaled logarithm:** \f$\log I_0(k) - k = \log(e^{-k} I_0(k))\f$, computed by \ref laplace::math::own::log_bessel_i0_scaled "log_bessel_i0_scaled()". Because \f$e^{-k} I_0(k) \sim \frac{1}{\sqrt{2\pi k}}\f$ as \f$k \to \infty\f$, the quantity \f$\log I_0(k) - k\f$ remains finite and negative for all finite \f$k > 0\f$ (returning \f$-\infty\f$ only at \f$k = +\infty\f$), without intermediate underflow or overflow.
+
+## Ratio of Bessel functions and its derivatives
+
+The ratio of \f$I_1(k)\f$ to \f$I_0(k)\f$, denoted \f$A(k)\f$, is defined for \f$k \ge 0\f$ by
+\f[
+A(k) = \frac{I_1(k)}{I_0(k)}.
+\f]
+Because \f$I_0'(k) = I_1(k)\f$, \f$A(k)\f$ is the first derivative of \f$\log I_0(k)\f$:
+\f[
+\frac{\mathrm{d}}{\mathrm{d}k} \log I_0(k) = \frac{I_0'(k)}{I_0(k)} = A(k).
+\f]
+Consequently, the derivatives of \f$A(k)\f$ of order \f$n\f$, denoted \f$A^{(n)}(k) = \frac{\mathrm{d}^n}{\mathrm{d}k^n} A(k)\f$, are simultaneously the derivatives of \f$\log I_0(k)\f$ of order \f$n + 1\f$:
+\f[
+\frac{\mathrm{d}^{n+1}}{\mathrm{d}k^{n+1}} \log I_0(k) = A^{(n)}(k), \quad n = 1, \dots, 6.
+\f]
+
+The function \f$A(k)\f$ satisfies the Riccati differential equation
+\f[
+A'(k) = 1 - \frac{A(k)}{k} - A(k)^2.
+\f]
+Differentiating this relation \f$n\f$ times via Leibniz's rule yields the recurrence for \f$A^{(n+1)}(k)\f$:
+\f[
+A^{(n+1)}(k) = [n = 0] - \sum_{j=0}^n \binom{n}{j} A^{(j)}(k) \left( (-1)^{n-j} \frac{(n-j)!}{k^{n-j+1}} + A^{(n-j)}(k) \right)
+\f]
+where \f$[n = 0]\f$ equals 1 if \f$n = 0\f$ and 0 otherwise.
+
+Written out explicitly for the first four derivative orders:
+- Order 1: \f$A'(k) = 1 - \frac{A(k)}{k} - A(k)^2\f$,
+- Order 2: \f$A''(k) = \frac{A(k)}{k^2} - \frac{A'(k)}{k} - 2 A(k) A'(k)\f$,
+- Order 3: \f$A'''(k) = -\frac{2A(k)}{k^3} + \frac{2A'(k)}{k^2} - \frac{A''(k)}{k} - 2 (A'(k))^2 - 2 A(k) A''(k)\f$,
+- Order 4: \f$A^{(4)}(k) = \frac{6A(k)}{k^4} - \frac{6A'(k)}{k^3} + \frac{3A''(k)}{k^2} - \frac{A'''(k)}{k} - 6 A'(k) A''(k) - 2 A(k) A'''(k)\f$.
+
+## Inverse ratio and its derivatives
+
+The function \f$A(k)\f$ is strictly increasing and concave on \f$[0, \infty)\f$, mapping \f$[0, \infty)\f$ onto \f$[0, 1)\f$. Its inverse function, denoted \f$K(\rho) = A^{-1}(\rho)\f$, satisfies
+\f[
+A(K(\rho)) = \rho, \quad \rho \in [0, 1).
+\f]
+
+The derivatives of the inverse function with respect to \f$\rho\f$,
+\f[
+K^{(n)}(\rho) = \frac{\mathrm{d}^n}{\mathrm{d}\rho^n} K(\rho), \quad n = 1, \dots, 6,
+\f]
+are evaluated at \f$\rho = A(\kappa)\f$. The derivative functions \ref laplace::math::own::bessel_i_ratio_inv_d1 "bessel_i_ratio_inv_d1()" through \ref laplace::math::own::bessel_i_ratio_inv_d6 "bessel_i_ratio_inv_d6()" take \f$\kappa\f$ as argument rather than \f$\rho\f$. Because \f$1 - \rho \sim \frac{1}{2\kappa}\f$ as \f$\kappa \to \infty\f$, passing \f$\kappa\f$ preserves the precision that \f$\rho\f$ loses near 1 in floating-point representation.
+
+Defining the reciprocal derivative \f$w = \frac{1}{A'(\kappa)}\f$ and normalized derivatives \f$r_j = \frac{A^{(j)}(\kappa)}{A'(\kappa)}\f$ for \f$j \ge 2\f$, the derivatives of \f$K\f$ follow the inverse function rule:
+\f[
+\begin{aligned}
+K' &= w, \\
+K'' &= -r_2 w^2, \\
+K''' &= (3 r_2^2 - r_3) w^3, \\
+K^{(4)} &= (-15 r_2^3 + 10 r_2 r_3 - r_4) w^4, \\
+K^{(5)} &= (105 r_2^4 - 105 r_2^2 r_3 + 15 r_2 r_4 + 10 r_3^2 - r_5) w^5, \\
+K^{(6)} &= (-945 r_2^5 + 1260 r_2^3 r_3 - 210 r_2^2 r_4 - 280 r_2 r_3^2 + 21 r_2 r_5 + 35 r_3 r_4 - r_6) w^6.
+\end{aligned}
+\f]
+
+## Sequence of ratios of higher orders
+
+The function \ref laplace::math::own::bessel_i_ratios "bessel_i_ratios()" computes the vector of ratios
+\f[
+R_j(k) = \frac{I_j(k)}{I_0(k)}, \quad j = 1, \dots, m,
+\f]
+for a given integer \f$m \ge 1\f$ and argument \f$k \ge 0\f$.
+
+## Domain and special values
+
+- **Logarithm of** \f$I_0\f$: \f$k \ge 0\f$. At \f$k = 0\f$, \f$\log I_0(0) = 0.0\f$ and \f$\log I_0(0) - 0 = 0.0\f$. For \f$k < 0\f$ or NaN, returns quiet NaN. For \f$k \ge 10^{308}\f$, \f$\log I_0(k)\f$ returns \f$k\f$ and \f$\log I_0(k) - k\f$ returns \f$-k\f$, which are finite for finite \f$k\f$; only \f$k = +\infty\f$ gives \f$+\infty\f$ (scaled: \f$-\infty\f$).
+- **Ratio** \f$A(k)\f$ **and its derivatives:** \f$k \ge 0\f$. At \f$k = 0\f$, \f$A(0) = 0.0\f$, \f$A'(0) = 0.5\f$, \f$A''(0) = 0.0\f$, \f$A'''(0) = -0.375\f$, \f$A^{(4)}(0) = 0.0\f$, and \f$A^{(6)}(0) = 0.0\f$ (even-order derivatives of \f$A\f$ vanish at \f$k = 0\f$ because \f$A\f$ is odd). For \f$k < 0\f$ or NaN, returns quiet NaN. As \f$k \to +\infty\f$, \f$A(k) \to 1.0\f$ and all derivatives \f$A^{(n)}(k) \to 0.0\f$.
+- **Inverse** \f$K(\rho)\f$: \f$\rho \in [0, 1)\f$. At \f$\rho = 0\f$, \f$K(0) = 0.0\f$. At \f$\rho = 1\f$, returns \f$+\infty\f$. For \f$\rho < 0\f$, \f$\rho > 1\f$, or NaN, returns quiet NaN.
+- **Derivatives of inverse** \f$K^{(n)}(\rho)\f$ **at** \f$\rho = A(\kappa)\f$: \f$\kappa \ge 0\f$. At \f$\kappa = 0\f$, \f$K'(0) = 2.0\f$, and even orders \f$K''(0) = 0.0\f$, \f$K^{(4)}(0) = 0.0\f$, \f$K^{(6)}(0) = 0.0\f$. For \f$\kappa < 0\f$ or NaN, returns quiet NaN.
+- **Ratios** \f$R_j(k)\f$: \f$k \ge 0, m \ge 1\f$. If \f$m < 1\f$, returns immediately without writing. At \f$k = 0\f$, writes \f$0.0\f$ to all entries. For \f$k < 0\f$ or NaN, writes quiet NaN to all entries. For \f$k \ge 10^{308}\f$ (\f$k \to +\infty\f$), writes \f$1.0\f$ to all entries.
+
+## Numerical methods and regimes
+
+### Value of the logarithm
+
+The functions \ref laplace::math::own::log_bessel_i0 "log_bessel_i0()" and \ref laplace::math::own::log_bessel_i0_scaled "log_bessel_i0_scaled()" are adapted from Boost.Math's double-precision rational approximations (Holoborodko, 2015), rewritten in logarithmic form:
+1. **Small argument** (\f$k < 7.75\f$):
+   \f$I_0(k) = 1 + a P(a)\f$ where \f$a = k^2 / 4\f$ and \f$P\f$ is a polynomial of degree 14. Evaluated as \f$\log I_0(k) = \mathrm{log1p}(a P(a))\f$.
+2. **Intermediate argument** (\f$7.75 \le k < 500.0\f$):
+   \f$I_0(k) = e^k P(u) / \sqrt{k}\f$ where \f$u = 1/k\f$ and \f$P\f$ is a polynomial of degree 21 in \f$u\f$. Evaluated as \f$\log I_0(k) - k = \log P(u) - \frac{1}{2}\log k\f$.
+3. **Large argument** (\f$500.0 \le k < 10^{308}\f$):
+   The same asymptotic form with a polynomial of degree 4 in \f$u = 1/k\f$.
+
+### Ratio and its derivatives
+
+The ratio \f$A(k)\f$ and its derivatives \f$A^{(1 \dots 6)}(k)\f$ are computed across three regimes:
+1. **Power series** (\f$k < 0.25\f$):
+   The series
+   \f[
+   A(k) = \sum_{n=0}^{25} a_n k^{2n+1}
+   \f]
+   converges with radius of convergence \f$2.405\f$ (the first zero of \f$I_0\f$ on the imaginary axis). Coefficients \f$a_n\f$ are exact rationals rounded once to double precision (`tools/reference/bessel.py coefs`). Differentiated term by term for \f$A^{(M)}(k)\f$ to avoid catastrophic cancellation in the Riccati identity near \f$k = 0\f$ (where individual terms are of order \f$k^{-M}\f$).
+2. **Continued fraction and Riccati identity** (\f$0.25 \le k < 30.0\f$):
+   The continued fraction
+   \f[
+   r_j = \frac{k}{2j + k r_{j+1}}
+   \f]
+   is truncated at \f$j = \lfloor k \rfloor + 20\f$.
+   - The value \f$A(k)\f$ is evaluated backwards in double precision.
+   - The derivatives \f$A'(k) \dots A^{(6)}(k)\f$ are evaluated by computing \f$A(k)\f$ forwards in double-double arithmetic via Wallis recurrences of convergents (\f$P_j = j P_{j-1} + (k/2)^2 P_{j-2}\f$ and \f$Q_j = j Q_{j-1} + (k/2)^2 Q_{j-2}\f$), followed by the Riccati recurrence in double-double arithmetic. Double-double arithmetic absorbs the loss of approximately \f$\log_2 k\f$ bits per derivative order.
+3. **Compensated asymptotic series** (\f$k \ge 30.0\f$):
+   The asymptotic expansion
+   \f[
+   A(k) \sim \sum_{n=0}^{59} q_n k^{-n}
+   \f]
+   (quotient of the asymptotic series of \f$I_1\f$ and \f$I_0\f$) is differentiated term by term:
+   \f[
+   S_M(u) = \sum_{n=1}^{59} q_n n (n+1) \cdots (n+M-1) u^n
+   \f]
+   where \f$u = 1/k\f$. The summation employs Neumaier compensated summation to prevent accumulation of rounding errors across terms above the last bit near \f$k = 30\f$. Rounding in \f$u = 1/k\f$ is corrected to first order via exact residual \f$\delta = (1 - p) - e\f$ (where \f$k u = p + e\f$), with \f$u^M\f$ accumulated in double-double precision.
+
+### Inverse ratio and its derivatives
+
+1. **Newton iteration for** \f$K(\rho)\f$:
+   Solved by Newton's iteration on \f$A(k) - \rho = 0\f$. For \f$\rho \ge 0.5\f$, the residual is computed as \f$(1 - \rho) - (1 - A(k))\f$ where \f$1 - \rho\f$ is exact and \f$1 - A(k)\f$ is computed without cancellation from the continued fraction or asymptotic series. In the range \f$0.25 \le k < 30\f$, iterations run in double precision until the relative step is below \f$10^{-9}\f$, completing in double-double precision.
+2. **Derivatives** \f$K^{(1 \dots 6)}(\rho)\f$ **at** \f$\rho = A(\kappa)\f$:
+   - For \f$\kappa < 0.25\f$: evaluated via power series \f$K^{(n)}(A(\kappa)) = \kappa^p \sum_{m=0}^{23} g_{n,m} \kappa^{2m}\f$ with \f$p = (n + 1) \pmod 2\f$ (\f$p = 0\f$ for odd \f$n\f$, \f$p = 1\f$ for even \f$n\f$), with exact rational coefficients (`tools/reference/bessel.py coefs`).
+   - For \f$0.25 \le \kappa < 30.0\f$: evaluated via the inverse function rule polynomials in \f$r_j = A^{(j)}/A'\f$ and \f$w = 1/A'\f$ in double-double precision, applying powers of \f$w\f$ successively.
+   - For \f$\kappa \ge 30.0\f$: evaluated via normalized asymptotic series \f$K^{(n)}(A(\kappa)) = n!\, 2^n \kappa^{n+1} (1 + \sum_{m=1}^{45} e_{n,m} \kappa^{-m})\f$ with \f$\kappa^{n+1}\f$ in double-double precision for \f$\kappa < 10^{40}\f$.
+
+### Vector of ratios
+
+The vector \f$R_j(k) = I_j(k)/I_0(k)\f$ for \f$j = 1, \dots, m\f$ is computed via Miller's backward recurrence:
+\f[
+y_{j-1} = \frac{2j}{k} y_j + y_{j+1}
+\f]
+initialized from \f$y_{n_0+1} = 0\f$ and \f$y_{n_0} = 10^{-280}\f$ at starting index:
+\f[
+n_0 = m + \max(30, \lceil\sqrt{40m}\rceil) + \lceil 7\sqrt{k}\rceil.
+\f]
+The recurrence is scaled by \f$10^{-250}\f$ whenever \f$y > 10^{250}\f$ to prevent overflow, yielding \f$R_j = y_j / y_0\f$. For \f$k < 10^{-8}\f$, the recurrence factor \f$2j/k\f$ would overflow in a single step; the ratios are evaluated directly via \f$R_j = R_{j-1} (k/2)/j\f$ with \f$R_1 = k/2\f$.
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
+
+Reference values were computed using `mpmath` (`tools/reference/bessel.py`):
+- For \f$\log I_0(k)\f$, \f$A(k)\f$, and the inverse \f$K(\rho)\f$: 4150 points in \f$k\f$ from \f$2^{-60}\f$ to \f$2^{45}\f$ (concentrated around 0.5, 1, 20, 30, 50, 100) and 4842 points in \f$\rho\f$ for the inverse (\f$1 - \rho\f$ down to \f$2^{-53}\f$, none dropped). Every row was evaluated at two precisions with a relative agreement of \f$2^{-110}\f$ between the two precisions.
+- For the sequence of ratios \f$R_j(k)\f$: 7416 rows \f$(k, j)\f$ with \f$k\f$ log-uniform on \f$(2^{-30}, 2^{10})\f$ and uniform on \f$(0, 100)\f$, evaluated at 200 and 264 bits; values below \f$10^{-300}\f$ left out.
+
+### Logarithm and scaled form
+
+| Function | Measured max error gcc (ulp) | Measured max error CUDA (ulp) | Test bound (ulp) |
+|---|---|---|---|
+| \ref laplace::math::own::log_bessel_i0 "log_bessel_i0()" | 2.31 | 2.15 | 3.5 |
+| \ref laplace::math::own::log_bessel_i0_scaled "log_bessel_i0_scaled()" | 3.0 | 3.0 | 4.5 |
+
+### Ratio and derivatives
+
+| Function | Order \f$n\f$ | Measured max error gcc (ulp) | Measured max error CUDA (ulp) | Test bound (ulp) |
+|---|---|---|---|---|
+| \ref laplace::math::own::bessel_i_ratio "bessel_i_ratio()" | 0 | 3.30 | 3.48 | 5.0 |
+| \ref laplace::math::own::bessel_i_ratio_d1 "bessel_i_ratio_d1()" | 1 | 2.04 | 2.04 | 3.0 |
+| \ref laplace::math::own::bessel_i_ratio_d2 "bessel_i_ratio_d2()" | 2 | 2.23 | 2.23 | 3.5 |
+| \ref laplace::math::own::bessel_i_ratio_d3 "bessel_i_ratio_d3()" | 3 | 2.00 | 2.00 | 3.0 |
+| \ref laplace::math::own::bessel_i_ratio_d4 "bessel_i_ratio_d4()" | 4 | 2.42 | 2.42 | 3.5 |
+| \ref laplace::math::own::bessel_i_ratio_d5 "bessel_i_ratio_d5()" | 5 | 2.08 | 2.08 | 3.0 |
+| \ref laplace::math::own::bessel_i_ratio_d6 "bessel_i_ratio_d6()" | 6 | 2.42 | 2.42 | 3.5 |
+
+### Inverse ratio and derivatives
+
+| Function | Order \f$n\f$ | Measured max error gcc (ulp) | Measured max error CUDA (ulp) | Test bound (ulp) |
+|---|---|---|---|---|
+| \ref laplace::math::own::bessel_i_ratio_inv "bessel_i_ratio_inv()" | 0 | 1.80 | 1.80 | 3.0 |
+| \ref laplace::math::own::bessel_i_ratio_inv_d1 "bessel_i_ratio_inv_d1()" | 1 | 1.99 | 1.99 | 3.0 |
+| \ref laplace::math::own::bessel_i_ratio_inv_d2 "bessel_i_ratio_inv_d2()" | 2 | 2.14 | 2.14 | 3.5 |
+| \ref laplace::math::own::bessel_i_ratio_inv_d3 "bessel_i_ratio_inv_d3()" | 3 | 2.31 | 2.31 | 3.5 |
+| \ref laplace::math::own::bessel_i_ratio_inv_d4 "bessel_i_ratio_inv_d4()" | 4 | 1.96 | 1.96 | 3.0 |
+| \ref laplace::math::own::bessel_i_ratio_inv_d5 "bessel_i_ratio_inv_d5()" | 5 | 2.54 | 2.54 | 4.0 |
+| \ref laplace::math::own::bessel_i_ratio_inv_d6 "bessel_i_ratio_inv_d6()" | 6 | 2.92 | 2.92 | 4.5 |
+
+### Vector of ratios
+
+For \ref laplace::math::own::bessel_i_ratios "bessel_i_ratios()":
+- Measured maximum error: 13.8 ulp (4.7 ulp for \f$R_j > 10^{-3}\f$), 2.3 ulp1 on both gcc and CUDA.
+- Test bounds: 23.0 ulp, 3.0 ulp1 (`tests/math/test_bessel.cpp`).
+- Agreement with \f$A(k)\f$ for \f$m = 1\f$: within \f$2 \times 10^{-15}\f$ relative (tested at \f$k = 2, 100, 1000, 10^4, 10^5\f$ only).
+
+### Timings
+
+Measured in nanoseconds per call on one gcc thread, OpenMP (16 threads), and CUDA (RTX 4070 SUPER):
+- `log_bessel_i0`: 65 / 5.1 / 0.72 ns/call.
+- `log_bessel_i0_scaled`: 64 / 5.0 / 0.72 ns/call.
+- `bessel_i_ratio`: 60 / 5.6 / 3.8 ns/call.
+- `bessel_i_ratio_d1` through `bessel_i_ratio_d6`: 290–495 / 28–47 / 18–26 ns/call.
+- `bessel_i_ratio_inv`: 609 / 54 / 39 ns/call.
+- `bessel_i_ratio_inv_d1` through `bessel_i_ratio_inv_d6`: 292–542 / 29–50 / 16–25 ns/call.
+- `bessel_i_ratios` (vector evaluation): 182 ns/call on one gcc thread (\f$k \in (0, 50)\f$); 11.8 ns/call on CUDA for \f$k \in (0, 50)\f$ and 67 ns/call for \f$k \in (500, 1000)\f$.
+
+## Example
+
+The following example evaluates \f$\log I_0(k)\f$, \f$A(k)\f$, and \f$K(\rho)\f$ inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/math/bessel_i.hpp>
+#include <Kokkos_Core.hpp>
+
+void compute_bessel_i(const Kokkos::View<const double*>& k,
+                      const Kokkos::View<const double*>& rho,
+                      Kokkos::View<double*>& log_i0,
+                      Kokkos::View<double*>& ratio,
+                      Kokkos::View<double*>& inv,
+                      int n) {
+  Kokkos::parallel_for("eval_bessel_i", n, KOKKOS_LAMBDA(const int i) {
+    const double k_val   = k(i);
+    const double rho_val = rho(i);
+    log_i0(i) = laplace::math::log_bessel_i0(k_val);
+    ratio(i)  = laplace::math::bessel_i_ratio(k_val);
+    inv(i)    = laplace::math::bessel_i_ratio_inv(rho_val);
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+- \ref laplace::math::own::log_bessel_i0 "log_bessel_i0()" — \f$\log I_0(k)\f$
+- \ref laplace::math::own::log_bessel_i0_scaled "log_bessel_i0_scaled()" — \f$\log I_0(k) - k\f$
+- \ref laplace::math::own::bessel_i_ratio "bessel_i_ratio()" — \f$A(k) = I_1(k)/I_0(k)\f$
+- \ref laplace::math::own::bessel_i_ratio_d1 "bessel_i_ratio_d1()" — \f$A'(k) = \frac{\mathrm{d}^2}{\mathrm{d}k^2}\log I_0(k)\f$
+- \ref laplace::math::own::bessel_i_ratio_d2 "bessel_i_ratio_d2()" — \f$A''(k) = \frac{\mathrm{d}^3}{\mathrm{d}k^3}\log I_0(k)\f$
+- \ref laplace::math::own::bessel_i_ratio_d3 "bessel_i_ratio_d3()" — \f$A'''(k) = \frac{\mathrm{d}^4}{\mathrm{d}k^4}\log I_0(k)\f$
+- \ref laplace::math::own::bessel_i_ratio_d4 "bessel_i_ratio_d4()" — \f$A^{(4)}(k) = \frac{\mathrm{d}^5}{\mathrm{d}k^5}\log I_0(k)\f$
+- \ref laplace::math::own::bessel_i_ratio_d5 "bessel_i_ratio_d5()" — \f$A^{(5)}(k) = \frac{\mathrm{d}^6}{\mathrm{d}k^6}\log I_0(k)\f$
+- \ref laplace::math::own::bessel_i_ratio_d6 "bessel_i_ratio_d6()" — \f$A^{(6)}(k) = \frac{\mathrm{d}^7}{\mathrm{d}k^7}\log I_0(k)\f$
+- \ref laplace::math::own::bessel_i_ratio_inv "bessel_i_ratio_inv()" — \f$K(\rho) = A^{-1}(\rho)\f$
+- \ref laplace::math::own::bessel_i_ratio_inv_d1 "bessel_i_ratio_inv_d1()" — \f$K'(\rho)\f$ at \f$\rho = A(\kappa)\f$
+- \ref laplace::math::own::bessel_i_ratio_inv_d2 "bessel_i_ratio_inv_d2()" — \f$K''(\rho)\f$ at \f$\rho = A(\kappa)\f$
+- \ref laplace::math::own::bessel_i_ratio_inv_d3 "bessel_i_ratio_inv_d3()" — \f$K'''(\rho)\f$ at \f$\rho = A(\kappa)\f$
+- \ref laplace::math::own::bessel_i_ratio_inv_d4 "bessel_i_ratio_inv_d4()" — \f$K^{(4)}(\rho)\f$ at \f$\rho = A(\kappa)\f$
+- \ref laplace::math::own::bessel_i_ratio_inv_d5 "bessel_i_ratio_inv_d5()" — \f$K^{(5)}(\rho)\f$ at \f$\rho = A(\kappa)\f$
+- \ref laplace::math::own::bessel_i_ratio_inv_d6 "bessel_i_ratio_inv_d6()" — \f$K^{(6)}(\rho)\f$ at \f$\rho = A(\kappa)\f$
+- \ref laplace::math::own::bessel_i_ratios "bessel_i_ratios()" — \f$I_j(k)/I_0(k)\f$ for \f$j = 1, \dots, m\f$
+
+## References
+
+- Boost.Math: rational approximations of \f$I_0\f$ for double precision (`boost/math/special_functions/detail/bessel_i0.hpp`), Boost Software License 1.0.
+- Holoborodko (2015): rational approximations of \f$I_0\f$ (Holoborodko's forms).
+*/

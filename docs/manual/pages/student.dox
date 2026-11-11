@@ -1,0 +1,205 @@
+/**
+\defgroup student Student t distribution function
+\ingroup special
+\brief Natural logarithm of the standard Student t distribution function, \f$\log T_\nu(z)\f$, and its mixed partial derivatives in \f$(z, \nu)\f$ to order 5.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Mathematical definition
+
+The distribution function of the standard Student \f$t\f$ distrib with real degrees of freedom \f$\nu > 0\f$, denoted \f$T_\nu(z)\f$, is defined by
+\f[
+T_\nu(z) = \int_{-\infty}^z t_\nu(s) \, \mathrm{d}s
+\f]
+where:
+- \f$z \in \mathbb{R}\f$ is the real argument,
+- \f$\nu \in (0, \infty)\f$ is the real degrees of freedom,
+- \f$s \in \mathbb{R}\f$ is the real integration variable,
+- \f$t_\nu(s) = \exp(c(\nu) + k(s, \nu))\f$ is the probability density of the standard Student \f$t\f$ distrib, with
+\f[
+c(\nu) = \log\Gamma\left(\frac{\nu + 1}{2}\right) - \log\Gamma\left(\frac{\nu}{2}\right) - \frac{1}{2}\log(\nu \pi)
+\f]
+the normalizing constant, and
+\f[
+k(s, \nu) = -\frac{\nu + 1}{2} \log\left(1 + \frac{s^2}{\nu}\right)
+\f]
+the density kernel.
+
+## Logarithmic scale and derivatives
+
+Laplace evaluates \f$\log T_\nu(z)\f$ and its mixed partial derivatives in \f$(z, \nu)\f$ of total order \f$K \in \{1, \dots, 5\}\f$:
+\f[
+\frac{\partial^K}{\partial z^{K-j} \partial \nu^j} \log T_\nu(z), \quad j = 0, \dots, K
+\f]
+rather than \f$T_\nu(z)\f$ directly, for numerical stability:
+
+1. **Avoidance of underflow and loss of precision.** In the lower tail (\f$z \to -\infty\f$), \f$T_\nu(z)\f$ underflows IEEE 754 double precision. In the upper tail (\f$z \to +\infty\f$), \f$T_\nu(z) \to 1\f$, so \f$1 - T_\nu(z)\f$ suffers catastrophic cancellation if evaluated through \f$T_\nu(z)\f$. Working on the log scale avoids underflow and avoids forming \f$1 - T\f$ in the upper tail.
+2. **Derivative conditioning:** The direct derivative formulation
+\f[
+\frac{\partial}{\partial z} \log T_\nu(z) = \frac{t_\nu(z)}{T_\nu(z)}, \quad \frac{\partial^2}{\partial z^2} \log T_\nu(z) = \frac{t_\nu(z)}{T_\nu(z)} \left(\frac{\partial}{\partial z} \log t_\nu(z) - \frac{t_\nu(z)}{T_\nu(z)}\right)
+\f]
+cancels severely in floating-point arithmetic: by a factor \f$z^2\f$ in the Gaussian tail (\f$z \le 0\f$ with \f$z^2 < 4\nu\f$) and by a factor \f$\nu\f$ in the power tail (\f$z^2 \ge 4\nu\f$). Similarly, composing derivatives from the incomplete beta shape derivatives \f$a = \nu/2\f$ and \f$x(z, \nu)\f$ loses a factor \f$\nu\f$ as \f$\nu\f$ grows, because the \f$\nu\f$-derivatives of the normal limit are \f$O(\nu^{-2})\f$ formed from \f$O(\nu^{-1})\f$ terms. Laplace avoids these cancellations by expressing every derivative as an integral of density derivatives whose terms do not cancel.
+
+## Domain and symmetry
+
+- **Domain:** Defined for \f$z \in \mathbb{R}\f$ and \f$\nu \in (0, \infty)\f$.
+- **Symmetry and survival:** The distribution function satisfies
+\f[
+1 - T_\nu(z) = T_\nu(-z)
+\f]
+for all \f$z \in \mathbb{R}\f$ and \f$\nu > 0\f$. The survival function requires no separate routine.
+- **Special values and boundaries:**
+  - Value function: returns quiet NaN for \f$\nu \le 0\f$, or if \f$z\f$ or \f$\nu\f$ is NaN (`!(nu > 0.0) || z != z`). Infinite \f$\nu\f$ does not return NaN (\f$\nu = +\infty, z = 0\f$ gives \f$-\log 2\f$). At \f$z = 0\f$, returns \f$-\log 2\f$.
+  - Derivative functions: return quiet NaN if \f$\nu \le 0\f$, \f$\nu = +\infty\f$, or if \f$z\f$ or \f$\nu\f$ is NaN. At \f$z = -\infty\f$, all derivative components return quiet NaN; at \f$z = +\infty\f$, all derivative components return \f$0.0\f$.
+
+## Numerical methods and regimes
+
+### Function value
+
+The value \f$\log T_\nu(z)\f$ is computed using the regularized incomplete beta function via `laplace::math::own::beta_inc`:
+
+- For \f$z < 0\f$: \f$T_\nu(z) = \frac{1}{2} I_x(\nu/2, 1/2)\f$, where \f$x = \nu / (\nu + z^2) \in (0, 1]\f$.
+  - If \f$x \le 1/2\f$: evaluated directly as \f$\log I_x(\nu/2, 1/2) - \log 2\f$.
+  - If \f$x > 1/2\f$: evaluated as \f$\log(1 - I_{1-x}(1/2, \nu/2)) - \log 2\f$.
+- For \f$z > 0\f$: evaluated by complementation \f$\log T_\nu(z) = \log(1 - S)\f$, where \f$S = T_\nu(-z) = \exp(l_S + l_o)\f$ is computed from the lower tail, retaining the low-order correction \f$l_o\f$ from `beta_inc` to prevent losing \f$|l_S|/2\f$ ulps in the far upper tail.
+
+### Derivatives in argument and degrees of freedom
+
+The mixed partial derivatives of order \f$K \in \{1, \dots, 5\}\f$ are evaluated by three-region numerical quadrature. Every function of \f$(z, \nu)\f$ is maintained as a truncated bivariate Taylor polynomial in \f$(\mathrm{d}z, \mathrm{d}\nu)\f$ with 21 coefficients representing \f$\mathrm{d}z^i \mathrm{d}\nu^j / (i! j!)\f$ for \f$i + j \le 5\f$.
+
+The computational regime is chosen by comparing the lower tail probability \f$T_\nu(-|z|)\f$ (computed via `beta_inc`) against the threshold \f$t_{\mathrm{switch}} = 0.2\f$. Outside the centre region (\f$T_\nu(-|z|) \le 0.2\f$), the split between the Gaussian shift and power-law scaling regimes is determined by comparing \f$|z|^2\f$ against \f$4\nu\f$; for \f$z > 0\f$, the code evaluates these regimes on the lower tail at \f$-z\f$ and complements:
+
+1. **Centre region** (\f$T_\nu(-|z|) > 0.2\f$):
+   The distribution function is split as
+   \f[
+   T_\nu(z) = \frac{1}{2} + G(z), \quad G(z) = \int_0^z t_\nu(s) \, \mathrm{d}s
+   \f]
+   The \f$z\f$-derivatives of \f$G(z)\f$ match those of the density \f$t_\nu(z)\f$ in closed form. The \f$\nu\f$-derivatives are given by
+   \f[
+   \int_0^z \frac{\partial^j}{\partial \nu^j} t_\nu(s) \, \mathrm{d}s
+   \f]
+   and evaluated by 16-point Gauss-Legendre quadrature (nodes and weights written by mpmath at 200 bits) under the transformation \f$s = \sqrt{\nu}\sinh\tau\f$, where \f$t_\nu(s) \, \mathrm{d}s = e^{c(\nu)} \sqrt{\nu} (\cosh\tau)^{-\nu} \, \mathrm{d}\tau\f$, across geometrically growing intervals \f$[0, 1], [1, 3], [3, 9], \dots\f$ The polynomial logarithm yields the derivatives of \f$\log T_\nu(z)\f$.
+
+2. **Gaussian tail region** (\f$|z|^2 < 4\nu\f$ with \f$T_\nu(-|z|) \le 0.2\f$):
+   Using the shift transformation \f$s = z - u\f$ with \f$u \ge 0\f$:
+   \f[
+   \log T_\nu(z) = c(\nu) + k(z, \nu) + \log \int_0^\infty \exp(\Delta k(u)) \, \mathrm{d}u
+   \f]
+   where \f$\Delta k(u) = k(z - u + \mathrm{d}z, \nu + \mathrm{d}\nu) - k(z + \mathrm{d}z, \nu + \mathrm{d}\nu)\f$ is expanded as a bivariate polynomial. Letting \f$A = \nu + z^2\f$, \f$A_u = \nu + (z - u)^2\f$, and \f$\delta = A_u - A = u(u + 2|z|)\f$, the coefficients of \f$\Delta k\f$ are formed as exact differences. The integral is evaluated in \f$\zeta = \log(A_u / A)\f$ using Takahasi and Mori's map \f$\zeta = \sigma \exp(\alpha(t - e^{-t}))\f$ with step \f$h = 0.25\f$, scale \f$\sigma = 2/(\nu + 1)\f$, and \f$\alpha = 0.75\f$ (node table written by mpmath at 200 bits).
+
+3. **Power tail region** (\f$|z|^2 \ge 4\nu\f$ with \f$T_\nu(-|z|) \le 0.2\f$):
+   Using the scaling transformation \f$s = z e^v\f$ with \f$v \ge 0\f$:
+   \f[
+   \log T_\nu(z) = c(\nu) + h(z, \nu) + \log \int_0^\infty \exp(\Delta k(v) + v) \, \mathrm{d}v
+   \f]
+   where \f$h(z, \nu) = \log|z| + k(z, \nu)\f$ and
+   \f[
+   \Delta k(v) = -(\nu + 1 + \mathrm{d}\nu) v - \frac{\nu + 1 + \mathrm{d}\nu}{2} \log(1 - x m_v)
+   \f]
+   with \f$m_v = 1 - e^{-2v}\f$ and \f$x = (\nu + \mathrm{d}\nu) / (\nu + \mathrm{d}\nu + (z + \mathrm{d}z)^2)\f$. Quadrature nodes in \f$v\f$ are mapped via Takahasi and Mori's map with \f$h = 0.25\f$, \f$\sigma = 1/(\nu + 1)\f$, and \f$\alpha = 0.75\f$ from the same node table. For small degrees of freedom (\f$\nu < 1.0\f$), the integral is evaluated at fixed \f$w = \nu v\f$, analytically isolating the pole of \f$c(\nu)\f$ at \f$\nu \to 0\f$.
+
+4. **Upper side** (\f$z > 0\f$ with \f$T_\nu(-z) \le 0.2\f$):
+   For \f$z > 0\f$, the lower tail \f$S = T_\nu(-z)\f$ is evaluated via the Gaussian or power tail regime on \f$|z|\f$, substituting \f$\mathrm{d}z \to -\mathrm{d}z\f$ and composing through \f$\log(1 - S)\f$.
+
+### Normalizing constant
+
+The normalizing constant \f$c(\nu)\f$ and its derivatives are computed with \f$b = \nu / 2\f$ from
+\f[
+f(b) = \log\Gamma\left(b + \frac{1}{2}\right) - \log\Gamma(b) - \frac{1}{2}\log b
+\f]
+such that \f$c(\nu) = f(b) - \frac{1}{2}\log(2\pi)\f$.
+- For \f$b \ge 15.0\f$: evaluated via the asymptotic expansion in terms of Bernoulli numbers \f$c_k = 2(1 - 4^{-k}) B_{2k} / (2k)!\f$.
+- For \f$b < 15.0\f$: shifted to \f$b + M \ge 15.0\f$ by the recurrence \f$f(b) = f(b + 1) + \frac{1}{2}\log(1 - 1/(2b + 1)^2)\f$, whose derivatives are computed as polynomials in \f$1/(2b + 1)^2\f$ without cancellation.
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
+
+The reference values were generated using arbitrary-precision arithmetic with `mpmath` at 280 and 360 bits (verified at 440 and 560 bits where precisions disagreed) via `tools/reference/student_owen.py` across 780 points kept in \f$(z, \nu)\f$ (20 rows dropped where \f$|z| \ge 25\f$ and \f$\nu \in [4600, 10^6]\f$, from 800 generated). Reference values are stored as double-double numbers in `tests/data/reference/log_student_cdf*.csv`.
+
+### Error metrics
+
+Accuracy for the mixed partial derivatives of order \f$K\f$ is quantified across three metrics:
+- **Geometric mean component scale:** \f$\text{ulpN} = |y - \text{exact}| / \text{ulp}(\max(|f|, N_{ij}))\f$, where \f$N_{ij} = |f_{K0}|^{i/K} |f_{0K}|^{j/K}\f$ is the geometric mean of the pure components of that order with \f$i = K - j\f$. For pure components (\f$j = 0\f$ or \f$j = K\f$), \f$N_{ij} = |f|\f$, so this metric reduces to relative error in ulps.
+- **Absolute scale near zero:** \f$\text{ulp1} = |y - \text{exact}| / \text{ulp}(\max(|f|, 1))\f$, applied to pure \f$z\f$-derivatives of odd orders (orders 3 and 5) near \f$z = 0\f$ (\f$|z| < 1\f$), where the derivatives pass near zero and are small against the terms they are composed of: at large \f$\nu\f$, the fifth derivative \f$\frac{\partial^5}{\partial z^5} \log T_\nu(z)\f$ at \f$z = 0\f$ is about 2000 times smaller than its terms, and the third derivative has a zero near \f$\nu = 6\f$.
+- **Logarithmic tail scale:** \f$\text{ulpL} = \text{ulpN} / \max(1, |\log|f||)\f$, measuring error relative to the inherent conditioning of values evaluated through \f$\log(1 - S)\f$ in the upper tail.
+
+### Function value accuracy
+
+The value routine \ref laplace::math::own::log_student_cdf "log_student_cdf()" achieves a measured maximum error of 188 ulp (and 10.8 ulp1) in the upper tail, bounded by 285.0 ulp and 17.0 ulp1 in automated tests (`tests/math/test_student.cpp`). In contrast, evaluating the value by quadrature yields 357 ulp.
+
+### Derivative accuracy
+
+| Function | Order \f$K\f$ | Measured max error gcc (ulpN) | Measured max error CUDA (ulpN) | Measured max error (ulpL) | Test bound (ulpN) | Test bound (ulp1) | Test bound (ulpL) |
+|---|---|---|---|---|---|---|---|
+| \ref laplace::math::own::log_student_cdf_d1 "log_student_cdf_d1()" | 1 | 432 | 432 | 7 | 650.0 | — | 12.0 |
+| \ref laplace::math::own::log_student_cdf_d2 "log_student_cdf_d2()" | 2 | 525 | 525 | 23 | 800.0 | — | 35.0 |
+| \ref laplace::math::own::log_student_cdf_d3 "log_student_cdf_d3()" | 3 | 337 | 319 | 33 | 510.0 | 18.0 | 50.0 |
+| \ref laplace::math::own::log_student_cdf_d4 "log_student_cdf_d4()" | 4 | 506 | 1480 | 281 | 2200.0 | — | 420.0 |
+| \ref laplace::math::own::log_student_cdf_d5 "log_student_cdf_d5()" | 5 | 470 | 470 | 96 | 710.0 | 145.0 | 145.0 |
+
+The source does not specify a backend for the measured ulpL column.
+
+Across alternative methods:
+- **Central finite differences** lose catastrophic accuracy: \f$10^{16}\f$ ulp error at order 1, \f$10^{23}\f$ at order 2, \f$5 \times 10^{28}\f$ at order 3, \f$5 \times 10^{32}\f$ at order 4, and \f$4 \times 10^{35}\f$ at order 5.
+- **Beta composition** loses stability as \f$\nu\f$ grows: \f$2.8 \times 10^7\f$ ulp error at order 1 (68 ulp for \f$\nu < 1\f$), \f$1.7 \times 10^{12}\f$ at order 2, \f$1.3 \times 10^{18}\f$ at order 3, \f$4.7 \times 10^{23}\f$ at order 4, and \f$8.7 \times 10^{28}\f$ at order 5.
+- **Deep tail consistency:** Across 2000 deep tail points, the three-region quadrature agrees with itself at halved step \f$h/2\f$ within 1–50 ulpN, the value via `beta_inc` agrees to within 4 ulp, and comparisons against independent 300-bit mpmath integrals at 8 points agree to within 1–3 ulp.
+
+## Timings
+
+Timings measured in nanoseconds per call for arguments with \f$\nu = 2^u\f$ with \f$u\f$ uniform on \f$(-2, 10)\f$, and \f$z = 3 Z\f$ with \f$z\f$ equal to 3 times a standard normal variate \f$Z\f$, on one gcc thread, OpenMP (7 threads), and CUDA (RTX 4070 SUPER):
+- **Function value.** 535 ns/call via `beta_inc` on one gcc thread, 88 ns/call on CUDA.
+- **Derivatives of order 1.** 2350 ns/call on one gcc thread.
+- **Derivatives of order 2.** 2810 ns/call on one gcc thread.
+- **Derivatives of order 3.** 3530 ns/call on one gcc thread.
+- **Derivatives of order 4.** 4820 ns/call on one gcc thread.
+- **Derivatives of order 5.** 9300 ns/call on one gcc thread.
+- **Parallel backends across orders 1 to 5.** 365–1900 ns/call on OpenMP (7 threads) and 216–727 ns/call on CUDA.
+
+## Example
+
+The following example evaluates \f$\log T_\nu(z)\f$ and its first-order derivatives inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/math/student.hpp>
+#include <Kokkos_Core.hpp>
+
+void compute_student(const Kokkos::View<const double*>& z,
+                     const Kokkos::View<const double*>& nu,
+                     Kokkos::View<double*>& log_t,
+                     Kokkos::View<double*>& dz,
+                     Kokkos::View<double*>& dnu,
+                     int n) {
+  Kokkos::parallel_for("eval_student", n, KOKKOS_LAMBDA(const int i) {
+    const double z_val  = z(i);
+    const double nu_val = nu(i);
+    log_t(i) = laplace::math::log_student_cdf(z_val, nu_val);
+    const auto d1 = laplace::math::log_student_cdf_d1(z_val, nu_val);
+    dz(i)  = d1.c[0];
+    dnu(i) = d1.c[1];
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+### Types
+
+- \ref laplace::math::own::shape_deriv "shape_deriv" — Container holding \f$K + 1\f$ mixed partial derivative components of order \f$K\f$
+
+### Function values and derivatives
+
+- \ref laplace::math::own::log_student_cdf "log_student_cdf()" — \f$\log T_\nu(z)\f$
+- \ref laplace::math::own::log_student_cdf_d1 "log_student_cdf_d1()" — \f$\frac{\partial}{\partial z} \log T_\nu(z)\f$ and \f$\frac{\partial}{\partial \nu} \log T_\nu(z)\f$ (order 1)
+- \ref laplace::math::own::log_student_cdf_d2 "log_student_cdf_d2()" — mixed partial derivatives of order 2
+- \ref laplace::math::own::log_student_cdf_d3 "log_student_cdf_d3()" — mixed partial derivatives of order 3
+- \ref laplace::math::own::log_student_cdf_d4 "log_student_cdf_d4()" — mixed partial derivatives of order 4
+- \ref laplace::math::own::log_student_cdf_d5 "log_student_cdf_d5()" — mixed partial derivatives of order 5
+
+## References
+
+- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/
+- H. Takahasi and M. Mori (1974), Double exponential formulas for numerical integration, Publications of the Research Institute for Mathematical Sciences, 9(3), 721–741.
+*/

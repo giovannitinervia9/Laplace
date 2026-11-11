@@ -44,6 +44,31 @@ namespace laplace::math {
 
 namespace own {
 
+/**
+ * \ingroup incomplete_gamma
+ * \brief Result of incomplete gamma evaluation functions.
+ *
+ * Holds the values \f$P(a, x)\f$, \f$Q(a, x)\f$, and their natural logarithms,
+ * along with low-order correction terms for extended precision in tail regions.
+ *
+ * - `p`:
+ * Regularized lower incomplete gamma function \f$P(a, x)\f$.
+ *
+ * - `q`:
+ * Regularized upper incomplete gamma function \f$Q(a, x) = 1 - P(a, x)\f$.
+ *
+ * - `log_p`:
+ * Natural logarithm of the regularized lower incomplete gamma function, \f$\log P(a, x)\f$.
+ *
+ * - `log_q`:
+ * Natural logarithm of the regularized upper incomplete gamma function, \f$\log Q(a, x)\f$.
+ *
+ * - `log_p_lo`:
+ * Low-order correction of \f$\log P(a, x)\f$ as a double-double number.
+ *
+ * - `log_q_lo`:
+ * Low-order correction of \f$\log Q(a, x)\f$ as a double-double number.
+ */
 struct gamma_inc_result {
   double p, q;          // P(a, x), Q(a, x)
   double log_p, log_q;  // their logarithms
@@ -325,7 +350,66 @@ LAPLACE_HD gamma_inc_result gamma_inc(double a, double x) {
   return gamma_inc_classic(a, x);
 }
 
+/**
+ * \ingroup incomplete_gamma
+ * \brief Regularized lower incomplete gamma function \f$P(a, x)\f$.
+ *
+ * Computes the regularized lower incomplete gamma function
+ * \f[
+ * P(a, x) = \frac{\gamma(a, x)}{\Gamma(a)} = \frac{1}{\Gamma(a)} \int_0^x t^{a-1} e^{-t} \, \mathrm{d}t
+ * \f]
+ * where \f$a \in (0, \infty)\f$ is the shape parameter, \f$x \in [0, \infty)\f$ is the argument,
+ * and \f$t \in [0, x]\f$ is the integration variable.
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$P(a, x) \in [0, 1]\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, or \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$0.0\f$.
+ * - \f$x = +\infty\f$: returns \f$1.0\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 7.6 ulp1, 30.3 ulpL on general reference set (test bound 12.0 ulp1, 45.0 ulpL),
+ * measured in the section "Own incomplete gamma" before Temme's expansion and double-double logarithms
+ * (backend not stated; later measurements showed maxima stayed unchanged or lower);
+ * 0.82 ulp1, 2.9–3.4 ulpL for large shapes \f$a \in [10^2, 10^{15}]\f$ (test bound 1.5 ulp1, 4.5 ulpL).
+ *
+ * \see incomplete_gamma, gamma_q(), log_gamma_p(), gamma_p_inv()
+ */
 LAPLACE_HD_FORCEINLINE double gamma_p(double a, double x) { return gamma_inc(a, x).p; }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Regularized upper incomplete gamma function \f$Q(a, x)\f$.
+ *
+ * Computes the regularized upper incomplete gamma function
+ * \f[
+ * Q(a, x) = \frac{\Gamma(a, x)}{\Gamma(a)} = \frac{1}{\Gamma(a)} \int_x^\infty t^{a-1} e^{-t} \, \mathrm{d}t = 1 - P(a, x)
+ * \f]
+ * where \f$a \in (0, \infty)\f$ is the shape parameter, \f$x \in [0, \infty)\f$ is the argument,
+ * and \f$t \in [x, \infty)\f$ is the integration variable.
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$Q(a, x) \in [0, 1]\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, or \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$1.0\f$.
+ * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 7.6 ulp1, 24.7 ulpL on general reference set (test bound 12.0 ulp1, 40.0 ulpL),
+ * measured in the section "Own incomplete gamma" before Temme's expansion and double-double logarithms
+ * (backend not stated; later measurements showed maxima stayed unchanged or lower);
+ * 0.82 ulp1, 2.9–3.4 ulpL for large shapes \f$a \in [10^2, 10^{15}]\f$ (test bound 1.5 ulp1, 5.5 ulpL).
+ *
+ * \see incomplete_gamma, gamma_p(), log_gamma_q(), gamma_q_inv()
+ */
 LAPLACE_HD_FORCEINLINE double gamma_q(double a, double x) { return gamma_inc(a, x).q; }
 
 }  // namespace own
@@ -333,7 +417,61 @@ LAPLACE_HD_FORCEINLINE double gamma_q(double a, double x) { return gamma_inc(a, 
 // What the rest of Laplace calls: the own versions (docs/numerics.md).
 LAPLACE_HD_FORCEINLINE double gamma_p(double a, double x) { return own::gamma_inc(a, x).p; }
 LAPLACE_HD_FORCEINLINE double gamma_q(double a, double x) { return own::gamma_inc(a, x).q; }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Natural logarithm of the regularized lower incomplete gamma function, \f$\log P(a, x)\f$.
+ *
+ * Computes \f$\log P(a, x)\f$ directly without forming \f$P(a, x)\f$, avoiding underflow in the lower tail:
+ * \f[
+ * \log P(a, x) = \log \left(\frac{1}{\Gamma(a)} \int_0^x t^{a-1} e^{-t} \, \mathrm{d}t\right)
+ * \f]
+ * where \f$a \in (0, \infty)\f$ is the shape parameter, \f$x \in [0, \infty)\f$ is the argument,
+ * and \f$t \in [0, x]\f$ is the integration variable.
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\log P(a, x) \in (-\infty, 0]\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, or \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$-\infty\f$.
+ * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error within 5.9–6.4 ulp1 for large shapes \f$a \in [10^2, 10^{15}]\f$ (test bound 9.0 ulp1).
+ *
+ * \see incomplete_gamma, gamma_p(), log_gamma_q(), gamma_p_inv_logp(), log_gamma_p_da1()
+ */
 LAPLACE_HD_FORCEINLINE double log_gamma_p(double a, double x) { return own::gamma_inc(a, x).log_p; }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Natural logarithm of the regularized upper incomplete gamma function, \f$\log Q(a, x)\f$.
+ *
+ * Computes \f$\log Q(a, x)\f$ directly without forming \f$Q(a, x)\f$, avoiding underflow in the upper tail:
+ * \f[
+ * \log Q(a, x) = \log \left(\frac{1}{\Gamma(a)} \int_x^\infty t^{a-1} e^{-t} \, \mathrm{d}t\right)
+ * \f]
+ * where \f$a \in (0, \infty)\f$ is the shape parameter, \f$x \in [0, \infty)\f$ is the argument,
+ * and \f$t \in [x, \infty)\f$ is the integration variable.
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\log Q(a, x) \in (-\infty, 0]\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, or \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$0.0\f$.
+ * - \f$x = +\infty\f$: returns \f$-\infty\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error within 5.9–6.4 ulp1 for large shapes \f$a \in [10^2, 10^{15}]\f$ (test bound 10.0 ulp1).
+ *
+ * \see incomplete_gamma, gamma_q(), log_gamma_p(), gamma_q_inv_logq(), log_gamma_q_da1()
+ */
 LAPLACE_HD_FORCEINLINE double log_gamma_q(double a, double x) { return own::gamma_inc(a, x).log_q; }
 
 }  // namespace laplace::math

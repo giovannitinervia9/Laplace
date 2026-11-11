@@ -42,18 +42,77 @@
 
 namespace laplace::math::quad {
 
+/**
+ * \ingroup quadrature
+ * \brief Result of an adaptive quadrature rule.
+ *
+ * Encapsulates the computed integral estimate, an error estimate, the total
+ * number of integrand evaluations, and a boolean flag indicating whether the
+ * convergence criterion was satisfied. When the rule does not converge,
+ * `value` holds the last estimate and `error` holds the last difference between
+ * successive estimates.
+ *
+ * - `value`:
+ * Estimated value of the definite integral \f$I = \int_a^b f(x) \, \mathrm{d}x\f$; holds the last estimate when the rule does not converge.
+ *
+ * - `error`:
+ * Estimated absolute error of the integral estimate; holds the last difference between successive estimates when the rule does not converge.
+ *
+ * - `evals`:
+ * Total number of integrand evaluations performed.
+ *
+ * - `converged`:
+ * Flag indicating whether the convergence tolerance was met within the evaluation limit.
+ *
+ * \see quadrature, de_options
+ */
 struct result {
   double value = 0.0, error = 0.0;
   int evals = 0;
   bool converged = false;
 };
 
+/**
+ * \ingroup quadrature
+ * \brief Options for double-exponential and panel quadrature rules.
+ *
+ * Specifies the relative stopping tolerance between successive trapezoidal
+ * refinement levels and the maximum refinement level for step halving.
+ *
+ * - `stop`:
+ * Successive estimates tolerance factor: iteration terminates when two
+ * successive trapezoidal estimates differ by less than \f$\mathrm{stop} \times \int |f|\f$.
+ * Default is \f$10^{-9}\f$.
+ *
+ * - `max_level`:
+ * Maximum refinement level for step halving (default 8). At level \f$L\f$,
+ * the step size is \f$h = 2^{-(L+1)}\f$, down to \f$h = 2^{-9} = 1/512\f$ at level 8.
+ *
+ * \see quadrature, result, tanh_sinh(), exp_sinh(), sinh_sinh(), panels()
+ */
 struct de_options {
   double stop = 1e-9;  // successive estimates within stop * int |f|
   int max_level = 8;   // step 2^-(max_level + 1) at most
 };
 
 namespace detail {
+
+// argument checks shared by the rules: an end or a centre must be finite, a
+// scale positive and finite; a NaN fails both
+LAPLACE_HD_FORCEINLINE bool finite(double x) { return Kokkos::fabs(x) <= 1.7976931348623157e308; }
+LAPLACE_HD_FORCEINLINE bool scale_ok(double s) { return s > 0.0 && finite(s); }
+// invalid arguments: NaN value and error, not converged
+LAPLACE_HD_FORCEINLINE result invalid() {
+  result r;
+  r.value = r.error = laplace::math::detail::quiet_nan();
+  return r;
+}
+// an empty interval: exactly 0, converged
+LAPLACE_HD_FORCEINLINE result empty() {
+  result r;
+  r.converged = true;
+  return r;
+}
 
 constexpr double half_pi = 1.57079632679489661923;
 constexpr double t_max = 6.8;
@@ -354,24 +413,179 @@ LAPLACE_HD_FORCEINLINE void gk15(const F& f, double a, double b, double& K, doub
 
 }  // namespace detail
 
+/**
+ * \ingroup quadrature
+ * \brief Adaptive double-exponential tanh-sinh quadrature on a finite interval.
+ *
+ * Computes the definite integral:
+ * \f[
+ * I = \int_a^b f(x) \, \mathrm{d}x
+ * \f]
+ * using the double-exponential tanh-sinh transformation (Takahasi and Mori, 1974):
+ * \f[
+ * x(t) = \frac{a+b}{2} + \frac{b-a}{2} \tanh\left(\frac{\pi}{2} \sinh t\right), \quad t \in [-6.8, 6.8].
+ * \f]
+ * The integrand \f$f\f$ may be a unary functor \f$f(x)\f$ or a binary functor \f$f(x, x_c)\f$,
+ * where \f$x_c\f$ is the signed distance to the nearer endpoint (\f$x_c = a - x\f$ on the left
+ * half, \f$x_c = b - x\f$ on the right half).
+ *
+ * \tparam F Integrand functor type callable as \f$f(x)\f$ or \f$f(x, x_c)\f$.
+ * \param f Integrand functor.
+ * \param a Finite lower integration limit \f$a \in \mathbb{R}\f$.
+ * \param b Finite upper integration limit \f$b \in \mathbb{R}\f$.
+ * \param o Options specifying stopping tolerance and maximum level (default `de_options{}`).
+ * \return A \ref result containing the integral value, error estimate, evaluation count, and convergence status.
+ *
+ * \par Domain and special values
+ * - Standard domain: finite \f$a, b \in \mathbb{R}\f$.
+ * - Reversed interval: if \f$b < a\f$, \f$\int_a^b f = -\int_b^a f\f$; the result of the reversed call has the opposite value and the same error, evaluations and convergence.
+ * - Empty interval: if \f$a = b\f$, returns value 0, error 0, `converged = true`, and no evaluation.
+ * - Invalid arguments: if \f$a\f$ or \f$b\f$ is NaN or infinite, returns value and error NaN and `converged = false` (evaluations 0).
+ * - If a node rounds to an endpoint in double precision while \f$x_c \ne 0\f$, it is evaluated; if the integrand returns a non-finite value or \f$|v| \ge 10^{308}\f$ at an endpoint singularity, the node is skipped.
+ * - When the rule does not converge, `value` holds the last estimate and `error` holds the last difference between successive estimates.
+ *
+ * \par Measured accuracy
+ * Maximum error 6.5 ulp (gcc) / 7.8 ulp (CUDA) on the beta integral with distance to end (test bound 10.0 ulp, 88 evaluations);
+ * 6.4 ulp (gcc) / 7.4 ulp (CUDA) on \f$x^p \log(x)^2\f$ (test bound 10.0 ulp, 72 evaluations).
+ *
+ * \see quadrature, exp_sinh(), sinh_sinh(), gauss_kronrod(), panels(), de_options, result
+ */
 template <class F>
 LAPLACE_HD result tanh_sinh(const F& f, double a, double b, const de_options& o = de_options{}) {
+  if (!detail::finite(a) || !detail::finite(b)) return detail::invalid();
+  if (a == b) return detail::empty();
+  if (b < a) {  // int_a^b = -int_b^a
+    result r = detail::de_rule(f, detail::tanh_sinh_node{b, a}, o);
+    r.value = -r.value;
+    return r;
+  }
   return detail::de_rule(f, detail::tanh_sinh_node{a, b}, o);
 }
+
+/**
+ * \ingroup quadrature
+ * \brief Adaptive double-exponential exp-sinh quadrature on a semi-infinite interval.
+ *
+ * Computes the definite integral:
+ * \f[
+ * I = \int_a^\infty f(x) \, \mathrm{d}x
+ * \f]
+ * using the double-exponential exp-sinh transformation (Takahasi and Mori, 1974):
+ * \f[
+ * x(t) = a + s \exp\left(\frac{\pi}{2} \sinh t\right), \quad t \in [-6.8, 6.8]
+ * \f]
+ * where \f$s > 0\f$ is the characteristic scale of decay of the integrand.
+ * The integrand \f$f\f$ may be a unary functor \f$f(x)\f$ or a binary functor \f$f(x, x_c)\f$,
+ * where \f$x_c = x - a\f$ is the exact distance from the lower limit \f$a\f$.
+ *
+ * \tparam F Integrand functor type callable as \f$f(x)\f$ or \f$f(x, x_c)\f$.
+ * \param f Integrand functor.
+ * \param a Finite lower integration limit \f$a \in \mathbb{R}\f$.
+ * \param s Scale parameter of the integrand's decay \f$s > 0\f$ (default 1.0).
+ * \param o Options specifying stopping tolerance and maximum level (default `de_options{}`).
+ * \return A \ref result containing the integral value, error estimate, evaluation count, and convergence status.
+ *
+ * \par Domain and special values
+ * - Standard domain: finite \f$a \in \mathbb{R}\f$ and \f$s > 0\f$.
+ * - Integrable singularities at \f$x = a\f$ that evaluate to non-finite values or \f$|v| \ge 10^{308}\f$ are skipped.
+ * - Invalid arguments: if \f$a\f$ is NaN or infinite, or if scale \f$s\f$ is not positive and finite (\f$s \le 0\f$, infinite, or NaN), returns value and error NaN and `converged = false` (evaluations 0).
+ * - When the rule does not converge, `value` holds the last estimate and `error` holds the last difference between successive estimates.
+ *
+ * \par Measured accuracy
+ * Maximum error 68 ulp (gcc) / 20 ulp (CUDA) on the gamma integral (test bound 100.0 ulp, 136 evaluations);
+ * 5.4 ulp on the Student t tail (test bound 8.0 ulp, 85 evaluations).
+ *
+ * \see quadrature, tanh_sinh(), sinh_sinh(), gauss_laguerre32(), panels(), de_options, result
+ */
 template <class F>
 LAPLACE_HD result exp_sinh(const F& f, double a, double s = 1.0, const de_options& o = de_options{}) {
+  if (!detail::finite(a) || !detail::scale_ok(s)) return detail::invalid();
   return detail::de_rule(f, detail::exp_sinh_node{a, s}, o);
 }
+
+/**
+ * \ingroup quadrature
+ * \brief Adaptive double-exponential sinh-sinh quadrature over the real line.
+ *
+ * Computes the definite integral:
+ * \f[
+ * I = \int_{-\infty}^\infty f(x) \, \mathrm{d}x
+ * \f]
+ * using the double-exponential sinh-sinh transformation (Takahasi and Mori, 1974):
+ * \f[
+ * x(t) = c + s \sinh\left(\frac{\pi}{2} \sinh t\right), \quad t \in [-6.8, 6.8]
+ * \f]
+ * where \f$c \in \mathbb{R}\f$ is the centre and \f$s > 0\f$ is the scale parameter.
+ *
+ * \tparam F Integrand functor type callable as \f$f(x)\f$.
+ * \param f Integrand functor.
+ * \param c Centre parameter of the integrand \f$c \in \mathbb{R}\f$ (default 0.0).
+ * \param s Scale parameter of the integrand \f$s > 0\f$ (default 1.0).
+ * \param o Options specifying stopping tolerance and maximum level (default `de_options{}`).
+ * \return A \ref result containing the integral value, error estimate, evaluation count, and convergence status.
+ *
+ * \par Domain and special values
+ * - Standard domain: finite \f$c \in \mathbb{R}\f$ and \f$s > 0\f$.
+ * - Nodes with displacement \f$|\sinh(q)| \ge 10^{300}\f$ (where \f$q = \frac{\pi}{2} \sinh t\f$) are skipped; integrand values are skipped by the common test \f$|v| < 10^{308}\f$ of every double-exponential rule (non-finite values and finite values with \f$|v| \ge 10^{308}\f$).
+ * - Invalid arguments: if centre \f$c\f$ is NaN or infinite, or if scale \f$s\f$ is not positive and finite (\f$s \le 0\f$, infinite, or NaN), returns value and error NaN and `converged = false` (evaluations 0).
+ * - When the rule does not converge, `value` holds the last estimate and `error` holds the last difference between successive estimates.
+ *
+ * \par Measured accuracy
+ * Maximum error 7.3 ulp (gcc) / 6.7 ulp (CUDA) on the skew normal information entry (test bound 11.0 ulp, 159 evaluations);
+ * 18 ulp on the pseudo-Huber normalizer (test bound 27.0 ulp, 615 evaluations);
+ * 6.3 ulp on \f$\mathrm{sech}^p\f$ (test bound 10.0 ulp, 182 evaluations).
+ *
+ * \see quadrature, tanh_sinh(), exp_sinh(), gauss_hermite32(), panels(), de_options, result
+ */
 template <class F>
 LAPLACE_HD result sinh_sinh(const F& f, double c = 0.0, double s = 1.0, const de_options& o = de_options{}) {
+  if (!detail::finite(c) || !detail::scale_ok(s)) return detail::invalid();
   return detail::de_rule(f, detail::sinh_sinh_node{c, s}, o);
 }
 
 // adaptive Gauss-Kronrod 7-15: bisect the interval with the largest error
 // until the sum of the errors is below tol times |value|, at most 64 intervals
+/**
+ * \ingroup quadrature
+ * \brief Adaptive Gauss-Kronrod 7–15 quadrature on a finite interval.
+ *
+ * Computes the definite integral:
+ * \f[
+ * I = \int_a^b f(x) \, \mathrm{d}x
+ * \f]
+ * using the adaptive Gauss-Kronrod 7–15 rule with interval bisection.
+ * On each subinterval, evaluates a 15-point Kronrod estimate \f$K\f$ and an embedded 7-point
+ * Gauss estimate \f$G\f$ using constants from Boost.Math. The interval with the largest error
+ * is iteratively bisected until the total error satisfies \f$\sum \mathrm{err}_i \le \mathrm{tol} \times |\sum \mathrm{val}_i|\f$
+ * or the maximum number of subintervals (at most 64) is reached.
+ *
+ * \tparam F Integrand functor type callable as \f$f(x)\f$.
+ * \param f Integrand functor.
+ * \param a Finite lower integration limit \f$a \in \mathbb{R}\f$.
+ * \param b Finite upper integration limit \f$b \in \mathbb{R}\f$.
+ * \param tol Relative convergence tolerance (default \f$10^{-14}\f$).
+ * \param max_intervals Maximum number of subintervals (default 64, capped at 64).
+ * \return A \ref result containing the integral value, error estimate, evaluation count, and convergence status.
+ *
+ * \par Domain and special values
+ * - Standard domain: finite \f$a, b \in \mathbb{R}\f$.
+ * - Reversed interval: if \f$b < a\f$, \f$\int_a^b f = -\int_b^a f\f$; the result of the reversed call has the opposite value and the same error, evaluations and convergence.
+ * - Empty interval: if \f$a = b\f$, returns value 0, error 0, `converged = true`, and no evaluation.
+ * - Invalid arguments: if \f$a\f$ or \f$b\f$ is NaN or infinite, returns value and error NaN and `converged = false` (evaluations 0).
+ * - If midpoint bisection underflows in double precision, iteration terminates.
+ * - Fails to converge on integrands with endpoint singularities.
+ * - When the rule does not converge, `value` holds the last accumulated estimate and `error` holds the last accumulated error estimate.
+ *
+ * \par Measured accuracy
+ * Maximum error 72 ulp on the truncated Laplace density with a kink at 0 (test bound 110.0 ulp, 167 evaluations).
+ *
+ * \see quadrature, tanh_sinh(), gauss_legendre(), panels(), result
+ */
 template <class F>
 LAPLACE_HD result gauss_kronrod(const F& f, double a, double b, double tol = 1e-14, int max_intervals = 64) {
   constexpr int cap = 64;
+  if (!detail::finite(a) || !detail::finite(b)) return detail::invalid();
+  if (a == b) return detail::empty();  // b < a: the rule itself gives -int_b^a
   if (max_intervals > cap) max_intervals = cap;
   double lo[cap], hi[cap], val[cap], err[cap];
   result r;
@@ -402,6 +616,35 @@ LAPLACE_HD result gauss_kronrod(const F& f, double a, double b, double tol = 1e-
 }
 
 // fixed Gauss rules
+/**
+ * \ingroup quadrature
+ * \brief Fixed Gauss-Legendre quadrature with 16, 32, or 64 nodes on a finite interval.
+ *
+ * Evaluates the definite integral:
+ * \f[
+ * \int_a^b f(x) \, \mathrm{d}x \approx \frac{b - a}{2} \sum_{i=0}^{N-1} w_i f\left(\frac{a+b}{2} + \frac{b-a}{2} x_i\right)
+ * \f]
+ * where \f$x_i \in (-1, 1)\f$ and \f$w_i > 0\f$ are the Gauss-Legendre nodes and weights
+ * generated via the Golub-Welsch algorithm at 256 bits. Exact for polynomials of degree up to \f$2N - 1\f$.
+ *
+ * \tparam N Number of quadrature nodes, must be 16, 32, or 64.
+ * \tparam F Integrand functor type callable as \f$f(x)\f$.
+ * \param f Integrand functor.
+ * \param a Finite lower integration limit \f$a \in \mathbb{R}\f$.
+ * \param b Finite upper integration limit \f$b \in \mathbb{R}\f$.
+ * \return The computed integral value in double precision.
+ *
+ * \par Domain and special values
+ * - Standard domain: finite \f$a, b \in \mathbb{R}\f$.
+ * - Reversed interval: if \f$b < a\f$, \f$\int_a^b f = -\int_b^a f\f$; the result of the reversed call has the opposite value.
+ * - Empty interval: if \f$a = b\f$, returns \f$0.0\f$.
+ *
+ * \par Tests
+ * In `tests/math/test_quadrature.cpp`, tested on monomials \f$x^k\f$ on \f$[0, 1]\f$ for \f$k \in \{0, 1, 7, 31\}\f$
+ * for \f$N = 16\f$ and \f$N = 64\f$ (\f$N = 32\f$ untested) against test tolerance \f$4 \times 10^{-16}\f$ (`doctest::Approx` epsilon).
+ *
+ * \see quadrature, gauss_kronrod(), tanh_sinh()
+ */
 template <int N, class F>
 LAPLACE_HD double gauss_legendre(const F& f, double a, double b) {
   static_assert(N == 16 || N == 32 || N == 64, "Gauss-Legendre with 16, 32 or 64 nodes");
@@ -414,8 +657,37 @@ LAPLACE_HD double gauss_legendre(const F& f, double a, double b) {
   }
   return s * hl;
 }
+
+/**
+ * \ingroup quadrature
+ * \brief Fixed 32-node Gauss-Hermite quadrature over the real line.
+ *
+ * Evaluates the definite integral:
+ * \f[
+ * \int_{-\infty}^\infty f(x) \, \mathrm{d}x \approx s \sum_{i=0}^{31} w_i e^{y_i^2} f(c + s y_i)
+ * \f]
+ * where \f$y_i\f$ and \f$w_i\f$ are the 32 Gauss-Hermite nodes and weights for the weight
+ * function \f$e^{-y^2}\f$, computed via the Golub-Welsch algorithm at 256 bits.
+ *
+ * \tparam F Integrand functor type callable as \f$f(x)\f$.
+ * \param f Integrand functor.
+ * \param c Centre parameter of the integrand \f$c \in \mathbb{R}\f$ (default 0.0).
+ * \param s Scale parameter of the integrand \f$s > 0\f$ (default 1.0).
+ * \return The computed integral value in double precision.
+ *
+ * \par Domain and special values
+ * - Standard domain: finite \f$c \in \mathbb{R}\f$ and \f$s > 0\f$.
+ * - Invalid arguments: if centre \f$c\f$ is NaN or infinite, or if scale \f$s\f$ is not positive and finite (\f$s \le 0\f$, infinite, or NaN), returns NaN.
+ *
+ * \par Tests
+ * In `tests/math/test_quadrature.cpp`, tested on monomials times the weight function, \f$x^{2j} e^{-x^2}\f$
+ * for \f$j \in \{0, 1, 2, 3\}\f$, against test tolerance \f$10^{-14}\f$ (`doctest::Approx` epsilon).
+ *
+ * \see quadrature, sinh_sinh(), gauss_laguerre32()
+ */
 template <class F>
 LAPLACE_HD double gauss_hermite32(const F& f, double c = 0.0, double s = 1.0) {
+  if (!detail::finite(c) || !detail::scale_ok(s)) return laplace::math::detail::quiet_nan();
   double acc = 0.0;
   for (int i = 0; i < 32; ++i) {
     const double y = detail::hermite32(i), w = detail::hermite32(32 + i);
@@ -423,8 +695,37 @@ LAPLACE_HD double gauss_hermite32(const F& f, double c = 0.0, double s = 1.0) {
   }
   return acc * s;
 }
+
+/**
+ * \ingroup quadrature
+ * \brief Fixed 32-node Gauss-Laguerre quadrature on a semi-infinite interval.
+ *
+ * Evaluates the definite integral:
+ * \f[
+ * \int_a^\infty f(x) \, \mathrm{d}x \approx s \sum_{i=0}^{31} w_i e^{y_i} f(a + s y_i)
+ * \f]
+ * where \f$y_i\f$ and \f$w_i\f$ are the 32 Gauss-Laguerre nodes and weights for the weight
+ * function \f$e^{-y}\f$, computed via the Golub-Welsch algorithm at 256 bits.
+ *
+ * \tparam F Integrand functor type callable as \f$f(x)\f$.
+ * \param f Integrand functor.
+ * \param a Finite lower integration limit \f$a \in \mathbb{R}\f$ (default 0.0).
+ * \param s Scale parameter of the integrand \f$s > 0\f$ (default 1.0).
+ * \return The computed integral value in double precision.
+ *
+ * \par Domain and special values
+ * - Standard domain: finite \f$a \in \mathbb{R}\f$ and \f$s > 0\f$.
+ * - Invalid arguments: if start \f$a\f$ is NaN or infinite, or if scale \f$s\f$ is not positive and finite (\f$s \le 0\f$, infinite, or NaN), returns NaN.
+ *
+ * \par Tests
+ * In `tests/math/test_quadrature.cpp`, tested on monomials times the weight function, \f$x^k e^{-x}\f$
+ * for \f$k \in \{0, \dots, 9\}\f$, against test tolerance \f$10^{-14}\f$ (`doctest::Approx` epsilon).
+ *
+ * \see quadrature, exp_sinh(), gauss_hermite32()
+ */
 template <class F>
 LAPLACE_HD double gauss_laguerre32(const F& f, double a = 0.0, double s = 1.0) {
+  if (!detail::finite(a) || !detail::scale_ok(s)) return laplace::math::detail::quiet_nan();
   double acc = 0.0;
   for (int i = 0; i < 32; ++i) {
     const double y = detail::laguerre32(i), w = detail::laguerre32(32 + i);
@@ -436,12 +737,60 @@ LAPLACE_HD double gauss_laguerre32(const F& f, double a = 0.0, double s = 1.0) {
 // the panel rule: [a, b] cut at c and at the kinks (at most 8), finite pieces
 // in doubling panels from the side nearer c, tanh-sinh on each; a piece
 // unbounded on one side gets doubling panels over its first 63 s, then exp-sinh
+/**
+ * \ingroup quadrature
+ * \brief Geometric panel quadrature rule on a finite or infinite interval cut at a centre and kinks.
+ *
+ * Implements the panel integration rule of statmodels7's `pt_trunc_rule.h`:
+ * - The interval \f$[a, b]\f$ is cut at the centre \f$c\f$ and at up to 8 user-supplied interior kink points.
+ * - Each finite subpiece \f$[u, v]\f$ is partitioned into doubling geometric panels of widths \f$s, 2s, 4s, \dots, 2^k s\f$
+ *   advancing from the end closer to \f$c\f$, with \ref tanh_sinh() evaluated on each panel.
+ * - Pieces extending to \f$\pm\infty\f$ use doubling panels over the first \f$63s\f$, followed by \ref exp_sinh() on the unbounded tail.
+ * - Convergence is checked on each panel individually; the result is marked converged only if every panel converged.
+ *
+ * \tparam F Integrand functor type callable as \f$f(x)\f$.
+ * \param f Integrand functor.
+ * \param a Lower integration boundary \f$a \in [-\infty, \infty]\f$.
+ * \param b Upper integration boundary \f$b \in [-\infty, \infty]\f$.
+ * \param c Centre point \f$c \in \mathbb{R}\f$.
+ * \param s Base panel width and scale parameter \f$s > 0\f$.
+ * \param kinks Optional array of interior kink coordinates (at most 8 used).
+ * \param nk Number of elements in `kinks` array.
+ * \param o Options specifying stopping tolerance and maximum level (default `de_options{}`).
+ * \return A \ref result containing the accumulated integral value, accumulated error, total evaluation count, and combined convergence status.
+ *
+ * \par Domain and special values
+ * - Standard domain: \f$-\infty \le a, b \le \infty\f$, finite centre \f$c \in \mathbb{R}\f$, and \f$s > 0\f$.
+ * - Reversed interval: if \f$b < a\f$, \f$\int_a^b f = -\int_b^a f\f$; the result of the reversed call has the opposite value and the same error, evaluations and convergence.
+ * - Empty interval: if \f$a = b\f$, returns value 0, error 0, `converged = true`, and no evaluation.
+ * - Invalid arguments: if \f$a\f$ or \f$b\f$ is NaN, if centre \f$c\f$ is not finite (NaN or infinite), or if scale \f$s\f$ is not positive and finite (\f$s \le 0\f$, infinite, or NaN), returns value and error NaN and `converged = false` (evaluations 0). Integration limits \f$a\f$ and \f$b\f$ may be infinite.
+ * - Boundaries with \f$a \le -10^{308}\f$ or \f$b \ge 10^{308}\f$ are treated as infinite.
+ * - Takes integrands of \f$x\f$ alone; does not support distance-to-endpoint evaluation \f$f(x, x_c)\f$.
+ * - When the rule does not converge, `value` holds the accumulated estimate and `error` holds the accumulated error.
+ *
+ * \par Measured accuracy
+ * Maximum error 13 ulp (gcc) / 21 ulp (CUDA) on gamma (test bound 32.0 ulp, 839 evaluations);
+ * 4.0 ulp on Student t tail (test bound 6.0 ulp, 793 evaluations);
+ * 4.5 ulp on truncated Laplace (test bound 7.0 ulp, 229 evaluations);
+ * 3.9 ulp on \f$x^p \log(x)^2\f$ (test bound 6.0 ulp, 274 evaluations);
+ * 6.8 ulp (gcc) / 5.4 ulp (CUDA) on skew normal entry (test bound 10.0 ulp, 1527 evaluations);
+ * 2.8 ulp on pseudo-Huber normalizer (test bound 5.0 ulp, 1557 evaluations);
+ * 3.7 ulp on \f$\mathrm{sech}^p\f$ (test bound 6.0 ulp, 1561 evaluations).
+ *
+ * \see quadrature, tanh_sinh(), exp_sinh(), sinh_sinh(), de_options, result
+ */
 template <class F>
 LAPLACE_HD result panels(const F& f, double a, double b, double c, double s, const double* kinks = nullptr, int nk = 0,
                          const de_options& o = de_options{}) {
+  if (a != a || b != b || !detail::finite(c) || !detail::scale_ok(s)) return detail::invalid();
+  if (a == b) return detail::empty();
+  if (b < a) {  // int_a^b = -int_b^a
+    result r = panels(f, b, a, c, s, kinks, nk, o);
+    r.value = -r.value;
+    return r;
+  }
   result r;
   r.converged = true;
-  if (!(b > a)) return r;
   double cut[10];
   int nc = 0;
   if (c > a && c < b) cut[nc++] = c;

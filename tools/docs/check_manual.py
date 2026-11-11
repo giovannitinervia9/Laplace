@@ -32,6 +32,10 @@ pages = sorted(p for p in out.glob("*.html") if not p.name.endswith("_source.htm
 for p in pages:
     text = p.read_text(encoding="utf-8", errors="replace")
     text = re.sub(r"<script.*?</script>|<style.*?</style>|<pre.*?</pre>|<code.*?</code>", " ", text, flags=re.S)
+    # code fragments (\code ... \endcode) and function signatures hold C++ such as double**
+    text = re.sub(r'<div class="fragment">.*?</div><!-- fragment -->', " ", text, flags=re.S)
+    text = re.sub(r'<table class="(?:memname|mlabels)">.*?</table>', " ", text, flags=re.S)
+    text = re.sub(r'<td class="(?:memItemRight|memItemLeft|memTemplParams)"[^>]*>.*?</td>', " ", text, flags=re.S)
     text = re.sub(r"\\\(.*?\\\)|\\\[.*?\\\]", " ", text, flags=re.S)  # MathJax formulas
     text = html.unescape(re.sub(r"<[^>]+>", " ", text))
     for name, rx in raw.items():
@@ -43,7 +47,6 @@ for p in pages:
 heading = re.compile(r"^\s*(?:\*\s*|///\s*)?#{1,6}\s+(.*)$")
 mathy = re.compile(r"\\f\$|\b(?:x|y|z|t|nu|mu|K_\w+|log K\w*)\b|[_^]")
 text_us = re.compile(r"\\text\{[^}]*_[^}]*\}")
-bold_code = re.compile(r"\*\*[^*\n]*(?:`|\\f\$)[^*\n]*\*\*")
 doc_line = re.compile(r"^\s*(?:\*|///|/\*\*)")
 
 sources = sorted((ROOT / "docs" / "manual" / "pages").glob("*.md"))
@@ -60,7 +63,9 @@ for p in sources + headers:
             problems.append(f"{rel}:{i}: mathematics in a heading: {h.group(1)!r}")
         if text_us.search(line):
             problems.append(f"{rel}:{i}: \\text with an underscore: {line.strip()[:100]!r}")
-        if bold_code.search(line):
+        # the text inside each **...** pair (odd pieces after splitting on **)
+        pieces = line.split("**")
+        if len(pieces) > 2 and any("`" in s or "\\f$" in s for s in pieces[1:-1:2]):
             problems.append(f"{rel}:{i}: formula or code inside bold: {line.strip()[:100]!r}")
 
 for line in problems:

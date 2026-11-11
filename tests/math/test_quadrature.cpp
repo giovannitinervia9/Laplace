@@ -7,6 +7,9 @@
 
 #include "quad_common.hpp"
 
+#include <cmath>
+#include <limits>
+
 #ifndef LAPLACE_REFERENCE_DIR
 #error "LAPLACE_REFERENCE_DIR must point to tests/data/reference"
 #endif
@@ -106,4 +109,42 @@ TEST_CASE("fixed Gauss rules integrate their polynomials") {
     INFO("k = ", k);
     CHECK(quad::gauss_laguerre32(ExpMono{k}) == doctest::Approx(fact).epsilon(1e-14));
   }
+}
+
+TEST_CASE("quadrature rules: reversed, empty and invalid arguments") {
+  namespace quad = laplace::math::quad;
+  const double nan = std::nan(""), inf = std::numeric_limits<double>::infinity();
+  auto sq = [](double x) { return x * x; };            // int_0^1 = 1/3
+  auto g = [](double x) { return std::exp(-x * x); };  // int over R = sqrt(pi)
+  auto e = [](double x) { return std::exp(-x); };      // int_0^inf = 1
+  // int_a^b = -int_b^a
+  const auto ts = quad::tanh_sinh(sq, 0.0, 1.0), tr = quad::tanh_sinh(sq, 1.0, 0.0);
+  CHECK(tr.converged);
+  CHECK(tr.value == -ts.value);
+  CHECK(tr.error == ts.error);
+  CHECK(quad::gauss_kronrod(sq, 1.0, 0.0).value == doctest::Approx(-1.0 / 3.0).epsilon(1e-15));
+  CHECK(quad::gauss_legendre<16>(sq, 1.0, 0.0) == doctest::Approx(-1.0 / 3.0).epsilon(4e-16));
+  const auto pf = quad::panels(sq, 0.0, 1.0, 0.0, 0.25), pr = quad::panels(sq, 1.0, 0.0, 0.0, 0.25);
+  CHECK(pr.converged);
+  CHECK(pr.value == -pf.value);
+  // empty interval: exactly 0, error 0, converged
+  for (const auto& r : {quad::tanh_sinh(sq, 0.5, 0.5), quad::gauss_kronrod(sq, 0.5, 0.5), quad::panels(sq, 0.5, 0.5, 0.0, 1.0)}) {
+    CHECK(r.value == 0.0);
+    CHECK(r.error == 0.0);
+    CHECK(r.converged);
+  }
+  // invalid arguments: NaN, not converged
+  for (const auto& r : {quad::tanh_sinh(sq, nan, 1.0), quad::tanh_sinh(sq, 0.0, inf), quad::gauss_kronrod(sq, 0.0, nan),
+                        quad::exp_sinh(e, 0.0, 0.0), quad::exp_sinh(e, 0.0, -1.0), quad::exp_sinh(e, nan, 1.0),
+                        quad::sinh_sinh(g, 0.0, -1.0), quad::sinh_sinh(g, nan, 1.0), quad::sinh_sinh(g, 0.0, inf),
+                        quad::panels(sq, nan, 1.0, 0.0, 1.0), quad::panels(sq, 0.0, 1.0, 0.0, 0.0)}) {
+    CHECK(std::isnan(r.value));
+    CHECK_FALSE(r.converged);
+  }
+  CHECK(std::isnan(quad::gauss_hermite32(sq, 0.0, -1.0)));
+  CHECK(std::isnan(quad::gauss_laguerre32(sq, 0.0, 0.0)));
+  CHECK(std::isnan(quad::gauss_hermite32(sq, nan, 1.0)));
+  // valid scales still give the integral
+  CHECK(quad::sinh_sinh(g, 0.0, 1.0).value == doctest::Approx(std::sqrt(3.14159265358979323846)).epsilon(1e-14));
+  CHECK(quad::exp_sinh(e, 0.0, 1.0).value == doctest::Approx(1.0).epsilon(1e-14));
 }

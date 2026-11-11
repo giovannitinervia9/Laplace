@@ -1,0 +1,271 @@
+/**
+\defgroup incomplete_beta Regularized incomplete beta function
+\ingroup special
+\brief Regularized incomplete beta function \f$I_x(a, b)\f$, its complement \f$1 - I_x(a, b)\f$, their logarithms, shape derivatives to order 5, and inverses.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Mathematical definition
+
+The regularized incomplete beta function of positive shape parameters \f$a\f$ and \f$b\f$ and real argument \f$x \in [0, 1]\f$, denoted \f$I_x(a, b)\f$, is defined by
+\f[
+I_x(a, b) = \frac{1}{B(a, b)} \int_0^x t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t
+\f]
+where:
+- \f$a \in (0, \infty)\f$ is the first shape parameter,
+- \f$b \in (0, \infty)\f$ is the second shape parameter,
+- \f$x \in [0, 1]\f$ is the upper limit of integration,
+- \f$t \in [0, x]\f$ is the real integration variable,
+- \f$B(a, b) = \int_0^1 t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t = \frac{\Gamma(a)\Gamma(b)}{\Gamma(a+b)}\f$ is the complete beta function.
+
+The complement of the regularized incomplete beta function (the regularized upper incomplete beta function) is defined by
+\f[
+1 - I_x(a, b) = I_{1-x}(b, a) = \frac{1}{B(a, b)} \int_x^1 t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t.
+\f]
+
+The function satisfies the following properties:
+- **Symmetry in the argument.** \f$I_x(a, b) = 1 - I_{1-x}(b, a)\f$ for all \f$a, b > 0\f$ and \f$x \in [0, 1]\f$.
+- **Equal shape symmetry.** \f$I_{1/2}(a, a) = 1/2\f$ for all \f$a > 0\f$.
+- **Unit shape special values.** \f$I_x(1, 1) = x\f$ and \f$I_x(a, 1) = x^a\f$.
+
+### Logarithms
+
+Laplace provides direct evaluations of \f$\log I_x(a, b)\f$ and \f$\log(1 - I_x(a, b))\f$. In double precision, \f$I_x(a, b)\f$ or \f$1 - I_x(a, b)\f$ underflows to zero in deep tails; evaluating the logarithms directly preserves numerical accuracy in deep tails without underflow.
+
+### Shape derivatives
+
+Laplace evaluates all mixed partial derivatives of \f$\log I_x(a, b)\f$ and \f$\log(1 - I_x(a, b))\f$ with respect to the shapes \f$a\f$ and \f$b\f$, of total order \f$K \in \{1, 2, 3, 4, 5\}\f$:
+\f[
+\frac{\partial^K}{\partial a^{K-j} \partial b^j} \log I_x(a, b) \quad \text{and} \quad \frac{\partial^K}{\partial a^{K-j} \partial b^j} \log(1 - I_x(a, b)), \quad j = 0, \dots, K.
+\f]
+Let \f$s = a + b\f$, \f$y = 1 - x\f$, and \f$J(a, b) = B(a, b) I_x(a, b) = \int_0^x t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t\f$. The derivatives of \f$\log J(a, b)\f$ are the joint cumulants \f$\kappa_{i,j}\f$ of \f$(\log T, \log(1 - T))\f$ under the truncated distribution \f$T \sim \mathrm{Beta}(a, b)\f$ conditioned on \f$T < x\f$. Thus:
+\f[
+l_{i,j} = \frac{\partial^{i+j}}{\partial a^i \partial b^j} \log I_x(a, b) = \kappa_{i,j} - \frac{\partial^{i+j}}{\partial a^i \partial b^j} \log B(a, b)
+\f]
+where:
+- \f$\frac{\partial^i}{\partial a^i} \log B(a, b) = \psi^{(i-1)}(a) - \psi^{(i-1)}(s)\f$ for \f$j = 0\f$,
+- \f$\frac{\partial^j}{\partial b^j} \log B(a, b) = \psi^{(j-1)}(b) - \psi^{(j-1)}(s)\f$ for \f$i = 0\f$,
+- \f$\frac{\partial^{i+j}}{\partial a^i \partial b^j} \log B(a, b) = -\psi^{(i+j-1)}(s)\f$ for \f$i, j \ge 1\f$,
+and \f$\psi^{(m)}(z) = \frac{\mathrm{d}^{m+1}}{\mathrm{d}z^{m+1}} \log \Gamma(z)\f$ is the polygamma function of order \f$m\f$.
+
+The central moments are \f$\mu_{i,j} = \mathbb{E}[X^i Y^j]\f$ with \f$X = \log T - \mathbb{E}[\log T]\f$ and \f$Y = \log(1 - T) - \mathbb{E}[\log(1 - T)]\f$ (both centred). The cumulants \f$\kappa_{i,j}\f$ are related to the central moments through the bivariate cumulant recursion
+\f[
+\mu_{i,j} = \sum_{k < i, \, l \le j} \binom{i-1}{k} \binom{j}{l} \kappa_{k+1, l} \, \mu_{i-1-k, j-l}
+\f]
+which uses \f$\kappa_{1,0} = \kappa_{0,1} = 0\f$.
+The derivatives of \f$\log(1 - I_x(a, b))\f$ are obtained either through the symmetry \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$ or by composing \f$\log(1 - S)\f$ from \f$S / b\f$ using bivariate Faà di Bruno recursions. The shape derivative functions are defined in `laplace::math::own`; the wrappers `log_ibeta_d1` through `log_ibeta_d5` and `log_ibetac_d1` through `log_ibetac_d5` in `laplace::math` only forward to them and are called as `laplace::math::NAME`.
+
+### Inverses
+
+The module provides inverse functions that solve for the argument \f$x \in [0, 1]\f$:
+- `ibeta_inv(a, b, p)`: solves \f$I_x(a, b) = p\f$ for \f$p \in [0, 1]\f$.
+- `ibetac_inv(a, b, q)`: solves \f$1 - I_x(a, b) = q\f$ for \f$q \in [0, 1]\f$.
+- `ibeta_inv_logp(a, b, log_p)`: solves \f$\log I_x(a, b) = \log p\f$ for \f$\log p \le 0\f$.
+- `ibetac_inv_logq(a, b, log_q)`: solves \f$\log(1 - I_x(a, b)) = \log q\f$ for \f$\log q \le 0\f$.
+
+In `laplace::math::own`, the inverses return both \f$x\f$ and its complement \f$y = 1 - x\f$ (\ref laplace::math::own::beta_inv_result "beta_inv_result"), each retaining full relative precision even when \f$x\f$ rounds to 1.0. The wrappers `laplace::math::ibeta_inv()`, `laplace::math::ibetac_inv()`, `laplace::math::ibeta_inv_logp()`, and `laplace::math::ibetac_inv_logq()` return only \f$x\f$ as a `double`, discarding \f$1 - x\f$.
+
+## Domain and special values
+
+- **Standard domain:** \f$a > 0\f$, \f$b > 0\f$, and \f$x \in [0, 1]\f$. For shape derivatives of \f$\log I\f$, \f$x \in (0, 1]\f$; for shape derivatives of \f$\log(1 - I)\f$, \f$x \in [0, 1)\f$.
+- **Quiet NaN cases:** If \f$a \le 0\f$, \f$b \le 0\f$, \f$x < 0\f$, \f$x > 1\f$, or if any argument is NaN, functions return quiet NaN. Infinite shapes (\f$a = +\infty\f$ or \f$b = +\infty\f$) give quiet NaN for the inverses and the shape derivatives. For shape derivatives, \f$x < 0\f$, \f$x > 1\f$, \f$x = 0\f$ for \f$\log I\f$, or \f$x = 1\f$ for \f$\log(1 - I)\f$ returns quiet NaN in all components.
+- **Boundaries at the ends of the unit interval:**
+  - At \f$x = 0\f$: \f$I_0(a, b) = 0.0\f$, \f$1 - I_0(a, b) = 1.0\f$, \f$\log I_0(a, b) = -\infty\f$, and \f$\log(1 - I_0(a, b)) = 0.0\f$. Shape derivatives of \f$\log(1 - I)\f$ return all zeros in all components.
+  - At \f$x = 1\f$: \f$I_1(a, b) = 1.0\f$, \f$1 - I_1(a, b) = 0.0\f$, \f$\log I_1(a, b) = 0.0\f$, and \f$\log(1 - I_1(a, b)) = -\infty\f$. Shape derivatives of \f$\log I\f$ return all zeros in all components.
+- **Inverse boundaries:**
+  - For `ibeta_inv`: at \f$p = 0.0\f$ returns \f$0.0\f$; at \f$p = 1.0\f$ returns \f$1.0\f$.
+  - For `ibetac_inv`: at \f$q = 0.0\f$ returns \f$1.0\f$; at \f$q = 1.0\f$ returns \f$0.0\f$.
+  - For `ibeta_inv_logp`: at \f$\log p = 0.0\f$ returns \f$1.0\f$; at \f$\log p = -\infty\f$ returns \f$0.0\f$.
+  - For `ibetac_inv_logq`: at \f$\log q = 0.0\f$ returns \f$0.0\f$; at \f$\log q = -\infty\f$ returns \f$1.0\f$.
+  - Roots with \f$x\f$ below \f$2^{-1075}\f$ return \f$0.0\f$ (and \f$y = 1 - x = 1.0\f$). For \f$1 - x\f$, the inverse returns \f$0.0\f$ (and \f$x = 1.0\f$) when \f$1 - x\f$ is below \f$2^{-1075}\f$ or when \f$1 - x \le 2^{-1074}\f$ (the smallest subnormal).
+
+## Numerical methods and regimes
+
+### Function values and logarithms
+
+In double precision, Boost.Math forms the incomplete beta function with a prefactor \f$x^a (1 - x)^b / B(a, b)\f$, which cancels catastrophic amounts of precision in the far tails and loses up to all relative accuracy (\f$7.5 \times 10^{15}\f$ ulp error). Laplace avoids this cancellation:
+1. **Cancellation-free prefactor:** Evaluated in logarithmic scale via `log_power_dd`:
+   - For \f$a, b \ge 1\f$: expanded about the mean \f$p_0 = a / (a + b)\f$ with \f$u = -\lambda / a = x/p_0 - 1\f$ and \f$v = \lambda / b = (1 - x)/q_0 - 1\f$ (\f$q_0 = b / (a + b)\f$, \f$a u + b v = 0\f$) as \f$a L(u) + b L(v) + \log(\sqrt{a b / (a + b)} / \sqrt{2\pi}) + \log \Gamma^*(a + b) - \log \Gamma^*(a) - \log \Gamma^*(b)\f$, with \f$L(t) = \log(1+t) - t\f$; \f$u\f$ and \f$v\f$ come from \f$\lambda\f$, not from a rounded mean.
+   - For one shape below 1 and the other at least 1 (for example \f$a < 1\f$ and \f$b \ge 1\f$): with \f$\log \Gamma(a) = \log \Gamma(1 + a) - \log a\f$, computed as \f$a \log(b x) + b \log(1 - x) + \log a - \log \Gamma(1 + a) + \log(\Gamma(a + b) / (\Gamma(b) b^a))\f$.
+   - For both shapes below 1: \f$a \log x + b \log(1 - x) - \log B(a, b)\f$, with \f$B(a, b)\f$ from Boost.Math.
+2. **Direct side selection:** For \f$a, b > 1\f$, `direct_side` selects the side below the mean (\f$\lambda \ge 0\f$); for \f$\min(a, b) \le 1\f$, it sometimes computes the complement. The side computed directly is never close to 1. The other side is obtained as \f$1 - w\f$ and its logarithm as `log1p(-w)`.
+3. **DiDonato and Morris expansions (BRATIO, ACM TOMS 708, 1992):** Chosen according to shapes and argument:
+   - **BPSER:** Power series expansion in \f$x\f$, used for small \f$x\f$ and shapes.
+   - **BFRAC:** Continued fraction by the modified Lentz method, used for \f$b < 40\f$ when \f$x \le 0.7\f$, for \f$b < 40\f$ when \f$x > 0.7\f$ and \f$a < 500\f$, and for \f$b \ge 40\f$ unless BASYM applies.
+   - **BUP:** Finite recurrence summed outwards from the largest term.
+   - **BGRAT:** Asymptotic expansion in terms of the incomplete gamma function via `gamma_inc`, used when one shape is small and the other large.
+   - **BASYM:** Temme's uniform asymptotic expansion for large shapes near the mean, used when \f$\min(a, b) > 100\f$ and \f$\lambda \le 0.03 \min(a, b)\f$.
+4. **Exact parameter lambda.** \f$\lambda = a - (a + b)x\f$ is computed with exact sum and product (fused multiply-add on device, Dekker product on host).
+5. **Double-double logarithmic accumulation:** The function `log_split` is always on: \f$\log x\f$ and \f$\log(1 - x)\f$ are split into two-part double-double representations via `log_split` (measured within 0.49 units of \f$2^{-53}\f$ absolute on the arguments of `dd_log.csv`).
+
+### Shape derivatives
+
+The shape derivatives are computed using two primary routes:
+1. **Differentiated power series:** For \f$x \le 1/2\f$ with \f$b \le 1\f$ or \f$b x \le 0.7\f$ (and up to \f$x = 0.8\f$ for \f$b \le 1\f$ on direct sides, `quad_par::x_wide`), the DiDonato–Morris series is differentiated term by term:
+   - \f$\frac{\mathrm{d}^i}{\mathrm{d}a^i} \frac{a}{a + n}\f$ is evaluated in closed form.
+   - \f$b\f$-derivatives of \f$g_n = (1 - b)_n \frac{x^n}{n!}\f$ follow the recurrence \f$g_n^{(j)} = \frac{x}{n} \left((n - b) g_{n-1}^{(j)} - j g_{n-1}^{(j-1)}\right)\f$.
+   - The derivatives of \f$\log \Sigma\f$ are formed through the cumulant recurrence.
+2. **Double-exponential quadrature:** Used in all other regions. Evaluates rays in \f$v = \log t\f$ towards 0 and \f$w = -\log(1 - t)\f$ towards 1 from an anchor (the boundary \f$x\f$ on the monotone side, or the mean \f$t_c = a / s\f$ on the other):
+   - Transformed with the Takahasi–Mori map for exponentially decaying integrands with step \f$h = 1/5\f$.
+   - Nodes are tabulated in constant memory on the device.
+   - On the host, rays dominated by their slope use 16-to-32-node Gauss–Laguerre quadrature.
+   - Central moments of \f$(\log T, \log(1 - T))\f$ are accumulated and converted to cumulants via the bivariate recursion.
+3. **Complement composition:** \f$\log(1 - S)\f$ is composed from \f$S / b\f$ using bivariate Faà di Bruno polynomials, eliminating the singularity of \f$\log b\f$ as \f$b \to 0\f$.
+
+### Inverses
+
+The inverse functions solve \f$g(v) = \log S(x(v)) - \log s = 0\f$ for the target probability \f$s\f$, where \f$v = \mathrm{logit}\,x = \log(x / (1 - x))\f$. In the variable \f$v\f$, \f$\log S\f$ is concave for all \f$a, b > 0\f$, so that Newton's iteration is monotone after the first step, from a bracket-controlled start:
+1. **Iteration:** Closed-form derivatives \f$g', g'', g'''\f$ are computed:
+   \f[
+   g' = \pm \frac{D}{S}, \quad g'' = g' (a(1 - x) - b x - g'), \quad g''' = g' (h^2 - c - g' h)
+   \f]
+   where \f$D = x(1 - x) f(x)\f$ with \f$f(x)\f$ the beta density, \f$h = a(1 - x) - b x - g'\f$, and \f$c = (a + b)x(1 - x)\f$.
+2. **Step control:** Halley's cubic step is taken when \f$1 + \frac{1}{2} \Delta v \, h > 1/2\f$; otherwise Newton's step is used. Monotonic brackets bisect any step that overshoots.
+3. **Stopping criteria:** Iteration terminates when the predicted residual error from higher derivatives is below \f$\varepsilon / 16\f$, when the step is below \f$0.5\,\mathrm{ulp}(x)\f$ or \f$4\varepsilon\f$, at the noise floor \f$|g| < 10^{-6}\f$, or after 64 steps.
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
+
+Reference tables are computed with `mpmath` at 200 bits or more and stored in hexadecimal format as double-double numbers (`hi, lo`) in `tests/data/reference/`.
+
+### Value accuracy
+
+Accuracy is measured in units in the last place of 1 (\f$\text{ulp1}\f$), logarithmic units (\f$\text{ulpL} = \text{ulp} / \max(1, |\log f|)\f$), and ulps of \f$\max(|\log f|, 1)\f$ for logarithmic outputs:
+
+| Function / File | Measured max error gcc (ulp1 / ulpL) | Measured max error CUDA (ulp1 / ulpL) | Test bound (ulp1 / ulpL) | Log error max gcc / CUDA (ulp) | Log test bound (ulp) |
+|---|---|---|---|---|---|
+| \ref laplace::math::ibeta "ibeta()" | 2.82 / 12.7 | 3.80 / 12.9 | 5.7 / 19.5 | 17 / 12 | 33.0 |
+| \ref laplace::math::ibetac "ibetac()" | 2.82 / 16.9 | 3.80 / 12.2 | 5.7 / 25.5 | 10 / 15 | 33.0 |
+| `ibeta_hard` | 3.65 / 18.8 | 3.65 / 18.8 | 5.5 / 29.5 | 22 / 22 | 33.0 |
+| `ibetac_hard` | 3.65 / 18.4 | 3.65 / 19.7 | 5.5 / 29.5 | 15 / 16 | 33.0 |
+
+With the inclusion of double-double logarithmic accumulation (`log_split`), the mean plain-ulp error on reference sets is 9.8 ulp for `ibeta` and 8.2 ulp for `ibetac` (5.4 ulp and 3.9 ulp on the hard sets); the source gives no backend for these mean error figures. In comparison, Boost.Math in double precision loses all relative accuracy in deep tails (\f$7.5 \times 10^{15}\f$ ulp error).
+
+### Derivative accuracy
+
+Errors for shape derivatives are measured in \f$\text{ulpN} = \text{ulp} / \max(|f|, N_{ij})\f$, where \f$N_{ij} = |f_{K,0}|^{i/K} |f_{0,K}|^{j/K}\f$ is the Cauchy–Schwarz scale of mixed components (plain ulp for pure components), and \f$\text{ulpL} = \text{ulpN} / \max(1, |\log |f||)\f$. The measured maximum errors are one figure per order over both sides (\f$\log I\f$ and \f$\log(1 - I)\f$) and all components, not per function; measured on gcc (CUDA within 1.9 times):
+
+| Order \f$K\f$ | Function | Measured max error gcc (ulpN) | Test bound (ulpN) | Test bound (ulpL) |
+|---|---|---|---|---|
+| 1 | \ref laplace::math::own::log_ibeta_d1 "log_ibeta_d1()" | 1580 | 1600.0 | 55.0 |
+| 1 | \ref laplace::math::own::log_ibetac_d1 "log_ibetac_d1()" | 1580 | 2400.0 | 180.0 |
+| 2 | \ref laplace::math::own::log_ibeta_d2 "log_ibeta_d2()" | 1340 | 1800.0 | 245.0 |
+| 2 | \ref laplace::math::own::log_ibetac_d2 "log_ibetac_d2()" | 1340 | 2050.0 | 155.0 |
+| 3 | \ref laplace::math::own::log_ibeta_d3 "log_ibeta_d3()" | 1620 | 3100.0 | 315.0 |
+| 3 | \ref laplace::math::own::log_ibetac_d3 "log_ibetac_d3()" | 1620 | 2450.0 | 80.0 |
+| 4 | \ref laplace::math::own::log_ibeta_d4 "log_ibeta_d4()" | 1370 | 1800.0 | 115.0 |
+| 4 | \ref laplace::math::own::log_ibetac_d4 "log_ibetac_d4()" | 1370 | 2950.0 | 75.0 |
+| 5 | \ref laplace::math::own::log_ibeta_d5 "log_ibeta_d5()" | 1950 | 3300.0 | 420.0 |
+| 5 | \ref laplace::math::own::log_ibetac_d5 "log_ibetac_d5()" | 1950 | 2950.0 | 690.0 |
+
+Across both sides and all components, relative accuracy is \f$4 \times 10^{-13}\f$ or better outside the deep tails. In deep tails, errors of approximately \f$10^3\f$ ulp reflect the inherent error of exponentiating \f$\log(1 - I)\f$ inside the forward routine.
+
+### Inverse accuracy
+
+Errors for inverses are measured in condition-adjusted units \f$\text{ulpC} = |x - x^*| / \max(\text{ulp}(x^*), \mathrm{d}x)\f$, where \f$\mathrm{d}x = \text{ulp}(s) / |\mathrm{d}s/\mathrm{d}x|\f$ is the shift in \f$x^*\f$ induced by 1 ulp of the input. Measured on gcc (OpenMP 8 threads), with CUDA within the same figures:
+
+| Function / File | Measured 99% ulpC | Measured max ulpC | Test bound for \f$x\f$ (ulpC) | Test bound for \f$1 - x\f$ (ulpC) |
+|---|---|---|---|---|
+| \ref laplace::math::own::ibeta_inv "ibeta_inv()" | 4.09 (7.27 for \f$1 - x\f$) | 7.05 (19.5 for \f$1 - x\f$) | 750.0 | 4300.0 |
+| `ibeta_inv_tail` | 2.07 (2.71 for \f$1 - x\f$) | 5.38 (11.3 for \f$1 - x\f$) | 1250.0 | 800.0 |
+| \ref laplace::math::own::ibetac_inv "ibetac_inv()" | 5.53 (4.32 for \f$1 - x\f$) | 12.3 (7.96 for \f$1 - x\f$) | 7000.0 | 230.0 |
+| `ibetac_inv_tail` | 1.83 (2.75 for \f$1 - x\f$) | 4.40 (4.39 for \f$1 - x\f$) | 2050.0 | 1400.0 |
+| \ref laplace::math::own::ibeta_inv_logp "ibeta_inv_logp()" | 4.90 (4.40 for \f$1 - x\f$) | 18.6 (6.49 for \f$1 - x\f$) | 2000.0 | 1000.0 |
+| \ref laplace::math::own::ibetac_inv_logq "ibetac_inv_logq()" | 3.28 (5.34 for \f$1 - x\f$) | 5.82 (16.3 for \f$1 - x\f$) | 1800.0 | 2450.0 |
+
+### Timings
+
+Measured in nanoseconds per call:
+- **Function value** (\ref laplace::math::ibeta "ibeta()", \ref laplace::math::ibetac "ibetac()"):
+  - gcc (1 thread): 263 ns (common), 264 ns (mixed), 344 ns (large shapes) with Laplace's own elementary functions; 370 / 401 / 424 ns with platform elementary functions after the double-double change.
+  - Earlier measurements (predating the double-double change): gcc (1 thread): 336 / 377 / 403 ns (double-double added +12%, +8%, +7%, reaching 371 / 407 / 424 ns); gcc (OpenMP, 12 threads): 34.8 / 40.3 / 44.6 ns; MSVC (1 thread): 194 / 205 / 315 ns; CUDA (RTX 4070 SUPER): 48.4 / 39.0 / 29.4 ns (double-double added +4%, +3%, 0).
+- **Shape derivatives (orders 1 to 5, mixed arguments):**
+  - gcc (1 thread): 1740–2970 ns (1420–2430 ns with own elementary functions).
+  - OpenMP (8 threads): 235–397 ns.
+  - CUDA (RTX 4070 SUPER): 250–519 ns on mixed arguments; 37–140 ns (order 1) and 98–495 ns (order 5) on homogeneous regions.
+- **Inverses:**
+  - gcc (1 thread): 976–1303 ns with Laplace's own elementary functions; 1506–1979 ns with platform elementary functions after the double-double change.
+  - Earlier measurements (predating the double-double change): gcc (1 thread): 1413–2078 ns (double-double added +7% in bulk and +10–17% in tails); OpenMP (8 threads): 206–292 ns; CUDA (RTX 4070 SUPER): 52–165 ns (double-double added +2–4% in bulk and +7% in tails).
+
+## Example
+
+The following example evaluates \f$I_x(a, b)\f$, its logarithm \f$\log I_x(a, b)\f$, and its first-order shape derivatives inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/math/incomplete_beta.hpp>
+#include <laplace/math/incomplete_beta_deriv.hpp>
+#include <Kokkos_Core.hpp>
+
+void compute_beta_values(const Kokkos::View<const double*>& a,
+                         const Kokkos::View<const double*>& b,
+                         const Kokkos::View<const double*>& x,
+                         Kokkos::View<double*>& ib,
+                         Kokkos::View<double*>& log_ib,
+                         Kokkos::View<double*>& da,
+                         Kokkos::View<double*>& db,
+                         int n) {
+  Kokkos::parallel_for("eval_incomplete_beta", n, KOKKOS_LAMBDA(const int i) {
+    const double a_val = a(i);
+    const double b_val = b(i);
+    const double x_val = x(i);
+    ib(i)     = laplace::math::ibeta(a_val, b_val, x_val);
+    log_ib(i) = laplace::math::log_ibeta(a_val, b_val, x_val);
+    const auto d1 = laplace::math::log_ibeta_d1(a_val, b_val, x_val);
+    da(i)     = d1.c[0];
+    db(i)     = d1.c[1];
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+### Function values and logarithms
+
+- \ref laplace::math::ibeta "ibeta()" — Regularized incomplete beta function \f$I_x(a, b)\f$
+- \ref laplace::math::ibetac "ibetac()" — Complement of the regularized incomplete beta function \f$1 - I_x(a, b)\f$
+- \ref laplace::math::log_ibeta "log_ibeta()" — Natural logarithm \f$\log I_x(a, b)\f$
+- \ref laplace::math::log_ibetac "log_ibetac()" — Natural logarithm of the complement \f$\log(1 - I_x(a, b))\f$
+
+### Shape derivatives
+
+The shape derivative functions are defined in `laplace::math::own` and forwarded to `laplace::math`; callers call them as `laplace::math::NAME`.
+
+- \ref laplace::math::own::log_ibeta_d1 "log_ibeta_d1()" — First shape derivatives of \f$\log I_x(a, b)\f$
+- \ref laplace::math::own::log_ibeta_d2 "log_ibeta_d2()" — Second shape derivatives of \f$\log I_x(a, b)\f$
+- \ref laplace::math::own::log_ibeta_d3 "log_ibeta_d3()" — Third shape derivatives of \f$\log I_x(a, b)\f$
+- \ref laplace::math::own::log_ibeta_d4 "log_ibeta_d4()" — Fourth shape derivatives of \f$\log I_x(a, b)\f$
+- \ref laplace::math::own::log_ibeta_d5 "log_ibeta_d5()" — Fifth shape derivatives of \f$\log I_x(a, b)\f$
+- \ref laplace::math::own::log_ibetac_d1 "log_ibetac_d1()" — First shape derivatives of \f$\log(1 - I_x(a, b))\f$
+- \ref laplace::math::own::log_ibetac_d2 "log_ibetac_d2()" — Second shape derivatives of \f$\log(1 - I_x(a, b))\f$
+- \ref laplace::math::own::log_ibetac_d3 "log_ibetac_d3()" — Third shape derivatives of \f$\log(1 - I_x(a, b))\f$
+- \ref laplace::math::own::log_ibetac_d4 "log_ibetac_d4()" — Fourth shape derivatives of \f$\log(1 - I_x(a, b))\f$
+- \ref laplace::math::own::log_ibetac_d5 "log_ibetac_d5()" — Fifth shape derivatives of \f$\log(1 - I_x(a, b))\f$
+
+### Types
+
+- \ref laplace::math::own::shape_deriv "shape_deriv" — Container holding \f$K + 1\f$ mixed partial derivative components of order \f$K\f$
+- \ref laplace::math::own::beta_inc_result "beta_inc_result" — Result struct containing \f$I_x\f$, \f$1 - I_x\f$, and their logarithms
+- \ref laplace::math::own::beta_inv_result "beta_inv_result" — Container holding root \f$x\f$ and complement \f$y = 1 - x\f$ from `own` inverse functions
+
+### Inverses
+
+The inverse wrappers in `laplace::math` solve for \f$x\f$ and return only \f$x\f$ as a `double`, discarding the complement \f$1 - x\f$:
+- \ref laplace::math::ibeta_inv "ibeta_inv()" — Inverse of the regularized incomplete beta function, returning \f$x\f$
+- \ref laplace::math::ibetac_inv "ibetac_inv()" — Inverse of the complement of the regularized incomplete beta function, returning \f$x\f$
+- \ref laplace::math::ibeta_inv_logp "ibeta_inv_logp()" — Inverse from logarithmic probability \f$\log p\f$, returning \f$x\f$
+- \ref laplace::math::ibetac_inv_logq "ibetac_inv_logq()" — Inverse from logarithmic complement probability \f$\log q\f$, returning \f$x\f$
+
+The inverse functions in `laplace::math::own` return both \f$x\f$ and \f$1 - x\f$ as a \ref laplace::math::own::beta_inv_result "beta_inv_result", each with full relative precision:
+- \ref laplace::math::own::ibeta_inv "own::ibeta_inv()" — Inverse of the regularized incomplete beta function, returning \f$(x, 1 - x)\f$
+- \ref laplace::math::own::ibetac_inv "own::ibetac_inv()" — Inverse of the complement of the regularized incomplete beta function, returning \f$(x, 1 - x)\f$
+- \ref laplace::math::own::ibeta_inv_logp "own::ibeta_inv_logp()" — Inverse from logarithmic probability \f$\log p\f$, returning \f$(x, 1 - x)\f$
+- \ref laplace::math::own::ibetac_inv_logq "own::ibetac_inv_logq()" — Inverse from logarithmic complement probability \f$\log q\f$, returning \f$(x, 1 - x)\f$
+
+## References
+
+- A. R. DiDonato and A. H. Morris (1992), Algorithm 708: significant digit computation of the incomplete beta function ratios, ACM Transactions on Mathematical Software 18, 360–373. (The implementation is adapted from Boost.Math's `ibeta_imp`).
+- H. Takahasi and M. Mori (1974), Double exponential formulas for numerical integration, Publications of the Research Institute for Mathematical Sciences 9, 721–741. (Double-exponential transformation for exponentially decaying integrands on rays).
+*/

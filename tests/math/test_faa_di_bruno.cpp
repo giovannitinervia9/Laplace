@@ -35,6 +35,12 @@ TEST_CASE("partial Bell polynomials: Stirling numbers and C(n, k) k^(n-k)") {
       CHECK(laplace::math::bell_partial(n, k, nat) == c * std::pow(double(k), n - k));
     }
   CHECK(laplace::math::bell_partial(3, 4, ones) == 0.0);
+  // pairs whose key n * 8 + k would alias a valid case
+  CHECK(laplace::math::bell_partial(1, 9, nat) == 0.0);
+  CHECK(laplace::math::bell_partial(2, -7, nat) == 0.0);
+  CHECK(laplace::math::bell_partial(0, 9, nat) == 0.0);
+  CHECK(laplace::math::bell_partial(8, 1, nat) == 0.0);
+  CHECK(laplace::math::bell_partial(0, 0, nat) == 0.0);
 }
 
 TEST_CASE("Faa di Bruno's formula against mpmath") {

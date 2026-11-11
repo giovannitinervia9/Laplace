@@ -86,7 +86,7 @@
 //     g_n^(j) = (x / n) ((n - b) g_(n-1)^(j) - j g_(n-1)^(j-1)),
 // and log Sigma's derivatives by the cumulant recursion; log(a B(a, b)) =
 // log Gamma(a + 1) + log Gamma(b) - log Gamma(s) has no pole at a = 0. The
-// same on the upper side with y and the shapes exchanged, and up to x = 0.95
+// same on the upper side with y and the shapes exchanged, and up to x = 0.8 (quad_par::x_wide)
 // for b <= 1 on a side computed directly; elsewhere the quadrature. This is
 // the version chosen (chosen_method below; docs/numerics.md).
 //
@@ -110,8 +110,28 @@
 namespace laplace::math::own {
 
 // The components of order K: c[j] = d^K / da^(K-j) db^j, j = 0..K.
+/**
+ * \ingroup special
+ * \brief Container holding mixed partial derivatives of total order \f$K\f$ in two variables.
+ *
+ * Holds the \f$K + 1\f$ mixed partial derivative components of total order \f$K\f$:
+ * \f[
+ * c[j] = \frac{\partial^K}{\partial u^{K-j} \partial v^j} f(u, v), \quad j = 0, \dots, K
+ * \f]
+ * where \f$j\f$ is the number of derivatives with respect to the second variable \f$v\f$,
+ * and \f$K - j\f$ is the number of derivatives with respect to the first variable \f$u\f$.
+ *
+ * The array `c[j]` is filled by each module as follows:
+ * - Incomplete beta: \f$u = a\f$ and \f$v = b\f$, where `c[j]` holds \f$\frac{\partial^K}{\partial a^{K-j} \partial b^j} I_x(a, b)\f$
+ *   or the corresponding derivatives of \f$1 - I_x\f$, \f$\log I_x\f$, or \f$\log(1 - I_x)\f$.
+ * - Student \f$t\f$: \f$u = z\f$ and \f$v = \nu\f$, where `c[j]` holds \f$\frac{\partial^K}{\partial z^{K-j} \partial \nu^j} \log T_\nu(z)\f$.
+ * - Skew normal: \f$u = z\f$ and \f$v = \alpha\f$, where `c[j]` holds \f$\frac{\partial^K}{\partial z^{K-j} \partial \alpha^j} \log F(z; \alpha)\f$.
+ *
+ * \tparam K Total order of differentiation, \f$K \in \{1, \dots, 5\}\f$.
+ */
 template <int K>
 struct shape_deriv {
+  /// Array of \f$K + 1\f$ mixed partial derivative components of total order \f$K\f$, where `c[j]` holds the derivative with \f$j\f$ differentiations in the second variable.
   double c[K + 1];
 };
 
@@ -1339,7 +1359,8 @@ LAPLACE_IBD_NOINLINE LAPLACE_HD void quad_lower(const ibx::args& p, const quad_p
 // ---------------------------------------------------------------- the series
 
 // whether the series converges fast on the lower side of p; with wide, also up
-// to x = 0.95 when b <= 1 (terms below x^n: at most about 800)
+// to x = x_wide when b <= 1 (0.8 in quad_par; the default 0.95 is unused;
+// terms below x^n: at most about 800)
 LAPLACE_HD_FORCEINLINE bool series_ok(const ibx::args& p, bool wide = false, double x_wide = 0.95) {
   return (p.x <= 0.5 && (p.b <= 1.0 || p.b * p.x <= 0.7)) || (wide && p.x <= x_wide && p.b <= 1.0);
 }
@@ -1507,16 +1528,276 @@ LAPLACE_HD shape_deriv<K> order(double a, double b, double x, bool upper) {
 }  // namespace detail_ibd
 
 // d^K log I_x(a, b) / da^(K-j) db^j in c[j]
+/**
+ * \ingroup incomplete_beta
+ * \brief First shape derivatives of \f$\log I_x(a, b)\f$.
+ *
+ * Computes all mixed partial derivatives of total order 1 with respect to the shape parameters:
+ * \f[
+ * c[0] = \frac{\partial}{\partial a} \log I_x(a, b) = \kappa_{1,0} - (\psi(a) - \psi(a+b)), \quad
+ * c[1] = \frac{\partial}{\partial b} \log I_x(a, b) = \kappa_{0,1} - (\psi(b) - \psi(a+b))
+ * \f]
+ * where \f$\kappa_{i,j}\f$ are the joint cumulants of \f$(\log T, \log(1 - T))\f$ under \f$T \sim \mathrm{Beta}(a, b)\f$ truncated to \f$T < x\f$, and \f$\psi\f$ is the digamma function.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in (0, 1]\f$.
+ * \return A shape_deriv of order 1 containing \f$c[0] = \frac{\partial}{\partial a} \log I_x(a, b)\f$ and \f$c[1] = \frac{\partial}{\partial b} \log I_x(a, b)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in (0, 1]\f$: standard domain.
+ * - At \f$x = 1\f$: returns all zeros in all components.
+ * - At \f$x = 0\f$, or for \f$x < 0\f$, \f$x > 1\f$, \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, or if any argument is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1580 ulpN (gcc, CUDA within 1.9 times); test bound 1600.0 ulpN / 55.0 ulpL.
+ *
+ * \see incomplete_beta, shape_deriv, log_ibeta(), log_ibetac_d1(), log_ibeta_d2()
+ */
 LAPLACE_HD shape_deriv<1> log_ibeta_d1(double a, double b, double x) { return detail_ibd::order<1>(a, b, x, false); }
+
+/**
+ * \ingroup incomplete_beta
+ * \brief Second shape derivatives of \f$\log I_x(a, b)\f$.
+ *
+ * Computes all mixed partial derivatives of total order 2 with respect to the shape parameters:
+ * \f[
+ * c[j] = \frac{\partial^2}{\partial a^{2-j} \partial b^j} \log I_x(a, b) = \kappa_{2-j, j} - \frac{\partial^2}{\partial a^{2-j} \partial b^j} \log B(a, b), \quad j = 0, 1, 2
+ * \f]
+ * where \f$\kappa_{i,j}\f$ are the joint cumulants of \f$(\log T, \log(1 - T))\f$ under \f$T \sim \mathrm{Beta}(a, b)\f$ truncated to \f$T < x\f$, and \f$\frac{\partial^2}{\partial a^2} \log B(a, b) = \psi^{(1)}(a) - \psi^{(1)}(a+b)\f$, \f$\frac{\partial^2}{\partial a \partial b} \log B(a, b) = -\psi^{(1)}(a+b)\f$, \f$\frac{\partial^2}{\partial b^2} \log B(a, b) = \psi^{(1)}(b) - \psi^{(1)}(a+b)\f$.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in (0, 1]\f$.
+ * \return A shape_deriv of order 2 containing \f$c[j] = \frac{\partial^2}{\partial a^{2-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, 1, 2\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in (0, 1]\f$: standard domain.
+ * - At \f$x = 1\f$: returns all zeros in all components.
+ * - At \f$x = 0\f$, or for \f$x < 0\f$, \f$x > 1\f$, \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, or if any argument is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1340 ulpN (gcc, CUDA within 1.9 times); test bound 1800.0 ulpN / 245.0 ulpL.
+ *
+ * \see incomplete_beta, shape_deriv, log_ibeta(), log_ibetac_d2(), log_ibeta_d1(), log_ibeta_d3()
+ */
 LAPLACE_HD shape_deriv<2> log_ibeta_d2(double a, double b, double x) { return detail_ibd::order<2>(a, b, x, false); }
+
+/**
+ * \ingroup incomplete_beta
+ * \brief Third shape derivatives of \f$\log I_x(a, b)\f$.
+ *
+ * Computes all mixed partial derivatives of total order 3 with respect to the shape parameters:
+ * \f[
+ * c[j] = \frac{\partial^3}{\partial a^{3-j} \partial b^j} \log I_x(a, b) = \kappa_{3-j, j} - \frac{\partial^3}{\partial a^{3-j} \partial b^j} \log B(a, b), \quad j = 0, \dots, 3
+ * \f]
+ * where \f$\kappa_{i,j}\f$ are the joint cumulants of \f$(\log T, \log(1 - T))\f$ under \f$T \sim \mathrm{Beta}(a, b)\f$ truncated to \f$T < x\f$, and \f$\frac{\partial^3}{\partial a^{3-j} \partial b^j} \log B(a, b)\f$ are polygamma differences of order 2.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in (0, 1]\f$.
+ * \return A shape_deriv of order 3 containing \f$c[j] = \frac{\partial^3}{\partial a^{3-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, \dots, 3\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in (0, 1]\f$: standard domain.
+ * - At \f$x = 1\f$: returns all zeros in all components.
+ * - At \f$x = 0\f$, or for \f$x < 0\f$, \f$x > 1\f$, \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, or if any argument is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1620 ulpN (gcc, CUDA within 1.9 times); test bound 3100.0 ulpN / 315.0 ulpL.
+ *
+ * \see incomplete_beta, shape_deriv, log_ibeta(), log_ibetac_d3(), log_ibeta_d2(), log_ibeta_d4()
+ */
 LAPLACE_HD shape_deriv<3> log_ibeta_d3(double a, double b, double x) { return detail_ibd::order<3>(a, b, x, false); }
+
+/**
+ * \ingroup incomplete_beta
+ * \brief Fourth shape derivatives of \f$\log I_x(a, b)\f$.
+ *
+ * Computes all mixed partial derivatives of total order 4 with respect to the shape parameters:
+ * \f[
+ * c[j] = \frac{\partial^4}{\partial a^{4-j} \partial b^j} \log I_x(a, b) = \kappa_{4-j, j} - \frac{\partial^4}{\partial a^{4-j} \partial b^j} \log B(a, b), \quad j = 0, \dots, 4
+ * \f]
+ * where \f$\kappa_{i,j}\f$ are the joint cumulants of \f$(\log T, \log(1 - T))\f$ under \f$T \sim \mathrm{Beta}(a, b)\f$ truncated to \f$T < x\f$, and \f$\frac{\partial^4}{\partial a^{4-j} \partial b^j} \log B(a, b)\f$ are polygamma differences of order 3.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in (0, 1]\f$.
+ * \return A shape_deriv of order 4 containing \f$c[j] = \frac{\partial^4}{\partial a^{4-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, \dots, 4\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in (0, 1]\f$: standard domain.
+ * - At \f$x = 1\f$: returns all zeros in all components.
+ * - At \f$x = 0\f$, or for \f$x < 0\f$, \f$x > 1\f$, \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, or if any argument is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1370 ulpN (gcc, CUDA within 1.9 times); test bound 1800.0 ulpN / 115.0 ulpL.
+ *
+ * \see incomplete_beta, shape_deriv, log_ibeta(), log_ibetac_d4(), log_ibeta_d3(), log_ibeta_d5()
+ */
 LAPLACE_HD shape_deriv<4> log_ibeta_d4(double a, double b, double x) { return detail_ibd::order<4>(a, b, x, false); }
+
+/**
+ * \ingroup incomplete_beta
+ * \brief Fifth shape derivatives of \f$\log I_x(a, b)\f$.
+ *
+ * Computes all mixed partial derivatives of total order 5 with respect to the shape parameters:
+ * \f[
+ * c[j] = \frac{\partial^5}{\partial a^{5-j} \partial b^j} \log I_x(a, b) = \kappa_{5-j, j} - \frac{\partial^5}{\partial a^{5-j} \partial b^j} \log B(a, b), \quad j = 0, \dots, 5
+ * \f]
+ * where \f$\kappa_{i,j}\f$ are the joint cumulants of \f$(\log T, \log(1 - T))\f$ under \f$T \sim \mathrm{Beta}(a, b)\f$ truncated to \f$T < x\f$, and \f$\frac{\partial^5}{\partial a^{5-j} \partial b^j} \log B(a, b)\f$ are polygamma differences of order 4.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in (0, 1]\f$.
+ * \return A shape_deriv of order 5 containing \f$c[j] = \frac{\partial^5}{\partial a^{5-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, \dots, 5\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in (0, 1]\f$: standard domain.
+ * - At \f$x = 1\f$: returns all zeros in all components.
+ * - At \f$x = 0\f$, or for \f$x < 0\f$, \f$x > 1\f$, \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, or if any argument is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1950 ulpN (gcc, CUDA within 1.9 times); test bound 3300.0 ulpN / 420.0 ulpL.
+ *
+ * \see incomplete_beta, shape_deriv, log_ibeta(), log_ibetac_d5(), log_ibeta_d4()
+ */
 LAPLACE_HD shape_deriv<5> log_ibeta_d5(double a, double b, double x) { return detail_ibd::order<5>(a, b, x, false); }
+
 // d^K log(1 - I_x(a, b)) / da^(K-j) db^j in c[j]
+/**
+ * \ingroup incomplete_beta
+ * \brief First shape derivatives of \f$\log(1 - I_x(a, b))\f$.
+ *
+ * Computes all mixed partial derivatives of total order 1 of the complementary logarithm with respect to the shape parameters:
+ * \f[
+ * c[0] = \frac{\partial}{\partial a} \log(1 - I_x(a, b)), \quad c[1] = \frac{\partial}{\partial b} \log(1 - I_x(a, b))
+ * \f]
+ * evaluated via symmetry \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$ or composed from the lower side \f$S = I_x(a, b)\f$ using Faà di Bruno recursion.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in [0, 1)\f$.
+ * \return A shape_deriv of order 1 containing \f$c[0] = \frac{\partial}{\partial a} \log(1 - I_x(a, b))\f$ and \f$c[1] = \frac{\partial}{\partial b} \log(1 - I_x(a, b))\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in [0, 1)\f$: standard domain.
+ * - At \f$x = 0\f$: returns all zeros in all components.
+ * - At \f$x = 1\f$, or for \f$x < 0\f$, \f$x > 1\f$, \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, or if any argument is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1580 ulpN (gcc, CUDA within 1.9 times); test bound 2400.0 ulpN / 180.0 ulpL.
+ *
+ * \see incomplete_beta, shape_deriv, log_ibetac(), log_ibeta_d1(), log_ibetac_d2()
+ */
 LAPLACE_HD shape_deriv<1> log_ibetac_d1(double a, double b, double x) { return detail_ibd::order<1>(a, b, x, true); }
+
+/**
+ * \ingroup incomplete_beta
+ * \brief Second shape derivatives of \f$\log(1 - I_x(a, b))\f$.
+ *
+ * Computes all mixed partial derivatives of total order 2 of the complementary logarithm with respect to the shape parameters:
+ * \f[
+ * c[j] = \frac{\partial^2}{\partial a^{2-j} \partial b^j} \log(1 - I_x(a, b)), \quad j = 0, 1, 2
+ * \f]
+ * evaluated via symmetry \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$ or composed from the lower side \f$S = I_x(a, b)\f$ using Faà di Bruno recursion.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in [0, 1)\f$.
+ * \return A shape_deriv of order 2 containing \f$c[j] = \frac{\partial^2}{\partial a^{2-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, 1, 2\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in [0, 1)\f$: standard domain.
+ * - At \f$x = 0\f$: returns all zeros in all components.
+ * - At \f$x = 1\f$, or for \f$x < 0\f$, \f$x > 1\f$, \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, or if any argument is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1340 ulpN (gcc, CUDA within 1.9 times); test bound 2050.0 ulpN / 155.0 ulpL.
+ *
+ * \see incomplete_beta, shape_deriv, log_ibetac(), log_ibeta_d2(), log_ibetac_d1(), log_ibetac_d3()
+ */
 LAPLACE_HD shape_deriv<2> log_ibetac_d2(double a, double b, double x) { return detail_ibd::order<2>(a, b, x, true); }
+
+/**
+ * \ingroup incomplete_beta
+ * \brief Third shape derivatives of \f$\log(1 - I_x(a, b))\f$.
+ *
+ * Computes all mixed partial derivatives of total order 3 of the complementary logarithm with respect to the shape parameters:
+ * \f[
+ * c[j] = \frac{\partial^3}{\partial a^{3-j} \partial b^j} \log(1 - I_x(a, b)), \quad j = 0, \dots, 3
+ * \f]
+ * evaluated via symmetry \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$ or composed from the lower side \f$S = I_x(a, b)\f$ using Faà di Bruno recursion.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in [0, 1)\f$.
+ * \return A shape_deriv of order 3 containing \f$c[j] = \frac{\partial^3}{\partial a^{3-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, \dots, 3\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in [0, 1)\f$: standard domain.
+ * - At \f$x = 0\f$: returns all zeros in all components.
+ * - At \f$x = 1\f$, or for \f$x < 0\f$, \f$x > 1\f$, \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, or if any argument is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1620 ulpN (gcc, CUDA within 1.9 times); test bound 2450.0 ulpN / 80.0 ulpL.
+ *
+ * \see incomplete_beta, shape_deriv, log_ibetac(), log_ibeta_d3(), log_ibetac_d2(), log_ibetac_d4()
+ */
 LAPLACE_HD shape_deriv<3> log_ibetac_d3(double a, double b, double x) { return detail_ibd::order<3>(a, b, x, true); }
+
+/**
+ * \ingroup incomplete_beta
+ * \brief Fourth shape derivatives of \f$\log(1 - I_x(a, b))\f$.
+ *
+ * Computes all mixed partial derivatives of total order 4 of the complementary logarithm with respect to the shape parameters:
+ * \f[
+ * c[j] = \frac{\partial^4}{\partial a^{4-j} \partial b^j} \log(1 - I_x(a, b)), \quad j = 0, \dots, 4
+ * \f]
+ * evaluated via symmetry \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$ or composed from the lower side \f$S = I_x(a, b)\f$ using Faà di Bruno recursion.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in [0, 1)\f$.
+ * \return A shape_deriv of order 4 containing \f$c[j] = \frac{\partial^4}{\partial a^{4-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, \dots, 4\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in [0, 1)\f$: standard domain.
+ * - At \f$x = 0\f$: returns all zeros in all components.
+ * - At \f$x = 1\f$, or for \f$x < 0\f$, \f$x > 1\f$, \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, or if any argument is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1370 ulpN (gcc, CUDA within 1.9 times); test bound 2950.0 ulpN / 75.0 ulpL.
+ *
+ * \see incomplete_beta, shape_deriv, log_ibetac(), log_ibeta_d4(), log_ibetac_d3(), log_ibetac_d5()
+ */
 LAPLACE_HD shape_deriv<4> log_ibetac_d4(double a, double b, double x) { return detail_ibd::order<4>(a, b, x, true); }
+
+/**
+ * \ingroup incomplete_beta
+ * \brief Fifth shape derivatives of \f$\log(1 - I_x(a, b))\f$.
+ *
+ * Computes all mixed partial derivatives of total order 5 of the complementary logarithm with respect to the shape parameters:
+ * \f[
+ * c[j] = \frac{\partial^5}{\partial a^{5-j} \partial b^j} \log(1 - I_x(a, b)), \quad j = 0, \dots, 5
+ * \f]
+ * evaluated via symmetry \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$ or composed from the lower side \f$S = I_x(a, b)\f$ using Faà di Bruno recursion.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in [0, 1)\f$.
+ * \return A shape_deriv of order 5 containing \f$c[j] = \frac{\partial^5}{\partial a^{5-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, \dots, 5\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in [0, 1)\f$: standard domain.
+ * - At \f$x = 0\f$: returns all zeros in all components.
+ * - At \f$x = 1\f$, or for \f$x < 0\f$, \f$x > 1\f$, \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, or if any argument is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1950 ulpN (gcc, CUDA within 1.9 times); test bound 2950.0 ulpN / 690.0 ulpL.
+ *
+ * \see incomplete_beta, shape_deriv, log_ibetac(), log_ibeta_d5(), log_ibetac_d4()
+ */
 LAPLACE_HD shape_deriv<5> log_ibetac_d5(double a, double b, double x) { return detail_ibd::order<5>(a, b, x, true); }
 
 }  // namespace laplace::math::own

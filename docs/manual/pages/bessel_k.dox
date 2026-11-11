@@ -173,6 +173,8 @@ void compute_bessel_k(const Kokkos::View<const double*>& nu,
 
 ## Module functions
 
+Functions in this module are called as `laplace::math::NAME`.
+
 - \ref laplace::math::own::log_bessel_k "log_bessel_k()" — \f$\log K_\nu(x)\f$
 - \ref laplace::math::own::log_bessel_k_dx1 "log_bessel_k_dx1()" — \f$\frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$
 - \ref laplace::math::own::log_bessel_k_dx2 "log_bessel_k_dx2()" — \f$\frac{\mathrm{d}^2}{\mathrm{d}x^2}\log K_\nu(x)\f$

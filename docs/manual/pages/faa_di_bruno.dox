@@ -1,0 +1,187 @@
+/**
+\defgroup faa_di_bruno Faà di Bruno's formula and partial Bell polynomials
+\ingroup math
+\brief Faà di Bruno's formula for the \f$N\f$-th derivative of a composite function \f$f(g(x))\f$ and the partial Bell polynomials \f$B_{n,k}\f$ up to order 7.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Mathematical definitions
+
+### Partial Bell polynomials
+
+The partial (or incomplete) Bell polynomials \f$B_{n,k}(g_1, \dots, g_{n-k+1})\f$ are multivariate polynomials defined for integers \f$1 \le k \le n\f$ by
+\f[
+B_{n,k}(g_1, \dots, g_{n-k+1}) = \sum \frac{n!}{j_1! j_2! \cdots j_{n-k+1}!} \prod_{m=1}^{n-k+1} \left( \frac{g_m}{m!} \right)^{j_m}
+\f]
+where:
+- \f$n \in \{1, \dots, 7\}\f$ is the degree of the polynomial,
+- \f$k \in \{1, \dots, n\}\f$ is the order of the partial polynomial,
+- \f$g_m \in \mathbb{R}\f$ is the argument of order \f$m \in \{1, \dots, n-k+1\}\f$, representing the derivative \f$g^{(m)}(x)\f$ of an inner function,
+- \f$j_m \in \mathbb{Z}_{\ge 0}\f$ are non-negative integer partition indices.
+
+The summation runs over all partitions of \f$n\f$ into \f$k\f$ parts:
+\f[
+\sum_{m=1}^{n-k+1} j_m = k \quad \text{and} \quad \sum_{m=1}^{n-k+1} m j_m = n.
+\f]
+For indices outside the range \f$1 \le k \le n \le 7\f$, the polynomial is defined as \f$0\f$.
+
+Special evaluations include the Stirling numbers of the second kind \f$S(n, k)\f$,
+\f[
+B_{n,k}(1, 1, \dots, 1) = S(n, k)
+\f]
+and the identity on natural sequences,
+\f[
+B_{n,k}(1, 2, \dots, n - k + 1) = \binom{n}{k} k^{n-k}.
+\f]
+
+### Composition of derivatives
+
+Faà di Bruno's formula expresses the \f$N\f$-th derivative of the composition of two sufficiently differentiable functions \f$f\f$ and \f$g\f$,
+\f[
+\frac{\mathrm{d}^N}{\mathrm{d}x^N} f(g(x)) = \sum_{k=1}^N f^{(k)}(g(x)) \, B_{N,k}\bigl(g'(x), g''(x), \dots, g^{(N-k+1)}(x)\bigr)
+\f]
+where:
+- \f$x \in \mathbb{R}\f$ is the evaluation point,
+- \f$N \in \{1, \dots, 7\}\f$ is the derivative order of the composition,
+- \f$f^{(k)}(g(x)) \in \mathbb{R}\f$ is the \f$k\f$-th derivative of the outer function \f$f\f$ evaluated at \f$g(x)\f$,
+- \f$g^{(m)}(x) \in \mathbb{R}\f$ is the \f$m\f$-th derivative of the inner function \f$g\f$ evaluated at \f$x\f$, for \f$m = 1, \dots, N-k+1\f$.
+
+Writing \f$f_k = f^{(k)}(g(x))\f$ and \f$g_m = g^{(m)}(x)\f$, the explicit formulas for orders \f$N = 1, \dots, 7\f$ are:
+- \f$N = 1\f$:
+  \f[
+  \frac{\mathrm{d}}{\mathrm{d}x} f(g(x)) = f_1 g_1
+  \f]
+- \f$N = 2\f$:
+  \f[
+  \frac{\mathrm{d}^2}{\mathrm{d}x^2} f(g(x)) = f_1 g_2 + f_2 g_1^2
+  \f]
+- \f$N = 3\f$:
+  \f[
+  \frac{\mathrm{d}^3}{\mathrm{d}x^3} f(g(x)) = f_1 g_3 + 3 f_2 g_1 g_2 + f_3 g_1^3
+  \f]
+- \f$N = 4\f$:
+  \f[
+  \frac{\mathrm{d}^4}{\mathrm{d}x^4} f(g(x)) = f_1 g_4 + f_2 (4 g_1 g_3 + 3 g_2^2) + 6 f_3 g_1^2 g_2 + f_4 g_1^4
+  \f]
+- \f$N = 5\f$:
+  \f[
+  \frac{\mathrm{d}^5}{\mathrm{d}x^5} f(g(x)) = f_1 g_5 + f_2 (5 g_1 g_4 + 10 g_2 g_3) + f_3 (10 g_1^2 g_3 + 15 g_1 g_2^2) + 10 f_4 g_1^3 g_2 + f_5 g_1^5
+  \f]
+- \f$N = 6\f$:
+  \f[
+  \frac{\mathrm{d}^6}{\mathrm{d}x^6} f(g(x)) = f_1 g_6 + f_2 (6 g_1 g_5 + 15 g_2 g_4 + 10 g_3^2) + f_3 (15 g_1^2 g_4 + 60 g_1 g_2 g_3 + 15 g_2^3) + f_4 (20 g_1^3 g_3 + 45 g_1^2 g_2^2) + 15 f_5 g_1^4 g_2 + f_6 g_1^6
+  \f]
+- \f$N = 7\f$:
+  \f[
+  \begin{aligned}
+  \frac{\mathrm{d}^7}{\mathrm{d}x^7} f(g(x)) = {} & f_1 g_7 + f_2 (7 g_1 g_6 + 21 g_2 g_5 + 35 g_3 g_4) \\
+  & + f_3 (21 g_1^2 g_5 + 105 g_1 g_2 g_4 + 70 g_1 g_3^2 + 105 g_2^2 g_3) \\
+  & + f_4 (35 g_1^3 g_4 + 210 g_1^2 g_2 g_3 + 105 g_1 g_2^3) \\
+  & + f_5 (35 g_1^4 g_3 + 105 g_1^3 g_2^2) + 21 f_6 g_1^5 g_2 + f_7 g_1^7.
+  \end{aligned}
+  \f]
+
+## Domain and conventions
+
+- **Array indexing:** All derivative arrays are 1-indexed by derivative order:
+  - `f[k]` contains \f$f^{(k)}(g(x))\f$ for \f$k = 1, \dots, N\f$.
+  - `g[m]` contains \f$g^{(m)}(x)\f$ for \f$m = 1, \dots, N\f$.
+  Element 0 (`f[0]` and `g[0]`, corresponding to the function values \f$f(g(x))\f$ and \f$g(x)\f$) is not read.
+- **Bell polynomial domain:** \ref laplace::math::bell_partial "bell_partial()" accepts integer parameters \f$n\f$ and \f$k\f$. When \f$1 \le k \le n \le 7\f$, it reads \f$g[1], \dots, g[n-k+1]\f$. Outside this triangular range, it returns \f$0.0\f$ (tested on out-of-range pairs such as \f$(3, 4)\f$ with \f$B_{3,4} = 0.0\f$, \f$(1, 9)\f$, \f$(2, -7)\f$, \f$(0, 9)\f$, \f$(8, 1)\f$, and \f$(0, 0)\f$).
+- **Special values:** If any required input in `f` or `g` is NaN, the returned value is NaN.
+
+## Numerical methods
+
+- **Polynomial evaluation:** The 28 partial Bell polynomials \f$B_{n,k}\f$ for \f$1 \le k \le n \le 7\f$ are written out explicitly as sums of monomials with positive integer coefficients, written out with SymPy's `bell(n, k, ...)` (SymPy 1.14.0).
+- **Summation direction:** For orders \f$N \ge 2\f$, the composition functions sum the terms \f$f_k B_{N,k}\f$ in descending order of \f$k\f$, from \f$k = N\f$ down to \f$k = 1\f$.
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
+
+Reference values are computed at 300 bits of precision using mpmath (`tools/reference/faa_di_bruno.py`, written to `tests/data/reference/faa_di_bruno.csv`). The reference dataset contains 1950 rows:
+- 1500 rows with derivatives drawn at random, with magnitudes log-uniformly distributed on \f$(2^{-10}, 2^{10})\f$ and random signs;
+- 450 rows from compositions met in practice, with outer functions \f$f \in \{\log, \exp, \operatorname{lgamma}, \log\Phi, x^{-1/2}\}\f$ and inner functions \f$g \in \{\exp, \operatorname{logistic}, \Phi, x^2, \sqrt{x}, \log\}\f$ evaluated at random points, with derivatives computed by `mpmath.diff` and rounded to double precision.
+
+The expected values are exact on the double-precision inputs, generated by composing truncated Taylor series:
+\f[
+F(t) = \sum_{k=1}^N \frac{f_k}{k!} t^k, \quad G(e) = \sum_{j=1}^N \frac{g_j}{j!} e^j
+\f]
+where the coefficient of \f$e^N\f$ in \f$F(G(e))\f$ multiplied by \f$N!\f$ gives the exact composite derivative \f$\frac{\mathrm{d}^N}{\mathrm{d}x^N} f(g(x))\f$, independently of the library's Bell polynomials.
+
+### Composition accuracy
+
+Because terms in Faà di Bruno's formula can have alternating signs, catastrophic cancellation occurs when evaluating composite functions whose derivatives are zero or near zero (for example, \f$\log(\exp(x)) = x\f$ has derivatives of order \f$N \ge 2\f$ identically equal to zero). In such cases, the result represents the cancellation of rounded inputs, and errors in plain ulps reach \f$10^{16}\f$ to \f$10^{18}\f$.
+
+Accuracy is therefore measured in units in the last place (ulp) of the absolute term sum:
+\f[
+S = \sum_{k=1}^N |f_k| B_{N,k}(|g_1|, \dots, |g_{N-k+1}|).
+\f]
+The measured maximum errors in ulps of \f$S\f$ over the 1950 reference rows (1500 with random derivatives, 450 from compositions met in practice) and test bounds are:
+
+| Function | Order \f$N\f$ | Measured max error gcc (ulp of \f$S\f$) | Measured max error CUDA (ulp of \f$S\f$) | Test bound (ulp of \f$S\f$) |
+|---|---|---|---|---|
+| \ref laplace::math::compose_d1 "compose_d1()" | 1 | 0.50 | 0.50 | 1.0 |
+| \ref laplace::math::compose_d2 "compose_d2()" | 2 | 1.73 | 1.73 | 3.0 |
+| \ref laplace::math::compose_d3 "compose_d3()" | 3 | 2.21 | 2.21 | 3.5 |
+| \ref laplace::math::compose_d4 "compose_d4()" | 4 | 3.08 | 3.03 | 4.5 |
+| \ref laplace::math::compose_d5 "compose_d5()" | 5 | 3.05 | 3.05 | 4.5 |
+| \ref laplace::math::compose_d6 "compose_d6()" | 6 | 3.96 | 3.96 | 6.0 |
+| \ref laplace::math::compose_d7 "compose_d7()" | 7 | 5.03 | 5.03 | 7.5 |
+
+### Exact polynomial verification
+
+The partial Bell polynomials in \ref laplace::math::bell_partial "bell_partial()" are verified in automated tests against two exact combinatorial identities:
+1. Stirling numbers of the second kind: \f$B_{n,k}(1, 1, \dots, 1) = S(n, k)\f$ for all \f$1 \le k \le n \le 7\f$.
+2. Sequence of natural numbers: \f$B_{n,k}(1, 2, \dots, n-k+1) = \binom{n}{k} k^{n-k}\f$ for all \f$1 \le k \le n \le 7\f$.
+
+All polynomial tests pass with exact equality.
+
+### Timings
+
+Measured in nanoseconds per call with 16 inputs read from memory:
+- **One gcc thread:** 2.8 to 6.6 ns/call,
+- **OpenMP (16 threads):** 1.7 to 1.9 ns/call,
+- **CUDA:** 0.31 ns/call.
+
+## Example
+
+The following example evaluates the first two composite derivatives of \f$f(g(x))\f$ inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/math/faa_di_bruno.hpp>
+#include <Kokkos_Core.hpp>
+
+void compute_derivatives(const Kokkos::View<const double**>& f,
+                         const Kokkos::View<const double**>& g,
+                         Kokkos::View<double*>& d1,
+                         Kokkos::View<double*>& d2,
+                         int n) {
+  Kokkos::parallel_for("eval_faa_di_bruno", n, KOKKOS_LAMBDA(const int i) {
+    // f(i, k) holds f^(k) at g(x_i) for k = 1..2
+    // g(i, j) holds g^(j) at x_i for j = 1..2
+    const double f_row[3] = {0.0, f(i, 1), f(i, 2)};
+    const double g_row[3] = {0.0, g(i, 1), g(i, 2)};
+    d1(i) = laplace::math::compose_d1(f_row, g_row);
+    d2(i) = laplace::math::compose_d2(f_row, g_row);
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+- \ref laplace::math::bell_partial "bell_partial()" — Partial Bell polynomials \f$B_{n,k}(g_1, \dots, g_{n-k+1})\f$ for \f$1 \le k \le n \le 7\f$
+- \ref laplace::math::compose_d1 "compose_d1()" — First derivative of composite function \f$\frac{\mathrm{d}}{\mathrm{d}x} f(g(x))\f$
+- \ref laplace::math::compose_d2 "compose_d2()" — Second derivative of composite function \f$\frac{\mathrm{d}^2}{\mathrm{d}x^2} f(g(x))\f$
+- \ref laplace::math::compose_d3 "compose_d3()" — Third derivative of composite function \f$\frac{\mathrm{d}^3}{\mathrm{d}x^3} f(g(x))\f$
+- \ref laplace::math::compose_d4 "compose_d4()" — Fourth derivative of composite function \f$\frac{\mathrm{d}^4}{\mathrm{d}x^4} f(g(x))\f$
+- \ref laplace::math::compose_d5 "compose_d5()" — Fifth derivative of composite function \f$\frac{\mathrm{d}^5}{\mathrm{d}x^5} f(g(x))\f$
+- \ref laplace::math::compose_d6 "compose_d6()" — Sixth derivative of composite function \f$\frac{\mathrm{d}^6}{\mathrm{d}x^6} f(g(x))\f$
+- \ref laplace::math::compose_d7 "compose_d7()" — Seventh derivative of composite function \f$\frac{\mathrm{d}^7}{\mathrm{d}x^7} f(g(x))\f$
+
+## References
+
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science 3:e103
+*/

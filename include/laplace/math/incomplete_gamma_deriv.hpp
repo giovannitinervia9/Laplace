@@ -1391,15 +1391,292 @@ LAPLACE_HD double log_gamma_da(int k, double a, double x, bool want_p, int metho
 }  // namespace detail_gamma_deriv
 
 // d^k log P(a, x) / da^k and d^k log Q(a, x) / da^k, k = 1..5
+/**
+ * \ingroup incomplete_gamma
+ * \brief First derivative of \f$\log P(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the first shape derivative:
+ * \f[
+ * \frac{\partial}{\partial a} \log P(a, x) = \log(x/a) - (\psi(a + 1) - \log a) + \kappa_1
+ * \f]
+ * where \f$\kappa_1\f$ is the first cumulant of \f$d = \log(t/x)\f$ under the normalized lower incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial}{\partial a}\log P(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$-\infty\f$.
+ * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 4.0 ulp (gcc) / 4.3 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 6.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_p(), log_gamma_p_da2(), log_gamma_q_da1()
+ */
 LAPLACE_HD double log_gamma_p_da1(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(1, a, x, true, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Second derivative of \f$\log P(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the second shape derivative:
+ * \f[
+ * \frac{\partial^2}{\partial a^2} \log P(a, x) = \kappa_2 - \psi'(a + 1)
+ * \f]
+ * where \f$\psi'(z) = \frac{\mathrm{d}^2}{\mathrm{d}z^2}\log \Gamma(z)\f$ is the trigamma function, and \f$\kappa_2\f$ is the
+ * second cumulant of \f$d = \log(t/x)\f$ under the normalized lower incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial^2}{\partial a^2}\log P(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$-\psi'(a + 1)\f$.
+ * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 4.4 ulp (gcc) / 4.4 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 7.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_p(), log_gamma_p_da1(), log_gamma_p_da3(), log_gamma_q_da2()
+ */
 LAPLACE_HD double log_gamma_p_da2(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(2, a, x, true, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Third derivative of \f$\log P(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the third shape derivative:
+ * \f[
+ * \frac{\partial^3}{\partial a^3} \log P(a, x) = \kappa_3 - \psi''(a + 1)
+ * \f]
+ * where \f$\psi''(z) = \frac{\mathrm{d}^3}{\mathrm{d}z^3}\log \Gamma(z)\f$ is the polygamma function of order 2, and \f$\kappa_3\f$ is the
+ * third cumulant of \f$d = \log(t/x)\f$ under the normalized lower incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial^3}{\partial a^3}\log P(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$-\psi''(a + 1)\f$.
+ * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 8.8 ulp (gcc) / 10.8 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 16.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_p(), log_gamma_p_da2(), log_gamma_p_da4(), log_gamma_q_da3()
+ */
 LAPLACE_HD double log_gamma_p_da3(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(3, a, x, true, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Fourth derivative of \f$\log P(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the fourth shape derivative:
+ * \f[
+ * \frac{\partial^4}{\partial a^4} \log P(a, x) = \kappa_4 - \psi'''(a + 1)
+ * \f]
+ * where \f$\psi'''(z) = \frac{\mathrm{d}^4}{\mathrm{d}z^4}\log \Gamma(z)\f$ is the polygamma function of order 3, and \f$\kappa_4\f$ is the
+ * fourth cumulant of \f$d = \log(t/x)\f$ under the normalized lower incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial^4}{\partial a^4}\log P(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$-\psi'''(a + 1)\f$.
+ * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 23.5 ulp (gcc) / 23.0 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 35.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_p(), log_gamma_p_da3(), log_gamma_p_da5(), log_gamma_q_da4()
+ */
 LAPLACE_HD double log_gamma_p_da4(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(4, a, x, true, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Fifth derivative of \f$\log P(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the fifth shape derivative:
+ * \f[
+ * \frac{\partial^5}{\partial a^5} \log P(a, x) = \kappa_5 - \psi^{(4)}(a + 1)
+ * \f]
+ * where \f$\psi^{(4)}(z) = \frac{\mathrm{d}^5}{\mathrm{d}z^5}\log \Gamma(z)\f$ is the polygamma function of order 4, and \f$\kappa_5\f$ is the
+ * fifth cumulant of \f$d = \log(t/x)\f$ under the normalized lower incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial^5}{\partial a^5}\log P(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$-\psi^{(4)}(a + 1)\f$.
+ * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 197.0 ulp (gcc) / 171.0 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 245.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_p(), log_gamma_p_da4(), log_gamma_q_da5()
+ */
 LAPLACE_HD double log_gamma_p_da5(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(5, a, x, true, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief First derivative of \f$\log Q(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the first shape derivative:
+ * \f[
+ * \frac{\partial}{\partial a} \log Q(a, x) = \log(x/a) + (\log a - \psi(a)) + \kappa_1
+ * \f]
+ * where \f$\kappa_1\f$ is the first cumulant of \f$d = \log(t/x)\f$ under the normalized upper incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial}{\partial a}\log Q(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$0.0\f$.
+ * - \f$x = +\infty\f$: returns \f$+\infty\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 4.8 ulp (gcc) / 4.8 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 7.5 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_q(), log_gamma_q_da2(), log_gamma_p_da1()
+ */
 LAPLACE_HD double log_gamma_q_da1(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(1, a, x, false, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Second derivative of \f$\log Q(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the second shape derivative:
+ * \f[
+ * \frac{\partial^2}{\partial a^2} \log Q(a, x) = \kappa_2 - \psi'(a)
+ * \f]
+ * where \f$\psi'(z) = \frac{\mathrm{d}^2}{\mathrm{d}z^2}\log \Gamma(z)\f$ is the trigamma function, and \f$\kappa_2\f$ is the
+ * second cumulant of \f$d = \log(t/x)\f$ under the normalized upper incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial^2}{\partial a^2}\log Q(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$0.0\f$.
+ * - \f$x = +\infty\f$: returns \f$-\psi'(a)\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 5.5 ulp (gcc) / 7.3 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 11.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_q(), log_gamma_q_da1(), log_gamma_q_da3(), log_gamma_p_da2()
+ */
 LAPLACE_HD double log_gamma_q_da2(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(2, a, x, false, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Third derivative of \f$\log Q(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the third shape derivative:
+ * \f[
+ * \frac{\partial^3}{\partial a^3} \log Q(a, x) = \kappa_3 - \psi''(a)
+ * \f]
+ * where \f$\psi''(z) = \frac{\mathrm{d}^3}{\mathrm{d}z^3}\log \Gamma(z)\f$ is the polygamma function of order 2, and \f$\kappa_3\f$ is the
+ * third cumulant of \f$d = \log(t/x)\f$ under the normalized upper incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial^3}{\partial a^3}\log Q(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$0.0\f$.
+ * - \f$x = +\infty\f$: returns \f$-\psi''(a)\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 13.9 ulp (gcc) / 13.9 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 21.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_q(), log_gamma_q_da2(), log_gamma_q_da4(), log_gamma_p_da3()
+ */
 LAPLACE_HD double log_gamma_q_da3(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(3, a, x, false, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Fourth derivative of \f$\log Q(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the fourth shape derivative:
+ * \f[
+ * \frac{\partial^4}{\partial a^4} \log Q(a, x) = \kappa_4 - \psi'''(a)
+ * \f]
+ * where \f$\psi'''(z) = \frac{\mathrm{d}^4}{\mathrm{d}z^4}\log \Gamma(z)\f$ is the polygamma function of order 3, and \f$\kappa_4\f$ is the
+ * fourth cumulant of \f$d = \log(t/x)\f$ under the normalized upper incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial^4}{\partial a^4}\log Q(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$0.0\f$.
+ * - \f$x = +\infty\f$: returns \f$-\psi'''(a)\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 22.1 ulp (gcc) / 23.0 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 35.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_q(), log_gamma_q_da3(), log_gamma_q_da5(), log_gamma_p_da4()
+ */
 LAPLACE_HD double log_gamma_q_da4(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(4, a, x, false, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Fifth derivative of \f$\log Q(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the fifth shape derivative:
+ * \f[
+ * \frac{\partial^5}{\partial a^5} \log Q(a, x) = \kappa_5 - \psi^{(4)}(a)
+ * \f]
+ * where \f$\psi^{(4)}(z) = \frac{\mathrm{d}^5}{\mathrm{d}z^5}\log \Gamma(z)\f$ is the polygamma function of order 4, and \f$\kappa_5\f$ is the
+ * fifth cumulant of \f$d = \log(t/x)\f$ under the normalized upper incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial^5}{\partial a^5}\log Q(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$0.0\f$.
+ * - \f$x = +\infty\f$: returns \f$-\psi^{(4)}(a)\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 62.9 ulp (gcc) / 67.9 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 102.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_q(), log_gamma_q_da4(), log_gamma_p_da5()
+ */
 LAPLACE_HD double log_gamma_q_da5(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(5, a, x, false, 0); }
 
 }  // namespace laplace::math::own

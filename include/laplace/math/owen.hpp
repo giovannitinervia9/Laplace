@@ -1052,24 +1052,220 @@ LAPLACE_HD_FORCEINLINE shape_deriv<K> sn_deriv(double z, double alpha, const par
 }  // namespace detail_owen
 
 // Owen's T(h, a)
+/**
+ * \ingroup owen
+ * \brief Owen's \f$T\f$ function, \f$T(h, a)\f$.
+ *
+ * Computes Owen's \f$T\f$ function defined by the integral:
+ * \f[
+ * T(h, a) = \frac{1}{2\pi} \int_0^a \frac{e^{-h^2 (1 + s^2)/2}}{1 + s^2} \, \mathrm{d}s
+ * \f]
+ * where \f$h \in \mathbb{R}\f$, \f$a \in \mathbb{R}\f$, and \f$s\f$ is the real integration variable.
+ *
+ * \param h Real argument \f$h \in \mathbb{R}\f$.
+ * \param a Real argument \f$a \in \mathbb{R}\f$.
+ * \return The value of \f$T(h, a)\f$.
+ *
+ * \par Domain and special values
+ * - Defined for all \f$h, a \in \mathbb{R}\f$.
+ * - Even in \f$h\f$: \f$T(-h, a) = T(h, a)\f$.
+ * - Odd in \f$a\f$: \f$T(h, -a) = -T(h, a)\f$.
+ * - At \f$a = 0\f$: returns \f$0.0\f$.
+ * - At \f$h = 0\f$: returns \f$\frac{1}{2\pi}\arctan a\f$.
+ * - At \f$a = 1\f$: \f$T(h, 1) = \frac{1}{2}\Phi(h)(1 - \Phi(h))\f$.
+ * - At \f$h = \pm\infty\f$: returns \f$0.0\f$ (with the sign of \f$a\f$).
+ * - At \f$a = +\infty\f$ with finite \f$h\f$: returns \f$\Phi(-h)/2\f$.
+ * - At \f$a = -\infty\f$ with finite \f$h\f$: returns \f$-\Phi(-h)/2\f$.
+ * - If \f$h\f$ is NaN or \f$a\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 4.44 ulp (2.24 ulpL) on gcc / 4.08 ulp (1.95 ulpL) on CUDA; test bound 6.7 ulp (3.4 ulpL).
+ *
+ * \see owen, log_sn_cdf()
+ */
 LAPLACE_HD double owens_t(double h, double a) { return detail_owen::owens_t(h, a, detail_owen::params{}); }
 
 // log F(z; alpha), F the distribution function of the standard skew normal
+/**
+ * \ingroup owen
+ * \brief Logarithm of the standard skew normal distribution function, \f$\log F(z; \alpha)\f$.
+ *
+ * Computes the natural logarithm of the distribution function of the standard skew normal distrib:
+ * \f[
+ * F(z; \alpha) = 2 \int_{-\infty}^z \phi(t) \Phi(\alpha t) \, \mathrm{d}t = \Phi(z) - 2 T(z, \alpha)
+ * \f]
+ * where \f$\phi(t) = \frac{1}{\sqrt{2\pi}} e^{-t^2/2}\f$ is the standard normal density, \f$\Phi\f$ is the standard normal distribution function, \f$T\f$ is Owen's \f$T\f$ function, \f$z \in \mathbb{R}\f$ is the argument, and \f$\alpha \in \mathbb{R}\f$ is the shape parameter.
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
+ * \return The value of \f$\log F(z; \alpha)\f$.
+ *
+ * \par Domain and special values
+ * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
+ * - At \f$\alpha = 0\f$: \f$F(z; 0) = \Phi(z)\f$, \f$\log F(z; 0) = \log \Phi(z)\f$.
+ * - Reflection: \f$1 - F(z; \alpha) = F(-z; -\alpha)\f$.
+ * - As \f$z \to -\infty\f$: returns \f$-\infty\f$.
+ * - As \f$z \to +\infty\f$: returns \f$0.0\f$.
+ * - If \f$z\f$ is NaN or \f$\alpha\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 5.0 ulp (3.6 ulpL) on gcc / 5.0 ulp (3.6 ulpL) on CUDA; test bound 7.5 ulp (5.5 ulpL).
+ *
+ * \see owen, owens_t(), log_sn_cdf_d1()
+ */
 LAPLACE_HD double log_sn_cdf(double z, double alpha) { return detail_owen::log_sn_cdf(z, alpha, detail_owen::params{}); }
 
 // d^K log F / dz^(K-j) dalpha^j in c[j], j = 0..K; one function per order
+/**
+ * \ingroup owen
+ * \brief First derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$.
+ *
+ * Computes the first partial derivatives of \f$\log F(z; \alpha)\f$:
+ * \f[
+ * c_0 = \frac{\partial}{\partial z} \log F(z; \alpha) = \frac{f}{F}, \quad
+ * c_1 = \frac{\partial}{\partial \alpha} \log F(z; \alpha) = -\frac{g}{F}
+ * \f]
+ * where \f$f = 2 \phi(z) \Phi(\alpha z)\f$, \f$g = \frac{e^{-(1+\alpha^2) z^2/2}}{\pi (1 + \alpha^2)}\f$, and Gaussian factors are cancelled in closed form where \f$F\f$ carries them.
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
+ * \return A shape_deriv of order 1 containing \f$c_0 = \frac{\partial}{\partial z} \log F\f$ in `c[0]` and \f$c_1 = \frac{\partial}{\partial \alpha} \log F\f$ in `c[1]`.
+ *
+ * \par Domain and special values
+ * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
+ * - If \f$z\f$ is NaN or \f$\alpha\f$ is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 4.8 ulpN (4.3 ulpL) on gcc / 5.1 ulpN (4.3 ulpL) on CUDA; test bound 7.7 ulpN (6.5 ulpL).
+ *
+ * \see owen, log_sn_cdf(), log_sn_cdf_d2()
+ */
 LAPLACE_HD shape_deriv<1> log_sn_cdf_d1(double z, double alpha) {
   return detail_owen::sn_deriv<1>(z, alpha, detail_owen::params{}, 0);
 }
+
+/**
+ * \ingroup owen
+ * \brief Second derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$.
+ *
+ * Computes all second partial derivatives of \f$\log F(z; \alpha)\f$:
+ * \f[
+ * c_j = \frac{\partial^2}{\partial z^{2-j} \partial \alpha^j} \log F(z; \alpha), \quad j = 0, 1, 2.
+ * \f]
+ * Explicitly:
+ * - \f$c_0 = \frac{\partial^2}{\partial z^2} \log F(z; \alpha)\f$
+ * - \f$c_1 = \frac{\partial^2}{\partial z \partial \alpha} \log F(z; \alpha)\f$
+ * - \f$c_2 = \frac{\partial^2}{\partial \alpha^2} \log F(z; \alpha)\f$
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
+ * \return A shape_deriv of order 2 containing \f$c_j\f$ in `c[j]` for \f$j = 0, 1, 2\f$.
+ *
+ * \par Domain and special values
+ * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
+ * - If \f$z\f$ is NaN or \f$\alpha\f$ is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 206 ulpN (24 ulpL) on gcc / 198 ulpN (24 ulpL) on CUDA; test bound 310.0 ulpN (37.0 ulpL).
+ *
+ * \see owen, log_sn_cdf(), log_sn_cdf_d1(), log_sn_cdf_d3()
+ */
 LAPLACE_HD shape_deriv<2> log_sn_cdf_d2(double z, double alpha) {
   return detail_owen::sn_deriv<2>(z, alpha, detail_owen::params{}, 0);
 }
+
+/**
+ * \ingroup owen
+ * \brief Third derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$.
+ *
+ * Computes all third partial derivatives of \f$\log F(z; \alpha)\f$:
+ * \f[
+ * c_j = \frac{\partial^3}{\partial z^{3-j} \partial \alpha^j} \log F(z; \alpha), \quad j = 0, \dots, 3.
+ * \f]
+ * Explicitly:
+ * - \f$c_0 = \frac{\partial^3}{\partial z^3} \log F(z; \alpha)\f$
+ * - \f$c_1 = \frac{\partial^3}{\partial z^2 \partial \alpha} \log F(z; \alpha)\f$
+ * - \f$c_2 = \frac{\partial^3}{\partial z \partial \alpha^2} \log F(z; \alpha)\f$
+ * - \f$c_3 = \frac{\partial^3}{\partial \alpha^3} \log F(z; \alpha)\f$
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
+ * \return A shape_deriv of order 3 containing \f$c_j\f$ in `c[j]` for \f$j = 0, \dots, 3\f$.
+ *
+ * \par Domain and special values
+ * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
+ * - If \f$z\f$ is NaN or \f$\alpha\f$ is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 2240 ulpN (501 ulpL) on gcc / 2150 ulpN (481 ulpL) on CUDA; test bound 3400.0 ulpN (760.0 ulpL).
+ *
+ * \see owen, log_sn_cdf(), log_sn_cdf_d2(), log_sn_cdf_d4()
+ */
 LAPLACE_HD shape_deriv<3> log_sn_cdf_d3(double z, double alpha) {
   return detail_owen::sn_deriv<3>(z, alpha, detail_owen::params{}, 0);
 }
+
+/**
+ * \ingroup owen
+ * \brief Fourth derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$.
+ *
+ * Computes all fourth partial derivatives of \f$\log F(z; \alpha)\f$:
+ * \f[
+ * c_j = \frac{\partial^4}{\partial z^{4-j} \partial \alpha^j} \log F(z; \alpha), \quad j = 0, \dots, 4.
+ * \f]
+ * Explicitly:
+ * - \f$c_0 = \frac{\partial^4}{\partial z^4} \log F(z; \alpha)\f$
+ * - \f$c_1 = \frac{\partial^4}{\partial z^3 \partial \alpha} \log F(z; \alpha)\f$
+ * - \f$c_2 = \frac{\partial^4}{\partial z^2 \partial \alpha^2} \log F(z; \alpha)\f$
+ * - \f$c_3 = \frac{\partial^4}{\partial z \partial \alpha^3} \log F(z; \alpha)\f$
+ * - \f$c_4 = \frac{\partial^4}{\partial \alpha^4} \log F(z; \alpha)\f$
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
+ * \return A shape_deriv of order 4 containing \f$c_j\f$ in `c[j]` for \f$j = 0, \dots, 4\f$.
+ *
+ * \par Domain and special values
+ * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
+ * - If \f$z\f$ is NaN or \f$\alpha\f$ is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 1500 ulpN (777 ulpL) on gcc / 1490 ulpN (784 ulpL) on CUDA; test bound 2300.0 ulpN (1200.0 ulpL).
+ *
+ * \see owen, log_sn_cdf(), log_sn_cdf_d3(), log_sn_cdf_d5()
+ */
 LAPLACE_HD shape_deriv<4> log_sn_cdf_d4(double z, double alpha) {
   return detail_owen::sn_deriv<4>(z, alpha, detail_owen::params{}, 0);
 }
+
+/**
+ * \ingroup owen
+ * \brief Fifth derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$.
+ *
+ * Computes all fifth partial derivatives of \f$\log F(z; \alpha)\f$:
+ * \f[
+ * c_j = \frac{\partial^5}{\partial z^{5-j} \partial \alpha^j} \log F(z; \alpha), \quad j = 0, \dots, 5.
+ * \f]
+ * Explicitly:
+ * - \f$c_0 = \frac{\partial^5}{\partial z^5} \log F(z; \alpha)\f$
+ * - \f$c_1 = \frac{\partial^5}{\partial z^4 \partial \alpha} \log F(z; \alpha)\f$
+ * - \f$c_2 = \frac{\partial^5}{\partial z^3 \partial \alpha^2} \log F(z; \alpha)\f$
+ * - \f$c_3 = \frac{\partial^5}{\partial z^2 \partial \alpha^3} \log F(z; \alpha)\f$
+ * - \f$c_4 = \frac{\partial^5}{\partial z \partial \alpha^4} \log F(z; \alpha)\f$
+ * - \f$c_5 = \frac{\partial^5}{\partial \alpha^5} \log F(z; \alpha)\f$
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
+ * \return A shape_deriv of order 5 containing \f$c_j\f$ in `c[j]` for \f$j = 0, \dots, 5\f$.
+ *
+ * \par Domain and special values
+ * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
+ * - If \f$z\f$ is NaN or \f$\alpha\f$ is NaN: returns quiet NaN in all components.
+ *
+ * \par Measured accuracy
+ * Maximum error \f$1.16 \times 10^5\f$ ulpN (\f$2.7 \times 10^4\f$ ulpL) on gcc / \f$1.17 \times 10^5\f$ ulpN (\f$2.8 \times 10^4\f$ ulpL) on CUDA; test bound \f$1.8 \times 10^5\f$ ulpN (\f$4.2 \times 10^4\f$ ulpL). Near zeros of components of order 3 to 5, the problem is ill-conditioned: a 1-ulp variation in \f$F\f$ moves the derivative by up to \f$1.4 \times 10^4\f$ to \f$2.9 \times 10^4\f$ ulps.
+ *
+ * \see owen, log_sn_cdf(), log_sn_cdf_d4()
+ */
 LAPLACE_HD shape_deriv<5> log_sn_cdf_d5(double z, double alpha) {
   return detail_owen::sn_deriv<5>(z, alpha, detail_owen::params{}, 0);
 }

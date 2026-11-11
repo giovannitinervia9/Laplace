@@ -141,6 +141,35 @@ LAPLACE_HD double erfcx_pos(double z) {
 }
 
 // erfcx(x) = exp(x^2) erfc(x); overflows to infinity below x = -26.63
+/**
+ * \ingroup normal
+ * \brief Scaled complementary error function, \f$\operatorname{erfcx}(x) = e^{x^2} \operatorname{erfc}(x)\f$.
+ *
+ * Computes the scaled complementary error function:
+ * \f[
+ * \operatorname{erfcx}(x) = e^{x^2} \operatorname{erfc}(x) = \frac{2}{\sqrt{\pi}} e^{x^2} \int_x^\infty e^{-u^2} \, \mathrm{d}u
+ * \f]
+ * where \f$u\f$ is the real integration variable.
+ *
+ * For \f$x \ge 0\f$, evaluated by Boost.Math rational approximations across \f$[0, 0.5)\f$, \f$[0.5, 1.5)\f$,
+ * \f$[1.5, 2.5)\f$, \f$[2.5, 4.5)\f$, and \f$[4.5, 28.0)\f$, and an asymptotic series in \f$1/(2x^2)\f$
+ * for \f$x \ge 28.0\f$. For \f$x < 0\f$, evaluated via \f$2 e^{x^2} - \operatorname{erfcx}(-x)\f$ with
+ * \f$x^2\f$ carried as an exact split \f$h + l\f$.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\operatorname{erfcx}(x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$x \in \mathbb{R}\f$: finite down to \f$x = -26.628\f$.
+ * - Returns \f$+\infty\f$ for \f$x \le -26.629\f$ and at \f$-\infty\f$.
+ * - Returns \f$0.0\f$ at \f$+\infty\f$ (\f$\operatorname{erfcx}(+\infty) = 0.0\f$).
+ * - If \f$x\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 1.78 ulp on CPU; test bound 3.0 ulp (3.0 ulp1).
+ *
+ * \see normal, erfc(), Phi(), log_Phi()
+ */
 LAPLACE_HD double erfcx(double x) {
   using namespace detail_normal;
   if (x != x) return x;
@@ -154,14 +183,47 @@ LAPLACE_HD double erfcx(double x) {
   double h, l;
   two_prod(a, a, h, l);
   const double e = math::exp(h);
+  // exp(a^2) overflows from a = 26.64 on (and a^2 itself from 1.3e154): +inf,
+  // not inf * 0 = NaN
+  if (!(e < detail::pos_inf())) return detail::pos_inf();
   return 2.0 * (e + e * l) - erfcx_pos(a);
 }
 
 // erfc(x) = exp(-x^2) erfcx(x) for x >= 0, with x^2 carried exactly; 2 - erfc(-x) below
+/**
+ * \ingroup normal
+ * \brief Complementary error function, \f$\operatorname{erfc}(x)\f$.
+ *
+ * Computes the complementary error function:
+ * \f[
+ * \operatorname{erfc}(x) = \frac{2}{\sqrt{\pi}} \int_x^\infty e^{-u^2} \, \mathrm{d}u
+ * \f]
+ * where \f$u\f$ is the real integration variable.
+ *
+ * For \f$x \ge 0\f$, evaluated as \f$e^{-x^2} \operatorname{erfcx}(x)\f$ with \f$x^2\f$ carried as an
+ * exact split \f$h + l\f$. For \f$x < 0\f$, evaluated via \f$2 - \operatorname{erfc}(-x)\f$.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\operatorname{erfc}(x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$x \in \mathbb{R}\f$: standard domain.
+ * - Returns \f$0.0\f$ for \f$x > 27.3\f$ (including \f$+\infty\f$).
+ * - Returns \f$2.0\f$ for \f$x < -27.3\f$ (including \f$-\infty\f$).
+ * - If \f$x\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 3.46 ulp on CPU; test bound 5.5 ulp (2.5 ulp1).
+ *
+ * \see normal, erfcx(), Phi()
+ */
 LAPLACE_HD double erfc(double x) {
   using namespace detail_normal;
   if (x != x) return x;
   const double a = Kokkos::fabs(x);
+  // erfc(27.3) is below half the smallest subnormal; beyond, the exact square
+  // overflows (from 1.3e154) and would give NaN
+  if (a > 27.3) return x >= 0.0 ? 0.0 : 2.0;
   double h, l;
   two_prod(a, a, h, l);
   const double r = erfcx_pos(a) * (math::exp(-h) * (1.0 - l));
@@ -169,17 +231,81 @@ LAPLACE_HD double erfc(double x) {
 }
 
 // Phi(x)
+/**
+ * \ingroup normal
+ * \brief Standard normal cumulative distribution function, \f$\Phi(x)\f$.
+ *
+ * Computes the cumulative distribution function of the standard normal distribution:
+ * \f[
+ * \Phi(x) = \frac{1}{\sqrt{2\pi}} \int_{-\infty}^x e^{-u^2/2} \, \mathrm{d}u = \frac{1}{2} \operatorname{erfc}\left(-\frac{x}{\sqrt{2}}\right)
+ * \f]
+ * where \f$u\f$ is the real integration variable.
+ *
+ * For \f$x < 0\f$, evaluated as \f$\frac{1}{2} \operatorname{erfcx}(-x/\sqrt{2}) \exp(-x^2/2)\f$ with
+ * \f$x^2/2\f$ carried as an exact split \f$h + l\f$. For \f$x \ge 0\f$, evaluated as \f$1 - \Phi(-x)\f$.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\Phi(x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$x \in \mathbb{R}\f$: standard domain.
+ * - At \f$x = 0.0\f$: returns \f$0.5\f$.
+ * - Underflows to \f$0.0\f$ below \f$x = -38.5\f$, returning \f$0.0\f$ for \f$x < -40.0\f$ (including \f$-\infty\f$).
+ * - Returns \f$1.0\f$ for \f$x > 40.0\f$ (including \f$+\infty\f$).
+ * - If \f$x\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 3.86 ulp (0.86 ulp1) on CPU; test bound 6.0 ulp (1.5 ulp1).
+ *
+ * \see normal, log_Phi(), Phi_inv(), erfcx()
+ */
 LAPLACE_HD double Phi(double x) {
   using namespace detail_normal;
   if (x != x) return x;
+  // Phi underflows below -38.5 and rounds to 1 long before 40; beyond, the
+  // square would overflow (from 1.3e154) and give NaN
+  if (x < -40.0) return 0.0;
+  if (x > 40.0) return 1.0;
   if (x < 0.0) return 0.5 * erfcx_pos(-x * sqrt_half) * exp_minus_half_square(x);
   return 1.0 - 0.5 * erfcx_pos(x * sqrt_half) * exp_minus_half_square(x);
 }
 
 // log Phi(x), without underflow down to x = -1.9e154
+/**
+ * \ingroup normal
+ * \brief Natural logarithm of the standard normal cumulative distribution function, \f$\log \Phi(x)\f$.
+ *
+ * Computes the natural logarithm of the distribution function:
+ * \f[
+ * \log \Phi(x) = \log\left(\frac{1}{\sqrt{2\pi}} \int_{-\infty}^x e^{-u^2/2} \, \mathrm{d}u\right)
+ * \f]
+ * where \f$u\f$ is the real integration variable.
+ *
+ * For \f$x < 0\f$, evaluated as \f$-h + (\log(\frac{1}{2}\operatorname{erfcx}(-x/\sqrt{2})) - l)\f$ where
+ * \f$h + l = x^2/2\f$ is exact. For \f$x \ge 0\f$, evaluated as \f$\operatorname{log1p}(-\Phi(-x))\f$.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\log \Phi(x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$x \in \mathbb{R}\f$: standard domain.
+ * - At \f$x = 0.0\f$: returns \f$-\log 2 \approx -0.693147\f$.
+ * - Finite down to \f$x = -1.8961 \times 10^{154}\f$ (`-sqrt(2 DBL_MAX)`); returns \f$-\infty\f$ below it and at \f$-\infty\f$.
+ * - Returns \f$-0.0\f$ for \f$x > 40.0\f$.
+ * - If \f$x\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 4.08 ulp on CPU (CUDA: 3.79 ulp); test bound 6.0 ulp (3.0 ulp1).
+ *
+ * \see normal, Phi(), log_Phi_d1(), Phi_inv_logp()
+ */
 LAPLACE_HD double log_Phi(double x) {
   using namespace detail_normal;
   if (x != x) return x;
+  // -x^2/2 passes -DBL_MAX below -sqrt(2 DBL_MAX) = -1.8961e154; log Phi(40)
+  // is -4e-350, which rounds to -0
+  if (x < -1.8961e154) return -detail::pos_inf();
+  if (x > 40.0) return -0.0;
   if (x < 0.0) {
     double h, l;
     half_square(x, h, l);
@@ -514,28 +640,192 @@ LAPLACE_HD double log_Phi_dk_outside(int k, double t) {
 // d^k log Phi / dt^k, one function per order: the piecewise Chebyshev
 // expansion on [-1, cheb_hi) (generated tables, measured in
 // note/numerics.md), the cumulants below -1, the recursion from R above
+/**
+ * \ingroup normal
+ * \brief First derivative of \f$\log \Phi(t)\f$, the inverse Mills ratio \f$R(t) = \phi(t)/\Phi(t)\f$.
+ *
+ * Computes the first derivative:
+ * \f[
+ * \frac{\mathrm{d}}{\mathrm{d}t} \log \Phi(t) = R(t) = \frac{\phi(t)}{\Phi(t)}
+ * \f]
+ *
+ * Evaluated via piecewise Chebyshev expansions on \f$[-1, 4)\f$; downward cumulant recurrence
+ * for \f$t < -1\f$; and the ratio \f$R(t)\f$ for \f$t \ge 4\f$.
+ *
+ * \param t Real argument \f$t \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}}{\mathrm{d}t}\log \Phi(t)\f$.
+ *
+ * \par Domain and special values
+ * - \f$t \in \mathbb{R}\f$: standard domain.
+ * - As \f$t \to -\infty\f$: \f$R(t) \sim -t \to +\infty\f$.
+ * - As \f$t \to +\infty\f$: \f$R(t) \sim \phi(t) \to 0.0\f$.
+ * - If \f$t\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 1.19 ulp1 on \f$[-1, 4)\f$ (CUDA overall: 0.99 ulp); test bounds: tail 2.0 ulp, centre 2.0 ulp1.
+ *
+ * \see normal, log_Phi(), log_Phi_d2()
+ */
 LAPLACE_HD double log_Phi_d1(double t) {
   if (t >= -1.0 && t < detail_normal::cheb_hi) return detail_normal::log_Phi_dk_cheb<1>(t);
   return detail_normal::log_Phi_dk_outside(1, t);
 }
+/**
+ * \ingroup normal
+ * \brief Second derivative of \f$\log \Phi(t)\f$.
+ *
+ * Computes the second derivative:
+ * \f[
+ * \frac{\mathrm{d}^2}{\mathrm{d}t^2} \log \Phi(t) = g_2(t) = -R(t)(t + R(t))
+ * \f]
+ * where \f$R(t)\f$, the first derivative, `log_Phi_d1()`, is the inverse Mills ratio.
+ *
+ * Evaluated via piecewise Chebyshev expansions on \f$[-1, 4)\f$; downward cumulant recurrence
+ * \f$g_2 = -1 + \kappa_2\f$ for \f$t < -1\f$; and \f$-R(t + R)\f$ for \f$t \ge 4\f$.
+ *
+ * \param t Real argument \f$t \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}^2}{\mathrm{d}t^2}\log \Phi(t)\f$.
+ *
+ * \par Domain and special values
+ * - \f$t \in \mathbb{R}\f$: standard domain.
+ * - At \f$t = 0\f$: returns \f$-2/\pi \approx -0.636620\f$.
+ * - As \f$t \to -\infty\f$: \f$g_2(t) \to -1.0\f$.
+ * - As \f$t \to +\infty\f$: \f$g_2(t) \to 0.0\f$.
+ * - If \f$t\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 0.64 ulp1 on \f$[-1, 4)\f$ (CUDA overall: 0.63 ulp); test bounds: tail 2.5 ulp, centre 1.0 ulp1.
+ *
+ * \see normal, log_Phi(), log_Phi_d1(), log_Phi_d3()
+ */
 LAPLACE_HD double log_Phi_d2(double t) {
   if (t >= -1.0 && t < detail_normal::cheb_hi) return detail_normal::log_Phi_dk_cheb<2>(t);
   return detail_normal::log_Phi_dk_outside(2, t);
 }
+/**
+ * \ingroup normal
+ * \brief Third derivative of \f$\log \Phi(t)\f$.
+ *
+ * Computes the third derivative:
+ * \f[
+ * \frac{\mathrm{d}^3}{\mathrm{d}t^3} \log \Phi(t) = g_3(t) = -g_2(t)(t + 2R(t)) - R(t)
+ * \f]
+ * where \f$R(t)\f$, the first derivative, `log_Phi_d1()`, is the inverse Mills ratio, and \f$g_2(t)\f$, the second derivative, `log_Phi_d2()`.
+ *
+ * Evaluated via piecewise Chebyshev expansions on \f$[-1, 4)\f$; downward cumulant recurrence
+ * \f$g_3 = \kappa_3\f$ for \f$t < -1\f$; and the recurrence from \f$R\f$ for \f$t \ge 4\f$.
+ *
+ * \param t Real argument \f$t \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}^3}{\mathrm{d}t^3}\log \Phi(t)\f$.
+ *
+ * \par Domain and special values
+ * - \f$t \in \mathbb{R}\f$: standard domain.
+ * - As \f$t \to -\infty\f$: \f$g_3(t) \to 0.0\f$.
+ * - As \f$t \to +\infty\f$: \f$g_3(t) \to 0.0\f$.
+ * - If \f$t\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 0.34 ulp1 on \f$[-1, 4)\f$ (CUDA overall: 0.75 ulp); test bounds: tail 22.0 ulp, centre 1.2 ulp1.
+ *
+ * \see normal, log_Phi(), log_Phi_d2(), log_Phi_d4()
+ */
 LAPLACE_HD double log_Phi_d3(double t) {
   if (t >= -1.0 && t < detail_normal::cheb_hi) return detail_normal::log_Phi_dk_cheb<3>(t);
   return detail_normal::log_Phi_dk_outside(3, t);
 }
+/**
+ * \ingroup normal
+ * \brief Fourth derivative of \f$\log \Phi(t)\f$.
+ *
+ * Computes the fourth derivative:
+ * \f[
+ * \frac{\mathrm{d}^4}{\mathrm{d}t^4} \log \Phi(t) = g_4(t) = -g_3(t)(t + 2R(t)) - 2 g_2(t)(1 + g_2(t))
+ * \f]
+ * where \f$R(t)\f$, \f$g_2(t)\f$, and \f$g_3(t)\f$ are the lower-order derivatives (`log_Phi_d1()`, `log_Phi_d2()`, `log_Phi_d3()`).
+ *
+ * Evaluated via piecewise Chebyshev expansions on \f$[-1, 4)\f$; downward cumulant recurrence
+ * \f$g_4 = \kappa_4\f$ for \f$t < -1\f$; and the recurrence from \f$R\f$ for \f$t \ge 4\f$.
+ *
+ * \param t Real argument \f$t \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}^4}{\mathrm{d}t^4}\log \Phi(t)\f$.
+ *
+ * \par Domain and special values
+ * - \f$t \in \mathbb{R}\f$: standard domain.
+ * - As \f$t \to -\infty\f$: \f$g_4(t) \to 0.0\f$.
+ * - As \f$t \to +\infty\f$: \f$g_4(t) \to 0.0\f$.
+ * - If \f$t\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 0.18 ulp1 on \f$[-1, 4)\f$ (CUDA overall: 1.19 ulp); test bounds: tail 50.0 ulp, centre 2.0 ulp1.
+ *
+ * \see normal, log_Phi(), log_Phi_d3(), log_Phi_d5()
+ */
 LAPLACE_HD double log_Phi_d4(double t) {
   if (t >= -1.0 && t < detail_normal::cheb_hi) return detail_normal::log_Phi_dk_cheb<4>(t);
   return detail_normal::log_Phi_dk_outside(4, t);
 }
+/**
+ * \ingroup normal
+ * \brief Fifth derivative of \f$\log \Phi(t)\f$.
+ *
+ * Computes the fifth derivative:
+ * \f[
+ * \frac{\mathrm{d}^5}{\mathrm{d}t^5} \log \Phi(t) = g_5(t) = -g_4(t)(t + 2R(t)) - 3 g_3(t)(1 + 2 g_2(t))
+ * \f]
+ * where \f$R(t)\f$, \f$g_2(t)\f$, \f$g_3(t)\f$, and \f$g_4(t)\f$ are the lower-order derivatives (`log_Phi_d1()` through `log_Phi_d4()`).
+ *
+ * Evaluated via piecewise Chebyshev expansions on \f$[-1, 4)\f$; downward cumulant recurrence
+ * \f$g_5 = \kappa_5\f$ for \f$t < -1\f$; and the recurrence from \f$R\f$ for \f$t \ge 4\f$.
+ *
+ * \param t Real argument \f$t \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}^5}{\mathrm{d}t^5}\log \Phi(t)\f$.
+ *
+ * \par Domain and special values
+ * - \f$t \in \mathbb{R}\f$: standard domain.
+ * - As \f$t \to -\infty\f$: \f$g_5(t) \to 0.0\f$.
+ * - As \f$t \to +\infty\f$: \f$g_5(t) \to 0.0\f$.
+ * - If \f$t\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 0.23 ulp1 on \f$[-1, 4)\f$ (CUDA overall: 1.85 ulp); test bounds: tail 120.0 ulp, centre 3.0 ulp1.
+ *
+ * \see normal, log_Phi(), log_Phi_d4()
+ */
 LAPLACE_HD double log_Phi_d5(double t) {
   if (t >= -1.0 && t < detail_normal::cheb_hi) return detail_normal::log_Phi_dk_cheb<5>(t);
   return detail_normal::log_Phi_dk_outside(5, t);
 }
 
 // Phi^-1(p)
+/**
+ * \ingroup normal
+ * \brief Standard normal quantile function, \f$\Phi^{-1}(p)\f$.
+ *
+ * Computes the quantile \f$x\f$ satisfying \f$\Phi(x) = p\f$ for \f$p \in (0, 1)\f$.
+ *
+ * For \f$p \le 0.5\f$, evaluated from Boost.Math's \f$-\sqrt{2}\operatorname{erfc}^{-1}(2p)\f$,
+ * followed for \f$p < 0.1\f$ by one Newton step on \f$\log \Phi\f$:
+ * \f[
+ * x = x_0 - \frac{\log \Phi(x_0) - \log p}{R(x_0)}
+ * \f]
+ * where \f$R(x_0) = \phi(x_0)/\Phi(x_0)\f$. For \f$p > 0.5\f$, evaluated as \f$-\Phi^{-1}(1 - p)\f$.
+ *
+ * \param p Probability \f$p \in (0, 1)\f$.
+ * \return The quantile \f$x = \Phi^{-1}(p)\f$.
+ *
+ * \par Domain and special values
+ * - \f$p \in (0, 1)\f$: standard domain.
+ * - At \f$p = 0.5\f$: returns \f$0.0\f$.
+ * - At \f$p = 0.0\f$: returns \f$-\infty\f$.
+ * - At \f$p = 1.0\f$: returns \f$+\infty\f$.
+ * - If \f$p < 0.0\f$ or \f$p > 1.0\f$ or NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Error in units of conditioned ulpC: 0.82 for \f$p < 10^{-300}\f$, 0.99 to \f$p = 10^{-10}\f$,
+ * 1.58 to \f$p = 0.1\f$, 2.32 at the centre; test bound 3.5 ulpC.
+ *
+ * \see normal, Phi(), Phi_inv_logp()
+ */
 LAPLACE_HD double Phi_inv(double p) {
   using namespace detail_normal;
   if (!(p > 0.0 && p < 1.0)) {
@@ -548,12 +838,42 @@ LAPLACE_HD double Phi_inv(double p) {
 }
 
 // Phi^-1(exp(l)), for l = log p <= 0, also below the double range of p
+/**
+ * \ingroup normal
+ * \brief Standard normal quantile function from log-probability, \f$\Phi^{-1}(e^l)\f$.
+ *
+ * Computes the quantile \f$x\f$ satisfying \f$\log \Phi(x) = l\f$ for \f$l = \log p \le 0\f$.
+ *
+ * For \f$l \ge -\log 2\f$, evaluated through \f$q = 1 - p = -\operatorname{expm1}(l)\f$ as \f$-\Phi^{-1}(q)\f$.
+ * For \f$-700.0 < l < -\log 2\f$, started from Boost.Math's \f$-\sqrt{2}\operatorname{erfc}^{-1}(2e^l)\f$.
+ * For \f$l \le -700.0\f$, started from the asymptotic approximation
+ * \f[
+ * x_0 = -\sqrt{-2 l - \log(-4\pi l)}
+ * \f]
+ * Followed by up to 8 Newton steps \f$x_{k+1} = x_k - (\log \Phi(x_k) - l)/R(x_k)\f$ until
+ * the update satisfies \f$|\Delta x| \le 4\varepsilon |x|\f$.
+ *
+ * \param l Log-probability \f$l \in (-\infty, 0]\f$.
+ * \return The quantile \f$x = \Phi^{-1}(e^l)\f$.
+ *
+ * \par Domain and special values
+ * - \f$l \in (-\infty, 0]\f$: standard domain.
+ * - At \f$l = 0.0\f$: returns \f$+\infty\f$.
+ * - At \f$l = -\infty\f$: returns \f$-\infty\f$.
+ * - If \f$l > 0.0\f$ or NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Conditioned error at most 2.76 ulpC everywhere; test bound 4.5 ulpC.
+ *
+ * \see normal, log_Phi(), Phi_inv()
+ */
 LAPLACE_HD double Phi_inv_logp(double l) {
   using namespace detail_normal;
   if (!(l < 0.0)) {
     if (l == 0.0) return detail::pos_inf();
     return detail::quiet_nan();
   }
+  if (l == -detail::pos_inf()) return -detail::pos_inf();
   if (l >= log_half) {
     // p >= 1/2: through q = 1 - p = -expm1(l), which keeps its relative precision
     return -Phi_inv_lower(-Kokkos::expm1(l));

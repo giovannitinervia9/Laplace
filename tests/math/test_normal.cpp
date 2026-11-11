@@ -8,6 +8,8 @@
 
 #include <laplace/math/normal.hpp>
 
+#include <limits>
+
 #ifndef LAPLACE_REFERENCE_DIR
 #error "LAPLACE_REFERENCE_DIR must point to tests/data/reference"
 #endif
@@ -138,4 +140,30 @@ TEST_CASE("derivatives of log Phi against mpmath") {
 TEST_CASE("normal quantile from p and from log p against mpmath") {
   check_quantile("qnorm", PhiInv{}, false, 3.5);
   check_quantile("Phi_inv_logp", PhiInvLogp{}, true, 4.5);
+}
+
+TEST_CASE("normal block at the ends of the range") {
+  namespace lm = laplace::math;
+  const double inf = std::numeric_limits<double>::infinity();
+  // erfcx overflows to +inf below -26.6288 (not inf * 0 = NaN)
+  CHECK(std::isfinite(lm::erfcx(-26.628)));
+  for (double x : {-26.629, -27.0, -32.0, -1e200, -inf}) CHECK(lm::erfcx(x) == inf);
+  CHECK(lm::erfcx(inf) == 0.0);
+  // erfc and Phi saturate; the exact square would overflow from 1.3e154
+  for (double x : {27.3, 1e154, 1.4e154, 1e200, inf}) {
+    CHECK(lm::erfc(x) == 0.0);
+    CHECK(lm::erfc(-x) == 2.0);
+  }
+  for (double x : {40.5, 1e200, inf}) {
+    CHECK(lm::Phi(-x) == 0.0);
+    CHECK(lm::Phi(x) == 1.0);
+    CHECK(lm::log_Phi(x) == 0.0);
+  }
+  // log Phi is finite down to -sqrt(2 DBL_MAX) = -1.8961e154, then -inf
+  CHECK(std::isfinite(lm::log_Phi(-1.896e154)));
+  for (double x : {-1.8962e154, -1e200, -inf}) CHECK(lm::log_Phi(x) == -inf);
+  CHECK(lm::Phi_inv_logp(-inf) == -inf);
+  CHECK(lm::Phi_inv_logp(0.0) == inf);
+  CHECK(std::isnan(lm::erfc(std::nan(""))));
+  CHECK(std::isnan(lm::log_Phi(std::nan(""))));
 }

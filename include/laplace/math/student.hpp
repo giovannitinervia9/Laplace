@@ -1028,12 +1028,190 @@ LAPLACE_HD double log_cdf_quad(double z, double nu) {
 
 }  // namespace detail_st
 
+/**
+ * \ingroup student
+ * \brief Natural logarithm of the standard Student t distribution function, \f$\log T_\nu(z)\f$.
+ *
+ * Computes \f$\log T_\nu(z)\f$ for real degrees of freedom \f$\nu > 0\f$ and real argument \f$z\f$.
+ * The distribution function is defined by
+ * \f[
+ * T_\nu(z) = \int_{-\infty}^z t_\nu(s) \, \mathrm{d}s
+ * \f]
+ * where \f$z \in \mathbb{R}\f$ is the argument, \f$\nu \in (0, \infty)\f$ is the degrees of freedom,
+ * \f$s \in \mathbb{R}\f$ is the integration variable, and
+ * \f[
+ * t_\nu(s) = \frac{\Gamma((\nu + 1)/2)}{\sqrt{\nu \pi} \, \Gamma(\nu / 2)} \left(1 + \frac{s^2}{\nu}\right)^{-(\nu + 1)/2}
+ * \f]
+ * is the density of the standard Student \f$t\f$ distrib.
+ *
+ * The survival function satisfies \f$1 - T_\nu(z) = T_\nu(-z)\f$.
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
+ * \return The value of \f$\log T_\nu(z)\f$.
+ *
+ * \par Domain and special values
+ * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
+ * - \f$z = 0\f$: returns \f$-\log 2\f$.
+ * - \f$\nu \le 0\f$, or \f$z\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN. Infinite \f$\nu\f$ does not return NaN (\f$\nu = +\infty, z = 0\f$ gives \f$-\log 2\f$).
+ *
+ * \par Measured accuracy
+ * Maximum error 188 ulp (10.8 ulp1) in the upper tail (test bound 285.0 ulp, 17.0 ulp1).
+ *
+ * \see student, log_student_cdf_d1()
+ */
 LAPLACE_HD double log_student_cdf(double z, double nu) { return detail_st::log_cdf_beta(z, nu); }
 
+/**
+ * \ingroup student
+ * \brief First mixed partial derivatives in \f$(z, \nu)\f$ of \f$\log T_\nu(z)\f$.
+ *
+ * Computes the first mixed partial derivatives:
+ * \f[
+ * c[0] = \frac{\partial}{\partial z} \log T_\nu(z), \quad c[1] = \frac{\partial}{\partial \nu} \log T_\nu(z)
+ * \f]
+ * where \f$z \in \mathbb{R}\f$ is the argument and \f$\nu \in (0, \infty)\f$ is the degrees of freedom.
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
+ * \return A shape_deriv of order 1 containing \f$c[0]\f$ (\f$z\f$-derivative) and \f$c[1]\f$ (\f$\nu\f$-derivative).
+ *
+ * \par Domain and special values
+ * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
+ * - \f$z = -\infty\f$: returns quiet NaN for all components.
+ * - \f$z = +\infty\f$: returns \f$0.0\f$ for all components.
+ * - \f$\nu \le 0\f$, or \f$\nu\f$ is infinite, or \f$z\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN for all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 432 ulpN on gcc and CUDA (7 ulpL, no backend specified in source); test bound 650.0 ulpN (12.0 ulpL).
+ *
+ * \see student, log_student_cdf(), log_student_cdf_d2()
+ */
 LAPLACE_HD shape_deriv<1> log_student_cdf_d1(double z, double nu) { return detail_st::order<1>(z, nu); }
+
+/**
+ * \ingroup student
+ * \brief Second mixed partial derivatives in \f$(z, \nu)\f$ of \f$\log T_\nu(z)\f$.
+ *
+ * Computes the second mixed partial derivatives:
+ * \f[
+ * c[0] = \frac{\partial^2}{\partial z^2} \log T_\nu(z), \quad
+ * c[1] = \frac{\partial^2}{\partial z \partial \nu} \log T_\nu(z), \quad
+ * c[2] = \frac{\partial^2}{\partial \nu^2} \log T_\nu(z)
+ * \f]
+ * where \f$z \in \mathbb{R}\f$ is the argument and \f$\nu \in (0, \infty)\f$ is the degrees of freedom.
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
+ * \return A shape_deriv of order 2 containing \f$c[j]\f$ for \f$j = 0, 1, 2\f$.
+ *
+ * \par Domain and special values
+ * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
+ * - \f$z = -\infty\f$: returns quiet NaN for all components.
+ * - \f$z = +\infty\f$: returns \f$0.0\f$ for all components.
+ * - \f$\nu \le 0\f$, or \f$\nu\f$ is infinite, or \f$z\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN for all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 525 ulpN on gcc and CUDA (23 ulpL, no backend specified in source); test bound 800.0 ulpN (35.0 ulpL).
+ *
+ * \see student, log_student_cdf(), log_student_cdf_d1(), log_student_cdf_d3()
+ */
 LAPLACE_HD shape_deriv<2> log_student_cdf_d2(double z, double nu) { return detail_st::order<2>(z, nu); }
+
+/**
+ * \ingroup student
+ * \brief Third mixed partial derivatives in \f$(z, \nu)\f$ of \f$\log T_\nu(z)\f$.
+ *
+ * Computes the third mixed partial derivatives:
+ * \f[
+ * c[j] = \frac{\partial^3}{\partial z^{3-j} \partial \nu^j} \log T_\nu(z), \quad j = 0, \dots, 3
+ * \f]
+ * where \f$z \in \mathbb{R}\f$ is the argument and \f$\nu \in (0, \infty)\f$ is the degrees of freedom:
+ * - \f$c[0] = \frac{\partial^3}{\partial z^3} \log T_\nu(z)\f$
+ * - \f$c[1] = \frac{\partial^3}{\partial z^2 \partial \nu} \log T_\nu(z)\f$
+ * - \f$c[2] = \frac{\partial^3}{\partial z \partial \nu^2} \log T_\nu(z)\f$
+ * - \f$c[3] = \frac{\partial^3}{\partial \nu^3} \log T_\nu(z)\f$
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
+ * \return A shape_deriv of order 3 containing \f$c[j]\f$ for \f$j = 0, \dots, 3\f$.
+ *
+ * \par Domain and special values
+ * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
+ * - \f$z = -\infty\f$: returns quiet NaN for all components.
+ * - \f$z = +\infty\f$: returns \f$0.0\f$ for all components.
+ * - \f$\nu \le 0\f$, or \f$\nu\f$ is infinite, or \f$z\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN for all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 337 ulpN on gcc, 319 ulpN on CUDA, and 33 ulpL (no backend specified in source); test bounds 510.0 ulpN, 18.0 ulp1 (for \f$c[0]\f$ near \f$z = 0\f$), 50.0 ulpL.
+ *
+ * \see student, log_student_cdf(), log_student_cdf_d2(), log_student_cdf_d4()
+ */
 LAPLACE_HD shape_deriv<3> log_student_cdf_d3(double z, double nu) { return detail_st::order<3>(z, nu); }
+
+/**
+ * \ingroup student
+ * \brief Fourth mixed partial derivatives in \f$(z, \nu)\f$ of \f$\log T_\nu(z)\f$.
+ *
+ * Computes the fourth mixed partial derivatives:
+ * \f[
+ * c[j] = \frac{\partial^4}{\partial z^{4-j} \partial \nu^j} \log T_\nu(z), \quad j = 0, \dots, 4
+ * \f]
+ * where \f$z \in \mathbb{R}\f$ is the argument and \f$\nu \in (0, \infty)\f$ is the degrees of freedom:
+ * - \f$c[0] = \frac{\partial^4}{\partial z^4} \log T_\nu(z)\f$
+ * - \f$c[1] = \frac{\partial^4}{\partial z^3 \partial \nu} \log T_\nu(z)\f$
+ * - \f$c[2] = \frac{\partial^4}{\partial z^2 \partial \nu^2} \log T_\nu(z)\f$
+ * - \f$c[3] = \frac{\partial^4}{\partial z \partial \nu^3} \log T_\nu(z)\f$
+ * - \f$c[4] = \frac{\partial^4}{\partial \nu^4} \log T_\nu(z)\f$
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
+ * \return A shape_deriv of order 4 containing \f$c[j]\f$ for \f$j = 0, \dots, 4\f$.
+ *
+ * \par Domain and special values
+ * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
+ * - \f$z = -\infty\f$: returns quiet NaN for all components.
+ * - \f$z = +\infty\f$: returns \f$0.0\f$ for all components.
+ * - \f$\nu \le 0\f$, or \f$\nu\f$ is infinite, or \f$z\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN for all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 281 ulpL (no backend specified in source), 506 ulpN on gcc, 1480 ulpN on CUDA; test bounds 2200.0 ulpN, 420.0 ulpL.
+ *
+ * \see student, log_student_cdf(), log_student_cdf_d3(), log_student_cdf_d5()
+ */
 LAPLACE_HD shape_deriv<4> log_student_cdf_d4(double z, double nu) { return detail_st::order<4>(z, nu); }
+
+/**
+ * \ingroup student
+ * \brief Fifth mixed partial derivatives in \f$(z, \nu)\f$ of \f$\log T_\nu(z)\f$.
+ *
+ * Computes the fifth mixed partial derivatives:
+ * \f[
+ * c[j] = \frac{\partial^5}{\partial z^{5-j} \partial \nu^j} \log T_\nu(z), \quad j = 0, \dots, 5
+ * \f]
+ * where \f$z \in \mathbb{R}\f$ is the argument and \f$\nu \in (0, \infty)\f$ is the degrees of freedom:
+ * - \f$c[0] = \frac{\partial^5}{\partial z^5} \log T_\nu(z)\f$
+ * - \f$c[1] = \frac{\partial^5}{\partial z^4 \partial \nu} \log T_\nu(z)\f$
+ * - \f$c[2] = \frac{\partial^5}{\partial z^3 \partial \nu^2} \log T_\nu(z)\f$
+ * - \f$c[3] = \frac{\partial^5}{\partial z^2 \partial \nu^3} \log T_\nu(z)\f$
+ * - \f$c[4] = \frac{\partial^5}{\partial z \partial \nu^4} \log T_\nu(z)\f$
+ * - \f$c[5] = \frac{\partial^5}{\partial \nu^5} \log T_\nu(z)\f$
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
+ * \return A shape_deriv of order 5 containing \f$c[j]\f$ for \f$j = 0, \dots, 5\f$.
+ *
+ * \par Domain and special values
+ * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
+ * - \f$z = -\infty\f$: returns quiet NaN for all components.
+ * - \f$z = +\infty\f$: returns \f$0.0\f$ for all components.
+ * - \f$\nu \le 0\f$, or \f$\nu\f$ is infinite, or \f$z\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN for all components.
+ *
+ * \par Measured accuracy
+ * Maximum error 470 ulpN on gcc and CUDA (96 ulpL, no backend specified in source); test bounds 710.0 ulpN, 145.0 ulp1 (for \f$c[0]\f$ near \f$z = 0\f$), 145.0 ulpL.
+ *
+ * \see student, log_student_cdf(), log_student_cdf_d4()
+ */
 LAPLACE_HD shape_deriv<5> log_student_cdf_d5(double z, double nu) { return detail_st::order<5>(z, nu); }
 
 }  // namespace laplace::math::own

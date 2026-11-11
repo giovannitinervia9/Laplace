@@ -26,6 +26,44 @@ namespace laplace::math {
 
 namespace own {
 
+/**
+ * \ingroup gamma
+ * \brief Polygamma function \f$\psi^{(n)}(x) = \frac{\mathrm{d}^{n+1}}{\mathrm{d}x^{n+1}} \log \Gamma(x)\f$ of order \f$n \in \{0, \dots, 6\}\f$ via recurrence and asymptotic expansion.
+ *
+ * Computes the \f$n\f$-th derivative of the digamma function:
+ * \f[
+ * \psi^{(n)}(x) = \frac{\mathrm{d}^n}{\mathrm{d}x^n} \psi(x) = \frac{\mathrm{d}^{n+1}}{\mathrm{d}x^{n+1}} \log \Gamma(x)
+ * \f]
+ * where \f$n \in \{0, \dots, 6\}\f$ is the non-negative integer order and \f$x \in (0, \infty)\f$ is the positive real argument.
+ *
+ * For \f$x < X_0 = 15.0\f$, shifts up to \f$z = x + m \ge 15.0\f$ with \f$m = \lfloor X_0 - x \rfloor + 1\f$ using the recurrence
+ * \f[
+ * \psi^{(n)}(x) = \psi^{(n)}(x + m) + (-1)^{n+1} n! \sum_{j=0}^{m-1} (x + j)^{-(n+1)}
+ * \f]
+ * and evaluates the asymptotic expansion at \f$z\f$ in even Bernoulli numbers \f$B_2 \dots B_{20}\f$.
+ *
+ * \param n Derivative order \f$n \in \{0, \dots, 6\}\f$.
+ * \param x Positive argument \f$x \in (0, \infty)\f$.
+ * \return The value of \f$\psi^{(n)}(x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$x \in (0, \infty)\f$, \f$n \in \{0, \dots, 6\}\f$: standard domain.
+ * - If \f$x \le 0\f$, \f$x\f$ is NaN, \f$n < 0\f$, or \f$n > 6\f$: returns quiet NaN.
+ * - Overflows to \f$\pm\infty\f$ for small \f$x\f$ and higher orders.
+ *
+ * \par Measured accuracy
+ * Maximum error by order:
+ * - \f$n = 0\f$: 8.1 ulp1 (relative error unbounded near the root \f$x_0 \approx 1.4616321449683623\f$).
+ * - \f$n = 1\f$: 2.89 ulp (2.11 ulp1).
+ * - \f$n = 2\f$: 3.36 ulp (test bound 5.0 ulp).
+ * - \f$n = 3\f$: 5.26 ulp (test bound 8.0 ulp).
+ * - \f$n = 4\f$: 6.34 ulp (test bound 9.5 ulp).
+ * - \f$n = 5\f$: 7.90 ulp (test bound 12.0 ulp).
+ * - \f$n = 6\f$: 9.44 ulp (test bound 14.0 ulp).
+ * For orders \f$n \in \{2, \dots, 6\}\f$ across the reference points (`tests/data/reference/polygamma{2..6}.csv`), errors stay below \f$2.1 \times 10^{-15}\f$ relative.
+ *
+ * \see gamma, digamma(), trigamma()
+ */
 LAPLACE_HD double polygamma(int n, double x) {
   // B_2k for k = 1..10
   constexpr double B[10] = {1.0 / 6.0,           -1.0 / 30.0,        1.0 / 42.0,
@@ -82,7 +120,53 @@ LAPLACE_HD double polygamma(int n, double x) {
   return (n % 2 == 1) ? result : -result;
 }
 
+/**
+ * \ingroup gamma
+ * \brief Digamma function \f$\psi(x) = \psi^{(0)}(x)\f$ via asymptotic expansion and recurrence.
+ *
+ * Computes the digamma function:
+ * \f[
+ * \psi(x) = \frac{\mathrm{d}}{\mathrm{d}x} \log \Gamma(x)
+ * \f]
+ * by calling polygamma(0, x).
+ *
+ * \param x Positive argument \f$x \in (0, \infty)\f$.
+ * \return The value of \f$\psi(x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$x \in (0, \infty)\f$: standard domain.
+ * - At the positive root \f$x_0 \approx 1.4616321449683623\f$: relative error is unbounded; absolute error is 8.1 ulp1.
+ * - If \f$x \le 0\f$, or \f$x\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 8.1 ulp1 (relative error unbounded near the root \f$x_0\f$); the source specifies no backend.
+ *
+ * \see gamma, polygamma(), trigamma()
+ */
 LAPLACE_HD_FORCEINLINE double digamma(double x) { return polygamma(0, x); }
+
+/**
+ * \ingroup gamma
+ * \brief Trigamma function \f$\psi'(x) = \psi^{(1)}(x)\f$ via asymptotic expansion and recurrence.
+ *
+ * Computes the trigamma function:
+ * \f[
+ * \psi_1(x) = \psi'(x) = \frac{\mathrm{d}^2}{\mathrm{d}x^2} \log \Gamma(x)
+ * \f]
+ * by calling polygamma(1, x).
+ *
+ * \param x Positive argument \f$x \in (0, \infty)\f$.
+ * \return The value of \f$\psi'(x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$x \in (0, \infty)\f$: standard domain.
+ * - If \f$x \le 0\f$, or \f$x\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 2.89 ulp (2.11 ulp1); the source specifies no backend.
+ *
+ * \see gamma, polygamma(), digamma()
+ */
 LAPLACE_HD_FORCEINLINE double trigamma(double x) { return polygamma(1, x); }
 
 }  // namespace own

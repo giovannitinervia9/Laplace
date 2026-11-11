@@ -1,0 +1,265 @@
+/**
+\defgroup owen Owen's T function and the skew normal distribution function
+\ingroup special
+\brief Owen's \f$T\f$ function, \f$T(h, a)\f$, and the logarithm of the standard skew normal distribution function, \f$\log F(z; \alpha)\f$, with its derivatives in \f$(z, \alpha)\f$ to order 5.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Mathematical definitions
+
+Owen's \f$T\f$ function is defined by the integral
+\f[
+T(h, a) = \frac{1}{2\pi} \int_0^a \frac{e^{-h^2 (1 + s^2)/2}}{1 + s^2} \, \mathrm{d}s
+\f]
+where:
+- \f$h \in \mathbb{R}\f$ is the first argument,
+- \f$a \in \mathbb{R}\f$ is the second argument,
+- \f$s \in \mathbb{R}\f$ is the real integration variable.
+
+The function satisfies the symmetry relations:
+- **Symmetry in the first argument.** \f$T(-h, a) = T(h, a)\f$
+- **Symmetry in the second argument.** \f$T(h, -a) = -T(h, a)\f$
+
+Special values include \f$T(h, 0) = 0\f$, \f$T(0, a) = \frac{1}{2\pi} \arctan a\f$, and \f$T(h, 1) = \frac{1}{2}\Phi(h)(1 - \Phi(h))\f$, where \f$\Phi\f$ is the standard normal distribution function. For positive arguments, Owen's \f$T\f$ satisfies the addition identity
+\f[
+T(h, a) + T(a h, 1/a) = \frac{1}{2}(Q(h) + Q(a h)) - Q(h) Q(a h)
+\f]
+where \f$Q(h) = \Phi(-h) = \frac{1}{2}\mathrm{erfc}(h / \sqrt{2})\f$.
+
+The distribution function of the standard skew normal distrib with real argument \f$z\f$ and real shape parameter \f$\alpha\f$, denoted \f$F(z; \alpha)\f$, is defined by
+\f[
+F(z; \alpha) = 2 \int_{-\infty}^z \phi(t) \Phi(\alpha t) \, \mathrm{d}t = \Phi(z) - 2 T(z, \alpha)
+\f]
+where:
+- \f$\phi(t) = \frac{1}{\sqrt{2\pi}} e^{-t^2/2}\f$ is the standard normal probability density,
+- \f$\Phi(u) = \int_{-\infty}^u \phi(t) \, \mathrm{d}t\f$ is the standard normal distribution function,
+- \f$z \in \mathbb{R}\f$ is the real argument,
+- \f$\alpha \in \mathbb{R}\f$ is the real shape parameter,
+- \f$t \in (-\infty, z]\f$ is the real integration variable.
+
+The distribution function satisfies the reflection relation
+\f[
+1 - F(z; \alpha) = F(-z; -\alpha)
+\f]
+for all \f$z, \alpha \in \mathbb{R}\f$.
+
+## Motivation: logarithmic scale and cancellation-free representations
+
+Laplace computes \f$\log F(z; \alpha)\f$ and its partial derivatives with respect to \f$z\f$ and \f$\alpha\f$ to total order 5,
+\f[
+c_j = \frac{\partial^K}{\partial z^{K-j} \partial \alpha^j} \log F(z; \alpha), \quad j = 0, \dots, K, \quad K = 1, \dots, 5,
+\f]
+rather than \f$F(z; \alpha)\f$ directly through \f$\Phi(z) - 2 T(z, \alpha)\f$, for several reasons:
+
+1. **Avoidance of catastrophic cancellation in the lower tail:** As \f$z \to -\infty\f$, \f$F(z; \alpha)\f$ becomes extremely small. The direct formula \f$\Phi(z) - 2 T(z, \alpha)\f$ subtracts two nearly equal positive quantities, producing errors up to \f$8.9 \times 10^{15}\f$ ulp and 78 non-finite values in IEEE 754 double precision (`docs/numerics.md`). In contrast, \f$\log F(z; \alpha)\f$ maintains relative accuracy on the 800 reference rows, deep tails included (maximum measured error 5.0 ulp in `docs/numerics.md`).
+2. **Derivative conditioning:** The derivatives of \f$F(z; \alpha)\f$ are elementary, but composing the elementary series derivatives of \f$F\f$ everywhere (the baseline of method 1) cancels catastrophically, producing \f$9 \times 10^{15}\f$ ulp error and 94 non-finite values at order 1 (`docs/numerics.md`). Formulating the derivatives through bivariate series of integral moments and scale-separated ratios avoids this catastrophic cancellation (measured errors reach 2240 ulpN at order 3 and \f$1.16 \times 10^5\f$ ulpN at order 5 near zeros where derivative components are ill-conditioned).
+
+## Domain and symmetry
+
+- **Domain:** Defined for all \f$h, a \in \mathbb{R}\f$ in Owen's \f$T\f$, and for all \f$z, \alpha \in \mathbb{R}\f$ in \f$\log F(z; \alpha)\f$ and its derivatives.
+- **Symmetry and reflection:**
+  - Owen's \f$T\f$: \f$T(-h, a) = T(h, a)\f$ and \f$T(h, -a) = -T(h, a)\f$.
+  - Skew normal distribution function: \f$1 - F(z; \alpha) = F(-z; -\alpha)\f$.
+- **Special values and boundaries:**
+  - If any input argument is NaN: returns quiet NaN.
+  - In Owen's \f$T\f$:
+    - \f$T(h, 0) = 0.0\f$;
+    - \f$T(0, a) = \frac{1}{2\pi}\arctan a\f$;
+    - \f$T(h, 1) = \frac{1}{2}\Phi(h)(1 - \Phi(h))\f$;
+    - At \f$h = \pm\infty\f$: returns \f$0.0\f$ (with the sign of \f$a\f$);
+    - At \f$a = +\infty\f$ with finite \f$h\f$: returns \f$\Phi(-h)/2\f$;
+    - At \f$a = -\infty\f$ with finite \f$h\f$: returns \f$-\Phi(-h)/2\f$.
+  - In \f$\log F(z; \alpha)\f$:
+    - At \f$\alpha = 0\f$: \f$F(z; 0) = \Phi(z)\f$, yielding \f$\log F(z; 0) = \log \Phi(z)\f$.
+    - As \f$z \to -\infty\f$: returns \f$-\infty\f$.
+    - As \f$z \to +\infty\f$: returns \f$0.0\f$ (\f$F \to 1\f$).
+
+## Numerical methods and regimes
+
+### Representation of the lower tail
+
+For \f$z = -h \le 0\f$, let \f$h = -z \ge 0\f$, \f$\eta = h^2 / 2\f$, and \f$\beta = \alpha h\f$.
+Laplace uses the integral representation
+\f[
+F(-h; \alpha) = \frac{1}{\pi} e^{-\eta} G(h, \alpha), \quad G(h, \alpha) = \int_\alpha^\infty \frac{e^{-\eta b^2}}{1 + b^2} \, \mathrm{d}b
+\f]
+where \f$b \in [\alpha, \infty)\f$ is the real integration variable. Because \f$\frac{\partial F}{\partial \alpha} = -\frac{e^{-(1+\alpha^2) z^2/2}}{\pi(1+\alpha^2)}\f$ and \f$F(z; +\infty) = 0\f$ for \f$z < 0\f$, \f$G(h, \alpha)\f$ is an integral of a strictly positive function.
+
+Letting \f$G_0 = G(h, 0) = \frac{\pi}{2} \mathrm{erfcx}(h / \sqrt{2})\f$, where \f$\mathrm{erfcx}(x) = e^{x^2}\mathrm{erfc}(x)\f$, the integral \f$G(h, \alpha)\f$ is evaluated in three forms that avoid cancellation and underflow:
+1. **Positive shape parameter** (\f$\alpha > 0\f$):
+   \f[
+   G(h, \alpha) = e^{-\eta \alpha^2} \bar{J}(h, \alpha)
+   \f]
+   where
+   \f[
+   \bar{J}(h, a) = \int_0^\infty \frac{e^{-h^2 (a u + u^2 / 2)}}{1 + (a + u)^2} \, \mathrm{d}u = \frac{1}{h} \int_0^\infty e^{-\beta y - y^2/2} r(a + y/h) \, \mathrm{d}y
+   \f]
+   with \f$r(x) = \frac{1}{1 + x^2}\f$, and \f$y \in [0, \infty)\f$ the integration variable.
+   The logarithm is then evaluated as
+   \f[
+   \log F = -\eta (1 + \alpha^2) - \log \pi + \log \bar{J}
+   \f]
+   where the quadratic term \f$-\eta (1 + \alpha^2) = -(1 + \alpha^2) h^2 / 2\f$ accounts for the cancellation of the far lower tail in closed form.
+   The integral \f$\bar{J}\f$ is evaluated by fixed Gauss quadrature rules chosen by the distance \f$D = \sqrt{h^2 + \beta^2}\f$ of the integrand poles \f$y = -\beta \pm i h\f$ from \f$y = 0\f$:
+   - For \f$D \ge 2\f$ and \f$\beta \ge 4\f$: 20-node Gauss-Laguerre quadrature in \f$t = \beta y + y^2/2\f$ with weight \f$e^{-t}\f$.
+   - For \f$D \ge 2\f$ and \f$\beta < 4\f$: 28-node half-range Gauss-Hermite quadrature in \f$y\f$ with weight \f$e^{-y^2/2}\f$ on \f$y > 0\f$.
+   - For \f$D < 2\f$: 16-point Gauss-Legendre quadrature on pieces of \f$y\f$ graded away from the poles (interval length \f$\le y + D\f$, increase of \f$t \le 20\f$, up to \f$t = 60\f$, using up to 96 nodes).
+2. **Small product** (\f$|\beta|\f$ small):
+   \f[
+   G(h, \alpha) = G_0 - \tilde{T}(h, \alpha), \quad \tilde{T}(h, \alpha) = \int_0^\alpha \frac{e^{-\eta s^2}}{1 + s^2} \, \mathrm{d}s
+   \f]
+   where \f$s \in [0, \alpha]\f$ is the integration variable, evaluated by 16-point Gauss-Legendre quadrature.
+3. **Negative shape parameter** (\f$\alpha = -a < 0\f$, \f$|\beta|\f$ larger):
+   \f[
+   G(h, \alpha) = 2 G_0 - e^{-\eta a^2} \bar{J}(h, a).
+   \f]
+
+### Distribution function regimes
+
+The value \f$\log F(z; \alpha)\f$ is computed across the following regions:
+
+- For \f$z = -h \le 0\f$:
+  - When \f$h < 1\f$: evaluated via \f$\bar{J}\f$ if \f$\beta \ge 0.8\f$; otherwise (small \f$\beta\f$), evaluated from Owen's \f$T\f$ for the value of \f$F(-h; \alpha)\f$ and from the elementary series for the derivatives:
+    - for \f$\alpha \le 1\f$: via \f$G_0 - \tilde{T}\f$;
+    - for \f$\alpha > 1\f$: via \f$2 T(a h, 1/a) - Q(a h) \mathrm{erf}(h / \sqrt{2})\f$;
+    - for \f$\alpha = -a < 0\f$: via \f$Q(h) + 2 T(h, a)\f$, through \f$1 - F = \mathrm{erf}(h / \sqrt{2}) + F(-h; a)\f$ near \f$F = 1\f$.
+  - When \f$h \ge 1\f$:
+    - for \f$|\beta| \le 0.5\f$: via \f$G_0 - \tilde{T}\f$;
+    - for \f$\beta > 0.5\f$: via \f$\bar{J}\f$;
+    - for \f$\beta < -0.5\f$: via \f$2 G_0 - e^{-\eta a^2} \bar{J}(h, a)\f$.
+- For \f$z > 0\f$:
+  Let \f$S = F(-z; -\alpha)\f$:
+  - If \f$S \le 1/2\f$: \f$F = 1 - S\f$ and \f$\log F = \mathrm{log1p}(-S)\f$.
+  - If \f$S > 1/2\f$ (which occurs only for \f$z < 0.68\f$ and \f$\alpha > 0\f$): \f$F = \mathrm{erf}(z / \sqrt{2}) + F(-z; \alpha)\f$ (both terms positive), and \f$\log F = \log(\mathrm{erf}(z / \sqrt{2}) + F(-z; \alpha))\f$.
+
+### Regimes for Owen function
+
+For \f$h \ge 0\f$ and \f$a \ge 0\f$ (extended to all \f$h, a\f$ by parity):
+1. For \f$a \le 1\f$ and \f$a h \le 2\f$:
+   \f[
+   T(h, a) = \frac{e^{-\eta}}{2\pi} \tilde{T}(h, a).
+   \f]
+2. For \f$a \le 1\f$ and \f$a h > 2\f$:
+   \f[
+   T(h, a) = \frac{1}{2}(Q(h) - F(-h; a))
+   \f]
+   where \f$F(-h; a)\f$ is small compared to \f$Q(h)\f$.
+3. For \f$a > 1\f$:
+   \f[
+   T(h, a) = \frac{1}{2}\left(Q(h) \mathrm{erf}\left(\frac{a h}{\sqrt{2}}\right) + F\left(-a h; \frac{1}{a}\right)\right)
+   \f]
+   evaluated as a sum of positive terms using Owen's identity.
+
+### Derivatives of the log distribution function
+
+Each derivative order \f$K \in \{1, \dots, 5\}\f$ returns an instance of `shape_deriv<K>` whose component \f$c_j\f$ (`c[j]`) corresponds to \f$\frac{\partial^K}{\partial z^{K-j} \partial \alpha^j} \log F(z; \alpha)\f$ for \f$j = 0, \dots, K\f$:
+
+- **First order:** Evaluated via closed forms:
+  \f[
+  \frac{\partial}{\partial z} \log F = \frac{f}{F}, \quad \frac{\partial}{\partial \alpha} \log F = -\frac{g}{F}
+  \f]
+  where \f$f = 2 \phi(z) \Phi(\alpha z)\f$ and \f$g = \frac{e^{-(1+\alpha^2) z^2/2}}{\pi (1 + \alpha^2)}\f$, with Gaussian factors cancelled analytically:
+  - In the \f$\bar{J}\f$ region:
+    \f[
+    \frac{f}{F} = \sqrt{\frac{\pi}{2}} \frac{\mathrm{erfcx}(\alpha h / \sqrt{2})}{\bar{J}}, \quad \frac{g}{F} = \frac{1}{(1 + \alpha^2) \bar{J}}.
+    \f]
+  - In the \f$G\f$ regions:
+    \f[
+    \frac{f}{F} = \sqrt{2\pi} \frac{\Phi(-\alpha h)}{G}, \quad \frac{g}{F} = \frac{e^{-(\alpha h)^2/2}}{(1 + \alpha^2) G}.
+    \f]
+  - Elsewhere (\f$z > 0\f$, or \f$|z| < 1\f$ with small \f$\beta\f$): \f$f/F\f$ and \f$g/F\f$ are computed using scale separation \f$m e^{-\sigma}\f$ (where \f$m\f$ is a multiplier and \f$\sigma\f$ an exponent shift, represented by `struct scale` in the header, keeping factors apart because they can lie below the double range while the derivatives do not) to avoid premature underflow.
+- **Higher orders 2 to 5:**
+  - In the \f$\bar{J}\f$ region: evaluated from bivariate Taylor coefficients in the displacement variables \f$(d, e)\f$ at \f$(h+d, a+e)\f$ (where \f$d\f$ is the displacement in \f$h\f$ and \f$e\f$ is the displacement in \f$a\f$) constructed from node moments \f$\sum w y^m c_k (y/h)^l\f$, where \f$w\f$ is the quadrature weight at node \f$y\f$, \f$m, l \in \{0, \dots, K\}\f$ are non-negative integer powers, and \f$r(x + s) = \sum c_k s^k\f$ with \f$c_k = (-1)^{k+1} \mathrm{Im}(x + i)^{-(k+1)}\f$ for local expansion variable \f$s\f$, followed by the bivariate series logarithm and the closed-form quadratic.
+  - In the \f$G_0 - \tilde{T}\f$ region: \f$\log G_0\f$ is obtained from the cumulants of the variable \f$s > 0\f$ under the weight \f$e^{-h s - s^2/2}\f$ on \f$s \in (0, \infty)\f$, \f$\log(1 - \tilde{T}/G_0)\f$ in \f$h\f$ from moments of \f$\tilde{T}\f$, and derivatives in \f$\alpha\f$ from \f$\frac{\partial}{\partial \alpha} \log G = -\frac{e^{-\eta \alpha^2}}{(1+\alpha^2) G}\f$ integrated column by column in \f$\alpha\f$.
+  - In the \f$2 G_0 - \dots\f$ region: \f$\log(2 G_0) + \log(1 - \varepsilon)\f$ with \f$\varepsilon = \frac{e^{-\eta a^2} \bar{J}(h, a)}{2 G_0} \le 1/2\f$.
+  - Elsewhere: \f$\frac{\partial}{\partial z} \log F = f/F\f$ solved order by order in \f$z\f$, and \f$\frac{\partial}{\partial \alpha} \log F = -g/F\f$ column by column in \f$\alpha\f$, maintaining scale separation \f$m e^{-\sigma}\f$.
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
+
+Reference values were computed using arbitrary-precision arithmetic with `mpmath` via `tools/reference/student_owen.py`:
+- `owens_t.csv` (3006 rows): evaluated by double-exponential quadrature of the definition at 200 and 280 bits, with all kept rows agreeing to \f$2^{-100}\f$ relative.
+- `log_sn_cdf*.csv` (800 rows): value evaluated as a sum of positive terms, and derivatives of \f$F\f$ elementary with Hermite polynomials composed with the logarithm, evaluated at 280 and 360 bits, agreeing to \f$2^{-100}\f$, and checked against \f$2 \phi \Phi / F\f$ and \f$\Phi - 2T\f$.
+
+Error is quantified in:
+- \f$\text{ulp}\f$: relative error in units in the last place of the exact value, \f$|y - \text{exact}| / \text{ulp}(\max(|\text{exact}|, 2^{-1022}))\f$.
+- \f$\text{ulpN}\f$: error in units in the last place of \f$\max(|f|, N_{K-j, j}, 2^{-1022})\f$, where \f$N_{ij} = |f_{K0}|^{i/K} |f_{0K}|^{j/K}\f$ is the geometric mean scale of the pure components of that order.
+- \f$\text{ulpL}\f$: logarithmic error, \f$\text{ulp} / \max(1, |\log |f||)\f$ or \f$\text{ulpN} / \max(1, |\log |f||)\f$.
+
+### Value accuracy
+
+- \ref laplace::math::own::owens_t "owens_t()": measured maximum error is **4.44 ulp** (2.24 ulpL) on gcc (OpenMP) and **4.08 ulp** (1.95 ulpL) on CUDA (test bound: **6.7 ulp**, 3.4 ulpL). In comparison, Boost.Math's `owens_t` on the host reaches 1350 ulp at \f$h = 35, a = -1122\f$, and plain quadrature with the traditional identity reaches \f$6.6 \times 10^{12}\f$ ulp.
+- \ref laplace::math::own::log_sn_cdf "log_sn_cdf()": measured maximum error is **5.0 ulp** (3.6 ulpL) on both gcc and CUDA (test bound: **7.5 ulp**, 5.5 ulpL). In comparison, the standard formula \f$\log(\Phi - 2T)\f$ reaches \f$8.9 \times 10^{15}\f$ ulp error and produces 78 non-finite values (34 non-finite values with Boost's \f$T\f$).
+
+### Derivative accuracy
+
+| Function | Order \f$K\f$ | Measured max error gcc (ulpN) | Measured max error CUDA (ulpN) | Test bound (ulpN) | Test bound (ulpL) |
+|---|---|---|---|---|---|
+| \ref laplace::math::own::log_sn_cdf_d1 "log_sn_cdf_d1()" | 1 | 4.8 (4.3 ulpL) | 5.1 (4.3 ulpL) | 7.7 | 6.5 |
+| \ref laplace::math::own::log_sn_cdf_d2 "log_sn_cdf_d2()" | 2 | 206 (24 ulpL) | 198 (24 ulpL) | 310.0 | 37.0 |
+| \ref laplace::math::own::log_sn_cdf_d3 "log_sn_cdf_d3()" | 3 | 2240 (501 ulpL) | 2150 (481 ulpL) | 3400.0 | 760.0 |
+| \ref laplace::math::own::log_sn_cdf_d4 "log_sn_cdf_d4()" | 4 | 1500 (777 ulpL) | 1490 (784 ulpL) | 2300.0 | 1200.0 |
+| \ref laplace::math::own::log_sn_cdf_d5 "log_sn_cdf_d5()" | 5 | 1.16e5 (2.7e4 ulpL) | 1.17e5 (2.8e4 ulpL) | 1.8e5 | 4.2e4 |
+
+Across regions (measured on order 5 in ulpN, reported without backend in the source):
+- **Lower tail** (\f$\alpha > 0\f$): \f$1.4 \times 10^4\f$ ulpN (in the build with own exp and log on the host, error in the large-\f$\alpha\f$ region goes from \f$1.4 \times 10^4\f$ to \f$2.8 \times 10^4\f$ ulp1 near the zeros; ulp1 is a different metric defined on \ref accuracy "How accuracy is measured").
+- **Lower tail** (\f$\alpha < 0\f$): \f$1.3 \times 10^3\f$ ulpN.
+- **Upper tail:** 100 ulpN.
+- **Centre:** \f$1.2 \times 10^5\f$ ulpN.
+
+Near their zeros, the derivative components of orders 3 to 5 are ill-conditioned with respect to \f$F\f$: a 1-ulp variation in \f$F\f$ shifts the derivative by up to \f$1.4 \times 10^4\f$ to \f$2.9 \times 10^4\f$ of its own ulps (measured with mpmath, e.g. \f$c_0\f$ of order 5 at \f$z = -0.198, \alpha = 1.30\f$). The observed errors match \f$F\f$ and \f$f\f$ computed to within 2–8 ulps.
+
+### Timings
+
+Measured in nanoseconds per call on one gcc thread, OpenMP (8 threads), and CUDA (RTX 4070 SUPER):
+- \ref laplace::math::own::owens_t "owens_t()": 740 / 106 / 25 ns/call (Boost's `owens_t`: 153–239 ns/call on gcc).
+- \ref laplace::math::own::log_sn_cdf "log_sn_cdf()": 816 / 114 / 121 ns/call.
+- Derivative functions \ref laplace::math::own::log_sn_cdf_d1 "log_sn_cdf_d1()" through \ref laplace::math::own::log_sn_cdf_d5 "log_sn_cdf_d5()": 876–2485 / 118–434 / 114–236 ns/call (from the earlier measurement in `docs/numerics.md`).
+- In the later section of `docs/numerics.md`, on one gcc thread with Laplace's own elementary functions on the host, derivative orders 4 and 5 evaluate in 1478 and 1670 ns/call (-32% and -29% relative to baseline timings of 2165 and 2361 ns/call with the platform exp and log).
+
+## Example
+
+The following example evaluates \f$\log F(z; \alpha)\f$, Owen's \f$T(z, \alpha)\f$, and the first derivatives inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/math/owen.hpp>
+#include <Kokkos_Core.hpp>
+
+void compute_skew_normal(const Kokkos::View<const double*>& z,
+                         const Kokkos::View<const double*>& alpha,
+                         Kokkos::View<double*>& log_f,
+                         Kokkos::View<double*>& t_val,
+                         Kokkos::View<double*>& dz,
+                         Kokkos::View<double*>& dalpha,
+                         int n) {
+  Kokkos::parallel_for("eval_skew_normal", n, KOKKOS_LAMBDA(const int i) {
+    const double z_val     = z(i);
+    const double alpha_val = alpha(i);
+    log_f(i) = laplace::math::log_sn_cdf(z_val, alpha_val);
+    t_val(i) = laplace::math::owens_t(z_val, alpha_val);
+    const auto d1 = laplace::math::log_sn_cdf_d1(z_val, alpha_val);
+    dz(i)     = d1.c[0];
+    dalpha(i) = d1.c[1];
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+### Types
+
+- \ref laplace::math::own::shape_deriv "shape_deriv" — Container holding \f$K + 1\f$ mixed partial derivative components of order \f$K\f$
+
+### Function values and derivatives
+
+- \ref laplace::math::own::owens_t "owens_t()" — Owen's \f$T\f$ function \f$T(h, a)\f$
+- \ref laplace::math::own::log_sn_cdf "log_sn_cdf()" — logarithm of the standard skew normal distribution function \f$\log F(z; \alpha)\f$
+- \ref laplace::math::own::log_sn_cdf_d1 "log_sn_cdf_d1()" — first derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$
+- \ref laplace::math::own::log_sn_cdf_d2 "log_sn_cdf_d2()" — second derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$
+- \ref laplace::math::own::log_sn_cdf_d3 "log_sn_cdf_d3()" — third derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$
+- \ref laplace::math::own::log_sn_cdf_d4 "log_sn_cdf_d4()" — fourth derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$
+- \ref laplace::math::own::log_sn_cdf_d5 "log_sn_cdf_d5()" — fifth derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$
+*/
