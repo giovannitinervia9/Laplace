@@ -987,3 +987,48 @@ computation of one function's derivatives, not a general jet type. The cost of
 the double-double region (Steed's fraction needs about 200/x steps) is the
 price of the one-ulp derivatives at moderate x; the pseudo-Huber families sit
 there (nu = 0..4, x = sqrt(nu_ph)).
+
+## Faa di Bruno's formula and the partial Bell polynomials to order 7
+
+**What.** `include/laplace/math/faa_di_bruno.hpp`: `bell_partial(n, k, g)`, the
+partial Bell polynomials B_(n,k)(g_1, ..., g_(n-k+1)) for 1 <= k <= n <= 7,
+and `compose_d1..d7(f, g)` = d^N/dx^N f(g(x)) = sum_k f^(k)(g(x)) B_(N,k)(g', ...),
+the arrays indexed by derivative order. They carry a distribution's
+derivatives in a parameter theta to the linear predictor of a link
+theta = h(eta) (phase 3), and mixed derivatives in several parameters, each
+with its own link, are sums of products of the B_(n,k) of each parameter.
+
+**How.** The 28 polynomials written out from sympy's `bell(n, k, ...)`, each a
+sum of monomials with positive integer coefficients; compose_dN sums
+f_k B_(N,k) from k = N down to 1.
+
+**Measurement.** References `faa_di_bruno.csv` (tools/reference/faa_di_bruno.py):
+1950 rows, 1500 with derivatives drawn at random (magnitudes log-uniform on
+(2^-10, 2^10), random signs) and 450 from compositions met in practice (outer
+log, exp, lgamma, log Phi, x^-1/2; inner exp, logistic, Phi, x^2, sqrt, log, at
+random points, derivatives by mpmath.diff rounded to doubles). The expected
+values are exact on the double inputs, by composition of truncated Taylor
+series at 300 bits (independent of the Bell polynomials). Error in ulps of
+S = sum_k |f_k| B_(N,k)(|g|), the sum of the absolute values of the terms,
+gcc / CUDA:
+
+| order | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| ulps of S | 0.5 / 0.5 | 1.73 / 1.73 | 2.21 / 2.21 | 3.08 / 3.03 | 3.05 / 3.05 | 3.96 / 3.96 | 5.03 / 5.03 |
+
+In plain ulps the error reaches 1e16-1e18 on the practical cases whose
+derivative is zero or nearly so (log(exp(x)) = x has zero derivatives from
+order two on): there the result is the cancellation of the rounded inputs and
+no order of summation recovers it. ns/call (the 16 inputs read from memory):
+2.8-6.6 on one gcc thread, 1.7-1.9 with 16 threads, 0.31 on CUDA. The
+polynomials are also checked exactly against the Stirling numbers
+B_(n,k)(1, 1, ...) = S(n, k) and against B_(n,k)(1, 2, 3, ...) = C(n, k) k^(n-k).
+
+**What this says.** The formula is backward stable: its error is a few
+roundings of its largest term.
+
+**Chosen.** This version. Tested in `tests/math/test_faa_di_bruno.cpp` on both
+builds.
+
+**Open.** The multivariate assembly (mixed derivatives through several links)
+is written with the link layer, where its shape is known.

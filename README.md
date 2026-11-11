@@ -37,6 +37,7 @@ host and on the device, each one measured against 200-bit
 | `owen.hpp` | Owen's T function, log of the skew-normal cdf and its derivatives to order 5 |
 | `bessel_i.hpp` | `log_bessel_i0`, `log_bessel_i0_scaled`, the ratio I1/I0 and its inverse (von Mises), with derivatives to order 6, and the ratios I_j/I_0 (`bessel_i_ratios`) |
 | `bessel_k.hpp` | `log_bessel_k` for real order, and its derivatives in the argument to order 7 |
+| `faa_di_bruno.hpp` | `bell_partial`, and `compose_d1` to `compose_d7` (derivatives of f(g(x))) |
 
 Every function is a separate function per derivative order, takes and returns
 `double`, throws no exception and allocates no memory. The measured accuracy
