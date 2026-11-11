@@ -55,6 +55,9 @@ HTML_DYNAMIC_SECTIONS  = NO
 SEARCHENGINE           = YES
 SERVER_BASED_SEARCH    = NO
 
+HAVE_DOT               = NO
+GROUP_GRAPHS           = NO
+
 USE_MATHJAX            = YES
 MATHJAX_VERSION        = MathJax_3
 MATHJAX_FORMAT         = chtml
