@@ -1,0 +1,8 @@
+/**
+\defgroup math Mathematics
+\brief Numerical functions callable inside Kokkos kernels, on the host and on the device.
+
+\defgroup special Special functions
+\ingroup math
+\brief Gamma, beta, normal, Student t, Owen's T and Bessel functions, with their derivatives.
+*/

@@ -1,0 +1,177 @@
+/**
+\defgroup bessel_k Modified Bessel function of the second kind
+\ingroup special
+\brief Logarithm of the modified Bessel function of the second kind, \f$\log K_\nu(x)\f$, and its derivatives in \f$x\f$ to order 7.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Mathematical definition
+
+The modified Bessel function of the second kind of real order \f$\nu\f$ and positive argument \f$x\f$, denoted \f$K_\nu(x)\f$, is defined by the integral representation
+\f[
+K_\nu(x) = \int_0^\infty e^{-x \cosh t} \cosh(\nu t) \, \mathrm{d}t
+\f]
+where:
+- \f$\nu \in \mathbb{R}\f$ is the real order,
+- \f$x \in (0, \infty)\f$ is the positive real argument,
+- \f$t \in [0, \infty)\f$ is the real integration variable.
+
+The function is symmetric in the order:
+\f[
+K_{-\nu}(x) = K_\nu(x)
+\f]
+for all \f$\nu \in \mathbb{R}\f$ and \f$x > 0\f$.
+
+## Motivation: logarithmic scale and derivatives in x
+
+Laplace computes \f$\log K_\nu(x)\f$ and its derivatives with respect to \f$x\f$,
+\f[
+\frac{\mathrm{d}^n}{\mathrm{d}x^n} \log K_\nu(x), \quad n = 1, \dots, 7,
+\f]
+rather than \f$K_\nu(x)\f$ directly, for several reasons:
+
+1. **Avoidance of overflow and underflow:** As \f$x \to \infty\f$, \f$K_\nu(x) \sim \sqrt{\frac{\pi}{2x}} e^{-x}\f$ underflows IEEE 754 double precision. Conversely, as \f$x \to 0^+\f$ or as \f$|\nu|\f$ grows, \f$K_\nu(x)\f$ grows exponentially and overflows double precision. In contrast, \f$\log K_\nu(x)\f$ remains well-behaved across the entire floating-point exponent range, tested for orders up to \f$\nu = 2^{40}\f$ and arguments from \f$x = 2^{-30}\f$ to \f$2^{30}\f$ without underflow or overflow.
+2. **Derivative conditioning:** The derivatives of \f$\log K_\nu(x)\f$ are well-scaled quantities: as \f$x \to \infty\f$, \f$\frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x) \to -1\f$, while higher derivatives \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x) \to 0\f$ for \f$n \ge 2\f$. Derivatives of \f$K_\nu(x)\f$ itself would inherit the extreme underflow and overflow of \f$K_\nu(x)\f$.
+
+## Domain and symmetry
+
+- **Domain:** Defined for \f$x > 0\f$ and \f$\nu \in \mathbb{R}\f$.
+- **Symmetry in the order:** \f$\log K_{-\nu}(x) = \log K_\nu(x)\f$ and \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_{-\nu}(x) = \frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x)\f$. Negative orders are replaced by \f$|\nu|\f$ on entry.
+- **Special values and boundaries:**
+  - If \f$x < 0\f$, or if \f$x\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN.
+  - At \f$x = 0\f$: \f$\log K_\nu(0)\f$ returns \f$+\infty\f$; derivatives at \f$x \le 0\f$ return quiet NaN.
+  - For \f$x \ge 10^{308}\f$ (\f$x \to +\infty\f$): \f$\log K_\nu(x)\f$ returns \f$-x\f$ (\f$-\infty\f$); \f$\frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ returns \f$-1.0\f$; and higher derivatives (\f$n \ge 2\f$) return \f$0.0\f$.
+
+## Numerical methods and regimes
+
+### Value of log K_nu(x)
+
+The value \f$\log K_\nu(x)\f$ is computed across two regimes:
+
+1. **Uniform asymptotic (Debye) expansion** (\f$\nu \ge \nu_{\mathrm{debye}} = 20.0\f$): (DLMF 10.41.4)
+   \f[
+   \log K_\nu(x) = \frac{1}{2}\log\left(\frac{\pi}{2\nu}\right) - \nu \eta - \frac{1}{4}\log(1 + z^2) + \log P(t)
+   \f]
+   where:
+   - \f$z = x / \nu \in (0, \infty)\f$ is the scaled argument,
+   - \f$t = (1 + z^2)^{-1/2} \in (0, 1)\f$ is the algebraic parameter,
+   - \f$\eta = \sqrt{1 + z^2} + \log\left(\frac{z}{1 + \sqrt{1 + z^2}}\right) \in \mathbb{R}\f$,
+   - \f$P(t) = \sum_{k=0}^{16} \frac{(-1)^k u_k(t)}{\nu^k}\f$, where \f$u_k(t)\f$ are polynomials in \f$t\f$ with exact rational coefficients rounded once.
+   Summation terminates when a term is \f$\le 2^{-60}\f$.
+2. **Temme / Steed with forward recurrence** (\f$\nu < 20.0\f$):
+   Let \f$n = \mathrm{round}(\nu) \in \mathbb{Z}_{\ge 0}\f$ and \f$\mu = \nu - n \in [-1/2, 1/2]\f$:
+   - For \f$x \le 2.0\f$, \f$K_\mu(x)\f$ and \f$K_{\mu+1}(x)\f$ are computed via Temme's series (adapted from Boost.Math `boost/math/special_functions/detail/bessel_ik.hpp`).
+   - For \f$x > 2.0\f$, \f$\log K_\mu(x)\f$ and the ratio \f$r_0 = K_{\mu+1}(x) / K_\mu(x)\f$ are computed by Steed's continued fraction (scaled by \f$e^x\f$, no overflow).
+   - Forward recurrence on the ratio \f$r_k = K_{\mu+k+1}(x) / K_{\mu+k}(x)\f$:
+     \f[
+     r_{k+1} = \frac{2(\mu + k + 1)}{x} + \frac{1}{r_k}
+     \f]
+     is stable for \f$K\f$, yielding \f$\log K_\nu(x) = \log K_\mu(x) + \sum_{k=1}^n \log r_k\f$. The running product is kept in a single double precision accumulator, rescaled when exceeding \f$10^{280}\f$ to prevent overflow.
+
+### Derivatives of log K_nu(x) in x (orders 1 to 7)
+
+The derivatives in \f$x\f$ are computed across three regimes:
+
+1. **Differentiated Debye expansion** (\f$\nu \ge \nu_{\mathrm{debye}} = 20.0\f$):
+   Differentiated with \f$\frac{\mathrm{d}}{\mathrm{d}x} = \frac{1}{\nu}\frac{\mathrm{d}}{\mathrm{d}z}\f$:
+   - Derivatives of \f$\eta' = h = \frac{\sqrt{1+z^2}}{z}\f$ are computed from \f$h h' = -z^{-3}\f$ using Leibniz's rule.
+   - Derivatives of \f$q = \log(1 + z^2)\f$ are computed from \f$(1 + z^2) q' = 2z\f$.
+   - Derivatives of \f$\log P(t(z))\f$ are computed from Taylor coefficients of \f$P\f$ in \f$t\f$ at \f$t_0\f$, their series logarithm, composed with the Taylor series of \f$t(z)\f$ via \f$(1 + z^2) t' = -z t\f$.
+   Terms \f$0 \dots k-1\f$ are used once \f$\nu \ge \nu_{\mathrm{enough}}(k-1)\f$, where the first omitted term is below \f$2^{-60}\f$ of \f$P\f$ for all \f$t \in [0, 1]\f$.
+2. **Hankel asymptotic expansion** in \f$1/x\f$ (\f$\nu < 20.0\f$ and \f$x \ge x_{\mathrm{hankel}} = 200.0\f$): (DLMF 10.40.2)
+   \f[
+   K_\nu(x) \sim \sqrt{\frac{\pi}{2x}} e^{-x} S(x), \quad S(x) = \sum_{k=0}^\infty a_k x^{-k}, \quad a_k = \prod_{j=1}^k \frac{4\nu^2 - (2j - 1)^2}{8j}
+   \f]
+   with \f$a_0 = 1\f$. The series \f$S(x)\f$ is differentiated term by term, and derivatives of \f$\log S(x)\f$ are obtained via Faà di Bruno recursion. Because \f$S(x) \approx 1\f$, no cancellation occurs.
+3. **Riccati identity in double-double arithmetic** (\f$\nu < 20.0\f$ and \f$x < 200.0\f$):
+   The base derivative \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x) = \frac{\nu}{x} - \frac{K_{\nu+1}(x)}{K_\nu(x)}\f$ satisfies the Riccati identity that follows from Bessel's differential equation:
+   \f[
+   g' = 1 + \frac{\nu^2}{x^2} - \frac{g}{x} - g^2
+   \f]
+   where \f$g' = \frac{\mathrm{d}g}{\mathrm{d}x} = \frac{\mathrm{d}^2}{\mathrm{d}x^2}\log K_\nu(x)\f$. Differentiating this relation \f$n\f$ times in double-double arithmetic (`laplace::math::detail::ddm::dd`) overcomes the cancellation of roughly a factor \f$\max(\nu, x)\f$ per derivative order.
+   The starting ratio \f$K_{\mu+1}/K_\mu\f$ in double-double is obtained:
+   - for \f$x \ge x_{\mathrm{cf}} = 1.0\f$: from Steed's continued fraction evaluated forwards by its convergents \f$P_k / Q_k\f$ in double-double arithmetic (\f$2n+4\f$ steps where \f$n\f$ is the step count in double precision, rescaled by \f$2^{-500}\f$ when \f$|Q_1| > 2^{500}\f$).
+   - for \f$x < 1.0\f$: from Temme's series in double precision, followed by forward recurrence in double-double (each recurrence step damps error by about \f$\frac{x^2}{4(\mu+k)^2}\f$).
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
+
+The references are computed at \f$P = 256 + 8 \log_2(2 + \nu + x + 1/x)\f$ bits and checked at \f$P + 96\f$ bits (all rows agree to \f$2^{-110}\f$), from the integral representation, because mpmath's `besselk` fails near \f$\nu = 10^6\f$ (`docs/numerics.md`, `tests/math/test_bessel_k.cpp`).
+
+### Value accuracy
+
+Because a 1-ulp variation in \f$x\f$ shifts \f$\log K_\nu(x)\f$ by \f$|x g|\f$ ulps (where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$, and \f$|x g| \approx 1.2\nu\f$ near the turning point \f$x \approx 0.66\nu\f$ where \f$\log K_\nu(x)\f$ crosses zero), error is measured in units of the conditioning scale:
+\f[
+\text{ulpC} = \frac{|y - \text{exact}|}{\text{ulp}(\max(|\log K|, |x g|, 1))}
+\f]
+The measured maximum error is **4.8 ulp** on both gcc (OpenMP) and CUDA (test bound: **7.5 ulp**). In contrast, Boost.Math's `cyl_bessel_k`, when logged, reaches \f$2.9 \times 10^8\f$ ulp error and produces 1651 non-finite values.
+
+### Derivative accuracy
+
+| Function | Order \f$n\f$ | Measured max error gcc (ulp) | Measured max error CUDA (ulp) | Test bound (ulp) |
+|---|---|---|---|---|
+| \ref laplace::math::own::log_bessel_k_dx1 "log_bessel_k_dx1()" | 1 | 8.9 | — | 9.0 |
+| \ref laplace::math::own::log_bessel_k_dx2 "log_bessel_k_dx2()" | 2 | 44.4 | 37.4 | 66.0 |
+| \ref laplace::math::own::log_bessel_k_dx3 "log_bessel_k_dx3()" | 3 | 44.0 | 37.0 | 66.0 |
+| \ref laplace::math::own::log_bessel_k_dx4 "log_bessel_k_dx4()" | 4 | 24.1 | 25.6 | 36.0 |
+| \ref laplace::math::own::log_bessel_k_dx5 "log_bessel_k_dx5()" | 5 | 12.4 | — | 17.0 |
+| \ref laplace::math::own::log_bessel_k_dx6 "log_bessel_k_dx6()" | 6 | 21.9 | — | 33.0 |
+| \ref laplace::math::own::log_bessel_k_dx7 "log_bessel_k_dx7()" | 7 | 31.5 | — | 48.0 |
+
+Across regimes:
+- **Double-double Riccati region** (\f$x \ge 1.0\f$): within 0.5–0.66 ulp at every order. Plain double precision Riccati without double-double loses catastrophic accuracy (\f$1.3 \times 10^{20}\f$ ulp at order 2, \f$1.3 \times 10^{64}\f$ ulp at order 7).
+- **Temme region** (\f$x < 1.0\f$ with \f$\nu < 3/2\f$): cancellation in Temme's first coefficient \f$f_0 = \frac{(x/2)^{-\mu}\Gamma(1+\mu) - (x/2)^\mu\Gamma(1-\mu)}{2\mu}\f$ near \f$x = 1\f$ reaches up to 44.4 ulp for orders 2–3, amplified by Riccati recursion.
+- **Debye expansion** (\f$\nu \ge 20.0\f$): within 31.5 ulp (maximum at \f$\nu = 20.5, x = 20.0\f$).
+- **Asymptotic expansion** in \f$1/x\f$ (\f$x \ge 200.0\f$): within 9.1 ulp.
+
+### Timings
+
+Measured in nanoseconds per call on one gcc thread, OpenMP (16 threads), and CUDA (RTX 4070 SUPER) for order 4:
+- Continued fraction in double-double (\f$x \in (1, 16)\f$): 1222 / 128 / 53 ns/call.
+- Temme series (\f$x < 1\f$): 384 / 31 / 9.4 ns/call.
+- Asymptotic \f$1/x\f$ expansion (\f$x \ge 200\f$): 45 / 4.5 / 2.0 ns/call.
+- Debye expansion (\f$\nu \ge 20\f$): 214 / 23 / 17 ns/call.
+- Value \f$\log K_\nu(x)\f$: 266 / 20 / 19 ns/call for small orders; 139 / 11 / 1.5 ns/call for Debye expansion.
+
+## Uses in Laplace distribs
+
+This module is used by the following probability distributions (`distrib`s) in Laplace:
+- **Pseudo-Huber distribs:** evaluate \f$K_0(x) \dots K_4(x)\f$ at \f$x = \sqrt{\nu_{\mathrm{ph}}}\f$.
+- **Poisson-inverse Gaussian distrib:** evaluates \f$\log K_{y - 1/2}(\alpha)\f$ with derivatives with respect to \f$\alpha\f$. The 7th derivative \f$\frac{\mathrm{d}^7}{\mathrm{d}x^7}\log K_\nu(x)\f$ is required to compute the 5th derivative of the expected information of the Poisson-inverse Gaussian distrib.
+
+## Example
+
+The following example evaluates \f$\log K_\nu(x)\f$ and its first two derivatives inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/math/bessel_k.hpp>
+#include <Kokkos_Core.hpp>
+
+void compute_bessel_k(const Kokkos::View<const double*>& nu,
+                      const Kokkos::View<const double*>& x,
+                      Kokkos::View<double*>& log_k,
+                      Kokkos::View<double*>& d1,
+                      Kokkos::View<double*>& d2,
+                      int n) {
+  Kokkos::parallel_for("eval_bessel_k", n, KOKKOS_LAMBDA(const int i) {
+    const double nu_val = nu(i);
+    const double x_val  = x(i);
+    log_k(i) = laplace::math::log_bessel_k(nu_val, x_val);
+    d1(i)    = laplace::math::log_bessel_k_dx1(nu_val, x_val);
+    d2(i)    = laplace::math::log_bessel_k_dx2(nu_val, x_val);
+  });
+}
+\endcode
+
+## Module functions
+
+- \ref laplace::math::own::log_bessel_k "log_bessel_k()" — \f$\log K_\nu(x)\f$
+- \ref laplace::math::own::log_bessel_k_dx1 "log_bessel_k_dx1()" — \f$\frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$
+- \ref laplace::math::own::log_bessel_k_dx2 "log_bessel_k_dx2()" — \f$\frac{\mathrm{d}^2}{\mathrm{d}x^2}\log K_\nu(x)\f$
+- \ref laplace::math::own::log_bessel_k_dx3 "log_bessel_k_dx3()" — \f$\frac{\mathrm{d}^3}{\mathrm{d}x^3}\log K_\nu(x)\f$
+- \ref laplace::math::own::log_bessel_k_dx4 "log_bessel_k_dx4()" — \f$\frac{\mathrm{d}^4}{\mathrm{d}x^4}\log K_\nu(x)\f$
+- \ref laplace::math::own::log_bessel_k_dx5 "log_bessel_k_dx5()" — \f$\frac{\mathrm{d}^5}{\mathrm{d}x^5}\log K_\nu(x)\f$
+- \ref laplace::math::own::log_bessel_k_dx6 "log_bessel_k_dx6()" — \f$\frac{\mathrm{d}^6}{\mathrm{d}x^6}\log K_\nu(x)\f$
+- \ref laplace::math::own::log_bessel_k_dx7 "log_bessel_k_dx7()" — \f$\frac{\mathrm{d}^7}{\mathrm{d}x^7}\log K_\nu(x)\f$
+*/

@@ -1,0 +1,60 @@
+# Doxygen configuration of Laplace's reference manual.
+# Run from the repository root:  doxygen docs/manual/Doxyfile
+# Output: build-docs/html (published to GitHub Pages by .github/workflows/docs.yml).
+# Only the settings that differ from Doxygen's defaults are listed.
+
+PROJECT_NAME           = Laplace
+PROJECT_LOGO           = docs/logo/laplace-icon-light-64.png
+OUTPUT_DIRECTORY       = build-docs
+STRIP_FROM_PATH        = include
+STRIP_FROM_INC_PATH    = include
+FULL_PATH_NAMES        = YES
+MARKDOWN_SUPPORT       = YES
+TOC_INCLUDE_HEADINGS   = 3
+AUTOLINK_SUPPORT       = YES
+EXTENSION_MAPPING      = hpp=C++
+
+# Only what carries a documentation comment appears; implementation
+# namespaces (detail, detail_*) never do.
+EXTRACT_ALL            = NO
+HIDE_UNDOC_MEMBERS     = YES
+HIDE_UNDOC_CLASSES     = YES
+HIDE_SCOPE_NAMES       = YES
+SHOW_INCLUDE_FILES     = YES
+SORT_MEMBER_DOCS       = NO
+SHOW_USED_FILES        = NO
+SHOW_FILES             = NO
+SHOW_NAMESPACES        = NO
+EXCLUDE_SYMBOLS        = detail detail_* *::detail *::detail_*
+WARN_IF_UNDOCUMENTED   = NO
+WARN_NO_PARAMDOC       = YES
+
+INPUT                  = docs/manual/pages include/laplace
+FILE_PATTERNS          = *.hpp *.md *.dox
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */detail/*
+USE_MDFILE_AS_MAINPAGE = docs/manual/pages/mainpage.md
+IMAGE_PATH             = docs/logo
+
+# Kokkos and Laplace macros that Doxygen's parser must not see.
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = LAPLACE_HD= LAPLACE_HD_FORCEINLINE= KOKKOS_INLINE_FUNCTION= KOKKOS_FUNCTION=
+
+GENERATE_LATEX         = NO
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_EXTRA_STYLESHEET  = docs/manual/theme/doxygen-awesome.css docs/manual/theme/doxygen-awesome-sidebar-only.css
+HTML_COLORSTYLE        = LIGHT
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+TREEVIEW_WIDTH         = 300
+HTML_DYNAMIC_SECTIONS  = NO
+SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
+
+USE_MATHJAX            = YES
+MATHJAX_VERSION        = MathJax_3
+MATHJAX_FORMAT         = chtml

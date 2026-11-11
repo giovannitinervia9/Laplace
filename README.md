@@ -15,6 +15,9 @@ computations are written as
 [Kokkos](https://github.com/kokkos/kokkos) kernels, so the same source runs on
 CPUs (Serial, OpenMP) and GPUs (CUDA).
 
+The reference manual is at
+[giovannitinervia9.github.io/Laplace](https://giovannitinervia9.github.io/Laplace/).
+
 ## Status
 
 Laplace is in early development and has no stable API yet. The model layer is
