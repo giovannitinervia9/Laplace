@@ -35,6 +35,12 @@ target_include_directories(laplace INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(laplace INTERFACE Kokkos::kokkos)
 
+# exp and log on the host: Laplace's own (default) or the platform's libm
+option(LAPLACE_OWN_ELEMENTARY "Use Laplace's own exp and log on the host" ON)
+if(NOT LAPLACE_OWN_ELEMENTARY)
+  target_compile_definitions(laplace INTERFACE LAPLACE_PLATFORM_ELEMENTARY)
+endif()
+
 # Boost.Math (header-only, Boost Software License) for some special functions,
 # on the host and on the GPU. Either a directory holding boost/ is given with
 # LAPLACE_BOOST_INCLUDE, or an installed Boost is found with find_package.

@@ -267,4 +267,36 @@ LAPLACE_HD dd log(const dd& a) {
   return x1 + dd(static_cast<double>(e)) * LN2;
 }
 
+// log x for a double x > 0 (finite, subnormals included), as a double-double
+// whose absolute error is that of log m, not |log x| 2^-53: with x = m 2^e,
+// m in [sqrt(1/2), sqrt(2)), log x = e LN2_1 + (e LN2_2 + log m), where LN2_1
+// has 42 significant bits, so e LN2_1 is exact for |e| < 2^11, and LN2_2 is the
+// rest of ln 2 to a double. The error is about 2^-53 |log m| + 2^-53 ulp(log m)
+// <= 1.2e-16 absolute: enough where the large part of a logarithm comes from
+// the exponent (a^x x^a with small x, a probability far in a tail), at the
+// cost of one plain log. Not a substitute for ddm::log where |log m| itself
+// must carry more than 53 bits.
+LAPLACE_HD dd log_split(double x) {
+  constexpr double LN2_1 = 0x1.62e42fefa38p-1;
+  constexpr double LN2_2 = 0x1.ef35793c76730p-45;
+  // x = m 2^e from the bits (a library frexp costs more than the log on gcc);
+  // subnormals are first scaled by 2^54
+  std::uint64_t u = laplace::math::detail::to_bits(x);
+  int e = -1022;
+  if (u < (std::uint64_t(1) << 52)) {
+    u = laplace::math::detail::to_bits(x * 0x1p54);
+    e -= 54;
+  }
+  e += static_cast<int>(u >> 52);
+  // m in [1, 2), then in [sqrt(1/2), sqrt(2))
+  double m = laplace::math::detail::from_bits((u & 0x000fffffffffffffULL) | 0x3ff0000000000000ULL);
+  e -= 1;
+  if (m >= 1.41421356237309504880) {
+    m *= 0.5;
+    ++e;
+  }
+  const double ed = static_cast<double>(e);
+  return two_sum(ed * LN2_1, add(mul(ed, LN2_2), laplace::math::log(m)));
+}
+
 }  // namespace laplace::math::detail::ddm

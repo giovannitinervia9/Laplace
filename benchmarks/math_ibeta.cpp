@@ -113,7 +113,8 @@ KOKKOS_INLINE_FUNCTION result4 dm_beta_inc(double a, double b, double x,
   if (x == 0.0) return {0.0, 1.0, -inf, 0.0};
   if (x == 1.0) return {1.0, 0.0, 0.0, -inf};
   const auto r = lm::own::detail_ibx::direct_side(a, b, x, th);
-  const double w = lm::exp(r.log_w);
+  double w = lm::exp(r.log_w);
+  w += w * r.log_w_lo;
   const double other = 1.0 - w, log_other = Kokkos::log1p(-w);
   if (!r.complement) return {w, other, r.log_w, log_other};
   return {other, w, log_other, r.log_w};

@@ -830,10 +830,21 @@ LAPLACE_HD void complement(double* L) {
 
 // ---------------------------------------------------------------- the driver
 
-// log T(-a) by own::beta_inc: T(-a) = I_x(nu/2, 1/2)/2 or (1 - I_y(1/2, nu/2))/2
-LAPLACE_HD_FORCEINLINE double log_lower_beta(double a, double nu) {
+// log T(-a) by own::beta_inc: T(-a) = I_x(nu/2, 1/2)/2 or (1 - I_y(1/2, nu/2))/2,
+// with the low part of the logarithm (beta_inc_result::log_i_lo) in *lo
+LAPLACE_HD_FORCEINLINE double log_lower_beta(double a, double nu, double* lo = nullptr) {
   const double z2 = a * a, A = nu + z2, x = nu / A, y = z2 / A;
-  const double li = x <= 0.5 ? own::beta_inc(0.5 * nu, 0.5, x).log_i : own::beta_inc(0.5, 0.5 * nu, y).log_ic;
+  double li, li_lo;
+  if (x <= 0.5) {
+    const auto r = own::beta_inc(0.5 * nu, 0.5, x);
+    li = r.log_i;
+    li_lo = r.log_i_lo;
+  } else {
+    const auto r = own::beta_inc(0.5, 0.5 * nu, y);
+    li = r.log_ic;
+    li_lo = r.log_ic_lo;
+  }
+  if (lo) *lo = li_lo;
   return li - ln2;
 }
 
@@ -999,8 +1010,13 @@ LAPLACE_HD shape_deriv<K> order(double z, double nu) {
 LAPLACE_HD double log_cdf_beta(double z, double nu) {
   if (!(nu > 0.0) || z != z) return math::detail::quiet_nan();
   if (z == 0.0) return -ln2;
-  const double lS = log_lower_beta(Kokkos::fabs(z), nu);
-  return z < 0.0 ? lS : Kokkos::log1p(-math::exp(lS));
+  double lo = 0.0;
+  const double lS = log_lower_beta(Kokkos::fabs(z), nu, &lo);
+  if (z < 0.0) return lS;
+  // T(-|z|) = e^(lS + lo): far in the tail |lS| / 2 ulps are lost without lo
+  double S = math::exp(lS);
+  S += S * lo;
+  return Kokkos::log1p(-S);
 }
 
 // the value by the quadrature

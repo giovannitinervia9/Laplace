@@ -180,6 +180,35 @@ TEST_CASE("double-double identities") {
   CHECK(ddm::log(dd(INFINITY)).hi == INFINITY);
 }
 
+// log_split(x) and ddm::log(x) (the reference, within 2^-104 relative) for a double x
+struct LogSplitDiff {
+  KOKKOS_INLINE_FUNCTION dd operator()(double h, double) const {
+    const dd s = ddm::log_split(h), r = ddm::log(dd(h));
+    return dd(((s.hi - r.hi) + s.lo) - r.lo, 0.0);
+  }
+};
+
+TEST_CASE("log_split: absolute error of log x split by the exponent") {
+  // its error is that of the plain log of the mantissa m in [sqrt(1/2), sqrt(2)),
+  // about 2^-53 |log m| <= 0.35 2^-53, plus the rounding of the low part: measured
+  // in units of 2^-53, absolute, on the arguments of the log table (normal and
+  // subnormal, rounded to doubles)
+  const auto r = bench::read_ref(refdir + "/dd_log.csv");
+  const auto y = eval_dd(r.x, LogSplitDiff{});
+  double worst = 0;
+  bench::Args at{0, 0, 0};
+  for (std::size_t i = 0; i < y.size(); ++i) {
+    if (!(r.x[i][0] > 0.0) || std::isinf(r.x[i][0])) continue;
+    const double e = std::fabs(y[i].hi) / 0x1p-53;
+    if (e > worst) {
+      worst = e;
+      at = r.x[i];
+    }
+  }
+  INFO("log_split: max ", worst, " units of 2^-53, at x = ", bench::show(at, 1));
+  CHECK(worst <= 0.75);  // 0.49 measured on 2026-11-11
+}
+
 TEST_CASE("double-double exp(log(x)) returns x") {
   // log x has an absolute error of about 2^-104 max(|log x|, 1), which exp turns
   // into a relative error of the same size in x: the bound scales with max(|log x|, 1).

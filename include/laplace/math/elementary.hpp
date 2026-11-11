@@ -161,8 +161,23 @@ LAPLACE_HD double log(double x) {
 
 }  // namespace own
 
-// What the rest of Laplace calls: the platform versions (docs/numerics.md).
+// What the rest of Laplace calls (docs/numerics.md, 2026-11-11): the own
+// versions on the host, the same algorithm on every CPU platform (the libm of
+// Rtools costs about 28 ns per exp or log, the own ones 4-6 ns), and the
+// platform's (CUDA's) on the device. Defining LAPLACE_PLATFORM_ELEMENTARY
+// (CMake: LAPLACE_OWN_ELEMENTARY=OFF) puts the platform's on the host as well.
+#if !defined(LAPLACE_PLATFORM_ELEMENTARY)
+LAPLACE_HD_FORCEINLINE double exp(double x) {
+  KOKKOS_IF_ON_HOST((return own::exp(x);))
+  KOKKOS_IF_ON_DEVICE((return platform::exp(x);))
+}
+LAPLACE_HD_FORCEINLINE double log(double x) {
+  KOKKOS_IF_ON_HOST((return own::log(x);))
+  KOKKOS_IF_ON_DEVICE((return platform::log(x);))
+}
+#else
 LAPLACE_HD_FORCEINLINE double exp(double x) { return platform::exp(x); }
 LAPLACE_HD_FORCEINLINE double log(double x) { return platform::log(x); }
+#endif
 
 }  // namespace laplace::math

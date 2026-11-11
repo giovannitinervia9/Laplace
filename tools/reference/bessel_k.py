@@ -286,6 +286,15 @@ def coefs(K=16):
     print("    " + ", ".join(repr(float((2.0 ** 60 * b) ** (1.0 / k))) for k, b in enumerate(B, 1)))
 
 
+def temme_band(rng, n):
+    pts = []
+    for _ in range(n):
+        nu = rng.choice([0.0, 0.25, 0.5, 0.5, 1.0, 1.5, rng.uniform(0.0, 3.0)])
+        x = rng.uniform(0.5, 1.0)
+        pts.append((nu, x))
+    return pts
+
+
 def main():
     if sys.argv[1:2] == ["coefs"]:
         coefs()
@@ -303,6 +312,11 @@ def main():
             n = int(a.split("=")[1])
     pts = sample(random.Random(SEED), n)
     pts += [(0.0, 1.0), (1.0, 1.0), (0.5, 1.0), (2.0, 2.0), (20.5, 20.0), (1e6 - 0.5, 1e6), (0.0, 1e-300 ** 0.1)]
+    # Temme's region near x = 1 (added 2026-11-11): its first coefficient f_0
+    # is a difference of two terms that vanishes near x = 1-1.12 for every
+    # reduced order, and below nu = 3/2 at most one recurrence step damps the
+    # error of the ratio; the worst case is nu = 1/2 just below x = 1
+    pts += temme_band(random.Random(SEED + 1), 200)
     with Pool(workers) as pool:
         out = pool.map(row, pts, chunksize=2)
     rows = sorted(r for r in out if r is not None)

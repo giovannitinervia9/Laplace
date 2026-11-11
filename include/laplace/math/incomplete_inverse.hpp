@@ -263,8 +263,9 @@ LAPLACE_HD double gamma_start(const gamma_shape& sh, bool lower, double lp, doub
 }
 
 // x with log P(a, x) = lp (lower) or log Q(a, x) = lq; the chosen side is the
-// smaller one, and both logarithms are given.
-LAPLACE_HD double gamma_solve(double a, bool lower, double lp, double lq) {
+// smaller one, and both logarithms are given. target_lo is the low part of the
+// chosen one as a double-double (0 when it is exact, as for the log-p inputs).
+LAPLACE_HD double gamma_solve(double a, bool lower, double lp, double lq, double target_lo = 0.0) {
   const double inf = math::detail::pos_inf();
   const gamma_shape sh(a);
   if (lower && (lp + sh.lga + math::log(a)) / a < log_half_min) return 0.0;
@@ -286,7 +287,10 @@ LAPLACE_HD double gamma_solve(double a, bool lower, double lp, double lq) {
   for (int it = 0; it < max_iter; ++it) {
     const auto r = gamma_inc(a, x);
     const double ls = lower ? r.log_p : r.log_q;
-    const double g = ls - target;
+    const double ls_lo = lower ? r.log_p_lo : r.log_q_lo;
+    // near the root ls - target is exact (Sterbenz); the low parts carry the
+    // digits that |log p| 2^-53 would lose far in a tail
+    const double g = (ls - target) + (ls_lo - target_lo);
     if (g == 0.0 || g != g) return x;
     // lower: g increases with x; upper: g decreases
     const bool below = (g < 0.0) == lower;  // the root is to the right of x
@@ -429,8 +433,9 @@ LAPLACE_HD bool left_of(const beta_inv_result& s1, const beta_inv_result& s2) {
   return s1.x <= 0.5;
 }
 
-// (x, 1 - x) with log I_x(a, b) = lp (lower) or log(1 - I_x(a, b)) = lq
-LAPLACE_HD beta_inv_result beta_solve(double a, double b, bool lower, double lp, double lq) {
+// (x, 1 - x) with log I_x(a, b) = lp (lower) or log(1 - I_x(a, b)) = lq;
+// target_lo as in gamma_solve
+LAPLACE_HD beta_inv_result beta_solve(double a, double b, bool lower, double lp, double lq, double target_lo = 0.0) {
   const double inf = math::detail::pos_inf();
   const beta_shape sh(a, b);
   if (lower && (lp + math::log(a) + sh.lbeta) / a < log_half_min) return {0.0, 1.0};
@@ -449,18 +454,23 @@ LAPLACE_HD beta_inv_result beta_solve(double a, double b, bool lower, double lp,
   for (int it = 0; it < max_iter; ++it) {
     const double x = s.x, y = s.y;
     // the forward function at the pair, from the side that is held exactly
-    double log_i, log_ic;
+    double log_i, log_ic, log_i_lo, log_ic_lo;
     if (x <= 0.5) {
       const auto r = beta_inc(a, b, x);
       log_i = r.log_i;
       log_ic = r.log_ic;
+      log_i_lo = r.log_i_lo;
+      log_ic_lo = r.log_ic_lo;
     } else {
       const auto r = beta_inc(b, a, y);
       log_i = r.log_ic;
       log_ic = r.log_i;
+      log_i_lo = r.log_ic_lo;
+      log_ic_lo = r.log_i_lo;
     }
     const double ls = lower ? log_i : log_ic;
-    const double g = ls - target;
+    const double ls_lo = lower ? log_i_lo : log_ic_lo;
+    const double g = (ls - target) + (ls_lo - target_lo);
     if (g == 0.0 || g != g) return s;
     const double u = x <= 0.5 ? math::log(x) - Kokkos::log1p(-x) : Kokkos::log1p(-y) - math::log(y);
     const bool below = (g < 0.0) == lower;  // the root is to the right of x
@@ -534,9 +544,13 @@ LAPLACE_HD double gamma_p_inv(double a, double p) {
   if (!(a > 0.0) || !(a < math::detail::pos_inf()) || !(p >= 0.0) || !(p <= 1.0)) return nan;
   if (p == 0.0) return 0.0;
   if (p == 1.0) return math::detail::pos_inf();
-  if (p <= 0.5) return detail_inverse::gamma_solve(a, true, math::log(p), Kokkos::log1p(-p));
+  if (p <= 0.5) {
+    const auto lp = math::detail::ddm::log_split(p);
+    return detail_inverse::gamma_solve(a, true, lp.hi, Kokkos::log1p(-p), lp.lo);
+  }
   const double q = 1.0 - p;  // exact
-  return detail_inverse::gamma_solve(a, false, Kokkos::log1p(-q), math::log(q));
+  const auto lq = math::detail::ddm::log_split(q);
+  return detail_inverse::gamma_solve(a, false, Kokkos::log1p(-q), lq.hi, lq.lo);
 }
 
 LAPLACE_HD double gamma_q_inv(double a, double q) {
@@ -544,9 +558,13 @@ LAPLACE_HD double gamma_q_inv(double a, double q) {
   if (!(a > 0.0) || !(a < math::detail::pos_inf()) || !(q >= 0.0) || !(q <= 1.0)) return nan;
   if (q == 0.0) return math::detail::pos_inf();
   if (q == 1.0) return 0.0;
-  if (q < 0.5) return detail_inverse::gamma_solve(a, false, Kokkos::log1p(-q), math::log(q));
+  if (q < 0.5) {
+    const auto lq = math::detail::ddm::log_split(q);
+    return detail_inverse::gamma_solve(a, false, Kokkos::log1p(-q), lq.hi, lq.lo);
+  }
   const double p = 1.0 - q;  // exact
-  return detail_inverse::gamma_solve(a, true, math::log(p), Kokkos::log1p(-p));
+  const auto lp = math::detail::ddm::log_split(p);
+  return detail_inverse::gamma_solve(a, true, lp.hi, Kokkos::log1p(-p), lp.lo);
 }
 
 LAPLACE_HD double gamma_p_inv_logp(double a, double log_p) {
@@ -575,9 +593,13 @@ LAPLACE_HD beta_inv_result ibeta_inv(double a, double b, double p) {
   if (!(a > 0.0) || !(a < inf) || !(b > 0.0) || !(b < inf) || !(p >= 0.0) || !(p <= 1.0)) return {nan, nan};
   if (p == 0.0) return {0.0, 1.0};
   if (p == 1.0) return {1.0, 0.0};
-  if (p <= 0.5) return detail_inverse::beta_solve(a, b, true, math::log(p), Kokkos::log1p(-p));
+  if (p <= 0.5) {
+    const auto lp = math::detail::ddm::log_split(p);
+    return detail_inverse::beta_solve(a, b, true, lp.hi, Kokkos::log1p(-p), lp.lo);
+  }
   const double q = 1.0 - p;  // exact
-  return detail_inverse::beta_solve(a, b, false, Kokkos::log1p(-q), math::log(q));
+  const auto lq = math::detail::ddm::log_split(q);
+  return detail_inverse::beta_solve(a, b, false, Kokkos::log1p(-q), lq.hi, lq.lo);
 }
 
 LAPLACE_HD beta_inv_result ibetac_inv(double a, double b, double q) {
@@ -586,9 +608,13 @@ LAPLACE_HD beta_inv_result ibetac_inv(double a, double b, double q) {
   if (!(a > 0.0) || !(a < inf) || !(b > 0.0) || !(b < inf) || !(q >= 0.0) || !(q <= 1.0)) return {nan, nan};
   if (q == 0.0) return {1.0, 0.0};
   if (q == 1.0) return {0.0, 1.0};
-  if (q < 0.5) return detail_inverse::beta_solve(a, b, false, Kokkos::log1p(-q), math::log(q));
+  if (q < 0.5) {
+    const auto lq = math::detail::ddm::log_split(q);
+    return detail_inverse::beta_solve(a, b, false, Kokkos::log1p(-q), lq.hi, lq.lo);
+  }
   const double p = 1.0 - q;  // exact
-  return detail_inverse::beta_solve(a, b, true, math::log(p), Kokkos::log1p(-p));
+  const auto lp = math::detail::ddm::log_split(p);
+  return detail_inverse::beta_solve(a, b, true, lp.hi, Kokkos::log1p(-p), lp.lo);
 }
 
 LAPLACE_HD beta_inv_result ibeta_inv_logp(double a, double b, double log_p) {

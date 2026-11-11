@@ -32,6 +32,7 @@
 #pragma once
 
 #include <laplace/core/config.hpp>
+#include <laplace/math/detail/double_double.hpp>
 #include <laplace/math/elementary.hpp>
 #include <laplace/math/normal.hpp>
 #include <laplace/math/special.hpp>
@@ -46,6 +47,10 @@ namespace own {
 struct gamma_inc_result {
   double p, q;          // P(a, x), Q(a, x)
   double log_p, log_q;  // their logarithms
+  // the low parts of the logarithms as double-doubles (log_p + log_p_lo), where
+  // they are computed (the lower tail with x below a/2 or with small a); 0
+  // elsewhere. The inverses use them to solve far in the lower tail.
+  double log_p_lo = 0.0, log_q_lo = 0.0;
 };
 
 namespace detail_igamma {
@@ -87,6 +92,20 @@ LAPLACE_HD double log_prefactor(double a, double x) {
     phi = lambda - 1.0 - math::log(lambda);
   }
   return -a * phi - 0.5 * math::log(a) - half_log_two_pi - log_gamma_star(a);
+}
+
+// The same as a double-double. For a >= 1 and x <= a/2 the large term
+// -a phi = a - x + a log(x/a) is formed with log x and log a split by their
+// exponents (ddm::log_split), so its absolute error is a few 2^-53 times a
+// instead of |a phi| 2^-53; elsewhere the plain value (lo = 0).
+LAPLACE_HD math::detail::ddm::dd log_prefactor_dd(double a, double x) {
+  namespace ddm = math::detail::ddm;
+  if (a >= 1.0 && x <= 0.5 * a) {
+    const ddm::dd log_lambda = ddm::log_split(x) - ddm::log_split(a);
+    return (log_lambda * a + ddm::two_sum(a, -x)) +
+           (-0.5 * math::log(a) - half_log_two_pi - log_gamma_star(a));
+  }
+  return ddm::dd(log_prefactor(a, x));
 }
 
 // Temme's coefficients c_k(eta), k = 0..9, as polynomials in eta (ascending
@@ -193,14 +212,18 @@ LAPLACE_HD gamma_inc_result gamma_inc_classic(double a, double x) {
       if (Kokkos::fabs(c) <= eps * Kokkos::fabs(J)) break;
     }
     J *= a;
-    const double log_g = a * math::log(x) - Kokkos::log1p(boost::math::tgamma1pm1(a, math::detail::boost_policy()));
-    const double g = math::exp(log_g);
+    // log g = a log x - log Gamma(a + 1), with log x split by its exponent
+    namespace ddm = math::detail::ddm;
+    const ddm::dd log_g =
+        ddm::log_split(x) * a - Kokkos::log1p(boost::math::tgamma1pm1(a, math::detail::boost_policy()));
+    double g = math::exp(log_g.hi);
+    g += g * log_g.lo;
     const double p = g * (1.0 + J);
-    const double q = -Kokkos::expm1(log_g) - g * J;
-    return {p, q, log_g + Kokkos::log1p(J), math::log(q)};
+    const double q = -Kokkos::expm1(log_g.hi) - g * J;
+    const ddm::dd log_p = log_g + Kokkos::log1p(J);
+    return {p, q, log_p.hi, math::log(q), log_p.lo, 0.0};
   }
 
-  const double log_d = log_prefactor(a, x);
   if (x < a + 1.0) {
     // P = prefactor * sum_{n>=0} x^n / ((a+1)...(a+n))
     double term = 1.0, s = 1.0;
@@ -209,10 +232,13 @@ LAPLACE_HD gamma_inc_result gamma_inc_classic(double a, double x) {
       s += term;
       if (term <= eps * s) break;
     }
-    const double log_p = log_d + math::log(s);
-    const double p = math::exp(log_p);
-    return {p, 1.0 - p, log_p, Kokkos::log1p(-p)};
+    const auto log_p = log_prefactor_dd(a, x) + math::log(s);
+    double p = math::exp(log_p.hi);
+    p += p * log_p.lo;
+    return {p, 1.0 - p, log_p.hi, Kokkos::log1p(-p), log_p.lo, 0.0};
   }
+
+  const double log_d = log_prefactor(a, x);
 
   // Q = x^a e^-x / Gamma(a) * 1 / (x + 1 - a - 1 (1 - a) / (x + 3 - a - ...))
   constexpr double tiny = 1e-300;

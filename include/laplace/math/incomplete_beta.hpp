@@ -30,6 +30,9 @@ namespace own {
 struct beta_inc_result {
   double i, ic;          // I_x(a, b), 1 - I_x(a, b)
   double log_i, log_ic;  // their logarithms
+  // the low part of the logarithm of the side computed directly (the smaller
+  // one), as a double-double; 0 for the other. The inverses use it far in a tail.
+  double log_i_lo = 0.0, log_ic_lo = 0.0;
 };
 
 LAPLACE_HD beta_inc_result beta_inc(double a, double b, double x) {
@@ -39,10 +42,11 @@ LAPLACE_HD beta_inc_result beta_inc(double a, double b, double x) {
   if (x == 0.0) return {0.0, 1.0, -inf, 0.0};
   if (x == 1.0) return {1.0, 0.0, 0.0, -inf};
   const detail_ibx::side r = detail_ibx::direct_side(a, b, x);
-  const double w = math::exp(r.log_w);
+  double w = math::exp(r.log_w);
+  w += w * r.log_w_lo;
   const double other = 1.0 - w, log_other = Kokkos::log1p(-w);
-  if (!r.complement) return {w, other, r.log_w, log_other};
-  return {other, w, log_other, r.log_w};
+  if (!r.complement) return {w, other, r.log_w, log_other, r.log_w_lo, 0.0};
+  return {other, w, log_other, r.log_w, 0.0, r.log_w_lo};
 }
 
 }  // namespace own

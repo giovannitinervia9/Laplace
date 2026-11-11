@@ -156,7 +156,12 @@ LAPLACE_HD double lambda_of(double a, double b, double x) {
 struct args {
   double a, b, x, y, lx, ly, lambda;
   bool xe, ye;
+  // low parts of lx, ly as double-doubles (from ddm::log_split where x or y
+  // is the exact one and below 1/2; 0 where they come from log1p)
+  double lx_lo = 0.0, ly_lo = 0.0;
 };
+
+namespace ddm = math::detail::ddm;
 
 // lambda = a - (a + b) x for the shapes of p, from the exact one of x and y
 LAPLACE_HD_FORCEINLINE double lambda_for(const args& p, double a, double b) {
@@ -174,7 +179,7 @@ LAPLACE_HD_FORCEINLINE args reshaped(const args& p, double a, double b) {
 
 // I_y(b, a) = 1 - I_x(a, b)
 LAPLACE_HD_FORCEINLINE args swapped(const args& p) {
-  return {p.b, p.a, p.y, p.x, p.ly, p.lx, -p.lambda, p.ye, p.xe};
+  return {p.b, p.a, p.y, p.x, p.ly, p.lx, -p.lambda, p.ye, p.xe, p.ly_lo, p.lx_lo};
 }
 
 // log Gamma(1 + a), accurate near a = 0 and 1
@@ -182,11 +187,12 @@ LAPLACE_HD_FORCEINLINE double lgamma1p(double a) {
   return Kokkos::log1p(boost::math::tgamma1pm1(a, math::detail::boost_policy()));
 }
 
-// log(e^u + e^v)
-LAPLACE_HD_FORCEINLINE double log_add(double u, double v) {
-  const double hi = u > v ? u : v, lo = u > v ? v : u;
-  if (lo - hi < -40.0) return hi;  // e^-40 < 2^-57
-  return hi + Kokkos::log1p(math::exp(lo - hi));
+// log(e^u + e^v), as double-doubles
+LAPLACE_HD_FORCEINLINE ddm::dd log_add(const ddm::dd& u, const ddm::dd& v) {
+  const bool uh = u.hi > v.hi;
+  const ddm::dd hi = uh ? u : v, lo = uh ? v : u;
+  if (lo.hi - hi.hi < -40.0) return hi;  // e^-40 < 2^-57
+  return hi + Kokkos::log1p(math::exp((lo.hi - hi.hi) + (lo.lo - hi.lo)));
 }
 
 // log(Gamma(a + b) / (Gamma(b) b^a)), b >= 1, a > 0: small terms only
@@ -206,37 +212,47 @@ LAPLACE_HD double log_gamma_ratio(double a, double b) {
 //     a log(b x) + b log y + log a - lgamma1p(a) + log(Gamma(a + b) / (Gamma(b) b^a));
 //   both below 1: a log x + b log y - log B(a, b), B from Boost (|log B| < 6.3
 //     for shapes down to 2^-8).
-LAPLACE_HD double log_power(const args& p) {
+// As a double-double: the terms a log x and b log y, which are large far in a
+// tail, are formed from lx, ly with their low parts and from log_split, so
+// that their absolute error is a few 2^-53 times the shape rather than
+// |a log x| 2^-53 (the inverses solve to a few ulps there).
+LAPLACE_HD ddm::dd log_power_dd(const args& p) {
   const double a = p.a, b = p.b;
+  const ddm::dd LX(p.lx, p.lx_lo), LY(p.ly, p.ly_lo);
   if (a >= 1.0 && b >= 1.0) {
     const double s = a + b;
     const double u = -p.lambda / a, v = p.lambda / b;
-    // L(u), L(v); below -1/2 log(1 + u) = log(x / p0), from lx (1 + u would lose a small x)
-    const double Lu = u >= -0.5 ? log1pmx(u) : p.lx - math::log(a / s) - u;
-    const double Lv = v >= -0.5 ? log1pmx(v) : p.ly - math::log(b / s) - v;
-    return a * Lu + b * Lv + 0.5 * math::log(a * b / s) - detail_igamma::half_log_two_pi + lgs(s) - lgs(a) - lgs(b);
+    const double rest = 0.5 * math::log(a * b / s) - detail_igamma::half_log_two_pi + lgs(s) - lgs(a) - lgs(b);
+    // a L(u), b L(v); below -1/2 log(1 + u) = log(x / p0) = lx - log a + log s
+    // (1 + u would lose a small x)
+    if (u >= -0.5 && v >= -0.5) return ddm::dd(a * log1pmx(u) + b * log1pmx(v) + rest);
+    // log(a / s) by log_split: the rounding of a / s moves it by 2^-53 absolute
+    const ddm::dd Au = u >= -0.5 ? ddm::dd(a * log1pmx(u)) : (LX - ddm::log_split(a / s) - u) * a;
+    const ddm::dd Bv = v >= -0.5 ? ddm::dd(b * log1pmx(v)) : (LY - ddm::log_split(b / s) - v) * b;
+    return (Au + Bv) + rest;
   }
   if (a < 1.0 && b >= 1.0) {
-    const double bx = b * p.x;
-    const double l_bx = bx > 1e-290 ? math::log(bx) : math::log(b) + p.lx;
-    return a * l_bx + b * p.ly + math::log(a) - lgamma1p(a) + log_gamma_ratio(a, b);
+    const ddm::dd l_bx = ddm::log_split(b) + LX;  // log(b x)
+    return (l_bx * a + LY * b) + (math::log(a) - lgamma1p(a) + log_gamma_ratio(a, b));
   }
   if (b < 1.0 && a >= 1.0) {
-    const double ay = a * p.y;
-    const double l_ay = ay > 1e-290 ? math::log(ay) : math::log(a) + p.ly;
-    return b * l_ay + a * p.lx + math::log(b) - lgamma1p(b) + log_gamma_ratio(b, a);
+    const ddm::dd l_ay = ddm::log_split(a) + LY;  // log(a y)
+    return (l_ay * b + LX * a) + (math::log(b) - lgamma1p(b) + log_gamma_ratio(b, a));
   }
   const double B = boost::math::beta(a, b, math::detail::boost_policy());
   const double log_b = (B > 0.0 && B < math::detail::pos_inf()) ? math::log(B)
                                                                  : math::lgamma(a) + math::lgamma(b) - math::lgamma(a + b);
-  return a * p.lx + b * p.ly - log_b;
+  return (LX * a + LY * b) - log_b;
 }
+
+// the same rounded to a double (used by incomplete_beta_deriv.hpp)
+LAPLACE_HD double log_power(const args& p) { return log_power_dd(p).hi; }
 
 // BPSER: I_x(a, b) = x^a / B(a, b) sum_{n>=0} (1 - b)_n x^n / (n! (a + n)),
 // (1 - b)_n the rising factorial. Used for x <= 1/2 with b <= 1, or b x <= 0.7.
 // For a <= 1 the sum is about 1/a and B(a, b) about 1/a: the two are taken
 // together, as a sum and a B(a, b), so that their logarithms do not cancel.
-LAPLACE_HD double bpser(const args& p) {
+LAPLACE_HD ddm::dd bpser(const args& p) {
   const double a = p.a, b = p.b, x = p.x;
   double term = 1.0, sum = 1.0 / a, poch = 1.0 - b;
   for (int n = 1; n < 2000; ++n) {
@@ -249,14 +265,14 @@ LAPLACE_HD double bpser(const args& p) {
   if (a <= 1.0) {
     if (b < 1.0) {
       const double aB = a * boost::math::beta(a, b, math::detail::boost_policy());  // Gamma(1 + a) Gamma(b) / Gamma(a + b)
-      if (aB > 0.0 && aB < math::detail::pos_inf()) return a * p.lx + math::log((a * sum) / aB);
+      if (aB > 0.0 && aB < math::detail::pos_inf())
+        return ddm::dd(p.lx, p.lx_lo) * a + math::log((a * sum) / aB);
     } else {
-      const double bx = b * x;
-      const double l_bx = bx > 1e-290 ? math::log(bx) : math::log(b) + p.lx;
-      return a * l_bx - lgamma1p(a) + log_gamma_ratio(a, b) + math::log(a * sum);
+      const ddm::dd l_bx = ddm::log_split(b) + ddm::dd(p.lx, p.lx_lo);  // log(b x)
+      return l_bx * a + (-lgamma1p(a) + log_gamma_ratio(a, b) + math::log(a * sum));
     }
   }
-  return log_power(p) - b * p.ly + math::log(sum);
+  return (log_power_dd(p) - ddm::dd(p.ly, p.ly_lo) * b) + math::log(sum);
 }
 
 // BUP: I_x(a, b) - I_x(a + n, b) = sum_{i=0}^{n-1} t_i, n >= 1, with
@@ -265,11 +281,11 @@ LAPLACE_HD double bpser(const args& p) {
 // Morris scale them for this reason): the sum starts from the largest term,
 // whose prefactor log_power computes without cancellation, and goes outwards,
 // so that no large exponent cancels against a large sum.
-LAPLACE_HD double bup(const args& p, int n) {
+LAPLACE_HD ddm::dd bup(const args& p, int n) {
   const double a = p.a, b = p.b, x = p.x, y = p.y;
   const double i0 = ((a + b) * x - a - 1.0) / y;  // the terms grow while i < i0
   const int k = i0 <= 0.0 ? 0 : (i0 >= n - 1.0 ? n - 1 : static_cast<int>(Kokkos::ceil(i0)));
-  const double log_tk = log_power(k == 0 ? p : reshaped(p, a + k, b)) - math::log(a + k);
+  const ddm::dd log_tk = log_power_dd(k == 0 ? p : reshaped(p, a + k, b)) - math::log(a + k);
   double d = 1.0, sum = 1.0;
   for (int i = k; i < n - 1; ++i) {  // t_{i+1} / t_k
     d *= (a + b + i) * x / (a + 1.0 + i);
@@ -384,7 +400,7 @@ LAPLACE_HD double bgrat(const args& p) {
 //   a_m = m (a + m - 1) (a + b + m - 1) (b - m) x^2 / (a + 2m - 1)^2,
 //   b_m = m + m (b - m) x / (a + 2m - 1) + (a + m) (lambda + 1 + m (2 - x)) / (a + 2m + 1),
 // by the modified Lentz method; for lambda >= 0.
-LAPLACE_HD double bfrac(const args& p) {
+LAPLACE_HD ddm::dd bfrac(const args& p) {
   const double a = p.a, b = p.b, x = p.x, lam = p.lambda;
   constexpr double tiny = 1e-300;
   double f = a * (lam + 1.0) / (a + 1.0);
@@ -404,7 +420,7 @@ LAPLACE_HD double bfrac(const args& p) {
     // 4 eps: with FMA contraction (CUDA) delta can settle one ulp away from 1
     if (Kokkos::fabs(delta - 1.0) <= 4.0 * eps) break;
   }
-  return log_power(p) - math::log(f);
+  return log_power_dd(p) - math::log(f);
 }
 
 // exp(z^2) erfc(z) for z >= 0, given f = z^2
@@ -485,7 +501,12 @@ struct side {
   double log_w;
   bool complement;
   int method;  // which piece computed it (for measurement): see direct_side
+  double log_w_lo = 0.0;  // low part of log_w as a double-double
 };
+
+LAPLACE_HD_FORCEINLINE side make_side(const ddm::dd& log_w, bool complement, int method) {
+  return {log_w.hi, complement, method, log_w.lo};
+}
 
 // Thresholds of the choice. BRATIO uses, for a, b > 1 and b < 40, bpser when
 // b x <= 0.7 and otherwise bup followed by bpser (x <= 0.7) or by bgrat; with
@@ -510,9 +531,11 @@ struct thresholds {
 // with the default thresholds).
 LAPLACE_IBX_NOINLINE LAPLACE_HD side direct_side(double a, double b, double x, const thresholds& th = thresholds{}) {
   const double y = 1.0 - x;
-  const double lx = x < 0.5 ? math::log(x) : Kokkos::log1p(-y);
-  const double ly = x < 0.5 ? Kokkos::log1p(-x) : math::log(y);
-  args p{a, b, x, y, lx, ly, lambda_of(a, b, x), true, x >= 0.5};
+  // the logarithm of the smaller of x, y split by its exponent (ddm::log_split)
+  const ddm::dd l_small = ddm::log_split(x < 0.5 ? x : y);
+  const double l_big = x < 0.5 ? Kokkos::log1p(-x) : Kokkos::log1p(-y);
+  args p = x < 0.5 ? args{a, b, x, y, l_small.hi, l_big, lambda_of(a, b, x), true, false, l_small.lo, 0.0}
+                   : args{a, b, x, y, l_big, l_small.hi, lambda_of(a, b, x), true, true, 0.0, l_small.lo};
   bool comp = false;
   if (Kokkos::fmin(a, b) <= 1.0) {
     if (x > 0.5) {
@@ -522,15 +545,15 @@ LAPLACE_IBX_NOINLINE LAPLACE_HD side direct_side(double a, double b, double x, c
     const double a0 = p.a, b0 = p.b, x0 = p.x;
     const args q = swapped(p);  // I_{y0}(b0, a0) = 1 - I_{x0}(a0, b0)
     if (Kokkos::fmax(a0, b0) <= 1.0) {
-      if (a0 >= Kokkos::fmin(0.2, b0) || math::exp(a0 * p.lx) <= 0.9) return {bpser(p), comp, 1};
-      if (x0 >= 0.3) return {bpser(q), !comp, 2};
-      return {log_add(bup(q, 20), bgrat(reshaped(q, b0 + 20.0, a0))), !comp, 3};
+      if (a0 >= Kokkos::fmin(0.2, b0) || math::exp(a0 * p.lx) <= 0.9) return make_side(bpser(p), comp, 1);
+      if (x0 >= 0.3) return make_side(bpser(q), !comp, 2);
+      return make_side(log_add(bup(q, 20), bgrat(reshaped(q, b0 + 20.0, a0))), !comp, 3);
     }
-    if (b0 <= 1.0) return {bpser(p), comp, 1};
-    if (x0 >= 0.3) return {bpser(q), !comp, 2};
-    if (x0 < 0.1 && math::exp(a0 * math::log(x0 * b0)) <= 0.7) return {bpser(p), comp, 1};
-    if (b0 > 15.0) return {bgrat(q), !comp, 4};
-    return {log_add(bup(q, 20), bgrat(reshaped(q, b0 + 20.0, a0))), !comp, 3};
+    if (b0 <= 1.0) return make_side(bpser(p), comp, 1);
+    if (x0 >= 0.3) return make_side(bpser(q), !comp, 2);
+    if (x0 < 0.1 && math::exp(a0 * math::log(x0 * b0)) <= 0.7) return make_side(bpser(p), comp, 1);
+    if (b0 > 15.0) return make_side(bgrat(q), !comp, 4);
+    return make_side(log_add(bup(q, 20), bgrat(reshaped(q, b0 + 20.0, a0))), !comp, 3);
   }
   // a, b > 1: compute the side below the mean (lambda >= 0)
   if (p.lambda < 0.0) {
@@ -539,9 +562,9 @@ LAPLACE_IBX_NOINLINE LAPLACE_HD side direct_side(double a, double b, double x, c
   }
   const double a0 = p.a, b0 = p.b, x0 = p.x;
   if (b0 < 40.0) {
-    if (b0 * x0 <= th.bpser_max_bx) return {bpser(p), comp, 1};
-    if (x0 <= 0.7 && a0 > th.bup_max_a) return {bfrac(p), comp, 7};
-    if (x0 > 0.7 && a0 < th.bgrat_min_a) return {bfrac(p), comp, 7};
+    if (b0 * x0 <= th.bpser_max_bx) return make_side(bpser(p), comp, 1);
+    if (x0 <= 0.7 && a0 > th.bup_max_a) return make_side(bfrac(p), comp, 7);
+    if (x0 > 0.7 && a0 < th.bgrat_min_a) return make_side(bfrac(p), comp, 7);
     // I_x0(a0, b0) = [I_y0(bbar, a0) - I_y0(bbar + n, a0)] + I_x0(a0, bbar), bbar in (0, 1]
     int n = static_cast<int>(b0);
     double bbar = b0 - n;
@@ -549,19 +572,19 @@ LAPLACE_IBX_NOINLINE LAPLACE_HD side direct_side(double a, double b, double x, c
       --n;
       bbar = 1.0;
     }
-    const double w = bup(reshaped(swapped(p), bbar, a0), n);
+    const ddm::dd w = bup(reshaped(swapped(p), bbar, a0), n);
     args r = reshaped(p, a0, bbar);
-    if (x0 <= 0.7) return {log_add(w, bpser(r)), comp, 5};
-    double v = -math::detail::pos_inf();
+    if (x0 <= 0.7) return make_side(log_add(w, bpser(r)), comp, 5);
+    ddm::dd v(-math::detail::pos_inf());
     if (a0 <= 15.0) {
       v = bup(r, 20);
       r = reshaped(r, a0 + 20.0, bbar);
     }
-    return {log_add(log_add(w, v), bgrat(r)), comp, 6};
+    return make_side(log_add(log_add(w, v), bgrat(r)), comp, 6);
   }
   const double mn = Kokkos::fmin(a0, b0);
-  if (mn > th.basym_min && p.lambda <= th.basym_lambda * mn) return {basym(p), comp, 8};
-  return {bfrac(p), comp, 7};
+  if (mn > th.basym_min && p.lambda <= th.basym_lambda * mn) return make_side(basym(p), comp, 8);
+  return make_side(bfrac(p), comp, 7);
 }
 
 }  // namespace laplace::math::own::detail_ibx

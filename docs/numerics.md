@@ -931,7 +931,7 @@ each step damps the error of the start by about x^2/(4 (mu+k)^2)). The Debye
 terms stop once nu passes the order from which the next term is below 2^-60 for
 the value and the first seven derivatives in t (table from the generator).
 
-**Measurement.** References from `tools/reference/bessel_k.py`: 2407 points
+**Measurement.** References from `tools/reference/bessel_k.py`: 2407 points (2607 later, see the entry on Temme's first coefficient)
 (nu, x) with nu from 0 to 2^40 (small real orders, half-integers y - 1/2 up to
 y = 2^40, large orders around x ~ nu, general) and x from 2^-30 to 2^30. mpmath's
 besselk fails near nu = 1e6 (its hypergeometric series), so the references
@@ -1226,3 +1226,144 @@ Boost is left out of the large-shape part of the bench.
 **Chosen.** Temme for a >= 100, |eta| <= 0.5. Tested in
 `tests/math/test_special.cpp` on both builds; the tests of the inverses and of
 the shape derivatives, which call gamma_inc, pass unchanged.
+
+## The large logarithms of the incomplete gamma and beta in double-double
+
+**What.** The inverses (`incomplete_inverse.hpp`) solve g(x) = log S(x) - log s
+= 0, S the forward probability and s the target. Far in a tail two terms
+carried an absolute error of about |log s| 2^-53, so the inverses solved s to
+about |log s| ulps (up to 700): the rounding of log s itself, and the term
+a log x (or b log y) inside the prefactor of gamma_inc and beta_inc. Both errors
+come from the exponent part of the logarithm. New `ddm::log_split(x)`
+(`detail/double_double.hpp`): x = m 2^e with m in [sqrt(1/2), sqrt(2)) taken
+from the bits, log x = e LN2_1 + (e LN2_2 + log m) as a double-double, LN2_1
+being ln 2 to 42 bits (so e LN2_1 is exact) and LN2_2 the rest; one plain log,
+absolute error that of log m. Carried as double-doubles: the gamma prefactor for
+a >= 1, x <= a/2 (`log_prefactor_dd`, -a phi = a - x + a (log x - log a)) and the
+small-a series; in the beta, lx and ly in `detail_ibx::args` (low parts
+`lx_lo`, `ly_lo`), `log_power_dd` (the tail branches u, v < -1/2 with
+log_split(a/s), and the branches with a shape below 1), `bpser`, `bfrac`, `bup`,
+`log_add`; the results gain `log_p_lo`, `log_q_lo` (gamma) and `log_i_lo`,
+`log_ic_lo` (beta), the probability is formed as e^hi (1 + lo), and the inverses
+take log s from log_split and compare g = (ls - target) + (ls_lo - target_lo).
+The full double-double log (`ddm::log`, about 500 ns) is not needed. The
+Student t value (`log_cdf_beta`) uses the low part in log(1 - e^(log S)), where
+rounding log S to a double alone loses up to |log S| / 2 ulps.
+
+**Measurement.** Inverses in ulpC (99%, max), gcc OpenMP 8; CUDA within the same
+figures:
+
+| set | before | after |
+|---|---|---|
+| gamma_p_inv | 23, 52.2 | 2.01, 6.86 |
+| gamma_p_inv_tail | 255, 657 | 1.74, 3.06 |
+| gamma_q_inv_tail | 2.17, 10.1 | 1.92, 6.09 |
+| gamma_p_inv_logp | 6.7, 39 | 6.37, 17 |
+| ibeta_inv (1 - x) | 43, 118 (8.09, 22.2) | 4.09, 7.05 (7.27, 19.5) |
+| ibeta_inv_tail (1 - x) | 343, 813 (9.31, 13.9) | 2.07, 5.38 (2.71, 11.3) |
+| ibetac_inv (1 - x) | 5.95, 11.8 (39, 58) | 5.53, 12.3 (4.32, 7.96) |
+| ibetac_inv_tail (1 - x) | 2.04, 4.39 (456, 1040) | 1.83, 4.4 (2.75, 4.39) |
+| ibeta_inv_logp (1 - x) | 5.92, 18.6 (7.43, 10.2) | 4.9, 18.6 (4.4, 6.49) |
+| ibetac_inv_logq (1 - x) | 5.64, 8.88 (5.85, 16.3) | 3.28, 5.82 (5.34, 16.3) |
+
+Forward functions: mean plain-ulp error of gamma P from 29.6 to 13.5 (Q
+unchanged, its path untouched), of ibeta from 25.2 to 9.8, ibetac 23.6 to 8.2,
+the hard sets 6.7 to 5.4 and 5.6 to 3.9; maximum ulp1, ulpL and log errors
+unchanged or lower. log_split within 0.49 units of 2^-53 absolute on the
+arguments of dd_log.csv.
+
+Cost, base and new alternated on the same day (ns per call):
+
+| | gcc 1 thread | CUDA |
+|---|---|---|
+| beta_inc, common / mixed / large | 331 / 377 / 395 to 371 / 407 / 424 (+12, +8, +7%) | +4%, +3%, 0 |
+| gamma_inc | 252 to 264 (+5%, at the noise) | |
+| gamma inverses, bulk / tail | +2% / 673 to 798 (+18%) | 0 / -15% |
+| beta inverses, bulk / tails | +7% / +10-17% | +2-4% / +7% |
+
+On gcc most of the cost is the extra plain logs (about 28 ns each with the
+Rtools libm). A first version took log a and log s separately in the tail
+branch of log_power (+71 ns on bfrac); one log_split(a/s) is as accurate (the
+rounding of a/s moves its logarithm by 2^-53) and cheaper. Replacing
+Kokkos::frexp by reading the bits made no measurable difference.
+
+**Chosen.** Adopted as above, always on (a version that
+uses the double-doubles only for |log x| large would save most of the cost but
+leave about 8-16 ulpC in the middle). Tested on both builds: the inverse tests
+unchanged, `log_split` in `tests/math/test_double_double.cpp` (bound 0.75).
+
+## Own exp and log in the gcc build: effect on whole functions
+
+**What.** The first entry (2026-11-08) left open the libm of Rtools, whose exp and
+log cost about 28 ns per call in the gcc build that R loads, against 4-6 ns for
+the own fdlibm-style versions (exp within 1 ulp, log within 0.78). New macro
+`LAPLACE_OWN_HOST_ELEMENTARY` (`elementary.hpp`): the wrapper
+`laplace::math::{exp,log}` takes the own versions on the host and keeps the
+platform's on the device. Measured with a build that defines it
+(`-DCMAKE_CXX_FLAGS=-DLAPLACE_OWN_HOST_ELEMENTARY`) against the default build,
+same day, gcc. Calls inside Boost.Math (lgamma, tgamma1pm1, log1p, expm1) and
+direct Kokkos calls still go to the libm.
+
+**Measurement.** ns per call on one gcc thread:
+
+| function | platform exp/log | own exp/log | change |
+|---|---|---|---|
+| beta_inc, common / mixed / large | 370 / 401 / 424 | 263 / 264 / 344 | -29%, -34%, -19% |
+| gamma_inc (P, Q) | 262 | 193 | -26% |
+| gamma inverses | 715-740 | 433-485 | -35 to -41% |
+| beta inverses | 1506-1979 | 976-1303 | -35% |
+| Student t derivatives, orders 1-5 | 2315 / 2781 / 3466 / 4796 / 8014 | 1826 / 2229 / 3032 / 4356 / 7303 | -21 to -9% |
+| skew normal derivatives, orders 4-5 | 2165 / 2361 | 1478 / 1670 | -32%, -29% |
+
+Accuracy: unchanged to within noise on every reference set measured (beta_inc
+max ulp, ulp1, ulpL and mean equal to three digits; gamma_inc the same; the
+inverses' tails the same, ibetac_inv_tail 1 - x max plain ulp 80 to 55). The
+whole test suite passes with the own versions except the Bessel K derivatives
+of orders 2 and 3 at nu = 1/2, x = 0.805 (25.8 and 26.1 ulp against a bound of
+24); the skew normal's order 5 in the large-alpha region goes from 1.4e4 to
+2.8e4 ulp1, near the zeros where it is ill-conditioned.
+
+**Chosen.** The own exp and log on the host in every CPU build (gcc,
+and MSVC on the host side of the CUDA build): the same algorithm on every CPU
+platform, and the speed of the gcc build that R loads. On Linux, where glibc's
+exp and log are fast and nearly correctly rounded, the switch costs about half
+an ulp for a gain not yet measured (no Linux build yet). The default is in
+`elementary.hpp` itself, so builds without CMake (an R package) get it too;
+`LAPLACE_PLATFORM_ELEMENTARY` (CMake: `LAPLACE_OWN_ELEMENTARY=OFF`) restores the
+libm. The device keeps CUDA's. The Bessel K failure turned out to be an older
+defect, which the references had missed (next entry). Open: whether the calls
+inside Boost should follow.
+
+## log K_nu derivatives near x = 1: Temme's first coefficient
+
+**What.** With the own exp and log, the test of the derivatives of log K_nu
+failed at nu = 1/2, x = 0.805 (25.8 ulp against a bound of 24). The defect is
+older and independent of exp and log. For x < 1 (below x_cf) the ratio
+K_(mu+1)/K_mu comes from Temme's series in double, mu = nu - round(nu). Its
+first coefficient is a difference of two terms,
+f_0 = ((x/2)^-mu Gamma(1 + mu) - (x/2)^mu Gamma(1 - mu)) / (2 mu),
+which vanishes near x = 1-1.12 for every mu (at mu = -1/2 it is
+sqrt(pi/2) (x^-1/2 - x^1/2), zero at x = 1); each term carries about one ulp
+from exp, log, sinh and tgamma1pm1, so the ratio is off by 5-10 ulps there
+(summing the series in double-double lowers 10.5 to 7.9 only: the error is in
+the inputs). Below nu = 3/2 at most one recurrence step damps it, and the
+Riccati identity amplifies it about eight times.
+
+**Measurement.** Second derivative at nu = 1/2 against its closed form, own
+exp and log (the platform's gives the same pattern, 31.6 ulp at most): x in
+(0, 0.25] 0.6-1.5 ulp, (0.25, 0.5] 6.8, (0.5, 0.75] 19.3, (0.75, 1] 41.6; at
+nu = 3/2 6.2 at most, at nu = 5/2 0.7. The references had missed the worst
+points: `tools/reference/bessel_k.py` now adds 200 points with x in (0.5, 1)
+and nu in {0, 1/4, 1/2, 1, 3/2} or uniform in (0, 3) (2607 rows; the earlier
+2407 are reproduced bit for bit). On them, orders 1-7: 8.9, 44.4, 44.0, 24.1,
+12.4, 21.9, 31.5 ulp, worst at nu = 1/4, x = 0.979 for orders 2-3, the same
+to three digits with the platform's exp and log; on CUDA 37.4, 37.0, 25.6 for orders 2-4. Steed's fraction in
+double-double from x = 0.5 for nu < 3/2 brings every order to 0.5 ulp but
+costs 2679 against 282 ns (order 2) and 2960 against 626 ns (order 7) per
+call on one gcc thread in that band.
+
+**Chosen.** The bounds of orders 2-4 raised to 66, 66,
+36 ulp (`tests/math/test_bessel_k.cpp`); Steed's fraction below x = 1 rejected
+for its cost. The Poisson-inverse Gaussian, which uses exactly nu = y - 1/2,
+gets a closed form for half-integer orders in phase 4: K_(n+1/2)(x) =
+sqrt(pi/(2x)) e^-x times a polynomial in 1/x, exact and cheaper than the series.
