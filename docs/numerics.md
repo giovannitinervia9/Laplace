@@ -1032,3 +1032,81 @@ builds.
 
 **Open.** The multivariate assembly (mixed derivatives through several links)
 is written with the link layer, where its shape is known.
+
+## Quadrature rules for kernels: double-exponential, Gauss-Kronrod, panels, fixed Gauss
+
+**What.** `include/laplace/math/quadrature.hpp` (namespace
+`laplace::math::quad`), rules callable inside Kokkos kernels (integrand a
+functor, no allocation, no recursion, every loop capped), each returning the
+value, an error estimate, the evaluations and whether it converged:
+tanh-sinh on [a, b], exp-sinh on [a, inf), sinh-sinh on R (double-exponential,
+step halved from 1/2 until two estimates differ by less than `stop` = 1e-9 of
+int |f|, at most 8 halvings, t in [-6.8, 6.8] trimmed at step 1/2 to where
+|f w| exceeds 2^-64 of int |f|); Gauss-Kronrod 7-15 adaptive (at most 64
+intervals; Boost's constants); `panels`, statmodels7's rule of
+`pt_trunc_rule.h` (cut at the centre and at up to 8 kinks, doubling panels of
+widths s, 2s, ... from the side nearer the centre, exp-sinh beyond 63 s on an
+unbounded side) with a convergence check on every panel; fixed Gauss-Legendre
+16, 32, 64, Gauss-Hermite 32 and Gauss-Laguerre 32 (Golub-Welsch at 256 bits).
+tanh-sinh and exp-sinh also accept an integrand f(x, xc) that takes the signed
+distance to the nearer end (Boost's convention), for singularities at an end
+that x itself cannot resolve.
+
+**Measurement.** References `quadrature.csv` (tools/reference/quadrature.py,
+540 rows): nine integrals from the uses, each at 60 parameter values, by
+closed forms (the skew normal entry by mpmath.quad at 200 bits): beta (singular
+ends, exponents down to 0.05), gamma (singular end, a up to 100),
+exp(-x^2/2) cos(px), the Student t tail (nu down to 0.25), the Laplace density
+on [p1, p2] (kink at 0), x^p log(x)^2 (p + 1 >= 0.1), the skew normal entry
+E[(d/dalpha log f)^2] (|alpha| up to 30), the pseudo-Huber normalizer
+(nu from 0.01 to 100) and sech(x)^p. Max ulp, gcc (CUDA where it differs),
+with the mean number of evaluations; every row converged:
+
+| integral | tanh-sinh | exp-sinh | sinh-sinh | panels | GK15 |
+|---|---|---|---|---|---|
+| beta (with the distance to the end) | 6.5 (7.8), 88 | | | | fails |
+| gamma | | 68 (20), 136 | | 13 (21), 839 | |
+| Student tail | | 5.4, 85 | | 4.0, 793 | |
+| Laplace with a kink | | | | 4.5, 229 | 72, 167 |
+| x^p log(x)^2 | 6.4 (7.4), 72 | | | 3.9, 274 | fails |
+| skew normal entry | | | 7.3 (6.7), 159 | 6.8 (5.4), 1527 | |
+| pseudo-Huber normalizer | | | 18, 615 | 2.8, 1557 | |
+| sech^p | | | 6.3, 182 | 3.7, 1561 | |
+
+Not in the table: exp(-x^2/2) cos(px) loses relative accuracy as p grows (the
+value is e^(-p^2/2) of int |f|; 1e7 ulp at p = 5.7, a cancellation no rule
+avoids); GK15 on the singular ends and the fixed Gauss rules on these
+integrands (1e9 to 1e15 ulp: they are for smooth integrands of Gaussian or
+exponential shape, and integrate their polynomials exactly, which the test
+checks); stop = 1e-11 instead of 1e-9 gains nothing and costs 10-30 per cent
+more evaluations. Three defects found on the way and repaired: a node whose x
+rounded to the end was dropped (it carried the whole singular mass of beta
+with b = 0.06, 0.2 relative; and 1251 ulp on a smooth integrand far from 0);
+exp-sinh stopped at x = 1e-152 (t <= 6.1), too early for x^(a-1) with small a
+(2e7 ulp at a = 0.055); both fixed by keeping such nodes (with xc for the
+two-argument form, skipping a non-finite value) and t up to 6.8. The limit
+that remains is the double range: x^(a-1) needs nodes below 10^(-16/a) of the
+scale, so exponents below about 0.06 cannot be integrated to the last bit.
+
+Throughput on 69120 integrals (the 540 rows 128 times), us per integral, one
+gcc thread / 16 threads / CUDA: tanh-sinh 17.3 / 1.51 / 3.44; exp-sinh 10.0 /
+0.91 / 0.82; sinh-sinh 20.8 / 1.79 / 2.62; GK15 61 / 4.4 / 3.9; panels 121 /
+9.5 / 8.7; the fixed rules 2.1-2.7 / 0.26-0.32 / 0.20. The cost is the
+integrand (90 to 1500 evaluations, each with exp and log at about 28 ns on the
+Rtools libm). 16 threads give 11-13 times one thread; the GPU matches them
+(FP64 at 1/64 of FP32 on this card, and threads that stop at different
+levels diverge).
+
+**What this says.** For every integral of the uses there is a rule within a
+few tens of ulps: tanh-sinh with the distance to the end for singular ends,
+exp-sinh or sinh-sinh where the mass sits near the end or the centre, panels
+where there are kinks or the mass is far from the end, at about ten times the
+evaluations.
+
+**Chosen.** As above, stop = 1e-9. Tested in `tests/math/test_quadrature.cpp`
+on both builds.
+
+**Open.** `panels` takes integrands of x alone, so it cannot use the distance
+to a singular end (beta with a small exponent goes to tanh-sinh); the choice of
+rule, centre and scale for each integral is the caller's, decided when the
+distributions are written.
