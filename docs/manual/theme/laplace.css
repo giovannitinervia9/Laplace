@@ -1,0 +1,6 @@
+/* Laplace's adjustments to doxygen-awesome-css. */
+
+/* No "More..." link after a page's brief: the details follow on the page. */
+div.contents > p > a[href="#details"] {
+  display: none;
+}

@@ -156,11 +156,11 @@ Special values are verified strictly:
 Points flagged as `n_bad` are excluded from numeric summary statistics and
 recorded separately. In automated tests, `n_bad` must be strictly zero.
 
-### Error scales: ulp, ulp1, ulpL, and ulpC
+### Error scales
 
 Different applications require different notions of error:
 
-#### 1. Relative error: ulp
+#### Relative error
 
 When the scale is \f$s = |hi|\f$, the error is the classical relative error in
 units in the last place:
@@ -171,7 +171,7 @@ An error of 0.5 ulp or less indicates correct rounding under round-to-nearest.
 However, relative ulp error diverges to infinity whenever \f$hi \to 0\f$, even
 when the computed result differs from zero by only a few units of \f$2^{-52}\f$.
 
-#### 2. Order-one absolute error: ulp1
+#### Order-one absolute error
 
 For functions where values can cross or approach zero, or where the output is
 subsequently added to quantities of order one (such as a log-density or a
@@ -182,7 +182,7 @@ score), the appropriate scale is \f$s = \max(|hi|, 1.0)\f$:
 When \f$|hi| \ge 1\f$, ulp1 coincides with standard ulp. When \f$|hi| < 1\f$,
 ulp1 measures absolute error in units of \f$\mathrm{ulp}(1.0) = 2^{-52} \approx 2.22 \times 10^{-16}\f$.
 
-#### 3. Inherent logarithmic error: ulpL
+#### Inherent logarithmic error
 
 When a quantity \f$f \in \mathbb{R}_{> 0}\f$ is evaluated in exponential form,
 say \f$f = \exp(\log f)\f$ or via a small tail representation, an uncertainty of
@@ -195,7 +195,7 @@ of exponentiation:
 A bounded ulpL demonstrates that the implementation does not introduce errors
 beyond what the inherent conditioning of exponentiation entails.
 
-#### 4. Conditioned scale: ulpC
+#### Conditioned scale
 
 General numerical principles dictate that an algorithm's error should be judged
 against what the mathematical conditioning of the function allows (Higham 2002).
@@ -207,7 +207,7 @@ arguments, error is scaled by a function-specific conditioning scale \f$s \in \m
 where \f$s\f$ reflects the sensitivity of the exact value to perturbations in
 its inputs.
 
-**Example in `bessel_k`:**
+**Example in** `bessel_k`:
 For \ref laplace::math::own::log_bessel_k "log_bessel_k()", a 1-ulp variation in the argument \f$x\f$ shifts
 \f$\log K_\nu(x)\f$ by approximately \f$|x g|\f$ ulps of 1, where
 \f$g = \frac{\mathrm{d}}{\mathrm{d}x} \log K_\nu(x)\f$ (computed by \ref laplace::math::own::log_bessel_k_dx1 "log_bessel_k_dx1()").
@@ -245,11 +245,11 @@ threads and on device GPU threads.
 
 ### Test bounds and safety margins
 
-In each test, the maximum observed error is compared against an explicit test bound:
+In each test, the maximum error \f$E\f$ observed over the reference points must satisfy an explicit test bound \f$B\f$:
 \f[
-\text{max\_error} \le \text{bound}
+E \le B
 \f]
-The test bound is chosen as the measured maximum error plus a margin chosen per
+The test bound \f$B\f$ is chosen as the measured maximum error plus a margin chosen per
 function. For example, in `tests/math/test_bessel_k.cpp`:
 - For \ref laplace::math::own::log_bessel_k "log_bessel_k()", the measured maximum is 4.8 ulpC on both backends, and the test bound is set to **7.5 ulpC**.
 - For the derivatives \ref laplace::math::own::log_bessel_k_dx2 "log_bessel_k_dx2()" and \ref laplace::math::own::log_bessel_k_dx3 "log_bessel_k_dx3()", the measured maximums on gcc are 44.4 ulp and 44.0 ulp (where Temme's first coefficient cancels near \f$x = 1\f$ for \f$\nu = 1/4\f$), and the test bounds are set to **66.0 ulp**.

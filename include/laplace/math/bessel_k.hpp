@@ -625,8 +625,9 @@ LAPLACE_HD double log_bessel_k_dx2(double nu, double x) { return detail_bessel_k
  *
  * Computes the third derivative:
  * \f[
- * \frac{\mathrm{d}^3}{\mathrm{d}x^3} \log K_\nu(x)
+ * \frac{\mathrm{d}^3}{\mathrm{d}x^3} \log K_\nu(x) = g'' = -\frac{2\nu^2}{x^3} + \frac{g}{x^2} - \frac{g'}{x} - 2 g g'
  * \f]
+ * where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ is its \f$k\f$-th derivative, the value of the lower-order functions (`log_bessel_k_dx<k+1>()`).
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
@@ -650,8 +651,9 @@ LAPLACE_HD double log_bessel_k_dx3(double nu, double x) { return detail_bessel_k
  *
  * Computes the fourth derivative:
  * \f[
- * \frac{\mathrm{d}^4}{\mathrm{d}x^4} \log K_\nu(x)
+ * \frac{\mathrm{d}^4}{\mathrm{d}x^4} \log K_\nu(x) = g''' = \frac{6\nu^2}{x^4} - \frac{2g}{x^3} + \frac{2g'}{x^2} - \frac{g''}{x} - 2 g g'' - 2 (g')^2
  * \f]
+ * where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ is its \f$k\f$-th derivative, the value of the lower-order functions (`log_bessel_k_dx<k+1>()`).
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
@@ -675,8 +677,11 @@ LAPLACE_HD double log_bessel_k_dx4(double nu, double x) { return detail_bessel_k
  *
  * Computes the fifth derivative:
  * \f[
- * \frac{\mathrm{d}^5}{\mathrm{d}x^5} \log K_\nu(x)
+ * \frac{\mathrm{d}^5}{\mathrm{d}x^5} \log K_\nu(x) = g^{(4)} = (-1)^3 4!\,\frac{\nu^2}{x^5}
+ *           - \sum_{k=0}^{3} \binom{3}{k} (-1)^{3-k} (3-k)!\,\frac{g^{(k)}}{x^{4-k}}
+ *           - \sum_{k=0}^{3} \binom{3}{k} g^{(k)} g^{(3-k)}
  * \f]
+ * where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ is its \f$k\f$-th derivative, the value of the lower-order functions (`log_bessel_k_dx<k+1>()`).
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
@@ -700,8 +705,11 @@ LAPLACE_HD double log_bessel_k_dx5(double nu, double x) { return detail_bessel_k
  *
  * Computes the sixth derivative:
  * \f[
- * \frac{\mathrm{d}^6}{\mathrm{d}x^6} \log K_\nu(x)
+ * \frac{\mathrm{d}^6}{\mathrm{d}x^6} \log K_\nu(x) = g^{(5)} = (-1)^4 5!\,\frac{\nu^2}{x^6}
+ *           - \sum_{k=0}^{4} \binom{4}{k} (-1)^{4-k} (4-k)!\,\frac{g^{(k)}}{x^{5-k}}
+ *           - \sum_{k=0}^{4} \binom{4}{k} g^{(k)} g^{(4-k)}
  * \f]
+ * where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ is its \f$k\f$-th derivative, the value of the lower-order functions (`log_bessel_k_dx<k+1>()`).
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
@@ -725,8 +733,11 @@ LAPLACE_HD double log_bessel_k_dx6(double nu, double x) { return detail_bessel_k
  *
  * Computes the seventh derivative:
  * \f[
- * \frac{\mathrm{d}^7}{\mathrm{d}x^7} \log K_\nu(x)
+ * \frac{\mathrm{d}^7}{\mathrm{d}x^7} \log K_\nu(x) = g^{(6)} = (-1)^5 6!\,\frac{\nu^2}{x^7}
+ *           - \sum_{k=0}^{5} \binom{5}{k} (-1)^{5-k} (5-k)!\,\frac{g^{(k)}}{x^{6-k}}
+ *           - \sum_{k=0}^{5} \binom{5}{k} g^{(k)} g^{(5-k)}
  * \f]
+ * where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ is its \f$k\f$-th derivative, the value of the lower-order functions (`log_bessel_k_dx<k+1>()`).
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.

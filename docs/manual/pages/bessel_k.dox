@@ -22,7 +22,7 @@ K_{-\nu}(x) = K_\nu(x)
 \f]
 for all \f$\nu \in \mathbb{R}\f$ and \f$x > 0\f$.
 
-## Motivation: logarithmic scale and derivatives in x
+## Motivation: logarithmic scale and derivatives in the argument
 
 Laplace computes \f$\log K_\nu(x)\f$ and its derivatives with respect to \f$x\f$,
 \f[
@@ -44,7 +44,7 @@ rather than \f$K_\nu(x)\f$ directly, for several reasons:
 
 ## Numerical methods and regimes
 
-### Value of log K_nu(x)
+### Function value
 
 The value \f$\log K_\nu(x)\f$ is computed across two regimes:
 
@@ -68,7 +68,7 @@ The value \f$\log K_\nu(x)\f$ is computed across two regimes:
      \f]
      is stable for \f$K\f$, yielding \f$\log K_\nu(x) = \log K_\mu(x) + \sum_{k=1}^n \log r_k\f$. The running product is kept in a single double precision accumulator, rescaled when exceeding \f$10^{280}\f$ to prevent overflow.
 
-### Derivatives of log K_nu(x) in x (orders 1 to 7)
+### Derivatives in the argument
 
 The derivatives in \f$x\f$ are computed across three regimes:
 
@@ -89,6 +89,19 @@ The derivatives in \f$x\f$ are computed across three regimes:
    g' = 1 + \frac{\nu^2}{x^2} - \frac{g}{x} - g^2
    \f]
    where \f$g' = \frac{\mathrm{d}g}{\mathrm{d}x} = \frac{\mathrm{d}^2}{\mathrm{d}x^2}\log K_\nu(x)\f$. Differentiating this relation \f$n\f$ times in double-double arithmetic (`laplace::math::detail::ddm::dd`) overcomes the cancellation of roughly a factor \f$\max(\nu, x)\f$ per derivative order.
+
+   Writing \f$g(x) = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ for its \f$k\f$-th derivative, so that \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x) = g^{(n-1)}(x)\f$ is the value of `log_bessel_k_dx<n>()`:
+   - order 1: \f$g = \frac{\nu}{x} - \frac{K_{\nu+1}(x)}{K_\nu(x)}\f$;
+   - order 2 (the Riccati identity): \f$g' = 1 + \frac{\nu^2}{x^2} - \frac{g}{x} - g^2\f$;
+   - order 3: \f$g'' = -\frac{2\nu^2}{x^3} + \frac{g}{x^2} - \frac{g'}{x} - 2 g g'\f$;
+   - order 4: \f$g''' = \frac{6\nu^2}{x^4} - \frac{2g}{x^3} + \frac{2g'}{x^2} - \frac{g''}{x} - 2 g g'' - 2 (g')^2\f$;
+   - every order \f$n \ge 3\f$, with \f$m = n - 2 \ge 1\f$ (Leibniz's rule applied to the Riccati identity):
+     \f[
+     g^{(m+1)} = (-1)^m (m+1)!\,\frac{\nu^2}{x^{m+2}}
+               - \sum_{k=0}^{m} \binom{m}{k} (-1)^{m-k} (m-k)!\,\frac{g^{(k)}}{x^{m-k+1}}
+               - \sum_{k=0}^{m} \binom{m}{k} g^{(k)} g^{(m-k)}.
+     \f]
+
    The starting ratio \f$K_{\mu+1}/K_\mu\f$ in double-double is obtained:
    - for \f$x \ge x_{\mathrm{cf}} = 1.0\f$: from Steed's continued fraction evaluated forwards by its convergents \f$P_k / Q_k\f$ in double-double arithmetic (\f$2n+4\f$ steps where \f$n\f$ is the step count in double precision, rescaled by \f$2^{-500}\f$ when \f$|Q_1| > 2^{500}\f$).
    - for \f$x < 1.0\f$: from Temme's series in double precision, followed by forward recurrence in double-double (each recurrence step damps error by about \f$\frac{x^2}{4(\mu+k)^2}\f$).
@@ -133,12 +146,6 @@ Measured in nanoseconds per call on one gcc thread, OpenMP (16 threads), and CUD
 - Asymptotic \f$1/x\f$ expansion (\f$x \ge 200\f$): 45 / 4.5 / 2.0 ns/call.
 - Debye expansion (\f$\nu \ge 20\f$): 214 / 23 / 17 ns/call.
 - Value \f$\log K_\nu(x)\f$: 266 / 20 / 19 ns/call for small orders; 139 / 11 / 1.5 ns/call for Debye expansion.
-
-## Uses in Laplace distribs
-
-This module is used by the following probability distributions (`distrib`s) in Laplace:
-- **Pseudo-Huber distribs:** evaluate \f$K_0(x) \dots K_4(x)\f$ at \f$x = \sqrt{\nu_{\mathrm{ph}}}\f$.
-- **Poisson-inverse Gaussian distrib:** evaluates \f$\log K_{y - 1/2}(\alpha)\f$ with derivatives with respect to \f$\alpha\f$. The 7th derivative \f$\frac{\mathrm{d}^7}{\mathrm{d}x^7}\log K_\nu(x)\f$ is required to compute the 5th derivative of the expected information of the Poisson-inverse Gaussian distrib.
 
 ## Example
 

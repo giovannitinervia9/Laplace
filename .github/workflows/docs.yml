@@ -10,6 +10,7 @@ on:
       - "include/**"
       - "docs/manual/**"
       - "docs/logo/**"
+      - "tools/docs/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -31,6 +32,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y doxygen
       - name: Build the manual
         run: doxygen docs/manual/Doxyfile
+      - name: Check the manual for unrendered markup
+        run: python3 -I tools/docs/check_manual.py build-docs/html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

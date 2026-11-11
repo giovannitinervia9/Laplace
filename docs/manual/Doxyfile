@@ -45,7 +45,7 @@ PREDEFINED             = LAPLACE_HD= LAPLACE_HD_FORCEINLINE= KOKKOS_INLINE_FUNCT
 GENERATE_LATEX         = NO
 GENERATE_HTML          = YES
 HTML_OUTPUT            = html
-HTML_EXTRA_STYLESHEET  = docs/manual/theme/doxygen-awesome.css docs/manual/theme/doxygen-awesome-sidebar-only.css
+HTML_EXTRA_STYLESHEET  = docs/manual/theme/doxygen-awesome.css docs/manual/theme/doxygen-awesome-sidebar-only.css docs/manual/theme/laplace.css
 HTML_COLORSTYLE        = LIGHT
 GENERATE_TREEVIEW      = YES
 DISABLE_INDEX          = NO
@@ -61,3 +61,6 @@ GROUP_GRAPHS           = NO
 USE_MATHJAX            = YES
 MATHJAX_VERSION        = MathJax_3
 MATHJAX_FORMAT         = chtml
+
+# A page's brief is shown once, at the top; no "More..." link to a repeat.
+REPEAT_BRIEF           = NO
