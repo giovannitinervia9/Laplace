@@ -1,6 +1,6 @@
 # Measurement tools (accuracy and speed); not part of the test suite.
 
-laplace_kokkos_sources(math_elementary.cpp math_special.cpp math_incomplete.cpp math_ibeta.cpp math_inverse.cpp math_normal.cpp math_gamma_deriv.cpp math_beta_deriv.cpp math_student.cpp math_owen.cpp math_bessel.cpp)
+laplace_kokkos_sources(math_elementary.cpp math_special.cpp math_incomplete.cpp math_ibeta.cpp math_inverse.cpp math_normal.cpp math_gamma_deriv.cpp math_beta_deriv.cpp math_student.cpp math_owen.cpp math_bessel.cpp math_bessel_k.cpp)
 
 add_executable(math_elementary math_elementary.cpp)
 target_link_libraries(math_elementary PRIVATE Laplace::laplace)
@@ -34,3 +34,6 @@ target_link_libraries(math_owen PRIVATE Laplace::laplace)
 
 add_executable(math_bessel math_bessel.cpp)
 target_link_libraries(math_bessel PRIVATE Laplace::laplace)
+
+add_executable(math_bessel_k math_bessel_k.cpp)
+target_link_libraries(math_bessel_k PRIVATE Laplace::laplace)

@@ -898,3 +898,92 @@ contraction would cost at most an ulp. `lambda_of` in `ibeta_expansions.hpp`
 does rely on the exact identity, but ibeta_hard on CUDA matches the CPU to the
 digit (1325 ulp, ulpL 18.83 on both), and the general set has the same mean
 and ulpL (12.9 against 12.7). Left as they are.
+
+## log K_nu(x) for real order and its derivatives in x to order 7
+
+**What.** `include/laplace/math/bessel_k.hpp`: `log_bessel_k(nu, x)` = log K_nu(x)
+for real nu (K_-nu = K_nu) and x > 0, and `log_bessel_k_dx1..dx7(nu, x)`, its
+derivatives in x. What the distributions need, read from statmodels7: the
+pseudo-Huber families use K_0 ... K_4 at x = sqrt(nu_ph), the Poisson-inverse
+Gaussian log K_(y-1/2)(alpha) with derivatives in alpha (the plan said
+"derivatives in nu": that nu was the pseudo-Huber parameter, not the order).
+Order seven because the fifth derivative of the PIG expected information
+contains the seventh of log K.
+
+**How.** The value: n = round(nu), mu = nu - n; K_mu and K_(mu+1) by Temme's
+series (x <= 2) or Steed's continued fraction (x > 2, scaled), both adapted
+from Boost.Math (`bessel_ik.hpp`, Boost Software License); then the forward
+recurrence on the ratio K_(mu+k+1)/K_(mu+k). From nu = 20 the uniform (Debye)
+expansion with the polynomials u_0..u_16 (exact rationals,
+`tools/reference/bessel_k.py coefs`). The derivatives, three regimes:
+nu >= 20, the Debye form differentiated (the derivatives of eta' = sqrt(1+z^2)/z
+from h h' = -z^-3, of log(1+z^2) from (1+z^2) q' = 2z, of log P(t(z)) from P's
+Taylor coefficients in t, their logarithm as a power series, composed with the
+Taylor series of t(z)); nu < 20 and x >= 200, the expansion in 1/x
+(DLMF 10.40.2), its series S differentiated term by term and then log S;
+otherwise g = d log K/dx = nu/x - K_(nu+1)/K_nu in double-double and the Riccati
+identity g' = 1 + nu^2/x^2 - g/x - g^2 differentiated n times in
+double-double. The ratio in double-double comes from Steed's continued
+fraction evaluated forwards by its convergents (x >= 1; twice the number of
+steps that the same fraction needs in double, plus four), or from Temme's
+series in double followed by the forward recurrence in double-double (x < 1;
+each step damps the error of the start by about x^2/(4 (mu+k)^2)). The Debye
+terms stop once nu passes the order from which the next term is below 2^-60 for
+the value and the first seven derivatives in t (table from the generator).
+
+**Measurement.** References from `tools/reference/bessel_k.py`: 2407 points
+(nu, x) with nu from 0 to 2^40 (small real orders, half-integers y - 1/2 up to
+y = 2^40, large orders around x ~ nu, general) and x from 2^-30 to 2^30. mpmath's
+besselk fails near nu = 1e6 (its hypergeometric series), so the references
+come from K_nu(x) = int_0^inf exp(-x cosh t) cosh(nu t) dt: log K is the log of
+that integral and d^n/dx^n log K = (-1)^n kappa_n, the cumulants of cosh T
+under the weight, by a double-exponential rule around the peak
+t* = asinh(nu/x), at P = 256 + 8 log2(2 + nu + x + 1/x) bits and P + 96 (all rows
+agree to 2^-110). Checked against log besselk and the Riccati identity at 300
+bits where besselk works: agreement to 1e-75.
+
+The value, in ulps of max(|log K|, |x g|, 1) (one ulp of x moves log K by |x g|
+ulps; near the turning point x ~ 0.66 nu, where log K crosses zero, |x g| is
+about 1.2 nu and plain ulps of log K reach 508 on the CPU and 1980 on CUDA):
+4.8 on both backends. Boost's cyl_bessel_k, logged: 2.9e8 ulp and 1651
+non-finite values (it overflows and underflows; it is O(nu) and throws above
+nu = 2^31). The derivatives, max ulp gcc / CUDA:
+
+| order | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| own | 6.0 / 5.9 | 15.8 / 21.0 | 16.1 / 20.6 | 10.9 / 10.9 | 11.1 / 11.1 | 21.9 / 21.9 | 31.5 / 29.5 |
+| Riccati in double everywhere | | 1.3e20 | | 7.7e37 | | | 1.3e64 |
+
+By regime (gcc): the double-double region within 0.5-0.66 ulp at every order;
+x < 1 with nu < 3 up to 16 ulp (Temme's ratio in double, not damped by a
+recurrence of 0 to 2 steps); Debye up to 31.5 (at nu = 20.5, x = 20, the edge
+of its range); 1/x expansion up to 9.1. Switch points: Debye from nu = 15 costs
+up to 4901 ulp at order 7; from 25 the same as from 20 (23 against 31.5 at
+order 7, 15.5 against 11.1 at order 5); the 1/x expansion from 100 gives 58 ulp
+at order 7, from 400 the same as from 200; Steed's fraction in double-double
+from x = 0.5 lowers the x < 1 errors to 5.5 ulp at 1.6 times the cost, from 2
+raises them to 550.
+
+ns/call on one gcc thread, OpenMP 16 threads, CUDA, by regime (order 4):
+continued fraction in double-double, x in (1, 16): 1222 / 128 / 53 (Steed's own
+form in double-double: 4914 / 378 / 168); Temme, x < 1: 384 / 31 / 9.4; 1/x
+expansion: 45 / 4.5 / 2.0; Debye: 214 / 23 / 17. The value: 266 / 20 / 19 for
+small orders, 139 / 11 / 1.5 for Debye.
+
+**What this says.** The value is accurate to the conditioning of the function
+everywhere, at any order up to 2^40 at constant cost. The derivatives are
+within 32 ulp everywhere, and within one ulp where the Riccati identity runs
+in double-double; that region is also the expensive one (about 1.2 us on one
+CPU thread, 53 ns on CUDA).
+
+**Chosen.** As above: Debye from nu = 20, the 1/x expansion from x = 200,
+Steed's fraction by convergents from x = 1. Tested in
+`tests/math/test_bessel_k.cpp` (value 7.5 ulpC; derivatives 9, 24, 24, 17, 17,
+33, 48 ulp; K_(1/2) in closed form) on both builds.
+
+**Open.** The Debye derivatives use Taylor-series arithmetic for log P and its
+composition with t(z) (as owen.hpp does for its series): an explicit
+computation of one function's derivatives, not a general jet type. The cost of
+the double-double region (Steed's fraction needs about 200/x steps) is the
+price of the one-ulp derivatives at moderate x; the pseudo-Huber families sit
+there (nu = 0..4, x = sqrt(nu_ph)).
