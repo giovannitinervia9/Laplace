@@ -101,6 +101,55 @@ struct LogPhiDSm7 {
   }
 };
 
+// the public functions log_Phi_d1..5 (piecewise Chebyshev on [-1, cheb_hi), the
+// route of log_Phi_dk outside it)
+struct LogPhiDCheb {
+  int k;
+  KOKKOS_INLINE_FUNCTION double operator()(double t) const {
+    switch (k) {
+      case 1: return laplace::math::log_Phi_d1(t);
+      case 2: return laplace::math::log_Phi_d2(t);
+      case 3: return laplace::math::log_Phi_d3(t);
+      case 4: return laplace::math::log_Phi_d4(t);
+      default: return laplace::math::log_Phi_d5(t);
+    }
+  }
+};
+
+// Errors of a derivative of log Phi by region of t, over the reference rows
+// and the dense rows log_Phi_d{k}_mid.csv (t in [-1, 10]): relative in ulps
+// for t < -1, in ulps of max(|g|, 1) above, the worst per region (host
+// evaluation, so that the numbers do not depend on the device).
+template <class F>
+void regions(int k, const char* impl, F f, const std::string& refdir) {
+  constexpr int NB = 11;
+  const double edges[NB + 1] = {-1e300, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 1e300};
+  double worst[NB] = {0};
+  double worst_t[NB] = {0};
+  std::size_t bad = 0;
+  for (const char* suffix : {"", "_mid"}) {
+    const auto r = bench::read_ref(refdir + "/log_Phi_d" + std::to_string(k) + suffix + ".csv");
+    const auto y = bench::eval_host(r.x, f);
+    for (std::size_t i = 0; i < y.size(); ++i) {
+      if (!std::isfinite(y[i])) {
+        ++bad;
+        continue;
+      }
+      const double t = r.x[i][0];
+      int b = 0;
+      while (t >= edges[b + 1]) ++b;
+      const double scale = b == 0 ? bench::ulp_of(std::max(std::fabs(r.hi[i]), 2.2250738585072014e-308))
+                                  : bench::ulp_of(std::max(std::fabs(r.hi[i]), 1.0));
+      const double e = std::fabs((y[i] - r.hi[i]) - r.lo[i]) / scale;
+      if (e > worst[b]) worst[b] = e, worst_t[b] = t;
+    }
+  }
+  std::printf("regions log_Phi_d%d %-8s | t<-1 %9.4g | [-1,0) %7.3g | [0,1) %7.3g | [1,2) %7.3g | [2,3) %7.3g |"
+              " [3,4) %7.3g | [4,5) %7.3g | [5,6) %7.3g | [6,8) %7.3g | [8,10) %7.3g | >=10 %7.3g | non-finite %zu\n",
+              k, impl, worst[0], worst[1], worst[2], worst[3], worst[4], worst[5], worst[6], worst[7], worst[8],
+              worst[9], worst[10], bad);
+}
+
 // ---------------------------------------------------------------- quantile
 struct PhiInvOwn {
   KOKKOS_INLINE_FUNCTION double operator()(double p) const { return own::Phi_inv(p); }
@@ -203,6 +252,24 @@ int main(int argc, char* argv[]) {
     run(dname[k], "recursion", LogPhiDOwn{k, -1e300, 0.0, 0}, t_deriv);
     run(dname[k], "sm7", LogPhiDSm7{k}, t_deriv);
     run(dname[k], "own", LogPhiDOwn{k, -1.0, 300.0, 20}, t_deriv);
+    run(dname[k], "cheb", LogPhiDCheb{k}, t_deriv);
+  }
+  // errors by region, the old route (own) and the public functions (cheb)
+  for (int k = 1; k <= 5; ++k) {
+    if (!filter.empty() && std::string(dname[k]).find(filter) == std::string::npos) continue;
+    regions(k, "own", LogPhiDOwn{k, -1.0, 300.0, 20}, refdir);
+    regions(k, "cheb", LogPhiDCheb{k}, refdir);
+  }
+  // timing on [-1, 4) alone, where the expansions replace the old route
+  const auto t_mid = bench::make_time_args(n, [&] { return -1.0 + 5.0 * u01(gen); });
+  for (int k = 1; k <= 5; ++k) {
+    if (!filter.empty() && std::string(dname[k]).find(filter) == std::string::npos) continue;
+    const double s_own = bench::time_ns<bench::HostOne>(t_mid.host, LogPhiDOwn{k, -1.0, 300.0, 20}, 5);
+    const double d_own = bench::time_ns<bench::Exec>(t_mid.dev, LogPhiDOwn{k, -1.0, 300.0, 20}, 7);
+    const double s_cheb = bench::time_ns<bench::HostOne>(t_mid.host, LogPhiDCheb{k}, 5);
+    const double d_cheb = bench::time_ns<bench::Exec>(t_mid.dev, LogPhiDCheb{k}, 7);
+    std::printf("timing [-1,4) log_Phi_d%d: own ns/call Serial %.2f, %s %.2f | cheb Serial %.2f, %s %.2f\n", k, s_own,
+                bench::Exec::name(), d_own, s_cheb, bench::Exec::name(), d_cheb);
   }
   return 0;
 }

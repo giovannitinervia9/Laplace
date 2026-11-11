@@ -1110,3 +1110,119 @@ on both builds.
 to a singular end (beta with a small exponent goes to tanh-sinh); the choice of
 rule, centre and scale for each integral is the caller's, decided when the
 distributions are written.
+
+## Piecewise Chebyshev expansions of the derivatives of log Phi on [-1, 4)
+
+**What.** `log_Phi_d1..d5` in `include/laplace/math/normal.hpp` on t in
+[-1, 4) (written by an agent, reviewed and verified by the session):
+Chebyshev expansions on five pieces of width 1, evaluated by Clenshaw's
+recurrence from a `__constant__` table (generated block between BEGIN and END
+markers). Outside, t < -1 keeps the cumulants and t >= 4 the recursion from
+R, both unchanged. Each order keeps its own function.
+
+**How.** `tools/reference/log_phi_cheb.py`: g_k at 80 Chebyshev nodes per
+piece at 300 bits (checked against 380), coefficients by the discrete cosine
+sum, degree the smallest with the tail of |c_m| below 2^-56 max |g_k| on the
+piece: 17, 17, 18, 19, 20 for k = 1..5. Denser references
+`log_Phi_d{k}_mid.csv` (20011 rows each on [-1, 10], added by normal.py). The
+upper end 4: above it the old route is already below 0.08 ulp1 at every order;
+the zeros of Phi at about 3.08 +- 3.81i set the piece width.
+
+**Measurement.** Max error in ulp of max(|g|, 1), old / new, gcc:
+
+| region | d1 | d2 | d3 | d4 | d5 |
+|---|---|---|---|---|---|
+| [-1, 0) | 2.85 / 1.19 | 6.14 / 0.64 | 13.5 / 0.16 | 36.2 / 0.082 | 109 / 0.070 |
+| [0, 1) | 1.67 / 0.73 | 2.39 / 0.62 | 4.26 / 0.32 | 10.2 / 0.10 | 24.7 / 0.20 |
+| [1, 2) | 0.40 / 0.33 | 0.77 / 0.32 | 1.21 / 0.34 | 2.09 / 0.18 | 3.04 / 0.23 |
+| [2, 3) | 0.067 / 0.051 | 0.19 / 0.12 | 0.44 / 0.16 | 0.91 / 0.14 | 1.43 / 0.18 |
+| [3, 4) | 0.0065 / 0.0055 | 0.018 / 0.013 | 0.062 / 0.040 | 0.22 / 0.094 | 0.50 / 0.14 |
+
+CUDA, overall on the main file (t < -1 included): old 2.53, 6.14, 12.2, 32.7,
+90.5; new 0.99, 0.63, 0.75, 1.19, 1.85. ns per call on [-1, 4), old / new:
+gcc one thread 38-43 / 15-19; CUDA 0.90-1.32 / 0.20-0.29.
+
+**What this says.** On [-1, 4) the error falls from up to 109 ulp1 to within
+2 at every order, and the evaluation is 2.5 times faster.
+
+**Chosen.** This version. Tested in `tests/math/test_normal.cpp` (centre bounds
+2.0, 1.0, 1.2, 2.0, 3.0 ulp1, were 4, 9, 18, 50, 140) on both builds.
+
+**Open.** Order 1 at [-1, 0) reaches 1.19 ulp1, mostly Clenshaw's rounding at
+values near 1.5.
+
+## Double-double sqrt, exp, expm1 and log
+
+**What.** `include/laplace/math/detail/double_double.hpp` gains `ddm::sqrt`,
+`exp`, `expm1` and `log` (written by an agent, reviewed and corrected by the
+session). sqrt by Karp's method, scaled by an even power of two outside
+[2^-900, 2^900] (Dekker's split overflows above 2^996, 1/sqrt(a.hi) for
+subnormal a). exp as in the QD library: Cody-Waite reduction by a two-part
+ln 2, Taylor series of e^r - 1 at r = t/2^9, nine steps s <- s (s + 2), which
+keep the relative precision of e^r - 1 (`expm1_reduced`, also behind
+`expm1`), scaling by 2^k. log: the argument split as m 2^e with m in
+[sqrt(1/2), sqrt(2)); for e = 0 and |m - 1| < 1/4 Newton's step on
+expm1(x) = m - 1 from x0 = log1p(m - 1), elsewhere on exp(x) = m with the
+log(1 + u) terms to u^3. All through the add/sub/mul helpers (safe from
+nvcc's contraction).
+
+**Measurement.** References `dd_{sqrt,exp,log,expm1}.csv`
+(tools/reference/double_double.py, 300 bits, inputs hi + lo with lo a random
+fraction of the ulp). Error in units of 2^-104 |f|, gcc and CUDA identical:
+
+| function | max | ns/call, 1 gcc thread / CUDA | plain double |
+|---|---|---|---|
+| sqrt | 1.27 | 13 / 0.22 | 2.3 / 0.05 |
+| exp | 0.57 | 490 / 6.3 | 3.1-29 / 0.09 |
+| log | 1.86 | 530 / 8.0 | 3.6-29 / 0.15 |
+| expm1 | 2.11 | | |
+
+The agent's version failed three ways, each fixed by the session: sqrt gave
+1.9e23 units on subnormal input and NaN near the largest double (scaling
+added); log near 1 was accurate only to 2^-104 absolute, 8.3e15 units
+relative, because its Newton step works on m exp(-x0) ~ 1 (the expm1 form
+added); expm1 was missing.
+
+**Chosen.** As above. Tested in `tests/math/test_double_double.cpp` on both
+builds (2, 1, 3, 3.5 units; exp(log x) = x within 1.2 units of max(1, |log x|)).
+
+**Open.** exp and log cost about 500 ns on one gcc thread (Dekker's product on
+the host); a table-driven reduction would cut it if a hot loop needs them.
+
+## Temme's uniform expansion for the incomplete gamma at large shapes
+
+**What.** `include/laplace/math/incomplete_gamma.hpp`: `own::gamma_inc` takes
+`gamma_inc_temme` for a >= 100 and |eta| <= 0.5 (eta^2/2 = phi =
+x/a - 1 - log(x/a), signed as x - a), `gamma_inc_classic` (the former code)
+elsewhere (written by an agent, reviewed and corrected by the session).
+Q = erfc(s)/2 + R with s = sqrt(a phi), R = e^-(a phi) S(a, eta) / sqrt(2 pi a),
+S = sum_(k<=9) c_k(eta) a^-k, the c_k Boost.Math's 53-bit polynomials
+(igamma_large.hpp, Boost licence); erfc as e^-y erfcx(s) so that nothing
+underflows, and the logarithm of the small tail as -y + log(bracket). The
+classic route needs O(sqrt(a)) terms near x = a; this one is O(1).
+
+**Measurement.** New references `gamma_{p,q}_large.csv` and
+`log_gamma_{p,q}_large.csv` (2400 rows: a log-uniform on [1e2, 1e15], x =
+a (1 + d), |d| log-uniform on [2^-40, 1], both signs). Two defects in the
+agent's references, both repaired: mpmath.quad on [0, x] without breakpoints
+near x, where the mass sits (wrong by a factor 0.58 at a = 1e12, x 24 sqrt(a)
+below the mode), and the integrand not scaled (values like e^-288 defeat
+quad's absolute error control; scaled by its maximum on the interval, the
+values agree to 30 digits across breakpoints and degrees); and the logarithm
+of the complement taken as log(1 - p) at 200 bits instead of log1p(-p). The
+agent's switch at |eta| <= 3 was wrong: Boost's c_k are polynomials truncated
+about eta = 0, and the route, measured on the logarithm of the small tail, is
+within 6 ulp for |eta| < 0.5 at every a, 11-38 ulp for |eta| in [0.5, 1) and
+up to 1.7e3 beyond; the switch is now 0.5 (beyond, the classic route needs a
+few tens of terms). Result, gcc (CUDA within the same test bounds): P and Q
+within 0.82 ulp of max(|f|, 1) and 2.9-3.4 ulpL (the small tail carries
+about a phi ulps from its argument: 1.0e3-1.3e3 plain ulps where a phi is
+near 500); log P and log Q within 5.9-6.4 ulp of max(|f|, 1). Every call
+within 5 us on one thread, against O(sqrt(a)) terms of the classic route
+(1e6 at a = 1e12). The agent's bench ran for hours: Boost outside its own
+Temme zone (a sigma^2 < 20) sums O(1/sigma) terms, about 1e6 at a = 1e15;
+Boost is left out of the large-shape part of the bench.
+
+**Chosen.** Temme for a >= 100, |eta| <= 0.5. Tested in
+`tests/math/test_special.cpp` on both builds; the tests of the inverses and of
+the shape derivatives, which call gamma_inc, pass unchanged.

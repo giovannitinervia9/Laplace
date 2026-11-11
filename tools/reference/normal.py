@@ -159,7 +159,7 @@ def rows_for(name, rng):
         xs += [signed(rng, -60, 3) for _ in range(N // 4)]
         xs += [0.0, -1.0, 1.0, -5.0, -38.5, 5.0, 8.3, 9.0, 38.0]
         rows = [((x,), log_Phi(x)) for x in xs]
-    elif name.startswith("log_Phi_d"):
+    elif name.startswith("log_Phi_d") and not name.endswith("_mid"):
         k = int(name[-1])
         ts = [rng.uniform(-40.0, 38.0) for _ in range(N // 4)]
         ts += [rng.uniform(-3.0, 1.0) for _ in range(N // 8)]  # around the switch near t = -1
@@ -169,6 +169,17 @@ def rows_for(name, rng):
         N_k = len(ts)
         rows = [((t,), logPhi_deriv(t, k)) for t in ts]
         print(f"{name}: {N_k} points", flush=True)
+    elif name.startswith("log_Phi_d") and name.endswith("_mid"):
+        # dense rows on [-1, 10] for the piecewise Chebyshev fits of
+        # log_phi_cheb.py and for the bench's regional errors; written to
+        # log_Phi_d{k}_mid.csv, the files above are unchanged
+        k = int(name[len("log_Phi_d")])
+        ts = [rng.uniform(-1.0, 10.0) for _ in range(16000)]
+        ts += [rng.uniform(-1.0, -0.5) for _ in range(2000)]
+        ts += [rng.uniform(4.0, 6.0) for _ in range(2000)]
+        ts += [-1.0, -0.5, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]
+        rows = [((t,), logPhi_deriv(t, k)) for t in ts]
+        print(f"{name}: {len(ts)} points", flush=True)
     elif name == "Phi_inv_logp":
         ls = [-log_uniform(rng, -60, 999) for _ in range(N // 2)]
         ls += [-log_uniform(rng, -10, 10) for _ in range(N // 4)]   # moderate p

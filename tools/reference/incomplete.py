@@ -227,9 +227,117 @@ ARGNAMES = {"gamma_p": "a,x", "gamma_q": "a,x", "gamma_p_inv": "a,p", "ibeta": "
             "ibetac": "a,b,x", "ibeta_inv": "a,b,p", "erfc": "x", "qnorm": "p"}
 
 
+# Large shapes (gamma_*_large): a from 1e2 to 1e15, x = a (1 + d) with |d| log-uniform
+# from 2^-40 to 1 and of both signs. The series of _P_series and the fraction of
+# _Q_upper need O(sqrt(a)) terms there, and mpmath.gammainc gives up above a of
+# about 1e8 (its hypergeometric series does not converge in the default number of
+# terms). The reference is therefore the integral itself, by mpmath.quad at 200
+# bits, split at the points m + k sqrt(a) / 2 (k = -40..40) around the mode
+# m = a - 1 of the integrand t^(a-1) e^-t, whose width is sqrt(a). Its prefactor
+# exp((a-1) log m - m - log Gamma(a)) is of size a log a and cancels, so it is
+# formed at extra precision (about 2 log2(a) more bits). Checked against
+# mpmath.gammainc for a <= 1e6 (agreement to 1e-54 relative; note/numerics.md).
+LARGE_NAMES = ("gamma_p_large", "gamma_q_large", "log_gamma_p_large", "log_gamma_q_large")
+LARGE_N = 2400
+
+
+def large_args(rng):
+    out = []
+    for i in range(LARGE_N):
+        a = 10.0 ** rng.uniform(2.0, 15.0)
+        mag = 2.0 ** rng.uniform(-40.0, 0.0)  # log-uniform in |d|, from 2^-40 to 1
+        d = mag if i % 2 == 0 else -mag
+        x = a * (1.0 + d)
+        out.append((a, x))
+    return out
+
+
+def _integrand_quad(a, x, lower_side):
+    """Integral of t^(a-1) e^-t over [x, inf) (lower_side False) or over [0, x] (True),
+    times 1 / Gamma(a), returned as an mpf with the prefactor at extra precision."""
+    extra = 200 + 2 * int(math.log2(a)) + 40
+    with mpmath.workprec(extra):
+        A = mpmath.mpf(a)
+        X = mpmath.mpf(x)
+        m = A - 1
+        lg = (A - 1) * mpmath.log(m) - m - mpmath.loggamma(A)
+        sd = mpmath.sqrt(A)
+        # the integrand divided by its largest value on the interval (at min(X, m)
+        # on the lower side, max(X, m) on the upper side): mpmath.quad's error
+        # control is absolute, and values like e^-288 defeat it (measured: the
+        # unscaled version was off by a factor 0.58 at a = 1e12, x 24 sqrt(a)
+        # below the mode, and agreed with itself to 6e-12 only across breakpoints)
+        tmax = min(X, m) if lower_side else max(X, m)
+        lh_max = (A - 1) * mpmath.log(tmax / m) - (tmax - m)
+        h = lambda t: mpmath.exp((A - 1) * mpmath.log(t / m) - (t - m) - lh_max)
+        # breakpoints at the local scale of the integrand at X, ell =
+        # min(sqrt(a), 1 / |r|) with r = d/dt log h at X = (a - 1)/X - 1, in a
+        # geometric progression away from X (the mass sits within a few ell of
+        # X when X is far from the mode m, and within a few sqrt(a) of m
+        # otherwise), and around the mode by sqrt(a)/2 when it lies inside
+        r = (A - 1) / X - 1
+        ell = sd if r == 0 else min(sd, 1 / abs(r))
+        if lower_side:
+            pts = [mpmath.mpf(0), X]
+            pts += [X - ell * 2 ** k for k in range(0, 200) if X - ell * 2 ** k > 0]
+            pts += [m + k * sd / 2 for k in range(-40, 41) if 0 < m + k * sd / 2 < X]
+        else:
+            pts = [X, mpmath.inf]
+            pts += [X + ell * 2 ** k for k in range(0, 200)]
+            pts += [m + k * sd / 2 for k in range(-40, 41) if m + k * sd / 2 > X]
+        pts = sorted(set(pts))
+        val = mpmath.quad(h, pts)
+        v = mpmath.exp(lg + lh_max) * val
+    return +v  # back to the working precision of the module (200 bits)
+
+
+def P_large(a, x):
+    return _integrand_quad(a, x, True)
+
+
+def Q_large(a, x):
+    return _integrand_quad(a, x, False)
+
+
+def write_large(names):
+    rng = random.Random(SEED)
+    rows = []
+    for a, x in large_args(rng):
+        A = mpmath.mpf(a)
+        X = mpmath.mpf(x)
+        if x < a:
+            p = P_large(A, X)
+            q = 1 - p
+        else:
+            q = Q_large(A, X)
+            p = 1 - q
+        rows.append((a, x, p, q))
+    for name in names:
+        path = OUT / f"{name}.csv"
+        with path.open("w", newline="\n") as fh:
+            fh.write("a,x,hi,lo\n")
+            for a, x, p, q in rows:
+                if name == "gamma_p_large":
+                    v = p
+                elif name == "gamma_q_large":
+                    v = q
+                elif name == "log_gamma_p_large":
+                    v = mpmath.log(p) if x < a else mpmath.log1p(-q)
+                else:
+                    v = mpmath.log1p(-p) if x < a else mpmath.log(q)
+                hi, lo = dd(v)
+                fh.write(",".join(float.hex(float(t)) for t in (a, x)) + f",{float.hex(hi)},{float.hex(lo)}\n")
+        print(f"{path}: {len(rows)} rows", flush=True)
+
+
 def main(names):
     OUT.mkdir(parents=True, exist_ok=True)
+    large = [n for n in names if n in LARGE_NAMES]
+    if large:
+        write_large(large)
     for name in names:
+        if name in LARGE_NAMES:
+            continue
         rng = random.Random(SEED)
         rows = rows_for(name, rng)
         path = OUT / f"{name}.csv"

@@ -14,7 +14,13 @@
 // about a phi ulps, which is |log P| or |log Q| in the tails; the logarithmic
 // versions do not have it.
 //
-// Branches (the classical ones, as in Numerical Recipes and DiDonato-Morris):
+// Two routes, chosen by gamma_inc from a and the distance of x from a:
+//
+// (1) Temme's uniform asymptotic expansion, for large a near x = a (see the
+//     comment on gamma_inc_temme). It needs O(1) operations, against the
+//     O(sqrt(a)) terms of the classic route for x close to a.
+//
+// (2) The classic route (gamma_inc_classic), for all other arguments:
 //   a < 1, x < 1.5   P = g (1 + J), Q = -expm1(log g) - g J, with
 //                    g = x^a / Gamma(a + 1) and J = a sum_{n>=1} (-x)^n / (n! (a + n));
 //                    Q is computed directly, without 1 - P, since it is small
@@ -22,13 +28,12 @@
 //   x < a + 1        P = prefactor * sum_{n>=0} x^n / ((a+1)...(a+n)), Q = 1 - P;
 //   x >= a + 1       Q = a * prefactor * Legendre's continued fraction (modified
 //                    Lentz), P = 1 - Q.
-// In the last two the complement is formed only where it is not small. The
-// series and the fraction need O(sqrt(a)) terms near x = a: for very large a a
-// uniform asymptotic expansion (Temme) would be faster; it is not written yet.
+// In the last two the complement is formed only where it is not small.
 #pragma once
 
 #include <laplace/core/config.hpp>
 #include <laplace/math/elementary.hpp>
+#include <laplace/math/normal.hpp>
 #include <laplace/math/special.hpp>
 
 #include <boost/math/special_functions/gamma.hpp>
@@ -84,9 +89,91 @@ LAPLACE_HD double log_prefactor(double a, double x) {
   return -a * phi - 0.5 * math::log(a) - half_log_two_pi - log_gamma_star(a);
 }
 
+// Temme's coefficients c_k(eta), k = 0..9, as polynomials in eta (ascending
+// powers), concatenated: c_k has temme_len(k) coefficients from temme_offset(k).
+// c_9 is a constant. Values: Boost.Math's igamma_temme_large, 53-bit version
+// (boost/math/special_functions/detail/igamma_large.hpp, Boost Software
+// License 1.0, copyright John Maddock 2006 and Matt Borland 2024), which it
+// took from Temme (1979) and DiDonato and Morris (1986).
+// clang-format off
+#define LAPLACE_TEMME_COEF                                                                                         \
+  -0.33333333333333333, 0.083333333333333333, -0.014814814814814815, 0.0011574074074074074,                         \
+      0.0003527336860670194, -0.00017875514403292181, 0.39192631785224378e-4, -0.21854485106799922e-5,             \
+      -0.185406221071516e-5, 0.8296711340953086e-6, -0.17665952736826079e-6, 0.67078535434014986e-8,               \
+      0.10261809784240308e-7, -0.43820360184533532e-8, 0.91476995822367902e-9,                                      \
+      -0.0018518518518518519, -0.0034722222222222222, 0.0026455026455026455, -0.00099022633744855967,              \
+      0.00020576131687242798, -0.40187757201646091e-6, -0.18098550334489978e-4, 0.76491609160811101e-5,           \
+      -0.16120900894563446e-5, 0.46471278028074343e-8, 0.1378633446915721e-6, -0.5752545603517705e-7,             \
+      0.11951628599778147e-7,                                                                                       \
+      0.0041335978835978836, -0.0026813271604938272, 0.00077160493827160494, 0.20093878600823045e-5,              \
+      -0.00010736653226365161, 0.52923448829120125e-4, -0.12760635188618728e-4, 0.34235787340961381e-7,           \
+      0.13721957309062933e-5, -0.6298992138380055e-6, 0.14280614206064242e-6,                                       \
+      0.00064943415637860082, 0.00022947209362139918, -0.00046918949439525571, 0.00026772063206283885,            \
+      -0.75618016718839764e-4, -0.23965051138672967e-6, 0.11082654115347302e-4, -0.56749528269915966e-5,          \
+      0.14230900732435884e-5,                                                                                       \
+      -0.0008618882909167117, 0.00078403922172006663, -0.00029907248030319018, -0.14638452578843418e-5,           \
+      0.66414982154651222e-4, -0.39683650471794347e-4, 0.11375726970678419e-4,                                      \
+      -0.00033679855336635815, -0.69728137583658578e-4, 0.00027727532449593921, -0.00019932570516188848,          \
+      0.67977804779372078e-4, 0.1419062920643967e-6, -0.13594048189768693e-4, 0.80184702563342015e-5,             \
+      -0.22914811765080952e-5,                                                                                      \
+      0.00053130793646399222, -0.00059216643735369388, 0.00027087820967180448, 0.79023532326603279e-6,            \
+      -0.81539693675619688e-4, 0.56116827531062497e-4, -0.18329116582843376e-4,                                     \
+      0.00034436760689237767, 0.51717909082605922e-4, -0.00033493161081142236, 0.0002812695154763237,             \
+      -0.00010976582244684731,                                                                                      \
+      -0.00065262391859530942, 0.00083949872067208728, -0.00043829709854172101,                                     \
+      -0.00059676129019274625
+// clang-format on
+#if defined(__CUDACC__)
+static __constant__ double temme_dev[80] = {LAPLACE_TEMME_COEF};
+#endif
+inline constexpr double temme_host[80] = {LAPLACE_TEMME_COEF};
+
+LAPLACE_HD_FORCEINLINE double temme_coef(int i) {
+  KOKKOS_IF_ON_DEVICE((return temme_dev[i];))
+  KOKKOS_IF_ON_HOST((return temme_host[i];))
+}
+
+// first index of c_k in the table, k = 0..9
+LAPLACE_HD_FORCEINLINE int temme_offset(int k) {
+  constexpr int offset[10] = {0, 15, 28, 39, 48, 55, 64, 71, 76, 79};
+  return offset[k];
+}
+
+// number of coefficients of c_k, k = 0..9
+LAPLACE_HD_FORCEINLINE int temme_length(int k) {
+  constexpr int length[10] = {15, 13, 11, 9, 7, 9, 7, 5, 3, 1};
+  return length[k];
+}
+
+// S(a, eta) = sum_{k=0}^{9} c_k(eta) a^-k, by Horner's rule in 1/a over k and in
+// eta within each c_k
+LAPLACE_HD double temme_sum(double a, double eta) {
+  const double w = 1.0 / a;
+  double s = 0.0;
+  for (int k = 9; k >= 0; --k) {
+    const int off = temme_offset(k), len = temme_length(k);
+    double c = temme_coef(off + len - 1);
+    for (int j = len - 2; j >= 0; --j) c = c * eta + temme_coef(off + j);
+    s = s * w + c;
+  }
+  return s;
+}
+
+// gamma_inc takes the Temme route when a >= temme_a_min and |eta| <= temme_eta_max,
+// where eta is defined in gamma_inc_temme. The coefficients c_k(eta) are
+// polynomials truncated about eta = 0: measured on the gamma_*_large
+// references (log P and log Q of the small tail), the route is within 6 ulp
+// for |eta| < 0.5 at every a from 1e2 to 1e15, 11-38 ulp for |eta| in
+// [0.5, 1), and up to 1.7e3 ulp beyond. For |eta| > 0.5 (|x/a - 1| above
+// about 0.4) the classic route needs a few tens of terms.
+inline constexpr double temme_a_min = 100.0;
+inline constexpr double temme_eta_max = 0.5;
+
 }  // namespace detail_igamma
 
-LAPLACE_HD gamma_inc_result gamma_inc(double a, double x) {
+// The classic route: the series, the continued fraction and the small-a series,
+// as described in the header comment.
+LAPLACE_HD gamma_inc_result gamma_inc_classic(double a, double x) {
   using namespace detail_igamma;
   constexpr double eps = 1.1102230246251565e-16;  // 2^-53
   constexpr int max_iter = 1000000;
@@ -149,6 +236,67 @@ LAPLACE_HD gamma_inc_result gamma_inc(double a, double x) {
   const double log_q = log_d + math::log(a) + math::log(h);
   const double q = math::exp(log_q);
   return {1.0 - q, q, Kokkos::log1p(-q), log_q};
+}
+
+// Temme's uniform asymptotic expansion of the incomplete gamma functions
+// (N. M. Temme, SIAM J. Math. Anal. 10, 1979; DiDonato and Morris, ACM TOMS 12,
+// 1986), for large a with x near a. With
+//
+//     lambda = x / a,   eta^2 / 2 = phi = lambda - 1 - log(lambda) >= 0,
+//     eta having the sign of lambda - 1,   y = a phi,   s = sqrt(y),
+//
+// the expansion reads
+//
+//     Q(a, x) = erfc(s) / 2 + R,     P(a, x) = erfc(-s)/2 - R, with
+//     R = exp(-y) S(a, eta) / sqrt(2 pi a),  S = sum_k c_k(eta) a^-k,
+//
+// and erfc(s) = exp(-y) erfcx(s) (exact, since s^2 = y), so with E = erfcx(s)/2
+// both are exp(-y) times a bracket:
+//
+//     x >= a:  Q = exp(-y) (E + r),   P = 1 - Q
+//     x <  a:  P = exp(-y) (E - r),   Q = 1 - P
+//
+// with r = S / sqrt(2 pi a). Nothing underflows before exp(-y) does, and the
+// logarithm of the small one is -y + log(bracket). phi comes from log1pmx, so
+// it has no cancellation near x = a; c_k(eta) are polynomials, so eta = 0 needs
+// no special case (c_0(0) = -1/3). The coefficients are those of Boost.Math's
+// 53-bit version (see LAPLACE_TEMME_COEF), with c_9 constant; the truncation
+// after k = 9 is of order a^-10 (measured in note/numerics.md).
+//
+// Argument: phi (not x), computed by the caller as -log1pmx((x - a) / a).
+LAPLACE_HD gamma_inc_result gamma_inc_temme(double a, double x, double phi) {
+  using namespace detail_igamma;
+  constexpr double two_pi = 6.2831853071795864769;
+  const double y = a * phi;
+  const double s = Kokkos::sqrt(y);
+  const double E = 0.5 * own::erfcx(s);
+  const double eta = (x < a ? -1.0 : 1.0) * Kokkos::sqrt(2.0 * phi);
+  const double r = temme_sum(a, eta) / Kokkos::sqrt(two_pi * a);
+  const double e_minus_y = math::exp(-y);
+  if (x >= a) {
+    const double bracket = E + r;
+    const double q = e_minus_y * bracket;
+    return {1.0 - q, q, Kokkos::log1p(-q), -y + math::log(bracket)};
+  }
+  const double bracket = E - r;
+  const double p = e_minus_y * bracket;
+  return {p, 1.0 - p, -y + math::log(bracket), Kokkos::log1p(-p)};
+}
+
+// P(a, x), Q(a, x) and their logarithms. The Temme route when a is large and x
+// is near a, the classic route elsewhere.
+LAPLACE_HD gamma_inc_result gamma_inc(double a, double x) {
+  using namespace detail_igamma;
+  const double nan = math::detail::quiet_nan();
+  const double inf = math::detail::pos_inf();
+  if (!(a > 0.0) || !(x >= 0.0)) return {nan, nan, nan, nan};
+  if (x == 0.0) return {0.0, 1.0, -inf, 0.0};
+  if (x == inf) return {1.0, 0.0, 0.0, -inf};
+  if (a >= temme_a_min && a < inf) {
+    const double phi = -boost::math::log1pmx((x - a) / a, math::detail::boost_policy());
+    if (Kokkos::sqrt(2.0 * phi) <= temme_eta_max) return gamma_inc_temme(a, x, phi);
+  }
+  return gamma_inc_classic(a, x);
 }
 
 LAPLACE_HD_FORCEINLINE double gamma_p(double a, double x) { return gamma_inc(a, x).p; }

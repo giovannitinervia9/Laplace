@@ -63,25 +63,28 @@ void check(const char* name, auto f, double max_ulp, double max_ulp1) {
 
 // Derivatives of log Phi: the relative error below t = -1, where they have no
 // zeros; above, where they cross zero, the error in ulps of max(|g|, 1).
+// The rows of the main file and of the dense file log_Phi_d{k}_mid.csv (t in [-1, 10]).
 void check_deriv(int k, double max_ulp_tail, double max_ulp1_centre) {
   const std::string name = "log_Phi_d" + std::to_string(k);
-  const auto r = bench::read_ref(refdir + "/" + name + ".csv");
-  const auto y = bench::eval_kernel(r.x, LogPhiD{k});
   double tail = 0, centre = 0, worst_tail = 0, worst_centre = 0;
   std::size_t bad = 0;
-  for (std::size_t i = 0; i < y.size(); ++i) {
-    if (!std::isfinite(y[i])) {
-      ++bad;
-      continue;
-    }
-    const double e = std::fabs((y[i] - r.hi[i]) - r.lo[i]);
-    const double t = r.x[i][0];
-    if (t < -1.0) {
-      const double u = e / ulp_normal(r.hi[i]);
-      if (u > tail) tail = u, worst_tail = t;
-    } else {
-      const double u = e / bench::ulp_of(std::max(std::fabs(r.hi[i]), 1.0));
-      if (u > centre) centre = u, worst_centre = t;
+  for (const char* suffix : {"", "_mid"}) {
+    const auto r = bench::read_ref(refdir + "/" + name + suffix + ".csv");
+    const auto y = bench::eval_kernel(r.x, LogPhiD{k});
+    for (std::size_t i = 0; i < y.size(); ++i) {
+      if (!std::isfinite(y[i])) {
+        ++bad;
+        continue;
+      }
+      const double e = std::fabs((y[i] - r.hi[i]) - r.lo[i]);
+      const double t = r.x[i][0];
+      if (t < -1.0) {
+        const double u = e / ulp_normal(r.hi[i]);
+        if (u > tail) tail = u, worst_tail = t;
+      } else {
+        const double u = e / bench::ulp_of(std::max(std::fabs(r.hi[i]), 1.0));
+        if (u > centre) centre = u, worst_centre = t;
+      }
     }
   }
   INFO(name, ": t < -1 max ", tail, " ulp at ", worst_tail, "; t >= -1 max ", centre, " ulp1 at ", worst_centre);
@@ -125,11 +128,11 @@ TEST_CASE("erfc, erfcx, Phi, log Phi against mpmath") {
 }
 
 TEST_CASE("derivatives of log Phi against mpmath") {
-  check_deriv(1, 2.0, 4.0);
-  check_deriv(2, 2.5, 9.0);
-  check_deriv(3, 22.0, 18.0);
-  check_deriv(4, 50.0, 50.0);
-  check_deriv(5, 120.0, 140.0);
+  check_deriv(1, 2.0, 2.0);
+  check_deriv(2, 2.5, 1.0);
+  check_deriv(3, 22.0, 1.2);
+  check_deriv(4, 50.0, 2.0);
+  check_deriv(5, 120.0, 3.0);
 }
 
 TEST_CASE("normal quantile from p and from log p against mpmath") {
