@@ -143,11 +143,11 @@ The inverse functions solve \f$g(v) = \log S(x(v)) - \log s = 0\f$ with \f$v = \
 
 See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
 
-Reference values were computed using `mpmath` at 200 bits of precision for forward functions and inverses (`tools/reference/incomplete.py`, `inverse.py`), and at 240 and 320 bits of precision for shape derivatives (`tools/reference/incomplete_deriv.py`), stored as double-double values in exact hexadecimal floating-point format. (The script `tools/reference/backward_inverse.py` computes backward errors rather than reference values.)
+Reference values were computed using `mpmath` at 200 bits of precision for forward functions and inverses (`tools/reference/incomplete.py`, `inverse.py`), and at 240 and 320 bits of precision for shape derivatives (`tools/reference/incomplete_deriv.py`). (The script `tools/reference/backward_inverse.py` computes backward errors rather than reference values.)
 
 ### Forward function accuracy
 
-Error is measured in units of the exact value (`ulp`), units of \f$\operatorname{ulp}(\max(|f|, 1))\f$ (`ulp1`), and relative to the logarithmic tail scale \f$\text{ulpL} = \text{ulp} / \max(1, |\log f|)\f$.
+Error is measured in \ref accuracy_ulp "ulp", \ref accuracy_ulp1 "ulp1" and \ref accuracy_ulpL "ulpL".
 
 The figures for the general reference set (4729, 1884, 7.6, 30.3, 24.7) are from the section "Own incomplete gamma" in `docs/numerics.md` (where the backend is not stated), measured before Temme's expansion and the double-double logarithms; the later section notes that the maximum ulp1, ulpL and log errors stayed unchanged or lower.
 
@@ -164,7 +164,7 @@ Following the adoption of double-double split logarithms (`ddm::log_split`) in `
 
 ### Shape derivative accuracy
 
-Error for shape derivatives is measured as \f$\max \min(\text{ulpL}, \text{ulp1})\f$ against mpmath references computed at 240 and 320 bits (`tools/reference/incomplete_deriv.py`, tested in `tests/math/test_gamma_deriv.cpp`):
+Error for shape derivatives is measured, at each point, as the smaller of \ref accuracy_ulpL "ulpL" and \ref accuracy_ulp1 "ulp1", and the table gives the maximum over the points, against mpmath references computed at 240 and 320 bits (`tools/reference/incomplete_deriv.py`, tested in `tests/math/test_gamma_deriv.cpp`):
 
 | Function | Order \f$k\f$ | Measured max error gcc (ulp) | Measured max error CUDA (ulp) | Test bound (ulp) |
 |---|---|---|---|---|
@@ -181,7 +181,7 @@ Error for shape derivatives is measured as \f$\max \min(\text{ulpL}, \text{ulp1}
 
 ### Inverse accuracy
 
-Inverse accuracy is measured in conditioned units \f$\text{ulpC} = |x - x^*| / \max(\operatorname{ulp}(x^*), \mathrm{d}x)\f$, where \f$\mathrm{d}x = \operatorname{ulp}(s) / |\mathrm{d}s/\mathrm{d}x|\f$ is the shift in \f$x^*\f$ induced by a 1-ulp perturbation of the input argument:
+Inverse accuracy is measured in ulpC (\ref accuracy_inverse "conditioned error of inverse functions"), with \f$s\f$ the input \f$p\f$, \f$q\f$, \f$\log p\f$ or \f$\log q\f$:
 
 | Function | Reference set | Initial measured max ulpC | Measured 99% | Measured max | Test bound (ulpC) |
 |---|---|---|---|---|---|

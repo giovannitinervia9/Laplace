@@ -110,15 +110,19 @@ The derivatives in \f$x\f$ are computed across three regimes:
 
 See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
 
-The references are computed at \f$P = 256 + 8 \log_2(2 + \nu + x + 1/x)\f$ bits and checked at \f$P + 96\f$ bits (all rows agree to \f$2^{-110}\f$), from the integral representation, because mpmath's `besselk` fails near \f$\nu = 10^6\f$ (`docs/numerics.md`, `tests/math/test_bessel_k.cpp`).
+The references do not use mpmath's `besselk`, which fails for orders near \f$\nu = 10^6\f$ (`docs/numerics.md`). The script `tools/reference/bessel_k.py` evaluates the integral representation of the definition above. With the positive weight \f$w(t) = e^{-x \cosh t} \cosh(\nu t)\f$, the derivatives of the logarithm are
+\f[
+\frac{\mathrm{d}^n}{\mathrm{d}x^n} \log K_\nu(x) = (-1)^n \kappa_n
+\f]
+where \f$\kappa_n\f$ is the \f$n\f$-th cumulant of \f$\cosh T\f$ when \f$T\f$ has the probability density \f$w(t) / \int_0^\infty w(u) \, \mathrm{d}u\f$ on \f$[0, \infty)\f$. The moments are computed by double-exponential quadrature centred at the peak \f$t^* = \mathrm{asinh}(\nu / x)\f$ at \f$P = 256 + 8 \log_2(2 + \nu + x + 1/x)\f$ bits and checked at \f$P + 96\f$ bits (all rows agree to \f$2^{-110}\f$; `tests/math/test_bessel_k.cpp`).
 
 ### Value accuracy
 
-Because a 1-ulp variation in \f$x\f$ shifts \f$\log K_\nu(x)\f$ by \f$|x g|\f$ ulps (where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$, and \f$|x g| \approx 1.2\nu\f$ near the turning point \f$x \approx 0.66\nu\f$ where \f$\log K_\nu(x)\f$ crosses zero), error is measured in units of the conditioning scale:
+The error of the value is given in ulpC (\ref accuracy_conditioned "conditioned scale"). A 1-ulp variation in \f$x\f$ shifts \f$\log K_\nu(x)\f$ by about \f$|x g|\f$ ulps of 1, where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$; near the turning point \f$x \approx 0.66\nu\f$, where \f$\log K_\nu(x)\f$ crosses zero, \f$|x g| \approx 1.2\nu\f$. The scale is therefore
 \f[
-\text{ulpC} = \frac{|y - \text{exact}|}{\text{ulp}(\max(|\log K|, |x g|, 1))}
+s = \max(|\log K_\nu(x)|, |x g|, 1).
 \f]
-The measured maximum error is **4.8 ulp** on both gcc (OpenMP) and CUDA (test bound: **7.5 ulp**). In contrast, Boost.Math's `cyl_bessel_k`, when logged, reaches \f$2.9 \times 10^8\f$ ulp error and produces 1651 non-finite values.
+The measured maximum error is **4.8 ulpC** on both gcc (OpenMP) and CUDA (test bound: **7.5 ulpC**). In contrast, Boost.Math's `cyl_bessel_k`, when logged, reaches \f$2.9 \times 10^8\f$ ulp error and produces 1651 non-finite values.
 
 ### Derivative accuracy
 

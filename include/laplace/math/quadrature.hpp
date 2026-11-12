@@ -531,8 +531,8 @@ LAPLACE_HD quad_result exp_sinh_quad(const F& f, double a, double s = 1.0, const
  * - When the rule does not converge, `value` holds the last estimate and `error` holds the last difference between successive estimates.
  *
  * \par Measured accuracy
- * Maximum error 7.3 ulp (gcc) / 6.7 ulp (CUDA) on the skew normal information entry (test bound 11.0 ulp, 159 evaluations);
- * 18 ulp on the pseudo-Huber normalizer (test bound 27.0 ulp, 615 evaluations);
+ * Maximum error 7.3 ulp (gcc) / 6.7 ulp (CUDA) on \f$2 x^2 \phi(x) \phi(p x)^2 / \Phi(p x)\f$, with \f$\phi\f$ and \f$\Phi\f$ the standard normal density and distribution function (test bound 11.0 ulp, 159 evaluations);
+ * 18 ulp on \f$\exp(-p(\sqrt{1 + x^2} - 1))\f$ (test bound 27.0 ulp, 615 evaluations);
  * 6.3 ulp on \f$\mathrm{sech}^p\f$ (test bound 10.0 ulp, 182 evaluations).
  *
  * \see quadrature, tanh_sinh_quad(), exp_sinh_quad(), gauss_hermite32_quad(), panels_quad(), de_quad_options, quad_result
@@ -741,7 +741,7 @@ LAPLACE_HD double gauss_laguerre32_quad(const F& f, double a = 0.0, double s = 1
  * \ingroup quadrature
  * \brief Geometric panel quadrature rule on a finite or infinite interval cut at a centre and kinks.
  *
- * Implements the panel integration rule of statmodels7's `pt_trunc_rule.h`:
+ * Cuts the interval into pieces and each piece into geometric panels:
  * - The interval \f$[a, b]\f$ is cut at the centre \f$c\f$ and at up to 8 user-supplied interior kink points.
  * - Each finite subpiece \f$[u, v]\f$ is partitioned into doubling geometric panels of widths \f$s, 2s, 4s, \dots, 2^k s\f$
  *   advancing from the end closer to \f$c\f$, with \ref tanh_sinh_quad() evaluated on each panel.
@@ -773,8 +773,8 @@ LAPLACE_HD double gauss_laguerre32_quad(const F& f, double a = 0.0, double s = 1
  * 4.0 ulp on Student t tail (test bound 6.0 ulp, 793 evaluations);
  * 4.5 ulp on truncated Laplace (test bound 7.0 ulp, 229 evaluations);
  * 3.9 ulp on \f$x^p \log(x)^2\f$ (test bound 6.0 ulp, 274 evaluations);
- * 6.8 ulp (gcc) / 5.4 ulp (CUDA) on skew normal entry (test bound 10.0 ulp, 1527 evaluations);
- * 2.8 ulp on pseudo-Huber normalizer (test bound 5.0 ulp, 1557 evaluations);
+ * 6.8 ulp (gcc) / 5.4 ulp (CUDA) on \f$2 x^2 \phi(x) \phi(p x)^2 / \Phi(p x)\f$, with \f$\phi\f$ and \f$\Phi\f$ the standard normal density and distribution function (test bound 10.0 ulp, 1527 evaluations);
+ * 2.8 ulp on \f$\exp(-p(\sqrt{1 + x^2} - 1))\f$ (test bound 5.0 ulp, 1557 evaluations);
  * 3.7 ulp on \f$\mathrm{sech}^p\f$ (test bound 6.0 ulp, 1561 evaluations).
  *
  * \see quadrature, tanh_sinh_quad(), exp_sinh_quad(), sinh_sinh_quad(), de_quad_options, quad_result

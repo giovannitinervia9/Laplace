@@ -115,14 +115,14 @@ such that \f$c(\nu) = f(b) - \frac{1}{2}\log(2\pi)\f$.
 
 See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
 
-The reference values were generated using arbitrary-precision arithmetic with `mpmath` at 280 and 360 bits (verified at 440 and 560 bits where precisions disagreed) via `tools/reference/student_owen.py` across 780 points kept in \f$(z, \nu)\f$ (20 rows dropped where \f$|z| \ge 25\f$ and \f$\nu \in [4600, 10^6]\f$, from 800 generated). Reference values are stored as double-double numbers in `tests/data/reference/log_student_cdf*.csv`.
+The reference values were generated using arbitrary-precision arithmetic with `mpmath` at 280 and 360 bits (verified at 440 and 560 bits where precisions disagreed) via `tools/reference/student_owen.py` across 780 points kept in \f$(z, \nu)\f$ (20 rows dropped where \f$|z| \ge 25\f$ and \f$\nu \in [4600, 10^6]\f$, from 800 generated; `tests/data/reference/log_student_cdf*.csv`).
 
 ### Error metrics
 
-Accuracy for the mixed partial derivatives of order \f$K\f$ is quantified across three metrics:
-- **Geometric mean component scale:** \f$\text{ulpN} = |y - \text{exact}| / \text{ulp}(\max(|f|, N_{ij}))\f$, where \f$N_{ij} = |f_{K0}|^{i/K} |f_{0K}|^{j/K}\f$ is the geometric mean of the pure components of that order with \f$i = K - j\f$. For pure components (\f$j = 0\f$ or \f$j = K\f$), \f$N_{ij} = |f|\f$, so this metric reduces to relative error in ulps.
-- **Absolute scale near zero:** \f$\text{ulp1} = |y - \text{exact}| / \text{ulp}(\max(|f|, 1))\f$, applied to pure \f$z\f$-derivatives of odd orders (orders 3 and 5) near \f$z = 0\f$ (\f$|z| < 1\f$), where the derivatives pass near zero and are small against the terms they are composed of: at large \f$\nu\f$, the fifth derivative \f$\frac{\partial^5}{\partial z^5} \log T_\nu(z)\f$ at \f$z = 0\f$ is about 2000 times smaller than its terms, and the third derivative has a zero near \f$\nu = 6\f$.
-- **Logarithmic tail scale:** \f$\text{ulpL} = \text{ulpN} / \max(1, |\log|f||)\f$, measuring error relative to the inherent conditioning of values evaluated through \f$\log(1 - S)\f$ in the upper tail.
+The mixed partial derivatives of order \f$K\f$ are measured in three units:
+- **ulpN** (\ref accuracy_mixed "mixed partial derivatives"), with \f$z\f$ as the first variable and \f$\nu\f$ as the second.
+- **ulp1** (\ref accuracy_ulp1 "order-one absolute error"), applied to pure \f$z\f$-derivatives of odd orders (orders 3 and 5) near \f$z = 0\f$ (\f$|z| < 1\f$), where the derivatives pass near zero and are small against the terms they are composed of: at large \f$\nu\f$, the fifth derivative \f$\frac{\partial^5}{\partial z^5} \log T_\nu(z)\f$ at \f$z = 0\f$ is about 2000 times smaller than its terms, and the third derivative has a zero near \f$\nu = 6\f$.
+- **ulpL**, the logarithmic variant of ulpN (\ref accuracy_mixed "mixed partial derivatives"), for the components evaluated through \f$\log(1 - S)\f$ in the upper tail.
 
 ### Function value accuracy
 

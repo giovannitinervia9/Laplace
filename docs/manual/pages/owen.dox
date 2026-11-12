@@ -52,7 +52,7 @@ c_j = \frac{\partial^K}{\partial z^{K-j} \partial \alpha^j} \log F(z; \alpha), \
 rather than \f$F(z; \alpha)\f$ directly through \f$\Phi(z) - 2 T(z, \alpha)\f$, for several reasons:
 
 1. **Avoidance of catastrophic cancellation in the lower tail:** As \f$z \to -\infty\f$, \f$F(z; \alpha)\f$ becomes extremely small. The direct formula \f$\Phi(z) - 2 T(z, \alpha)\f$ subtracts two nearly equal positive quantities, producing errors up to \f$8.9 \times 10^{15}\f$ ulp and 78 non-finite values in IEEE 754 double precision (`docs/numerics.md`). In contrast, \f$\log F(z; \alpha)\f$ maintains relative accuracy on the 800 reference rows, deep tails included (maximum measured error 5.0 ulp in `docs/numerics.md`).
-2. **Derivative conditioning:** The derivatives of \f$F(z; \alpha)\f$ are elementary, but composing the elementary series derivatives of \f$F\f$ everywhere (the baseline of method 1) cancels catastrophically, producing \f$9 \times 10^{15}\f$ ulp error and 94 non-finite values at order 1 (`docs/numerics.md`). Formulating the derivatives through bivariate series of integral moments and scale-separated ratios avoids this catastrophic cancellation (measured errors reach 2240 ulpN at order 3 and \f$1.16 \times 10^5\f$ ulpN at order 5 near zeros where derivative components are ill-conditioned).
+2. **Derivative conditioning:** The derivatives of \f$F(z; \alpha)\f$ are elementary, but composing the elementary series derivatives of \f$F\f$ everywhere cancels catastrophically, producing \f$9 \times 10^{15}\f$ ulp error and 94 non-finite values at order 1 (`docs/numerics.md`). Formulating the derivatives through bivariate series of integral moments and scale-separated ratios avoids this catastrophic cancellation (measured errors reach 2240 ulpN at order 3 and \f$1.16 \times 10^5\f$ ulpN at order 5 near zeros where derivative components are ill-conditioned).
 
 ## Domain and symmetry
 
@@ -182,10 +182,7 @@ Reference values were computed using arbitrary-precision arithmetic with `mpmath
 - `owens_t.csv` (3006 rows): evaluated by double-exponential quadrature of the definition at 200 and 280 bits, with all kept rows agreeing to \f$2^{-100}\f$ relative.
 - `log_sn_cdf*.csv` (800 rows): value evaluated as a sum of positive terms, and derivatives of \f$F\f$ elementary with Hermite polynomials composed with the logarithm, evaluated at 280 and 360 bits, agreeing to \f$2^{-100}\f$, and checked against \f$2 \phi \Phi / F\f$ and \f$\Phi - 2T\f$.
 
-Error is quantified in:
-- \f$\text{ulp}\f$: relative error in units in the last place of the exact value, \f$|y - \text{exact}| / \text{ulp}(\max(|\text{exact}|, 2^{-1022}))\f$.
-- \f$\text{ulpN}\f$: error in units in the last place of \f$\max(|f|, N_{K-j, j}, 2^{-1022})\f$, where \f$N_{ij} = |f_{K0}|^{i/K} |f_{0K}|^{j/K}\f$ is the geometric mean scale of the pure components of that order.
-- \f$\text{ulpL}\f$: logarithmic error, \f$\text{ulp} / \max(1, |\log |f||)\f$ or \f$\text{ulpN} / \max(1, |\log |f||)\f$.
+The values are measured in \ref accuracy_ulp "ulp" and \ref accuracy_ulpL "ulpL"; the derivatives in ulpN and its logarithmic variant ulpL (\ref accuracy_mixed "mixed partial derivatives"), with \f$z\f$ as the first variable and \f$\alpha\f$ as the second.
 
 ### Value accuracy
 
@@ -203,7 +200,7 @@ Error is quantified in:
 | \ref laplace::math::own::log_sn_cdf_d5 "log_sn_cdf_d5()" | 5 | 1.16e5 (2.7e4 ulpL) | 1.17e5 (2.8e4 ulpL) | 1.8e5 | 4.2e4 |
 
 Across regions (measured on order 5 in ulpN, reported without backend in the source):
-- **Lower tail** (\f$\alpha > 0\f$): \f$1.4 \times 10^4\f$ ulpN (in the build with own exp and log on the host, error in the large-\f$\alpha\f$ region goes from \f$1.4 \times 10^4\f$ to \f$2.8 \times 10^4\f$ ulp1 near the zeros; ulp1 is a different metric defined on \ref accuracy "How accuracy is measured").
+- **Lower tail** (\f$\alpha > 0\f$): \f$1.4 \times 10^4\f$ ulpN (in the build with own exp and log on the host, error in the large-\f$\alpha\f$ region goes from \f$1.4 \times 10^4\f$ to \f$2.8 \times 10^4\f$ \ref accuracy_ulp1 "ulp1" near the zeros).
 - **Lower tail** (\f$\alpha < 0\f$): \f$1.3 \times 10^3\f$ ulpN.
 - **Upper tail:** 100 ulpN.
 - **Centre:** \f$1.2 \times 10^5\f$ ulpN.

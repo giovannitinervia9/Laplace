@@ -136,19 +136,6 @@ Results evaluated on the reference arguments were compared bit for bit against t
 
 When nvcc does not contract multiply-add operations into FMA instructions (`--fmad=false`), `laplace::math::own` yields bit-identical results on gcc, MSVC, and CUDA.
 
-### Downstream performance impact in the CPU build
-
-Replacing the platform's libm calls with `laplace::math::own` on the host reduces execution time across Laplace routines on one gcc thread. The numbers come from the gcc build with the own versions compared with the default build of the time. Calls inside Boost.Math (`lgamma`, `tgamma1pm1`, `log1p`, `expm1`) and direct Kokkos calls still use the platform's libm, so the speed-ups of whole functions are partial:
-
-- Incomplete beta function `beta_inc` (common, mixed, large shapes): 370 / 401 / 424 ns to 263 / 264 / 344 ns (-29%, -34%, -19%).
-- Incomplete gamma function `gamma_inc` (\f$P\f$, \f$Q\f$): 262 ns to 193 ns (-26%).
-- Incomplete gamma inverses: 715–740 ns to 433–485 ns (-35% to -41%).
-- Incomplete beta inverses: 1506–1979 ns to 976–1303 ns (-35%).
-- Student \f$t\f$ distribution derivatives (orders 1–5): 2315 / 2781 / 3466 / 4796 / 8014 ns to 1826 / 2229 / 3032 / 4356 / 7303 ns (-21% to -9%).
-- Skew normal distribution derivatives (orders 4–5): 2165 / 2361 ns to 1478 / 1670 ns (-32%, -29%).
-
-Accuracy remains unchanged to within measurement noise on every reference set measured, with one exception: the skew normal order 5 in the large-\f$\alpha\f$ region goes from \f$1.4 \times 10^4\f$ to \f$2.8 \times 10^4\f$ ulp1.
-
 ## Example
 
 The following example evaluates \f$\exp(x)\f$ and \f$\log(x)\f$ inside a `Kokkos::parallel_for` kernel:

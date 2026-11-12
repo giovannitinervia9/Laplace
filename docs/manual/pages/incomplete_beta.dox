@@ -127,11 +127,11 @@ The inverse functions solve \f$g(v) = \log S(x(v)) - \log s = 0\f$ for the targe
 
 See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
 
-Reference tables are computed with `mpmath` at 200 bits or more and stored in hexadecimal format as double-double numbers (`hi, lo`) in `tests/data/reference/`.
+Reference tables are computed with `mpmath` at 200 bits or more.
 
 ### Value accuracy
 
-Accuracy is measured in units in the last place of 1 (\f$\text{ulp1}\f$), logarithmic units (\f$\text{ulpL} = \text{ulp} / \max(1, |\log f|)\f$), and ulps of \f$\max(|\log f|, 1)\f$ for logarithmic outputs:
+The values are measured in \ref accuracy_ulp1 "ulp1" and \ref accuracy_ulpL "ulpL", and the logarithms in ulps of \f$\max(|\log f|, 1)\f$, where \f$f\f$ is \f$I_x(a, b)\f$ or \f$1 - I_x(a, b)\f$:
 
 | Function / File | Measured max error gcc (ulp1 / ulpL) | Measured max error CUDA (ulp1 / ulpL) | Test bound (ulp1 / ulpL) | Log error max gcc / CUDA (ulp) | Log test bound (ulp) |
 |---|---|---|---|---|---|
@@ -144,7 +144,7 @@ With the inclusion of double-double logarithmic accumulation (`log_split`), the 
 
 ### Derivative accuracy
 
-Errors for shape derivatives are measured in \f$\text{ulpN} = \text{ulp} / \max(|f|, N_{ij})\f$, where \f$N_{ij} = |f_{K,0}|^{i/K} |f_{0,K}|^{j/K}\f$ is the Cauchy–Schwarz scale of mixed components (plain ulp for pure components), and \f$\text{ulpL} = \text{ulpN} / \max(1, |\log |f||)\f$. The measured maximum errors are one figure per order over both sides (\f$\log I\f$ and \f$\log(1 - I)\f$) and all components, not per function; measured on gcc (CUDA within 1.9 times):
+Errors for shape derivatives are measured in ulpN and its logarithmic variant ulpL (\ref accuracy_mixed "mixed partial derivatives"), with \f$a\f$ as the first variable and \f$b\f$ as the second. The measured maximum errors are one figure per order over both sides (\f$\log I\f$ and \f$\log(1 - I)\f$) and all components, not per function; measured on gcc (CUDA within 1.9 times):
 
 | Order \f$K\f$ | Function | Measured max error gcc (ulpN) | Test bound (ulpN) | Test bound (ulpL) |
 |---|---|---|---|---|
@@ -163,7 +163,7 @@ Across both sides and all components, relative accuracy is \f$4 \times 10^{-13}\
 
 ### Inverse accuracy
 
-Errors for inverses are measured in condition-adjusted units \f$\text{ulpC} = |x - x^*| / \max(\text{ulp}(x^*), \mathrm{d}x)\f$, where \f$\mathrm{d}x = \text{ulp}(s) / |\mathrm{d}s/\mathrm{d}x|\f$ is the shift in \f$x^*\f$ induced by 1 ulp of the input. Measured on gcc (OpenMP 8 threads), with CUDA within the same figures:
+Errors for inverses are measured in ulpC (\ref accuracy_inverse "conditioned error of inverse functions"), with \f$s\f$ the input \f$p\f$, \f$q\f$, \f$\log p\f$ or \f$\log q\f$. Measured on gcc (OpenMP 8 threads), with CUDA within the same figures:
 
 | Function / File | Measured 99% ulpC | Measured max ulpC | Test bound for \f$x\f$ (ulpC) | Test bound for \f$1 - x\f$ (ulpC) |
 |---|---|---|---|---|

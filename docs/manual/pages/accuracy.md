@@ -5,7 +5,7 @@ functions, accompanied by error bounds enforced in automated tests. On module
 pages, readers encounter figures such as "4.8 ulpC", "measured max error 44.4 ulp",
 or "test bound 66.0 ulp". This page explains how every
 accuracy figure in this manual is obtained, how the error metrics are defined,
-and what guarantees the test bounds provide.
+and what guarantees the test bounds provide. See \ref derivation "How formulas are derived" for how the analytic formulas inside Laplace are obtained.
 
 Laplace uses a four-step accuracy verification pipeline:
 1. **Reference generation:** High-precision reference tables are generated using
@@ -40,29 +40,11 @@ bits, well beyond the 53 bits of IEEE 754 binary64 double precision. Specific
 functions where cancellation or large arguments demand extra headroom raise the
 precision to 256 or 300 bits.
 
-For example, when generating references for `bessel_k`
-(`tools/reference/bessel_k.py`), mpmath's standard `besselk` function fails
-for orders near \f$\nu = 10^6\f$ due to instability in its hypergeometric series
-(`docs/numerics.md`). The reference script instead evaluates the integral
-representation (DLMF 10.32.9):
-\f[
-K_\nu(x) = \int_0^\infty e^{-x \cosh t} \cosh(\nu t) \, \mathrm{d}t
-\f]
-where \f$\nu \in \mathbb{R}_{\ge 0}\f$ is the real order, \f$x \in (0, \infty)\f$
-is the positive real argument, and \f$t \in [0, \infty)\f$ is the real
-integration variable. Defining the positive weight function
-\f$w(t) = e^{-x \cosh t} \cosh(\nu t) \in (0, \infty)\f$, the logarithm is
-\f$\log K_\nu(x) = \log \int_0^\infty w(t) \, \mathrm{d}t\f$, and its derivatives
-with respect to \f$x\f$ of order \f$n \in \{1, \dots, 7\}\f$ are:
-\f[
-\frac{\mathrm{d}^n}{\mathrm{d}x^n} \log K_\nu(x) = (-1)^n \kappa_n
-\f]
-where \f$\kappa_n \in \mathbb{R}\f$ is the \f$n\f$-th cumulant of \f$C = \cosh T \in [1, \infty)\f$
-under the probability density \f$w(t) / \int_0^\infty w(u) \, \mathrm{d}u\f$.
-The moments are computed by double-exponential quadrature centred at the peak
-\f$t^* = \mathrm{asinh}(\nu / x) \in [0, \infty)\f$ at precision
-\f$P = 256 + 8 \log_2(2 + \nu + x + 1/x)\f$ bits, and verified at \f$P + 96\f$
-bits (all rows agree to \f$2^{-110}\f$).
+Some functions need a different route to their references, because mpmath's
+own implementation is not accurate enough over the whole range: the module
+pages say so where it applies (for example, the references of
+\ref bessel_k "the Bessel function of the second kind" come from an integral
+representation evaluated at a precision that grows with the arguments).
 
 ### Reference file format
 
@@ -160,6 +142,7 @@ recorded separately. In automated tests, `n_bad` must be strictly zero.
 
 Different applications require different notions of error:
 
+\anchor accuracy_ulp
 #### Relative error
 
 When the scale is \f$s = |hi|\f$, the error is the classical relative error in
@@ -171,17 +154,18 @@ An error of 0.5 ulp or less indicates correct rounding under round-to-nearest.
 However, relative ulp error diverges to infinity whenever \f$hi \to 0\f$, even
 when the computed result differs from zero by only a few units of \f$2^{-52}\f$.
 
+\anchor accuracy_ulp1
 #### Order-one absolute error
 
-For functions where values can cross or approach zero, or where the output is
-subsequently added to quantities of order one (such as a log-density or a
-score), the appropriate scale is \f$s = \max(|hi|, 1.0)\f$:
+For functions whose values can cross or approach zero, or whose output is
+of interest only to an absolute accuracy of order one, the scale is \f$s = \max(|hi|, 1.0)\f$:
 \f[
 \text{ulp1} = \frac{|(y - hi) - lo|}{\mathrm{ulp}(\max(|hi|, 1.0))}
 \f]
 When \f$|hi| \ge 1\f$, ulp1 coincides with standard ulp. When \f$|hi| < 1\f$,
 ulp1 measures absolute error in units of \f$\mathrm{ulp}(1.0) = 2^{-52} \approx 2.22 \times 10^{-16}\f$.
 
+\anchor accuracy_ulpL
 #### Inherent logarithmic error
 
 When a quantity \f$f \in \mathbb{R}_{> 0}\f$ is evaluated in exponential form,
@@ -195,6 +179,7 @@ of exponentiation:
 A bounded ulpL demonstrates that the implementation does not introduce errors
 beyond what the inherent conditioning of exponentiation entails.
 
+\anchor accuracy_conditioned
 #### Conditioned scale
 
 General numerical principles dictate that an algorithm's error should be judged
@@ -207,17 +192,43 @@ arguments, error is scaled by a function-specific conditioning scale \f$s \in \m
 where \f$s\f$ reflects the sensitivity of the exact value to perturbations in
 its inputs.
 
-**Example in** `bessel_k`:
-For \ref laplace::math::own::log_bessel_k "log_bessel_k()", a 1-ulp variation in the argument \f$x\f$ shifts
-\f$\log K_\nu(x)\f$ by approximately \f$|x g|\f$ ulps of 1, where
-\f$g = \frac{\mathrm{d}}{\mathrm{d}x} \log K_\nu(x)\f$ (computed by \ref laplace::math::own::log_bessel_k_dx1 "log_bessel_k_dx1()").
-Near the turning point \f$x \approx 0.66\nu\f$, where \f$\log K_\nu(x)\f$ crosses
-zero, \f$|x g| \approx 1.2\nu\f$. The module therefore defines the conditioning scale:
+Each module page that uses ulpC gives its own scale \f$s\f$; for example,
+the page \ref bessel_k "Modified Bessel function of the second kind" scales
+the error of \f$\log K_\nu(x)\f$ by its sensitivity to the argument.
+
+\anchor accuracy_inverse
+#### Conditioned error of inverse functions
+
+For a function that solves \f$F(x) = s\f$ for \f$x\f$, where \f$s\f$ is the
+input (a probability or its logarithm), let \f$x^*\f$ be the exact root and
+\f$x\f$ the computed one. One ulp of the input moves the exact root by
+\f$\mathrm{d}x = \mathrm{ulp}(s) / |\mathrm{d}s/\mathrm{d}x|\f$, and the error
+is measured against the larger of this shift and one ulp of the root:
 \f[
-s = \max(|\log K_\nu(x)|, |x g|, 1.0)
+\text{ulpC} = \frac{|x - x^*|}{\max(\mathrm{ulp}(x^*), \mathrm{d}x)}
 \f]
-In units of ulpC, \ref laplace::math::own::log_bessel_k "log_bessel_k()" exhibits a measured maximum error of only
-**4.8 ulpC** on all reference points on both gcc and CUDA backends.
+Where the problem is well conditioned (\f$\mathrm{d}x\f$ below one ulp of
+\f$x^*\f$), this is the relative error in ulps of the root.
+
+\anchor accuracy_mixed
+#### Mixed partial derivatives
+
+A function of two variables with mixed partial derivatives of total order
+\f$K\f$ returns the \f$K + 1\f$ components \f$f_{K-j,j}\f$,
+\f$j = 0, \dots, K\f$, where \f$f_{i,j}\f$ is the derivative of order \f$i\f$ in
+the first variable and order \f$j\f$ in the second. A mixed component can be
+small against the pure components \f$f_{K,0}\f$ and \f$f_{0,K}\f$ of the
+same order. Its error is measured in ulps of the larger of its own size and
+the geometric mean of the pure components:
+\f[
+\text{ulpN} = \frac{|(y - hi) - lo|}{\mathrm{ulp}(\max(|f_{i,j}|, N_{i,j}))},
+\quad N_{i,j} = |f_{K,0}|^{i/K} |f_{0,K}|^{j/K}
+\f]
+For the pure components, and wherever \f$|f_{i,j}| \ge N_{i,j}\f$, ulpN is
+the relative error in ulps. Its logarithmic variant divides by the
+conditioning of exponentiation as ulpL does:
+\f$\text{ulpN} / \max(1, |\log |f_{i,j}||)\f$, also written ulpL on the module
+pages.
 
 ### Summary metrics
 
@@ -243,6 +254,7 @@ parallel kernel on the active execution space (`bench::eval_kernel`). This
 verifies that functions compile, inline, and run correctly both on host CPU
 threads and on device GPU threads.
 
+\anchor accuracy_bounds
 ### Test bounds and safety margins
 
 In each test, the maximum error \f$E\f$ observed over the reference points must satisfy an explicit test bound \f$B\f$:

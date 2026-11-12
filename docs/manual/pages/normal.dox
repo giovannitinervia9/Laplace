@@ -187,6 +187,8 @@ Reference values are computed with mpmath at 200 bits of precision (`tools/refer
 
 ### Function value and quantile accuracy
 
+The quantiles are measured in ulpC (\ref accuracy_inverse "conditioned error of inverse functions"), with \f$s\f$ the input \f$p\f$ or \f$l\f$.
+
 | Function | Argument or region | Measured max error CPU | Measured max error CUDA | Test bound | Metric |
 |---|---|---|---|---|---|
 | \ref laplace::math::own::erfc "erfc()" | \f$x \in \mathbb{R}\f$ | 3.46 ulp | — | 5.5 ulp, 2.5 ulp1 | ulp |
@@ -201,7 +203,7 @@ Reference values are computed with mpmath at 200 bits of precision (`tools/refer
 
 ### Derivative accuracy
 
-For derivative functions, error is measured in relative ulp below \f$t = -1\f$, where derivatives have no zeros; above \f$t \ge -1\f$, where they cross zero, error is measured in absolute units of \f$\max(|g|, 1)\f$ (ulp1):
+For derivative functions, error is measured in \ref accuracy_ulp "ulp" below \f$t = -1\f$, where the derivatives have no zeros, and in \ref accuracy_ulp1 "ulp1" for \f$t \ge -1\f$, where they cross zero:
 
 | Function | Order \f$k\f$ | Measured max error gcc on \f$[-1, 4)\f$ (ulp1) | Measured max error CUDA overall (ulp) | Test bound \f$t < -1\f$ (ulp) | Test bound \f$t \ge -1\f$ (ulp1) |
 |---|---|---|---|---|---|
