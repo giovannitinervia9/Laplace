@@ -29,6 +29,7 @@ set(LAPLACE_TEST_SOURCES
   bijector/test_yeo_johnson.cpp
   math/test_exprel.cpp
   math/test_log1prel.cpp
+  pdmat/test_pilot.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

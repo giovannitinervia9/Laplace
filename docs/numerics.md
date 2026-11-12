@@ -1874,3 +1874,115 @@ CUDA maxima for the changed quantities.
 **Open.** The inverses of Box-Cox and Yeo-Johnson near lambda = 0 and
 softplus's forward log-Jacobian (above); a cheaper log1prel quadrature on
 the device (one division per node) is a trade of speed against accuracy.
+
+## Structured matrices: diagonal, compound symmetry and AR(1)
+
+**What.** `include/laplace/pdmat/` (2026-11-12, the pilot of phase 5,
+`note/pdmat_structures.md`): `diagonal_pdmat`, `compound_symmetry_pdmat`,
+`ar1_pdmat`, the first structures of the interface decided with Giovanni the
+same day (`core.hpp`). A structure maps q unconstrained parameters theta to a
+symmetric positive definite p x p matrix M(theta) and supplies M, log det M,
+M^-1, the Cholesky factor L (M = L L^T) and the derivatives of each in theta
+to order 6, one function per order, along a sorted tuple of parameter indices;
+a matrix derivative returns false when it is identically zero for that tuple.
+Matrices go to a caller's buffer, the lower triangle packed by rows,
+(i, j) at i(i + 1)/2 + j. Each structure fixes the constraint of its natural
+parameter: rho = tanh(theta) (AR(1)); rho = a + (1 - a) expit(theta),
+a = -1/(p - 1) (compound symmetry, positive definite exactly on
+(-1/(p - 1), 1)); theta_i = log sigma_i, M_ii = e^(2 theta_i) (diagonal).
+
+**Why the derivatives are written in theta.** The alternative is to
+differentiate in rho and compose with the bijector by Faa di Bruno. Measured
+on the AR(1) log-determinant (p - 1) log(1 - rho^2) with rho = tanh(theta),
+in double, against mpmath at 200 bits (1 - rho given exact): the composition
+loses 1.6e-11 relative at theta = 3 (order 6), 9.1e-10 at theta = 5 and
+1.2e-5 at theta = 10 (3.8e-8 already at order 2), because the singularity of
+log(1 - rho^2) at rho = 1 cancels against the derivatives of tanh. The direct
+form -2 (p - 1) tanh^(K-1)(theta) stays within 2.7e-15 at every point.
+
+**How.**
+- AR(1), T = tanh(theta), S = 1 - T^2 and sech(theta) from e = exp(-2|theta|):
+  M_ij = T^|i-j|; log det M = -2 (p - 1) log cosh(theta); M^-1 tridiagonal,
+  cosh^2(theta) at the two ends of the diagonal, cosh(2 theta) inside,
+  -sinh(2 theta)/2 next to it; L_i0 = T^i, L_ij = T^(i-j) sech(theta) for
+  j >= 1. The derivatives of T^k sech^h (h = 0, 1) are sums
+  sum_n c_n T^(k+K-2n) S^n sech^h with integer coefficients from the
+  recursion c'_(n+1) += (k + K - 2n) c_n, c'_n = -(2n + h) c_n (D T = S,
+  D S^b = -2b T S^b): every term keeps a factor S, so nothing cancels as
+  T -> +-1.
+- Compound symmetry, s = expit(theta), q = 1 - s, E = e^theta:
+  1 - rho = p q/(p - 1), 1 + (p - 1) rho = p s; log det M =
+  (p - 1) log(p/(p - 1)) + log p + (p - 1) log q + log s, first derivative
+  q - (p - 1) s, K-th -p expit^(K-1)(theta); M^-1 by Sherman-Morrison in E,
+  diagonal [(p^2 - 2p + 2) + (p - 1)^2 E + 1/E]/p^2, off-diagonal
+  -[(p - 2) + (p - 1) E - 1/E]/p^2; L from the closed LDL^T of the
+  equicorrelation matrix, with 1 + j rho proportional to
+  u_j/(1 + E), u_j = (p - 1 - j) + (p - 1)(1 + j) E (no cancellation, both
+  coefficients >= 0): L_jj = exp(g_j), L_ij = rho exp(r_j) for i > j >= 1,
+  g_j and r_j sums of log(A + B E) whose derivatives are expit^(n-1) at
+  theta + log(B/A); exp(g) differentiated by the complete Bell polynomial
+  (`bell_partial`), rho exp(r) by Leibniz. expit and its derivatives come from
+  the logit bijector, except in L, where all orders come from one exponential
+  (the same polynomials; up to 3 ulp worse on the derivatives of M and
+  log det, so used only in L, where it cut the time by 1.2 at p = 4, order 0, to 3.9 at p = 16, order 6).
+- Diagonal: e^(2 theta_i), 2 sum theta_i, e^(-2 theta_i), e^(theta_i); the
+  derivatives are nonzero only along a tuple whose indices are all equal.
+
+**Measurement.** References `pdmat_pilot.csv` (`tools/reference/pdmat_pilot.py`,
+written by a Haiku agent): the matrices built from their definitions in mpmath
+at 640 bits (inverse by `mp.inverse`, L by `mp.cholesky`, log det by
+`mp.det`), derivatives by central differences with steps 2^-60 and 2^-70,
+which agree to 1.6e-35 relative; 16569 rows, AR(1) p in {1, 2, 3, 6} and
+theta in {-4, -0.8, 0, 0.35, 1.7, 5, 10}, compound symmetry p in
+{1, 2, 3, 5, 9} and theta in {-8, -2, -0.3, 0, 0.6, 2.5, 9}, diagonal p in
+{1, 3}. Error of a matrix: ulpN, the largest absolute error over the entries
+in ulps of the largest entry of that derivative matrix; of log det: relative
+ulp, ulp1 at order 0 (it crosses 0). Values below 1e-20 count as zero (the
+difference noise). Maximum over orders 0-6, gcc/OpenMP and CUDA (RTX 4070
+SUPER):
+
+| structure | M | M^-1 | L | log det |
+|---|---|---|---|---|
+| diagonal | 0.52 / 0.52 | 0.89 / 0.66 | 0.59 / 0.59 | 0.45 / 0.45 |
+| compound symmetry | 8.01 (K=4) / 6.67 (K=4) | 0.81 / 0.81 | 9.34 (K=5) / 9.77 (K=6) | 8.01 (K=5) / 7.91 (K=0) |
+| AR(1) | 13.0 (K=6) / 11.1 (K=6) | 0.52 / 0.58 | 8.22 (K=4) / 8.22 (K=4) | 3.92 (K=6) / 4.83 (K=6) |
+
+The largest, AR(1) d^6 M at p = 2, theta = -0.8, is tanh^(6) near a zero of
+it; the compound symmetry log det at order 0 (7.9 ulp1, p = 9, theta = -2)
+is the sum of the constant terms. Central differences of order K - 1 against
+order K agree within 0.0044 of their tolerance (1e-6 of the largest entries).
+
+ns per call, one call filling the whole packed matrix, theta uniform in
+[-3, 3] (`benchmarks/pdmat_pilot.cpp`), one gcc thread / 8 OpenMP threads,
+orders 0 and 6:
+
+| structure, p | M | M^-1 | L | log det |
+|---|---|---|---|---|
+| diagonal, 4 | 29 / 18 | 30 / 18 | 29 / 18 | 2.1 / 0.6 |
+| diagonal, 16 | 139 / 100 | 148 / 99 | 138 / 99 | 4.1 / 0.7 |
+| compound symmetry, 4 | 22 / 35 | 27 / 21 | 376 / 437 | 91 / 11 |
+| compound symmetry, 16 | 119 / 133 | 121 / 121 | 1531 / 2086 | 90 / 11 |
+| AR(1), 4 | 44 / 116 | 20 / 20 | 42 / 227 | 47 / 51 |
+| AR(1), 16 | 165 / 566 | 95 / 96 | 157 / 1055 | 46 / 48 |
+
+With 8 OpenMP threads the times fall by 4 to 7 times. CUDA timings of the same bench, in the
+default space, are 0.1-190 ns per call and erratic between neighbouring
+cases (the compiler drops part of the work for some kernels), so they are not
+quoted per case; the most expensive, L of compound symmetry at p = 16, order
+6, is 187 ns.
+
+**What this says.** Every quantity is within 13 ulpN on both backends,
+including AR(1) at theta = 10 (rho = 1 - 4e-9), where a composition through
+the bijector would lose 5 digits. The Cholesky factor of compound symmetry is
+the expensive part (1.5-2.1 microseconds at p = 16 on one thread), because
+each column needs its own logarithms and Bell polynomials; it depends on the
+column only, so its cost grows like p, not p^2. Two repairs during the work:
+AR(1) M and L computed each entry separately (4.3 microseconds for L at
+p = 16, order 6), now one value per diagonal band (1.06).
+
+**Open.** Storage is dense packed even for the diagonal, where a derivative
+fills p(p + 1)/2 zeros to set one entry; sparse storage is to be decided with
+the psdmat structures (`note/pdmat_structures.md` section 8).
+
+**Chosen.** This version; tested in `tests/pdmat/test_pilot.cpp` on gcc and
+CUDA, bounds 1.5 times the larger measured error.

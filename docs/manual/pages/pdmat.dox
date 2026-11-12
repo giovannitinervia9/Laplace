@@ -1,0 +1,242 @@
+/**
+\defgroup pdmat Structured positive definite matrices
+\brief Structured symmetric positive definite matrices with exact values, log-determinants, inverses, Cholesky factors, and derivatives to order 6.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Overview
+
+A structured matrix maps \f$q\f$ real, unconstrained parameters \f$\theta = (\theta_0, \dots, \theta_{q-1})^\top \in \mathbb{R}^q\f$ to a symmetric positive definite matrix \f$M(\theta) \in \mathbb{R}^{p \times p}\f$ of dimension \f$p \ge 1\f$.
+
+The dimension \f$p\f$ is stored in the runtime field `dim`, and the parameter count \f$q\f$ is returned by `n_params()`. Each structure is a lightweight struct designed to be copied by value into Kokkos parallel kernels.
+
+Three structures are implemented:
+- \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": diagonal matrix with \f$p\f$ unconstrained parameters \f$\theta_i = \log \sigma_i\f$ such that \f$M_{ii} = \sigma_i^2 = e^{2\theta_i}\f$.
+- \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": equicorrelation matrix with 1 unconstrained parameter mapped to correlation \f$\rho \in (-1/(p - 1), 1)\f$.
+- \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": first-order autoregressive correlation matrix with 1 unconstrained parameter mapped to correlation \f$\rho = \tanh\theta \in (-1, 1)\f$.
+
+## Storage layout and indexing
+
+Every matrix is written to a flat caller-provided buffer of \f$p(p + 1)/2\f$ doubles using packed lower-triangular storage by rows. Entry \f$(i, j)\f$ with \f$0 \le j \le i < p\f$ is located at the linear index computed by \ref laplace::pdmat::packed_index "packed_index()":
+\f[
+k = \frac{i(i + 1)}{2} + j
+\f]
+The total buffer capacity for dimension \f$p\f$ is returned by \ref laplace::pdmat::packed_size "packed_size()":
+\f[
+N = \frac{p(p + 1)}{2}
+\f]
+All indices are 0-based.
+
+## Interface and concepts
+
+Each structure type provides:
+- **Matrix value.** Evaluated by `matrix(theta, m)`, writing \f$M(\theta)\f$ to packed buffer \f$m\f$.
+- **Log-determinant.** Evaluated by `log_det(theta)`, returning \f$\log \det M(\theta)\f$.
+- **Inverse.** Evaluated by `inverse(theta, m)`, writing \f$M^{-1}(\theta)\f$ to packed buffer \f$m\f$.
+- **Cholesky factor.** Evaluated by `cholesky(theta, l)`, writing the lower-triangular Cholesky factor \f$L(\theta)\f$ with strictly positive diagonal entries, satisfying \f$M = L L^\top\f$, to packed buffer \f$l\f$.
+- **Derivatives along sorted tuples.** For order \f$K \in \{1, \dots, 6\}\f$ and a sorted tuple of parameter indices \f$i_1 \le \dots \le i_K\f$ with \f$i_k \in \{0, \dots, q - 1\}\f$, the partial derivative is
+  \f[
+  \frac{\partial^K M}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}}
+  \f]
+  and likewise for \f$\log \det M\f$, \f$M^{-1}\f$, and \f$L\f$.
+  The matrix derivative functions return `bool`: they return `true` when the derivative is computed into the caller buffer, and `false` when the derivative is structurally zero for that index tuple by the structure (leaving the buffer untouched).
+  The log-determinant derivative functions return `double`, returning \f$0.0\f$ when identically zero.
+- **Descriptors.** Compile-time boolean constants:
+  - `unit_diagonal`: indicates whether \f$M_{ii} = 1\f$ for all \f$i\f$.
+  - `closed_inverse`: indicates whether an exact closed-form inverse is implemented.
+  - `closed_factor`: indicates whether an exact closed-form Cholesky factor is implemented.
+- **Concept.** The full interface is formalized in the C++20 concept \ref laplace::pdmat::pdmat_structure "pdmat_structure".
+
+The named derivative functions are exposed through the CRTP base template \ref laplace::pdmat::pdmat_orders "pdmat_orders":
+- \ref laplace::pdmat::pdmat_orders::matrix_d1 "matrix_d1()" through \ref laplace::pdmat::pdmat_orders::matrix_d6 "matrix_d6()"
+- \ref laplace::pdmat::pdmat_orders::log_det_d1 "log_det_d1()" through \ref laplace::pdmat::pdmat_orders::log_det_d6 "log_det_d6()"
+- \ref laplace::pdmat::pdmat_orders::inverse_d1 "inverse_d1()" through \ref laplace::pdmat::pdmat_orders::inverse_d6 "inverse_d6()"
+- \ref laplace::pdmat::pdmat_orders::cholesky_d1 "cholesky_d1()" through \ref laplace::pdmat::pdmat_orders::cholesky_d6 "cholesky_d6()"
+
+## Parameter constraints and formulation of derivatives
+
+Each structure enforces the constraint of its natural parameter:
+- In \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": \f$\rho = \tanh\theta\f$, mapping \f$\theta \in \mathbb{R}\f$ to \f$\rho \in (-1, 1)\f$.
+- In \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": \f$\rho = a + (1 - a)\operatorname{expit}(\theta)\f$ with \f$a = -1/(p - 1)\f$ and \f$\operatorname{expit}(\theta) = 1/(1 + e^{-\theta})\f$, mapping \f$\theta \in \mathbb{R}\f$ to the open interval \f$(-1/(p - 1), 1)\f$, which is precisely the region where \f$M\f$ is positive definite.
+- In \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": \f$\theta_i = \log \sigma_i\f$, mapping \f$\theta_i \in \mathbb{R}\f$ to \f$M_{ii} = \sigma_i^2 = e^{2\theta_i} > 0\f$.
+
+Derivatives are formulated directly in \f$\theta\f$ in closed form, rather than composed from derivatives in \f$\rho\f$ via the chain rule through Faà di Bruno's formula. Measured on the AR(1) log-determinant \f$(p - 1)\log(1 - \rho^2)\f$ with \f$\rho = \tanh\theta\f$, the composition through \f$\tanh\f$ loses up to \f$1.2 \times 10^{-5}\f$ relative error at \f$\theta = 10\f$ at order 6 (\f$3.8 \times 10^{-8}\f$ at order 2), because the singularity of \f$\log(1 - \rho^2)\f$ at \f$\rho = 1\f$ cancels against the derivatives of \f$\tanh\f$. The direct closed form \f$-2(p - 1)\tanh^{(K-1)}(\theta)\f$ remains within \f$2.7 \times 10^{-15}\f$ across all tested points.
+
+## Diagonal structure
+
+In \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat", the parameter vector is \f$\theta = (\theta_0, \dots, \theta_{p-1})^\top\f$ with \f$q = p\f$.
+- **Matrix value.** \f$M_{ii} = e^{2\theta_i}\f$, and \f$M_{ij} = 0\f$ for \f$i \ne j\f$.
+- **Log-determinant.** \f$\log \det M = 2 \sum_{i=0}^{p-1} \theta_i\f$.
+- **Inverse.** \f$M^{-1}_{ii} = e^{-2\theta_i}\f$, and \f$M^{-1}_{ij} = 0\f$ for \f$i \ne j\f$.
+- **Cholesky factor.** \f$L_{ii} = e^{\theta_i}\f$, and \f$L_{ij} = 0\f$ for \f$i \ne j\f$.
+- **Derivatives.** Nonzero only along a pure tuple where every index equals \f$i\f$ (\f$i_1 = \dots = i_K = i\f$):
+  \f[
+  \frac{\partial^K M_{ii}}{\partial\theta_i^K} = 2^K e^{2\theta_i}, \quad
+  \frac{\partial^K M^{-1}_{ii}}{\partial\theta_i^K} = (-2)^K e^{-2\theta_i}, \quad
+  \frac{\partial^K L_{ii}}{\partial\theta_i^K} = e^{\theta_i}
+  \f]
+  For the log-determinant:
+  \f[
+  \frac{\partial \log \det M}{\partial\theta_i} = 2, \quad
+  \frac{\partial^K \log \det M}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}} = 0 \quad (K \ge 2)
+  \f]
+  If any two indices in the tuple differ, matrix derivative functions return `false` leaving the buffer untouched, and log-determinant derivatives return \f$0.0\f$.
+
+## Compound symmetry structure
+
+In \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat", \f$q = 1\f$.
+With \f$s = \operatorname{expit}(\theta)\f$, \f$q_0 = 1 - s = \operatorname{expit}(-\theta)\f$, and \f$E = e^\theta\f$:
+\f[
+1 - \rho = \frac{p q_0}{p - 1}, \quad 1 + (p - 1)\rho = p s
+\f]
+For \f$p = 1\f$, \f$M = [1]\f$, \f$\log \det M = 0\f$, \f$M^{-1} = [1]\f$, \f$L = [1]\f$, and all derivative functions return `false` (or \f$0.0\f$ for log-determinant).
+
+For \f$p \ge 2\f$:
+- **Matrix value.** \f$M_{ii} = 1\f$, and \f$M_{ij} = \rho\f$ for \f$i \ne j\f$.
+- **Matrix derivatives.**
+  \f[
+  \frac{\mathrm{d}^K M_{ij}}{\mathrm{d}\theta^K} = \frac{p}{p - 1} \operatorname{expit}^{(K)}(\theta) \quad (i \ne j), \quad \frac{\mathrm{d}^K M_{ii}}{\mathrm{d}\theta^K} = 0
+  \f]
+- **Log-determinant.**
+  \f[
+  \log \det M = (p - 1)\log\left(\frac{p}{p - 1}\right) + \log p + (p - 1)\log q_0 + \log s
+  \f]
+  with derivatives:
+  \f[
+  \frac{\mathrm{d}}{\mathrm{d}\theta} \log \det M = q_0 - (p - 1)s, \quad
+  \frac{\mathrm{d}^K}{\mathrm{d}\theta^K} \log \det M = -p \operatorname{expit}^{(K-1)}(\theta) \quad (K \ge 2)
+  \f]
+- **Inverse.** Sherman-Morrison inversion expressed in \f$E\f$:
+  \f[
+  M^{-1}_{ii} = \frac{(p^2 - 2p + 2) + (p - 1)^2 E + E^{-1}}{p^2}, \quad
+  M^{-1}_{ij} = -\frac{(p - 2) + (p - 1) E - E^{-1}}{p^2} \quad (i \ne j)
+  \f]
+  Derivatives for \f$K \ge 1\f$:
+  \f[
+  \frac{\mathrm{d}^K M^{-1}_{ii}}{\mathrm{d}\theta^K} = \frac{(p - 1)^2 E + (-1)^K E^{-1}}{p^2}, \quad
+  \frac{\mathrm{d}^K M^{-1}_{ij}}{\mathrm{d}\theta^K} = -\frac{(p - 1) E - (-1)^K E^{-1}}{p^2} \quad (i \ne j)
+  \f]
+- **Cholesky factor.** Formed from the closed \f$L D L^\top\f$ decomposition of the equicorrelation matrix.
+  With \f$u_j = A_j + B_j E\f$ for \f$j \in \{0, \dots, p - 1\}\f$, where \f$A_j = p - 1 - j\f$ and \f$B_j = (p - 1)(1 + j)\f$ (both non-negative):
+  \f$L_{00} = 1\f$, \f$L_{i0} = \rho\f$ for \f$i \ge 1\f$, and for \f$j \ge 1\f$:
+  \f[
+  L_{jj} = \exp(g_j), \quad g_j = \frac{1}{2}\left[\log\left(\frac{p}{p - 1}\right) + \log u_j - \log u_{j-1} - \log(1 + E)\right]
+  \f]
+  \f[
+  L_{ij} = \rho \exp(r_j) \quad (i > j), \quad r_j = \frac{1}{2}\left[\log\left(\frac{p}{p - 1}\right) + 2\log(p - 1) + \log(1 + E) - \log u_{j-1} - \log u_j\right]
+  \f]
+  For \f$A > 0\f$ the \f$n\f$-th derivative of \f$\log u = \log(A + B E)\f$ is \f$\operatorname{expit}^{(n-1)}(\theta + \log(B/A))\f$; for \f$A = 0\f$ (the last column, \f$j = p - 1\f$) \f$\log u = \log B + \theta\f$.
+  Derivatives of \f$\exp(g_j)\f$ are computed by the complete Bell polynomial (\ref laplace::math::bell_partial "bell_partial()"):
+  \f[
+  \frac{\mathrm{d}^K}{\mathrm{d}\theta^K} \exp(g_j) = \exp(g_j) \sum_{k=1}^K B_{K,k}\left(g_j', \dots, g_j^{(K-k+1)}\right)
+  \f]
+  and derivatives of \f$\rho \exp(r_j)\f$ follow by Leibniz's rule over the derivative orders of \f$\rho\f$ and \f$\exp(r_j)\f$.
+
+## Autoregressive structure
+
+In \ref laplace::pdmat::ar1_pdmat "ar1_pdmat", \f$q = 1\f$.
+Write \f$T = \tanh\theta\f$ and \f$S = 1 - T^2 = \operatorname{sech}^2\theta\f$; \f$T\f$, \f$S\f$ and \f$\operatorname{sech}\theta = 2 e^{-|\theta|} / (1 + e^{-2|\theta|})\f$ are computed from \f$e^{-2|\theta|}\f$, so that \f$S\f$ does not cancel as \f$|\theta|\f$ grows.
+For \f$p = 1\f$, \f$M = [1]\f$, \f$\log \det M = 0\f$, \f$M^{-1} = [1]\f$, \f$L = [1]\f$, and derivatives return `false` (or \f$0.0\f$ for log-determinant).
+
+For \f$p \ge 2\f$:
+- **Matrix value.** \f$M_{ij} = T^{|i - j|}\f$.
+- **Matrix derivatives.** \f$\frac{\mathrm{d}^K M_{ij}}{\mathrm{d}\theta^K} = \frac{\mathrm{d}^K}{\mathrm{d}\theta^K} T^{|i - j|}\f$ (zero on the diagonal).
+- **Log-determinant.** \f$\log \det M = -2(p - 1)\log\cosh\theta\f$, with derivatives:
+  \f[
+  \frac{\mathrm{d}^K}{\mathrm{d}\theta^K} \log \det M = -2(p - 1)\tanh^{(K-1)}(\theta)
+  \f]
+- **Inverse.** Tridiagonal matrix:
+  \f[
+  M^{-1}_{00} = M^{-1}_{p-1, p-1} = \cosh^2\theta = \frac{1 + \cosh(2\theta)}{2}
+  \f]
+  \f[
+  M^{-1}_{ii} = \cosh(2\theta) \quad (0 < i < p - 1)
+  \f]
+  \f[
+  M^{-1}_{i, i-1} = -\frac{1}{2}\sinh(2\theta) \quad (1 \le i < p)
+  \f]
+  with all other entries zero. Derivatives for \f$K \ge 1\f$:
+  \f[
+  \frac{\mathrm{d}^K}{\mathrm{d}\theta^K}\cosh(2\theta) = 2^K \times \begin{cases} \cosh(2\theta) & K \text{ even} \\ \sinh(2\theta) & K \text{ odd} \end{cases}, \quad
+  \frac{\mathrm{d}^K}{\mathrm{d}\theta^K}\sinh(2\theta) = 2^K \times \begin{cases} \sinh(2\theta) & K \text{ even} \\ \cosh(2\theta) & K \text{ odd} \end{cases}
+  \f]
+  with the diagonal endpoints scaled by \f$1/2\f$ and the subdiagonal scaled by \f$-1/2\f$.
+- **Cholesky factor.** \f$L_{i0} = T^i\f$ for \f$0 \le i < p\f$, and \f$L_{ij} = T^{i-j}\operatorname{sech}\theta\f$ for \f$1 \le j \le i < p\f$.
+- **Derivative recursion.** Derivatives of \f$T^k \operatorname{sech}^h\theta\f$ with \f$h \in \{0, 1\}\f$ are evaluated by:
+  \f[
+  \frac{\mathrm{d}^K}{\mathrm{d}\theta^K}\left(T^k \operatorname{sech}^h\theta\right) = \sum_{n=0}^K c_n T^{k + K - 2n} S^n \operatorname{sech}^h\theta
+  \f]
+  with integer coefficients computed by the recurrence \f$c'_{n+1} \mathrel{+}= (k + K - 2n) c_n\f$ and \f$c'_n \mathrel{-}= (2n + h) c_n\f$, initialized at \f$c_0 = 1\f$. Every term preserves a factor \f$S\f$, avoiding cancellation as \f$T \to \pm 1\f$.
+
+## Measured accuracy
+
+The general method is on the page \ref accuracy "How accuracy is measured"; what is specific here: the reference script `tools/reference/pdmat_pilot.py` builds each matrix from its definition in mpmath at 640 bits (inverse, Cholesky factor and determinant by mpmath's own routines), and takes the derivatives by central differences with steps \f$2^{-60}\f$ and \f$2^{-70}\f$, which agree to \f$1.6 \times 10^{-35}\f$ relative. There are 16569 reference values:
+- \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": \f$p \in \{1, 2, 3, 6\}\f$, \f$\theta \in \{-4, -0.8, 0, 0.35, 1.7, 5, 10\}\f$.
+- \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": \f$p \in \{1, 2, 3, 5, 9\}\f$, \f$\theta \in \{-8, -2, -0.3, 0, 0.6, 2.5, 9\}\f$.
+- \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": \f$p \in \{1, 3\}\f$, \f$\theta \in \{-2, 0.3, 3\}\f$.
+
+The error of a matrix (a value or one derivative of it) is measured normwise, in units of the largest entry of the reference matrix:
+\f[
+\mathrm{ulpN} = \frac{\max_{i, j} |y_{ij} - r_{ij}|}{\varepsilon \max\left(\max_{i, j} |r_{ij}|,\ 10^{-20}\right)},
+\f]
+with \f$y_{ij}\f$ the computed entries, \f$r_{ij}\f$ the reference entries and \f$\varepsilon = 2^{-52}\f$. The floor \f$10^{-20}\f$ lets an entry that is exactly zero (the even derivatives of an odd function at \f$\theta = 0\f$) be compared against the noise of the differences. The log-determinant is measured in relative ulp, with the same floor, and in ulp1 at order 0, where it crosses zero (both defined on the page \ref accuracy).
+
+Maximum error over orders 0 to 6, gcc/OpenMP / CUDA (RTX 4070 SUPER), with the order of the maximum when it is not the same for every order:
+
+| Structure | \f$M\f$ | \f$M^{-1}\f$ | \f$L\f$ | \f$\log \det M\f$ |
+|---|---|---|---|---|
+| Diagonal | 0.52 ulpN / 0.52 ulpN | 0.89 ulpN / 0.66 ulpN | 0.59 ulpN / 0.59 ulpN | 0.45 ulp / 0.45 ulp |
+| Compound symmetry | 8.01 ulpN (\f$K=4\f$) / 6.67 ulpN (\f$K=4\f$) | 0.81 ulpN / 0.81 ulpN | 9.34 ulpN (\f$K=5\f$) / 9.77 ulpN (\f$K=6\f$) | 8.01 ulp (\f$K=5\f$) / 7.91 ulp1 (\f$K=0\f$) |
+| Autoregressive AR(1) | 13.0 ulpN (\f$K=6\f$) / 11.1 ulpN (\f$K=6\f$) | 0.52 ulpN / 0.58 ulpN | 8.22 ulpN (\f$K=4\f$) / 8.22 ulpN (\f$K=4\f$) | 3.92 ulp (\f$K=6\f$) / 4.83 ulp (\f$K=6\f$) |
+
+Test bounds in automated regression tests (`tests/pdmat/test_pilot.cpp`) are set to 1.5 times the larger of the measured errors on gcc and CUDA, rounded up.
+
+## Execution times
+
+Timings measured in `benchmarks/pdmat_pilot.cpp` for one call filling the entire packed matrix, with parameter \f$\theta\f$ sampled uniformly from \f$[-3, 3]\f$, on one gcc thread, in nanoseconds per call, at order 0 / order 6:
+
+| Structure and dimension | \f$M\f$ | \f$M^{-1}\f$ | \f$L\f$ | \f$\log \det M\f$ |
+|---|---|---|---|---|
+| Diagonal, \f$p = 4\f$ | 29 ns / 18 ns | 30 ns / 18 ns | 29 ns / 18 ns | 2.1 ns / 0.6 ns |
+| Diagonal, \f$p = 16\f$ | 139 ns / 100 ns | 148 ns / 99 ns | 138 ns / 99 ns | 4.1 ns / 0.7 ns |
+| Compound symmetry, \f$p = 4\f$ | 22 ns / 35 ns | 27 ns / 21 ns | 376 ns / 437 ns | 91 ns / 11 ns |
+| Compound symmetry, \f$p = 16\f$ | 119 ns / 133 ns | 121 ns / 121 ns | 1531 ns / 2086 ns | 90 ns / 11 ns |
+| Autoregressive AR(1), \f$p = 4\f$ | 44 ns / 116 ns | 20 ns / 20 ns | 42 ns / 227 ns | 47 ns / 51 ns |
+| Autoregressive AR(1), \f$p = 16\f$ | 165 ns / 566 ns | 95 ns / 96 ns | 157 ns / 1055 ns | 46 ns / 48 ns |
+
+On CUDA the same benchmark gives times that vary erratically between neighbouring cases, so they are not quoted per case; the most expensive call, \f$L\f$ of compound symmetry at \f$p = 16\f$, order 6, takes 187 ns.
+
+## Parallel evaluation in Kokkos
+
+A structure is constructed and evaluated inside a kernel; here \f$p = 4\f$, one matrix and its first derivative per value of \f$\theta\f$ in the View `theta`:
+
+```cpp
+constexpr int p = 4;
+Kokkos::parallel_for(
+    "eval_pdmat", theta.extent(0), KOKKOS_LAMBDA(int i) {
+      const laplace::pdmat::ar1_pdmat s(p);
+      const double th[1] = {theta(i)};
+      double m[laplace::pdmat::packed_size(p)], dm[laplace::pdmat::packed_size(p)];
+      s.matrix(th, m);
+      const int idx[1] = {0};
+      if (s.matrix_d1(th, idx, dm)) {
+        // dm holds dM/dtheta in packed storage
+      }
+    });
+```
+
+## Public classes and concepts
+
+- \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": Diagonal positive definite matrix structure.
+- \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": Compound symmetry (equicorrelation) positive definite matrix structure.
+- \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": First-order autoregressive AR(1) positive definite correlation matrix structure.
+- \ref laplace::pdmat::pdmat_orders "pdmat_orders": CRTP base class template providing named derivative member functions.
+- \ref laplace::pdmat::pdmat_structure "pdmat_structure": Concept defining requirements for structured positive definite matrices.
+- \ref laplace::pdmat::packed_index "packed_index()": Row-major lower-triangular packed storage index.
+- \ref laplace::pdmat::packed_size "packed_size()": Total number of entries in row-major lower-triangular packed storage.
+
+## References
+
+- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/
+
+*/
