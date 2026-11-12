@@ -920,16 +920,16 @@ struct bijector_partials {
   LAPLACE_HD static constexpr int index(int n1, int n2) { return n2 * (K + 1) - n2 * (n2 - 1) / 2 + n1; }
 };
 
-// The points at which a map is not smooth: count of them (0 or 1 for a scalar
-// map, up to 4 for a chain), their positions, and the order up to which the map
+// The points at which a map is not smooth: count of them (0 or 1), their
+// positions, and the order up to which the map
 // stays continuous there (2 for Yeo-Johnson: its third derivative jumps). At the
 // point itself the derivatives are the right-hand ones.
 /**
  * \ingroup bijector_scalar
  * \brief Information about points where a scalar bijector is not smooth.
  *
- * Declares the non-smooth points: \c count (0 or 1 for a single scalar map),
- * \c point (positions of the kinks, up to 4), and \c continuous_order (the order
+ * Declares the non-smooth points: \c count (0 or 1),
+ * \c point (their positions), and \c continuous_order (the order
  * up to which the map remains continuous). For Yeo-Johnson, \c count is 1 at
  * \f$v = 0\f$ (\f$u = 0\f$) with \c continuous_order equal to 2 (its third
  * derivative jumps across zero unless \f$\lambda = 1\f$). At the kink itself,
