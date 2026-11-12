@@ -56,7 +56,7 @@ struct Integrand {
 // the methods
 enum { TS = 0, ES, SS, GK, PAN, GL64, GH32, GLA32, NMETH };
 inline const char* method_name(int m) {
-  static const char* n[] = {"tanh_sinh", "exp_sinh", "sinh_sinh", "gk15", "panels", "legendre64", "hermite32", "laguerre32"};
+  static const char* n[] = {"tanh_sinh_quad", "exp_sinh_quad", "sinh_sinh_quad", "gk15", "panels", "legendre64", "hermite32", "laguerre32"};
   return n[m];
 }
 
@@ -70,11 +70,11 @@ KOKKOS_INLINE_FUNCTION int domain(int id) {
 }
 
 // value, evaluations, converged (NaN when the rule does not apply)
-KOKKOS_INLINE_FUNCTION quad::result run(int id, double p1, double p2, int m, double stop) {
+KOKKOS_INLINE_FUNCTION quad::quad_result run(int id, double p1, double p2, int m, double stop) {
   const Integrand f{id, p1, p2};
-  quad::de_options o;
+  quad::de_quad_options o;
   o.stop = stop;
-  quad::result r;
+  quad::quad_result r;
   r.value = laplace::math::detail::quiet_nan();
   const int dom = domain(id);
   const double a = id == 4 ? p1 : 0.0, b = id == 4 ? p2 : 1.0;
@@ -88,20 +88,20 @@ KOKKOS_INLINE_FUNCTION quad::result run(int id, double p1, double p2, int m, dou
   const double kink = 0.0;
   switch (m) {
     case TS:
-      if (id == 0) r = quad::tanh_sinh(Beta{p1, p2}, a, b, o);
-      else if (dom == 0) r = quad::tanh_sinh(f, a, b, o);
+      if (id == 0) r = quad::tanh_sinh_quad(Beta{p1, p2}, a, b, o);
+      else if (dom == 0) r = quad::tanh_sinh_quad(f, a, b, o);
       break;
-    case ES: if (dom == 1) r = quad::exp_sinh(f, 0.0, s, o); break;
-    case SS: if (dom == 2) r = quad::sinh_sinh(f, c, s, o); break;
-    case GK: if (dom == 0) r = quad::gauss_kronrod(f, a, b, 1e-14); break;
+    case ES: if (dom == 1) r = quad::exp_sinh_quad(f, 0.0, s, o); break;
+    case SS: if (dom == 2) r = quad::sinh_sinh_quad(f, c, s, o); break;
+    case GK: if (dom == 0) r = quad::gauss_kronrod_quad(f, a, b, 1e-14); break;
     case PAN:
-      if (dom == 0) r = quad::panels(f, a, b, id == 4 ? 0.0 : 0.5 * (a + b), id == 4 ? 1.0 : 0.25, id == 4 ? &kink : nullptr, id == 4 ? 1 : 0, o);
-      if (dom == 1) r = quad::panels(f, 0.0, inf, c, s, nullptr, 0, o);
-      if (dom == 2) r = quad::panels(f, -inf, inf, c, s, nullptr, 0, o);
+      if (dom == 0) r = quad::panels_quad(f, a, b, id == 4 ? 0.0 : 0.5 * (a + b), id == 4 ? 1.0 : 0.25, id == 4 ? &kink : nullptr, id == 4 ? 1 : 0, o);
+      if (dom == 1) r = quad::panels_quad(f, 0.0, inf, c, s, nullptr, 0, o);
+      if (dom == 2) r = quad::panels_quad(f, -inf, inf, c, s, nullptr, 0, o);
       break;
-    case GL64: if (dom == 0) r.value = quad::gauss_legendre<64>(f, a, b), r.evals = 64, r.converged = true; break;
-    case GH32: if (dom == 2) r.value = quad::gauss_hermite32(f, c, s), r.evals = 32, r.converged = true; break;
-    case GLA32: if (dom == 1) r.value = quad::gauss_laguerre32(f, 0.0, s), r.evals = 32, r.converged = true; break;
+    case GL64: if (dom == 0) r.value = quad::gauss_legendre_quad<64>(f, a, b), r.evals = 64, r.converged = true; break;
+    case GH32: if (dom == 2) r.value = quad::gauss_hermite32_quad(f, c, s), r.evals = 32, r.converged = true; break;
+    case GLA32: if (dom == 1) r.value = quad::gauss_laguerre32_quad(f, 0.0, s), r.evals = 32, r.converged = true; break;
   }
   return r;
 }

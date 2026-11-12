@@ -121,13 +121,13 @@ The measured maximum errors in ulps of \f$S\f$ over the 1950 reference rows (150
 
 | Function | Order \f$N\f$ | Measured max error gcc (ulp of \f$S\f$) | Measured max error CUDA (ulp of \f$S\f$) | Test bound (ulp of \f$S\f$) |
 |---|---|---|---|---|
-| \ref laplace::math::compose_d1 "compose_d1()" | 1 | 0.50 | 0.50 | 1.0 |
-| \ref laplace::math::compose_d2 "compose_d2()" | 2 | 1.73 | 1.73 | 3.0 |
-| \ref laplace::math::compose_d3 "compose_d3()" | 3 | 2.21 | 2.21 | 3.5 |
-| \ref laplace::math::compose_d4 "compose_d4()" | 4 | 3.08 | 3.03 | 4.5 |
-| \ref laplace::math::compose_d5 "compose_d5()" | 5 | 3.05 | 3.05 | 4.5 |
-| \ref laplace::math::compose_d6 "compose_d6()" | 6 | 3.96 | 3.96 | 6.0 |
-| \ref laplace::math::compose_d7 "compose_d7()" | 7 | 5.03 | 5.03 | 7.5 |
+| \ref laplace::math::chain_rule_d1 "chain_rule_d1()" | 1 | 0.50 | 0.50 | 1.0 |
+| \ref laplace::math::chain_rule_d2 "chain_rule_d2()" | 2 | 1.73 | 1.73 | 3.0 |
+| \ref laplace::math::chain_rule_d3 "chain_rule_d3()" | 3 | 2.21 | 2.21 | 3.5 |
+| \ref laplace::math::chain_rule_d4 "chain_rule_d4()" | 4 | 3.08 | 3.03 | 4.5 |
+| \ref laplace::math::chain_rule_d5 "chain_rule_d5()" | 5 | 3.05 | 3.05 | 4.5 |
+| \ref laplace::math::chain_rule_d6 "chain_rule_d6()" | 6 | 3.96 | 3.96 | 6.0 |
+| \ref laplace::math::chain_rule_d7 "chain_rule_d7()" | 7 | 5.03 | 5.03 | 7.5 |
 
 ### Exact polynomial verification
 
@@ -162,8 +162,8 @@ void compute_derivatives(const Kokkos::View<const double**>& f,
     // g(i, j) holds g^(j) at x_i for j = 1..2
     const double f_row[3] = {0.0, f(i, 1), f(i, 2)};
     const double g_row[3] = {0.0, g(i, 1), g(i, 2)};
-    d1(i) = laplace::math::compose_d1(f_row, g_row);
-    d2(i) = laplace::math::compose_d2(f_row, g_row);
+    d1(i) = laplace::math::chain_rule_d1(f_row, g_row);
+    d2(i) = laplace::math::chain_rule_d2(f_row, g_row);
   });
 }
 \endcode
@@ -173,13 +173,13 @@ void compute_derivatives(const Kokkos::View<const double**>& f,
 Functions in this module are called as `laplace::math::NAME`.
 
 - \ref laplace::math::bell_partial "bell_partial()" — Partial Bell polynomials \f$B_{n,k}(g_1, \dots, g_{n-k+1})\f$ for \f$1 \le k \le n \le 7\f$
-- \ref laplace::math::compose_d1 "compose_d1()" — First derivative of composite function \f$\frac{\mathrm{d}}{\mathrm{d}x} f(g(x))\f$
-- \ref laplace::math::compose_d2 "compose_d2()" — Second derivative of composite function \f$\frac{\mathrm{d}^2}{\mathrm{d}x^2} f(g(x))\f$
-- \ref laplace::math::compose_d3 "compose_d3()" — Third derivative of composite function \f$\frac{\mathrm{d}^3}{\mathrm{d}x^3} f(g(x))\f$
-- \ref laplace::math::compose_d4 "compose_d4()" — Fourth derivative of composite function \f$\frac{\mathrm{d}^4}{\mathrm{d}x^4} f(g(x))\f$
-- \ref laplace::math::compose_d5 "compose_d5()" — Fifth derivative of composite function \f$\frac{\mathrm{d}^5}{\mathrm{d}x^5} f(g(x))\f$
-- \ref laplace::math::compose_d6 "compose_d6()" — Sixth derivative of composite function \f$\frac{\mathrm{d}^6}{\mathrm{d}x^6} f(g(x))\f$
-- \ref laplace::math::compose_d7 "compose_d7()" — Seventh derivative of composite function \f$\frac{\mathrm{d}^7}{\mathrm{d}x^7} f(g(x))\f$
+- \ref laplace::math::chain_rule_d1 "chain_rule_d1()" — First derivative of composite function \f$\frac{\mathrm{d}}{\mathrm{d}x} f(g(x))\f$
+- \ref laplace::math::chain_rule_d2 "chain_rule_d2()" — Second derivative of composite function \f$\frac{\mathrm{d}^2}{\mathrm{d}x^2} f(g(x))\f$
+- \ref laplace::math::chain_rule_d3 "chain_rule_d3()" — Third derivative of composite function \f$\frac{\mathrm{d}^3}{\mathrm{d}x^3} f(g(x))\f$
+- \ref laplace::math::chain_rule_d4 "chain_rule_d4()" — Fourth derivative of composite function \f$\frac{\mathrm{d}^4}{\mathrm{d}x^4} f(g(x))\f$
+- \ref laplace::math::chain_rule_d5 "chain_rule_d5()" — Fifth derivative of composite function \f$\frac{\mathrm{d}^5}{\mathrm{d}x^5} f(g(x))\f$
+- \ref laplace::math::chain_rule_d6 "chain_rule_d6()" — Sixth derivative of composite function \f$\frac{\mathrm{d}^6}{\mathrm{d}x^6} f(g(x))\f$
+- \ref laplace::math::chain_rule_d7 "chain_rule_d7()" — Seventh derivative of composite function \f$\frac{\mathrm{d}^7}{\mathrm{d}x^7} f(g(x))\f$
 
 ## References
 

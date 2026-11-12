@@ -2,7 +2,7 @@
 // (laplace::math):
 //
 //   bell_partial(n, k, g)   B_(n,k)(g_1, ..., g_(n-k+1)), 1 <= k <= n <= 7
-//   compose_d1 ... _d7(f, g)
+//   chain_rule_d1 ... _d7(f, g)
 //                           d^N/dx^N f(g(x)) = sum_(k=1..N) f^(k)(g(x)) B_(N,k)(g'(x), ..., g^(N-k+1)(x))
 //
 // The arrays are indexed by the derivative order: f[k] = f^(k) at g(x) and
@@ -13,7 +13,7 @@
 // link, are sums of products of the B_(n,k) of each parameter.
 //
 // The polynomials are written out (from sympy's bell(n, k, ...)), each a sum
-// of monomials with positive integer coefficients; compose_dN sums
+// of monomials with positive integer coefficients; chain_rule_dN sums
 // f[k] B_(N,k) from k = N down to 1.
 #pragma once
 
@@ -48,7 +48,7 @@ namespace laplace::math {
  * Verified to reproduce exact integer identities in automated tests:
  * \f$B_{n,k}(1, \dots, 1) = S(n,k)\f$ (Stirling numbers of the second kind) and \f$B_{n,k}(1, 2, \dots, n-k+1) = \binom{n}{k} k^{n-k}\f$.
  *
- * \see faa_di_bruno, compose_d1(), compose_d2(), compose_d3(), compose_d4(), compose_d5(), compose_d6(), compose_d7()
+ * \see faa_di_bruno, chain_rule_d1(), chain_rule_d2(), chain_rule_d3(), chain_rule_d4(), chain_rule_d5(), chain_rule_d6(), chain_rule_d7()
  */
 LAPLACE_HD double bell_partial(int n, int k, const double* g) {
   // outside 1 <= k <= n <= 7 the key n * 8 + k could alias a valid case
@@ -119,9 +119,9 @@ LAPLACE_HD_FORCEINLINE double compose(const double* f, const double* g) {
  * \par Measured accuracy
  * Measured maximum error over the 1950 reference rows (1500 with random derivatives, 450 from compositions met in practice): 0.50 ulp of \f$S\f$ (gcc) / 0.50 ulp of \f$S\f$ (CUDA); test bound 1.0 ulp of \f$S\f$, where \f$S = |f_1 g_1|\f$.
  *
- * \see faa_di_bruno, bell_partial(), compose_d2()
+ * \see faa_di_bruno, bell_partial(), chain_rule_d2()
  */
-LAPLACE_HD double compose_d1(const double* f, const double* g) { return f[1] * g[1]; }
+LAPLACE_HD double chain_rule_d1(const double* f, const double* g) { return f[1] * g[1]; }
 
 /**
  * \ingroup faa_di_bruno
@@ -143,9 +143,9 @@ LAPLACE_HD double compose_d1(const double* f, const double* g) { return f[1] * g
  * \par Measured accuracy
  * Measured maximum error over the 1950 reference rows (1500 with random derivatives, 450 from compositions met in practice): 1.73 ulp of \f$S\f$ (gcc) / 1.73 ulp of \f$S\f$ (CUDA); test bound 3.0 ulp of \f$S\f$, where \f$S = \sum_{k=1}^2 |f_k| B_{2,k}(|g_1|, \dots, |g_{3-k}|)\f$.
  *
- * \see faa_di_bruno, bell_partial(), compose_d1(), compose_d3()
+ * \see faa_di_bruno, bell_partial(), chain_rule_d1(), chain_rule_d3()
  */
-LAPLACE_HD double compose_d2(const double* f, const double* g) { return detail_faa::compose<2>(f, g); }
+LAPLACE_HD double chain_rule_d2(const double* f, const double* g) { return detail_faa::compose<2>(f, g); }
 
 /**
  * \ingroup faa_di_bruno
@@ -167,9 +167,9 @@ LAPLACE_HD double compose_d2(const double* f, const double* g) { return detail_f
  * \par Measured accuracy
  * Measured maximum error over the 1950 reference rows (1500 with random derivatives, 450 from compositions met in practice): 2.21 ulp of \f$S\f$ (gcc) / 2.21 ulp of \f$S\f$ (CUDA); test bound 3.5 ulp of \f$S\f$, where \f$S = \sum_{k=1}^3 |f_k| B_{3,k}(|g_1|, \dots, |g_{4-k}|)\f$.
  *
- * \see faa_di_bruno, bell_partial(), compose_d2(), compose_d4()
+ * \see faa_di_bruno, bell_partial(), chain_rule_d2(), chain_rule_d4()
  */
-LAPLACE_HD double compose_d3(const double* f, const double* g) { return detail_faa::compose<3>(f, g); }
+LAPLACE_HD double chain_rule_d3(const double* f, const double* g) { return detail_faa::compose<3>(f, g); }
 
 /**
  * \ingroup faa_di_bruno
@@ -191,9 +191,9 @@ LAPLACE_HD double compose_d3(const double* f, const double* g) { return detail_f
  * \par Measured accuracy
  * Measured maximum error over the 1950 reference rows (1500 with random derivatives, 450 from compositions met in practice): 3.08 ulp of \f$S\f$ (gcc) / 3.03 ulp of \f$S\f$ (CUDA); test bound 4.5 ulp of \f$S\f$, where \f$S = \sum_{k=1}^4 |f_k| B_{4,k}(|g_1|, \dots, |g_{5-k}|)\f$.
  *
- * \see faa_di_bruno, bell_partial(), compose_d3(), compose_d5()
+ * \see faa_di_bruno, bell_partial(), chain_rule_d3(), chain_rule_d5()
  */
-LAPLACE_HD double compose_d4(const double* f, const double* g) { return detail_faa::compose<4>(f, g); }
+LAPLACE_HD double chain_rule_d4(const double* f, const double* g) { return detail_faa::compose<4>(f, g); }
 
 /**
  * \ingroup faa_di_bruno
@@ -215,9 +215,9 @@ LAPLACE_HD double compose_d4(const double* f, const double* g) { return detail_f
  * \par Measured accuracy
  * Measured maximum error over the 1950 reference rows (1500 with random derivatives, 450 from compositions met in practice): 3.05 ulp of \f$S\f$ (gcc) / 3.05 ulp of \f$S\f$ (CUDA); test bound 4.5 ulp of \f$S\f$, where \f$S = \sum_{k=1}^5 |f_k| B_{5,k}(|g_1|, \dots, |g_{6-k}|)\f$.
  *
- * \see faa_di_bruno, bell_partial(), compose_d4(), compose_d6()
+ * \see faa_di_bruno, bell_partial(), chain_rule_d4(), chain_rule_d6()
  */
-LAPLACE_HD double compose_d5(const double* f, const double* g) { return detail_faa::compose<5>(f, g); }
+LAPLACE_HD double chain_rule_d5(const double* f, const double* g) { return detail_faa::compose<5>(f, g); }
 
 /**
  * \ingroup faa_di_bruno
@@ -243,9 +243,9 @@ LAPLACE_HD double compose_d5(const double* f, const double* g) { return detail_f
  * \par Measured accuracy
  * Measured maximum error over the 1950 reference rows (1500 with random derivatives, 450 from compositions met in practice): 3.96 ulp of \f$S\f$ (gcc) / 3.96 ulp of \f$S\f$ (CUDA); test bound 6.0 ulp of \f$S\f$, where \f$S = \sum_{k=1}^6 |f_k| B_{6,k}(|g_1|, \dots, |g_{7-k}|)\f$.
  *
- * \see faa_di_bruno, bell_partial(), compose_d5(), compose_d7()
+ * \see faa_di_bruno, bell_partial(), chain_rule_d5(), chain_rule_d7()
  */
-LAPLACE_HD double compose_d6(const double* f, const double* g) { return detail_faa::compose<6>(f, g); }
+LAPLACE_HD double chain_rule_d6(const double* f, const double* g) { return detail_faa::compose<6>(f, g); }
 
 /**
  * \ingroup faa_di_bruno
@@ -272,8 +272,8 @@ LAPLACE_HD double compose_d6(const double* f, const double* g) { return detail_f
  * \par Measured accuracy
  * Measured maximum error over the 1950 reference rows (1500 with random derivatives, 450 from compositions met in practice): 5.03 ulp of \f$S\f$ (gcc) / 5.03 ulp of \f$S\f$ (CUDA); test bound 7.5 ulp of \f$S\f$, where \f$S = \sum_{k=1}^7 |f_k| B_{7,k}(|g_1|, \dots, |g_{8-k}|)\f$.
  *
- * \see faa_di_bruno, bell_partial(), compose_d6()
+ * \see faa_di_bruno, bell_partial(), chain_rule_d6()
  */
-LAPLACE_HD double compose_d7(const double* f, const double* g) { return detail_faa::compose<7>(f, g); }
+LAPLACE_HD double chain_rule_d7(const double* f, const double* g) { return detail_faa::compose<7>(f, g); }
 
 }  // namespace laplace::math

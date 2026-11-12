@@ -37,7 +37,7 @@ void check(const qbench::Ref& r, const qbench::Out& o, int m, int id, double bou
 
 TEST_CASE("quadrature rules against mpmath, each on the integrals it is meant for") {
   const auto r = qbench::read(std::string(LAPLACE_REFERENCE_DIR) + "/quadrature.csv");
-  const double stop = laplace::math::quad::de_options{}.stop;
+  const double stop = laplace::math::quad::de_quad_options{}.stop;
   {
     const auto o = qbench::eval(r, qbench::TS, stop);
     check(r, o, qbench::TS, 0, 10.0);  // beta, singular ends, with the distance to the end
@@ -94,20 +94,20 @@ TEST_CASE("fixed Gauss rules integrate their polynomials") {
   // int_0^1 x^k = 1/(k+1); Gauss-Legendre with n nodes is exact to degree 2n - 1
   for (int k : {0, 1, 7, 31}) {
     INFO("k = ", k);
-    CHECK(quad::gauss_legendre<16>(Mono{k}, 0.0, 1.0) == doctest::Approx(1.0 / (k + 1)).epsilon(4e-16));
-    CHECK(quad::gauss_legendre<64>(Mono{k}, 0.0, 1.0) == doctest::Approx(1.0 / (k + 1)).epsilon(4e-16));
+    CHECK(quad::gauss_legendre_quad<16>(Mono{k}, 0.0, 1.0) == doctest::Approx(1.0 / (k + 1)).epsilon(4e-16));
+    CHECK(quad::gauss_legendre_quad<64>(Mono{k}, 0.0, 1.0) == doctest::Approx(1.0 / (k + 1)).epsilon(4e-16));
   }
   // int_R x^(2j) e^(-x^2) = Gamma(j + 1/2); int_0^inf x^k e^-x = k!
   const double g[] = {1.7724538509055160273, 0.88622692545275801365, 1.3293403881791370205, 3.3233509704478425512};
   for (int j = 0; j < 4; ++j) {
     INFO("j = ", j);
-    CHECK(quad::gauss_hermite32(GaussMono{2 * j}) == doctest::Approx(g[j]).epsilon(1e-14));
+    CHECK(quad::gauss_hermite32_quad(GaussMono{2 * j}) == doctest::Approx(g[j]).epsilon(1e-14));
   }
   double fact = 1.0;
   for (int k = 0; k < 10; ++k) {
     if (k > 0) fact *= k;
     INFO("k = ", k);
-    CHECK(quad::gauss_laguerre32(ExpMono{k}) == doctest::Approx(fact).epsilon(1e-14));
+    CHECK(quad::gauss_laguerre32_quad(ExpMono{k}) == doctest::Approx(fact).epsilon(1e-14));
   }
 }
 
@@ -118,33 +118,33 @@ TEST_CASE("quadrature rules: reversed, empty and invalid arguments") {
   auto g = [](double x) { return std::exp(-x * x); };  // int over R = sqrt(pi)
   auto e = [](double x) { return std::exp(-x); };      // int_0^inf = 1
   // int_a^b = -int_b^a
-  const auto ts = quad::tanh_sinh(sq, 0.0, 1.0), tr = quad::tanh_sinh(sq, 1.0, 0.0);
+  const auto ts = quad::tanh_sinh_quad(sq, 0.0, 1.0), tr = quad::tanh_sinh_quad(sq, 1.0, 0.0);
   CHECK(tr.converged);
   CHECK(tr.value == -ts.value);
   CHECK(tr.error == ts.error);
-  CHECK(quad::gauss_kronrod(sq, 1.0, 0.0).value == doctest::Approx(-1.0 / 3.0).epsilon(1e-15));
-  CHECK(quad::gauss_legendre<16>(sq, 1.0, 0.0) == doctest::Approx(-1.0 / 3.0).epsilon(4e-16));
-  const auto pf = quad::panels(sq, 0.0, 1.0, 0.0, 0.25), pr = quad::panels(sq, 1.0, 0.0, 0.0, 0.25);
+  CHECK(quad::gauss_kronrod_quad(sq, 1.0, 0.0).value == doctest::Approx(-1.0 / 3.0).epsilon(1e-15));
+  CHECK(quad::gauss_legendre_quad<16>(sq, 1.0, 0.0) == doctest::Approx(-1.0 / 3.0).epsilon(4e-16));
+  const auto pf = quad::panels_quad(sq, 0.0, 1.0, 0.0, 0.25), pr = quad::panels_quad(sq, 1.0, 0.0, 0.0, 0.25);
   CHECK(pr.converged);
   CHECK(pr.value == -pf.value);
   // empty interval: exactly 0, error 0, converged
-  for (const auto& r : {quad::tanh_sinh(sq, 0.5, 0.5), quad::gauss_kronrod(sq, 0.5, 0.5), quad::panels(sq, 0.5, 0.5, 0.0, 1.0)}) {
+  for (const auto& r : {quad::tanh_sinh_quad(sq, 0.5, 0.5), quad::gauss_kronrod_quad(sq, 0.5, 0.5), quad::panels_quad(sq, 0.5, 0.5, 0.0, 1.0)}) {
     CHECK(r.value == 0.0);
     CHECK(r.error == 0.0);
     CHECK(r.converged);
   }
   // invalid arguments: NaN, not converged
-  for (const auto& r : {quad::tanh_sinh(sq, nan, 1.0), quad::tanh_sinh(sq, 0.0, inf), quad::gauss_kronrod(sq, 0.0, nan),
-                        quad::exp_sinh(e, 0.0, 0.0), quad::exp_sinh(e, 0.0, -1.0), quad::exp_sinh(e, nan, 1.0),
-                        quad::sinh_sinh(g, 0.0, -1.0), quad::sinh_sinh(g, nan, 1.0), quad::sinh_sinh(g, 0.0, inf),
-                        quad::panels(sq, nan, 1.0, 0.0, 1.0), quad::panels(sq, 0.0, 1.0, 0.0, 0.0)}) {
+  for (const auto& r : {quad::tanh_sinh_quad(sq, nan, 1.0), quad::tanh_sinh_quad(sq, 0.0, inf), quad::gauss_kronrod_quad(sq, 0.0, nan),
+                        quad::exp_sinh_quad(e, 0.0, 0.0), quad::exp_sinh_quad(e, 0.0, -1.0), quad::exp_sinh_quad(e, nan, 1.0),
+                        quad::sinh_sinh_quad(g, 0.0, -1.0), quad::sinh_sinh_quad(g, nan, 1.0), quad::sinh_sinh_quad(g, 0.0, inf),
+                        quad::panels_quad(sq, nan, 1.0, 0.0, 1.0), quad::panels_quad(sq, 0.0, 1.0, 0.0, 0.0)}) {
     CHECK(std::isnan(r.value));
     CHECK_FALSE(r.converged);
   }
-  CHECK(std::isnan(quad::gauss_hermite32(sq, 0.0, -1.0)));
-  CHECK(std::isnan(quad::gauss_laguerre32(sq, 0.0, 0.0)));
-  CHECK(std::isnan(quad::gauss_hermite32(sq, nan, 1.0)));
+  CHECK(std::isnan(quad::gauss_hermite32_quad(sq, 0.0, -1.0)));
+  CHECK(std::isnan(quad::gauss_laguerre32_quad(sq, 0.0, 0.0)));
+  CHECK(std::isnan(quad::gauss_hermite32_quad(sq, nan, 1.0)));
   // valid scales still give the integral
-  CHECK(quad::sinh_sinh(g, 0.0, 1.0).value == doctest::Approx(std::sqrt(3.14159265358979323846)).epsilon(1e-14));
-  CHECK(quad::exp_sinh(e, 0.0, 1.0).value == doctest::Approx(1.0).epsilon(1e-14));
+  CHECK(quad::sinh_sinh_quad(g, 0.0, 1.0).value == doctest::Approx(std::sqrt(3.14159265358979323846)).epsilon(1e-14));
+  CHECK(quad::exp_sinh_quad(e, 0.0, 1.0).value == doctest::Approx(1.0).epsilon(1e-14));
 }

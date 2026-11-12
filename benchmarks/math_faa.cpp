@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
       Kokkos::fence();
       ns = std::min(ns, std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / m);
     }
-    std::printf("compose_d%d | %s: max %.3g ulp, %.3g ulpS (row %zu) | non-finite %zu | ns/call %.3f\n", n,
+    std::printf("chain_rule_d%d | %s: max %.3g ulp, %.3g ulpS (row %zu) | non-finite %zu | ns/call %.3f\n", n,
                 bench::Exec::name(), e.ulp, e.ulpS, e.worst, e.bad, ns);
   }
   return 0;

@@ -503,7 +503,7 @@ LAPLACE_HD void upper_rule(central& c, double a, double x, double t0, double d0)
 // distance to the nearer end computed directly, t in [-3.5, 3.5]; integrand
 // exp(r d - x (e^d - 1 - d)).
 template <int NH, int E, int S = 1>
-LAPLACE_HD void tanh_sinh(central& c, double d0, double L, const log_integrand& g) {
+LAPLACE_HD void tanh_sinh_quad(central& c, double d0, double L, const log_integrand& g) {
   const int J = (7 * NH) / 2 / S * S;
   for (int j = -J; j <= J; j += S) {
     double fr, wq;
@@ -532,10 +532,10 @@ LAPLACE_HD void quad_moments(double a, double x, bool lower, double* kap, double
     const double L = -math::log(x);
     const log_integrand g{a - x, x};
     if (L > SPLIT + 1.0) {
-      tanh_sinh<NH, E, ST>(c, 0.0, L - SPLIT, g);
-      tanh_sinh<NH, E, ST2>(c, L - SPLIT, SPLIT, g);
+      tanh_sinh_quad<NH, E, ST>(c, 0.0, L - SPLIT, g);
+      tanh_sinh_quad<NH, E, ST2>(c, L - SPLIT, SPLIT, g);
     } else {
-      tanh_sinh<NH, E, ST2>(c, 0.0, L, g);
+      tanh_sinh_quad<NH, E, ST2>(c, 0.0, L, g);
     }
     upper_rule<NH, E, SU>(c, a, x, 1.0, L);
   } else {

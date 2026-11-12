@@ -48,7 +48,7 @@ TEST_CASE("Faa di Bruno's formula against mpmath") {
   const double bound[8] = {0, 1.0, 3.0, 3.5, 4.5, 4.5, 6.0, 7.5};
   for (int n = 1; n <= 7; ++n) {
     const auto e = faa::errors(r, faa::eval(r, n), n);
-    INFO("compose_d", n, ": max ", e.ulpS, " ulp of the sum of |terms| (row ", e.worst, ")");
+    INFO("chain_rule_d", n, ": max ", e.ulpS, " ulp of the sum of |terms| (row ", e.worst, ")");
     CHECK(e.bad == 0);
     CHECK(e.ulpS <= bound[n]);
   }

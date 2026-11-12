@@ -21,18 +21,18 @@ Every routine in this module is designed for execution inside Kokkos parallel ke
 ## Domain and special values
 
 The integration domain depends on the chosen quadrature rule:
-- **Finite intervals.** \ref laplace::math::quad::tanh_sinh "tanh_sinh()" and \ref laplace::math::quad::gauss_kronrod "gauss_kronrod()" integrate over \f$[a, b]\f$ with finite \f$a, b \in \mathbb{R}\f$.
-- **Semi-infinite intervals.** \ref laplace::math::quad::exp_sinh "exp_sinh()" and \ref laplace::math::quad::gauss_laguerre32 "gauss_laguerre32()" integrate over \f$[a, \infty)\f$ for finite \f$a \in \mathbb{R}\f$ and scale \f$s > 0\f$.
-- **Infinite intervals.** \ref laplace::math::quad::sinh_sinh "sinh_sinh()" and \ref laplace::math::quad::gauss_hermite32 "gauss_hermite32()" integrate over \f$(-\infty, \infty)\f$ for centre \f$c \in \mathbb{R}\f$ and scale \f$s > 0\f$.
-- **Piecewise intervals.** \ref laplace::math::quad::panels "panels()" integrates over \f$[a, b]\f$, where \f$a \le -10^{308}\f$ is treated as \f$-\infty\f$ and \f$b \ge 10^{308}\f$ is treated as \f$+\infty\f$.
-- **Singular endpoints and integrand clipping.** For \ref laplace::math::quad::tanh_sinh "tanh_sinh()" and \ref laplace::math::quad::exp_sinh "exp_sinh()", integrands may take a second argument \f$x_c\f$ representing the exact distance to the nearer boundary (\f$x_c = a - x\f$ on the left half of \ref laplace::math::quad::tanh_sinh "tanh_sinh()", \f$x_c = b - x\f$ on the right half; \f$x_c = x - a\f$ for \ref laplace::math::quad::exp_sinh "exp_sinh()"). If a quadrature node rounds to an endpoint in double precision while \f$x_c \ne 0\f$, it is evaluated. Across all double-exponential rules, integrand evaluations are skipped if non-finite or if \f$|v| \ge 10^{308}\f$ (the common test \f$|v| < 10^{308}\f$). In \ref laplace::math::quad::sinh_sinh "sinh_sinh()", nodes with displacement \f$|\sinh(q)| \ge 10^{300}\f$ are skipped.
-- **Reversed interval.** (\ref laplace::math::quad::tanh_sinh "tanh_sinh()", \ref laplace::math::quad::gauss_kronrod "gauss_kronrod()", \ref laplace::math::quad::gauss_legendre "gauss_legendre()", \ref laplace::math::quad::panels "panels()"): \f$\int_a^b f = -\int_b^a f\f$; the result of the reversed call has the opposite value and the same error, evaluations and convergence.
-- **Empty interval.** When \f$a = b\f$ (\ref laplace::math::quad::tanh_sinh "tanh_sinh()", \ref laplace::math::quad::gauss_kronrod "gauss_kronrod()", \ref laplace::math::quad::panels "panels()"): value 0, error 0, `converged = true`, no evaluation (\ref laplace::math::quad::gauss_legendre "gauss_legendre()" returns \f$0.0\f$).
-- **Invalid arguments.** Invalid arguments give value and error NaN and `converged = false` (rules returning \ref laplace::math::quad::result "result"), or NaN (\ref laplace::math::quad::gauss_hermite32 "gauss_hermite32()", \ref laplace::math::quad::gauss_laguerre32 "gauss_laguerre32()"):
-  - a NaN or infinite end of \ref laplace::math::quad::tanh_sinh "tanh_sinh()" and \ref laplace::math::quad::gauss_kronrod "gauss_kronrod()";
-  - a NaN or infinite start of \ref laplace::math::quad::exp_sinh "exp_sinh()" or centre of \ref laplace::math::quad::sinh_sinh "sinh_sinh()", \ref laplace::math::quad::gauss_hermite32 "gauss_hermite32()", and \ref laplace::math::quad::gauss_laguerre32 "gauss_laguerre32()";
-  - a scale \f$s\f$ that is not positive and finite in \ref laplace::math::quad::exp_sinh "exp_sinh()", \ref laplace::math::quad::sinh_sinh "sinh_sinh()", \ref laplace::math::quad::gauss_hermite32 "gauss_hermite32()", \ref laplace::math::quad::gauss_laguerre32 "gauss_laguerre32()", and \ref laplace::math::quad::panels "panels()";
-  - a NaN end or a centre that is not finite in \ref laplace::math::quad::panels "panels()" (whose ends may be infinite).
+- **Finite intervals.** \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" and \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()" integrate over \f$[a, b]\f$ with finite \f$a, b \in \mathbb{R}\f$.
+- **Semi-infinite intervals.** \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()" and \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()" integrate over \f$[a, \infty)\f$ for finite \f$a \in \mathbb{R}\f$ and scale \f$s > 0\f$.
+- **Infinite intervals.** \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()" and \ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()" integrate over \f$(-\infty, \infty)\f$ for centre \f$c \in \mathbb{R}\f$ and scale \f$s > 0\f$.
+- **Piecewise intervals.** \ref laplace::math::quad::panels_quad "panels_quad()" integrates over \f$[a, b]\f$, where \f$a \le -10^{308}\f$ is treated as \f$-\infty\f$ and \f$b \ge 10^{308}\f$ is treated as \f$+\infty\f$.
+- **Singular endpoints and integrand clipping.** For \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" and \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()", integrands may take a second argument \f$x_c\f$ representing the exact distance to the nearer boundary (\f$x_c = a - x\f$ on the left half of \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()", \f$x_c = b - x\f$ on the right half; \f$x_c = x - a\f$ for \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()"). If a quadrature node rounds to an endpoint in double precision while \f$x_c \ne 0\f$, it is evaluated. Across all double-exponential rules, integrand evaluations are skipped if non-finite or if \f$|v| \ge 10^{308}\f$ (the common test \f$|v| < 10^{308}\f$). In \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()", nodes with displacement \f$|\sinh(q)| \ge 10^{300}\f$ are skipped.
+- **Reversed interval.** (\ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()", \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()", \ref laplace::math::quad::gauss_legendre_quad "gauss_legendre_quad()", \ref laplace::math::quad::panels_quad "panels_quad()"): \f$\int_a^b f = -\int_b^a f\f$; the result of the reversed call has the opposite value and the same error, evaluations and convergence.
+- **Empty interval.** When \f$a = b\f$ (\ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()", \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()", \ref laplace::math::quad::panels_quad "panels_quad()"): value 0, error 0, `converged = true`, no evaluation (\ref laplace::math::quad::gauss_legendre_quad "gauss_legendre_quad()" returns \f$0.0\f$).
+- **Invalid arguments.** Invalid arguments give value and error NaN and `converged = false` (rules returning \ref laplace::math::quad::quad_result "result"), or NaN (\ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()", \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()"):
+  - a NaN or infinite end of \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" and \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()";
+  - a NaN or infinite start of \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()" or centre of \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()", \ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()", and \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()";
+  - a scale \f$s\f$ that is not positive and finite in \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()", \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()", \ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()", \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()", and \ref laplace::math::quad::panels_quad "panels_quad()";
+  - a NaN end or a centre that is not finite in \ref laplace::math::quad::panels_quad "panels_quad()" (whose ends may be infinite).
 
 ## Numerical methods and regimes
 
@@ -40,7 +40,7 @@ The integration domain depends on the chosen quadrature rule:
 
 The double-exponential rules (Takahasi and Mori, 1974) map the integration variable \f$x\f$ to \f$t \in [-t_{\max}, t_{\max}]\f$ with \f$t_{\max} = 6.8\f$. Beyond \f$|t| > 6.8\f$, transformed nodes leave the IEEE 754 double-precision range. The transformations and weight functions \f$w(t) = \frac{\mathrm{d}x}{\mathrm{d}t}\f$ are:
 
-1. **Finite intervals** (\ref laplace::math::quad::tanh_sinh "tanh_sinh()"):
+1. **Finite intervals** (\ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()"):
    \f[
    x(t) = \frac{a+b}{2} + \frac{b-a}{2} \tanh\left(\frac{\pi}{2} \sinh t\right)
    \f]
@@ -48,11 +48,11 @@ The double-exponential rules (Takahasi and Mori, 1974) map the integration varia
    \f[
    d = (b - a) \frac{e^{-2|q|}}{1 + e^{-2|q|}}, \quad w(t) = \frac{\pi}{2} \cosh(t) (b - a) \frac{2 e^{-2|q|}}{(1 + e^{-2|q|})^2}.
    \f]
-2. **Semi-infinite intervals** (\ref laplace::math::quad::exp_sinh "exp_sinh()"):
+2. **Semi-infinite intervals** (\ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()"):
    \f[
    x(t) = a + s \exp\left(\frac{\pi}{2} \sinh t\right), \quad w(t) = s \frac{\pi}{2} \cosh(t) \exp\left(\frac{\pi}{2} \sinh t\right).
    \f]
-3. **Infinite intervals** (\ref laplace::math::quad::sinh_sinh "sinh_sinh()"):
+3. **Infinite intervals** (\ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()"):
    \f[
    x(t) = c + s \sinh\left(\frac{\pi}{2} \sinh t\right), \quad w(t) = s \frac{\pi}{2} \cosh(t) \cosh\left(\frac{\pi}{2} \sinh t\right).
    \f]
@@ -65,7 +65,7 @@ The adaptive summation proceeds as follows:
 
 ### Gauss-Kronrod quadrature
 
-\ref laplace::math::quad::gauss_kronrod "gauss_kronrod()" implements an adaptive Gauss-Kronrod 7–15 rule on \f$[a, b]\f$ using constants from Boost.Math (`boost/math/quadrature/gauss_kronrod.hpp`).
+\ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()" implements an adaptive Gauss-Kronrod 7–15 rule on \f$[a, b]\f$ using constants from Boost.Math (`boost/math/quadrature/gauss_kronrod_quad.hpp`).
 On each subinterval \f$[u, v]\f$:
 - A 15-point Kronrod estimate \f$K\f$ and an embedded 7-point Gauss-Legendre estimate \f$G\f$ are evaluated with 15 function evaluations.
 - The local error estimate is \f$|(K - G) \cdot \frac{v - u}{2}|\f$.
@@ -75,18 +75,18 @@ On each subinterval \f$[u, v]\f$:
 
 ### Geometric panel quadrature
 
-\ref laplace::math::quad::panels "panels()" implements the panel rule of statmodels7's `pt_trunc_rule.h`:
+\ref laplace::math::quad::panels_quad "panels_quad()" implements the panel rule of statmodels7's `pt_trunc_rule.h`:
 - The interval \f$[a, b]\f$ is cut at the centre \f$c\f$ and at up to 8 user-supplied interior kink points \f$\mathrm{kinks}[0 \dots nk-1]\f$. All cut points are sorted.
-- Each finite subpiece \f$[u, v]\f$ is subdivided into up to 64 geometric panels of doubling widths \f$s, 2s, 4s, \dots, 2^k s\f$ advancing from the end closer to \f$c\f$. Each panel is integrated with \ref laplace::math::quad::tanh_sinh "tanh_sinh()".
-- For subpieces extending to \f$\pm\infty\f$, doubling panels cover the first \f$63s\f$, and the remaining unbounded tail is integrated using \ref laplace::math::quad::exp_sinh "exp_sinh()" with scale \f$s\f$.
+- Each finite subpiece \f$[u, v]\f$ is subdivided into up to 64 geometric panels of doubling widths \f$s, 2s, 4s, \dots, 2^k s\f$ advancing from the end closer to \f$c\f$. Each panel is integrated with \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()".
+- For subpieces extending to \f$\pm\infty\f$, doubling panels cover the first \f$63s\f$, and the remaining unbounded tail is integrated using \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()" with scale \f$s\f$.
 - Convergence is enforced on every panel; the overall result is marked converged only if every subpiece converges.
 
 ### Fixed Gauss rules
 
 Node coordinates and weights were generated using the Golub-Welsch algorithm at 256 bits (`tools/reference/quadrature.py nodes`):
-- **Gauss-Legendre** (\ref laplace::math::quad::gauss_legendre "gauss_legendre<N>()"): \f$N \in \{16, 32, 64\}\f$ nodes on \f$[a, b]\f$, exact for polynomials of degree up to \f$2N - 1\f$.
-- **Gauss-Hermite** (\ref laplace::math::quad::gauss_hermite32 "gauss_hermite32()"): 32 nodes on \f$(-\infty, \infty)\f$, evaluating \f$s \sum_{i=0}^{31} w_i e^{y_i^2} f(c + s y_i)\f$.
-- **Gauss-Laguerre** (\ref laplace::math::quad::gauss_laguerre32 "gauss_laguerre32()"): 32 nodes on \f$[a, \infty)\f$, evaluating \f$s \sum_{i=0}^{31} w_i e^{y_i} f(a + s y_i)\f$.
+- **Gauss-Legendre** (\ref laplace::math::quad::gauss_legendre_quad "gauss_legendre_quad<N>()"): \f$N \in \{16, 32, 64\}\f$ nodes on \f$[a, b]\f$, exact for polynomials of degree up to \f$2N - 1\f$.
+- **Gauss-Hermite** (\ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()"): 32 nodes on \f$(-\infty, \infty)\f$, evaluating \f$s \sum_{i=0}^{31} w_i e^{y_i^2} f(c + s y_i)\f$.
+- **Gauss-Laguerre** (\ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()"): 32 nodes on \f$[a, \infty)\f$, evaluating \f$s \sum_{i=0}^{31} w_i e^{y_i} f(a + s y_i)\f$.
 
 ## Measured accuracy
 
@@ -120,11 +120,11 @@ Observations from measurements:
 ### Timings
 
 Throughput measured on 69,120 integrals (540 reference rows repeated 128 times), reported in microseconds (\f$\mu\mathrm{s}\f$) per integral on gcc (1 thread), OpenMP (16 threads), and CUDA (RTX 4070 SUPER):
-- \ref laplace::math::quad::tanh_sinh "tanh_sinh()": 17.3 / 1.51 / 3.44 \f$\mu\mathrm{s}\f$
-- \ref laplace::math::quad::exp_sinh "exp_sinh()": 10.0 / 0.91 / 0.82 \f$\mu\mathrm{s}\f$
-- \ref laplace::math::quad::sinh_sinh "sinh_sinh()": 20.8 / 1.79 / 2.62 \f$\mu\mathrm{s}\f$
-- \ref laplace::math::quad::gauss_kronrod "gauss_kronrod()" (GK15): 61 / 4.4 / 3.9 \f$\mu\mathrm{s}\f$
-- \ref laplace::math::quad::panels "panels()": 121 / 9.5 / 8.7 \f$\mu\mathrm{s}\f$
+- \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()": 17.3 / 1.51 / 3.44 \f$\mu\mathrm{s}\f$
+- \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()": 10.0 / 0.91 / 0.82 \f$\mu\mathrm{s}\f$
+- \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()": 20.8 / 1.79 / 2.62 \f$\mu\mathrm{s}\f$
+- \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()" (GK15): 61 / 4.4 / 3.9 \f$\mu\mathrm{s}\f$
+- \ref laplace::math::quad::panels_quad "panels_quad()": 121 / 9.5 / 8.7 \f$\mu\mathrm{s}\f$
 - Fixed Gauss rules: 2.1–2.7 / 0.26–0.32 / 0.20 \f$\mu\mathrm{s}\f$
 
 Execution cost is dominated by integrand evaluations (90 to 1500 evaluations, each with exp and log at about 28 ns).
@@ -144,7 +144,7 @@ void compute_integrals(Kokkos::View<double*>& values,
     auto integrand = [](double x) {
       return Kokkos::exp(-x * x);
     };
-    const auto res = laplace::math::quad::tanh_sinh(integrand, -1.0, 1.0);
+    const auto res = laplace::math::quad::tanh_sinh_quad(integrand, -1.0, 1.0);
     values(i) = res.value;
     evals(i)  = res.evals;
   });
@@ -157,20 +157,20 @@ Functions in this module are called as `laplace::math::quad::NAME`.
 
 ### Types
 
-- \ref laplace::math::quad::result "result" — Integration result struct containing value, error estimate, evaluation count, and convergence status; when not converged, `value` holds the last estimate and `error` holds the last difference between successive estimates.
-- \ref laplace::math::quad::de_options "de_options" — Options for double-exponential and panel quadrature rules (`stop` tolerance and `max_level`).
+- \ref laplace::math::quad::quad_result "result" — Integration result struct containing value, error estimate, evaluation count, and convergence status; when not converged, `value` holds the last estimate and `error` holds the last difference between successive estimates.
+- \ref laplace::math::quad::de_quad_options "de_quad_options" — Options for double-exponential and panel quadrature rules (`stop` tolerance and `max_level`).
 
 ### Adaptive rules
 
-- \ref laplace::math::quad::tanh_sinh "tanh_sinh()" — Adaptive tanh-sinh double-exponential quadrature on finite interval \f$[a, b]\f$.
-- \ref laplace::math::quad::exp_sinh "exp_sinh()" — Adaptive exp-sinh double-exponential quadrature on semi-infinite interval \f$[a, \infty)\f$.
-- \ref laplace::math::quad::sinh_sinh "sinh_sinh()" — Adaptive sinh-sinh double-exponential quadrature over the real line \f$(-\infty, \infty)\f$.
-- \ref laplace::math::quad::gauss_kronrod "gauss_kronrod()" — Adaptive Gauss-Kronrod 7–15 quadrature on finite interval \f$[a, b]\f$.
-- \ref laplace::math::quad::panels "panels()" — Geometric panel quadrature rule on \f$[a, b]\f$ cut at a centre and interior kinks.
+- \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" — Adaptive tanh-sinh double-exponential quadrature on finite interval \f$[a, b]\f$.
+- \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()" — Adaptive exp-sinh double-exponential quadrature on semi-infinite interval \f$[a, \infty)\f$.
+- \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()" — Adaptive sinh-sinh double-exponential quadrature over the real line \f$(-\infty, \infty)\f$.
+- \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()" — Adaptive Gauss-Kronrod 7–15 quadrature on finite interval \f$[a, b]\f$.
+- \ref laplace::math::quad::panels_quad "panels_quad()" — Geometric panel quadrature rule on \f$[a, b]\f$ cut at a centre and interior kinks.
 
 ### Fixed Gauss rules
 
-- \ref laplace::math::quad::gauss_legendre "gauss_legendre()" — Fixed Gauss-Legendre quadrature with 16, 32, or 64 nodes on \f$[a, b]\f$.
-- \ref laplace::math::quad::gauss_hermite32 "gauss_hermite32()" — Fixed 32-node Gauss-Hermite quadrature over the real line \f$(-\infty, \infty)\f$.
-- \ref laplace::math::quad::gauss_laguerre32 "gauss_laguerre32()" — Fixed 32-node Gauss-Laguerre quadrature on semi-infinite interval \f$[a, \infty)\f$.
+- \ref laplace::math::quad::gauss_legendre_quad "gauss_legendre_quad()" — Fixed Gauss-Legendre quadrature with 16, 32, or 64 nodes on \f$[a, b]\f$.
+- \ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()" — Fixed 32-node Gauss-Hermite quadrature over the real line \f$(-\infty, \infty)\f$.
+- \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()" — Fixed 32-node Gauss-Laguerre quadrature on semi-infinite interval \f$[a, \infty)\f$.
 */

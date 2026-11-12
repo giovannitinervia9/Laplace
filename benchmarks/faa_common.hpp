@@ -1,6 +1,6 @@
 // Shared by the bench and the test of Faa di Bruno's formula: the reader of
 // tests/data/reference/faa_di_bruno.csv and the kernel that evaluates
-// compose_dN on every row.
+// chain_rule_dN on every row.
 #pragma once
 
 #include "measure.hpp"
@@ -41,13 +41,13 @@ inline Rows read(const std::string& path) {
 
 KOKKOS_INLINE_FUNCTION double compose(int n, const double* f, const double* g) {
   switch (n) {
-    case 1: return laplace::math::compose_d1(f, g);
-    case 2: return laplace::math::compose_d2(f, g);
-    case 3: return laplace::math::compose_d3(f, g);
-    case 4: return laplace::math::compose_d4(f, g);
-    case 5: return laplace::math::compose_d5(f, g);
-    case 6: return laplace::math::compose_d6(f, g);
-    default: return laplace::math::compose_d7(f, g);
+    case 1: return laplace::math::chain_rule_d1(f, g);
+    case 2: return laplace::math::chain_rule_d2(f, g);
+    case 3: return laplace::math::chain_rule_d3(f, g);
+    case 4: return laplace::math::chain_rule_d4(f, g);
+    case 5: return laplace::math::chain_rule_d5(f, g);
+    case 6: return laplace::math::chain_rule_d6(f, g);
+    default: return laplace::math::chain_rule_d7(f, g);
   }
 }
 

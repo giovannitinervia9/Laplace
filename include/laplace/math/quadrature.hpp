@@ -4,20 +4,20 @@
 // an error estimate, the number of evaluations and whether it met its
 // tolerance.
 //
-//   tanh_sinh(f, a, b)         [a, b] finite; integrable singularities at the ends
+//   tanh_sinh_quad(f, a, b)         [a, b] finite; integrable singularities at the ends
 //                              (f may take (x, xc), xc the signed distance to the nearer end)
-//   exp_sinh(f, a, s)          [a, inf), s the scale of the integrand's decay
-//   sinh_sinh(f, c, s)         (-inf, inf), centre c and scale s
-//   gauss_kronrod(f, a, b)     [a, b], GK 7-15, adaptive bisection (at most 64 intervals)
-//   panels(f, a, b, c, s, kinks, nk)
+//   exp_sinh_quad(f, a, s)          [a, inf), s the scale of the integrand's decay
+//   sinh_sinh_quad(f, c, s)         (-inf, inf), centre c and scale s
+//   gauss_kronrod_quad(f, a, b)     [a, b], GK 7-15, adaptive bisection (at most 64 intervals)
+//   panels_quad(f, a, b, c, s, kinks, nk)
 //                              [a, b] (either end may be infinite) cut at the centre c and
 //                              at the kinks, finite pieces in panels of widths s, 2s, 4s,
 //                              ... from the side nearer c (tanh-sinh on each), unbounded
 //                              ones beyond 63 s by exp-sinh: the rule of statmodels7's
 //                              pt_trunc_rule.h, with a convergence check on every panel
-//   gauss_legendre<n>(f, a, b) n = 16, 32, 64, fixed
-//   gauss_hermite32(f, c, s)   int f over R as sum w_i e^(y_i^2) s f(c + s y_i), fixed
-//   gauss_laguerre32(f, a, s)  int f over [a, inf) as sum w_i e^(y_i) s f(a + s y_i), fixed
+//   gauss_legendre_quad<n>(f, a, b) n = 16, 32, 64, fixed
+//   gauss_hermite32_quad(f, c, s)   int f over R as sum w_i e^(y_i^2) s f(c + s y_i), fixed
+//   gauss_laguerre32_quad(f, a, s)  int f over [a, inf) as sum w_i e^(y_i) s f(a + s y_i), fixed
 //
 // The double-exponential rules (Takahasi and Mori, 1974) map the interval to
 // t in [-6.8, 6.8] (beyond, the nodes leave the double range) and halve the
@@ -28,7 +28,7 @@
 // tanh-sinh computes each node's distance to its nearer end directly, so
 // that integrable singularities at the ends are sampled to the last bit.
 //
-// The Gauss-Kronrod constants are those of Boost.Math (gauss_kronrod.hpp,
+// The Gauss-Kronrod constants are those of Boost.Math (gauss_kronrod_quad.hpp,
 // Boost Software License 1.0); the Gauss tables come from the Golub-Welsch
 // algorithm at 256 bits (tools/reference/quadrature.py nodes).
 #pragma once
@@ -64,9 +64,9 @@ namespace laplace::math::quad {
  * - `converged`:
  * Flag indicating whether the convergence tolerance was met within the evaluation limit.
  *
- * \see quadrature, de_options
+ * \see quadrature, de_quad_options
  */
-struct result {
+struct quad_result {
   double value = 0.0, error = 0.0;
   int evals = 0;
   bool converged = false;
@@ -88,9 +88,9 @@ struct result {
  * Maximum refinement level for step halving (default 8). At level \f$L\f$,
  * the step size is \f$h = 2^{-(L+1)}\f$, down to \f$h = 2^{-9} = 1/512\f$ at level 8.
  *
- * \see quadrature, result, tanh_sinh(), exp_sinh(), sinh_sinh(), panels()
+ * \see quadrature, quad_result, tanh_sinh_quad(), exp_sinh_quad(), sinh_sinh_quad(), panels_quad()
  */
-struct de_options {
+struct de_quad_options {
   double stop = 1e-9;  // successive estimates within stop * int |f|
   int max_level = 8;   // step 2^-(max_level + 1) at most
 };
@@ -102,14 +102,14 @@ namespace detail {
 LAPLACE_HD_FORCEINLINE bool finite(double x) { return Kokkos::fabs(x) <= 1.7976931348623157e308; }
 LAPLACE_HD_FORCEINLINE bool scale_ok(double s) { return s > 0.0 && finite(s); }
 // invalid arguments: NaN value and error, not converged
-LAPLACE_HD_FORCEINLINE result invalid() {
-  result r;
+LAPLACE_HD_FORCEINLINE quad_result invalid() {
+  quad_result r;
   r.value = r.error = laplace::math::detail::quiet_nan();
   return r;
 }
 // an empty interval: exactly 0, converged
-LAPLACE_HD_FORCEINLINE result empty() {
-  result r;
+LAPLACE_HD_FORCEINLINE quad_result empty() {
+  quad_result r;
   r.converged = true;
   return r;
 }
@@ -156,8 +156,8 @@ LAPLACE_HD_FORCEINLINE void de_sum(const F& f, const Node& node, double h, bool 
 }
 
 template <class F, class Node>
-LAPLACE_HD result de_rule(const F& f, const Node& node, const de_options& o) {
-  result r;
+LAPLACE_HD quad_result de_rule(const F& f, const Node& node, const de_quad_options& o) {
+  quad_result r;
   // level 0 at h = 1/2, and the range of t where |f w| matters
   double h = 0.5, s = 0.0, l1 = 0.0;
   double t_lo = -t_max, t_hi = t_max;
@@ -433,8 +433,8 @@ LAPLACE_HD_FORCEINLINE void gk15(const F& f, double a, double b, double& K, doub
  * \param f Integrand functor.
  * \param a Finite lower integration limit \f$a \in \mathbb{R}\f$.
  * \param b Finite upper integration limit \f$b \in \mathbb{R}\f$.
- * \param o Options specifying stopping tolerance and maximum level (default `de_options{}`).
- * \return A \ref result containing the integral value, error estimate, evaluation count, and convergence status.
+ * \param o Options specifying stopping tolerance and maximum level (default `de_quad_options{}`).
+ * \return A \ref quad_result containing the integral value, error estimate, evaluation count, and convergence status.
  *
  * \par Domain and special values
  * - Standard domain: finite \f$a, b \in \mathbb{R}\f$.
@@ -448,14 +448,14 @@ LAPLACE_HD_FORCEINLINE void gk15(const F& f, double a, double b, double& K, doub
  * Maximum error 6.5 ulp (gcc) / 7.8 ulp (CUDA) on the beta integral with distance to end (test bound 10.0 ulp, 88 evaluations);
  * 6.4 ulp (gcc) / 7.4 ulp (CUDA) on \f$x^p \log(x)^2\f$ (test bound 10.0 ulp, 72 evaluations).
  *
- * \see quadrature, exp_sinh(), sinh_sinh(), gauss_kronrod(), panels(), de_options, result
+ * \see quadrature, exp_sinh_quad(), sinh_sinh_quad(), gauss_kronrod_quad(), panels_quad(), de_quad_options, quad_result
  */
 template <class F>
-LAPLACE_HD result tanh_sinh(const F& f, double a, double b, const de_options& o = de_options{}) {
+LAPLACE_HD quad_result tanh_sinh_quad(const F& f, double a, double b, const de_quad_options& o = de_quad_options{}) {
   if (!detail::finite(a) || !detail::finite(b)) return detail::invalid();
   if (a == b) return detail::empty();
   if (b < a) {  // int_a^b = -int_b^a
-    result r = detail::de_rule(f, detail::tanh_sinh_node{b, a}, o);
+    quad_result r = detail::de_rule(f, detail::tanh_sinh_node{b, a}, o);
     r.value = -r.value;
     return r;
   }
@@ -482,8 +482,8 @@ LAPLACE_HD result tanh_sinh(const F& f, double a, double b, const de_options& o 
  * \param f Integrand functor.
  * \param a Finite lower integration limit \f$a \in \mathbb{R}\f$.
  * \param s Scale parameter of the integrand's decay \f$s > 0\f$ (default 1.0).
- * \param o Options specifying stopping tolerance and maximum level (default `de_options{}`).
- * \return A \ref result containing the integral value, error estimate, evaluation count, and convergence status.
+ * \param o Options specifying stopping tolerance and maximum level (default `de_quad_options{}`).
+ * \return A \ref quad_result containing the integral value, error estimate, evaluation count, and convergence status.
  *
  * \par Domain and special values
  * - Standard domain: finite \f$a \in \mathbb{R}\f$ and \f$s > 0\f$.
@@ -495,10 +495,10 @@ LAPLACE_HD result tanh_sinh(const F& f, double a, double b, const de_options& o 
  * Maximum error 68 ulp (gcc) / 20 ulp (CUDA) on the gamma integral (test bound 100.0 ulp, 136 evaluations);
  * 5.4 ulp on the Student t tail (test bound 8.0 ulp, 85 evaluations).
  *
- * \see quadrature, tanh_sinh(), sinh_sinh(), gauss_laguerre32(), panels(), de_options, result
+ * \see quadrature, tanh_sinh_quad(), sinh_sinh_quad(), gauss_laguerre32_quad(), panels_quad(), de_quad_options, quad_result
  */
 template <class F>
-LAPLACE_HD result exp_sinh(const F& f, double a, double s = 1.0, const de_options& o = de_options{}) {
+LAPLACE_HD quad_result exp_sinh_quad(const F& f, double a, double s = 1.0, const de_quad_options& o = de_quad_options{}) {
   if (!detail::finite(a) || !detail::scale_ok(s)) return detail::invalid();
   return detail::de_rule(f, detail::exp_sinh_node{a, s}, o);
 }
@@ -521,8 +521,8 @@ LAPLACE_HD result exp_sinh(const F& f, double a, double s = 1.0, const de_option
  * \param f Integrand functor.
  * \param c Centre parameter of the integrand \f$c \in \mathbb{R}\f$ (default 0.0).
  * \param s Scale parameter of the integrand \f$s > 0\f$ (default 1.0).
- * \param o Options specifying stopping tolerance and maximum level (default `de_options{}`).
- * \return A \ref result containing the integral value, error estimate, evaluation count, and convergence status.
+ * \param o Options specifying stopping tolerance and maximum level (default `de_quad_options{}`).
+ * \return A \ref quad_result containing the integral value, error estimate, evaluation count, and convergence status.
  *
  * \par Domain and special values
  * - Standard domain: finite \f$c \in \mathbb{R}\f$ and \f$s > 0\f$.
@@ -535,10 +535,10 @@ LAPLACE_HD result exp_sinh(const F& f, double a, double s = 1.0, const de_option
  * 18 ulp on the pseudo-Huber normalizer (test bound 27.0 ulp, 615 evaluations);
  * 6.3 ulp on \f$\mathrm{sech}^p\f$ (test bound 10.0 ulp, 182 evaluations).
  *
- * \see quadrature, tanh_sinh(), exp_sinh(), gauss_hermite32(), panels(), de_options, result
+ * \see quadrature, tanh_sinh_quad(), exp_sinh_quad(), gauss_hermite32_quad(), panels_quad(), de_quad_options, quad_result
  */
 template <class F>
-LAPLACE_HD result sinh_sinh(const F& f, double c = 0.0, double s = 1.0, const de_options& o = de_options{}) {
+LAPLACE_HD quad_result sinh_sinh_quad(const F& f, double c = 0.0, double s = 1.0, const de_quad_options& o = de_quad_options{}) {
   if (!detail::finite(c) || !detail::scale_ok(s)) return detail::invalid();
   return detail::de_rule(f, detail::sinh_sinh_node{c, s}, o);
 }
@@ -565,7 +565,7 @@ LAPLACE_HD result sinh_sinh(const F& f, double c = 0.0, double s = 1.0, const de
  * \param b Finite upper integration limit \f$b \in \mathbb{R}\f$.
  * \param tol Relative convergence tolerance (default \f$10^{-14}\f$).
  * \param max_intervals Maximum number of subintervals (default 64, capped at 64).
- * \return A \ref result containing the integral value, error estimate, evaluation count, and convergence status.
+ * \return A \ref quad_result containing the integral value, error estimate, evaluation count, and convergence status.
  *
  * \par Domain and special values
  * - Standard domain: finite \f$a, b \in \mathbb{R}\f$.
@@ -579,16 +579,16 @@ LAPLACE_HD result sinh_sinh(const F& f, double c = 0.0, double s = 1.0, const de
  * \par Measured accuracy
  * Maximum error 72 ulp on the truncated Laplace density with a kink at 0 (test bound 110.0 ulp, 167 evaluations).
  *
- * \see quadrature, tanh_sinh(), gauss_legendre(), panels(), result
+ * \see quadrature, tanh_sinh_quad(), gauss_legendre_quad(), panels_quad(), quad_result
  */
 template <class F>
-LAPLACE_HD result gauss_kronrod(const F& f, double a, double b, double tol = 1e-14, int max_intervals = 64) {
+LAPLACE_HD quad_result gauss_kronrod_quad(const F& f, double a, double b, double tol = 1e-14, int max_intervals = 64) {
   constexpr int cap = 64;
   if (!detail::finite(a) || !detail::finite(b)) return detail::invalid();
   if (a == b) return detail::empty();  // b < a: the rule itself gives -int_b^a
   if (max_intervals > cap) max_intervals = cap;
   double lo[cap], hi[cap], val[cap], err[cap];
-  result r;
+  quad_result r;
   int n = 1;
   lo[0] = a, hi[0] = b;
   detail::gk15(f, a, b, val[0], err[0], r.evals);
@@ -643,10 +643,10 @@ LAPLACE_HD result gauss_kronrod(const F& f, double a, double b, double tol = 1e-
  * In `tests/math/test_quadrature.cpp`, tested on monomials \f$x^k\f$ on \f$[0, 1]\f$ for \f$k \in \{0, 1, 7, 31\}\f$
  * for \f$N = 16\f$ and \f$N = 64\f$ (\f$N = 32\f$ untested) against test tolerance \f$4 \times 10^{-16}\f$ (`doctest::Approx` epsilon).
  *
- * \see quadrature, gauss_kronrod(), tanh_sinh()
+ * \see quadrature, gauss_kronrod_quad(), tanh_sinh_quad()
  */
 template <int N, class F>
-LAPLACE_HD double gauss_legendre(const F& f, double a, double b) {
+LAPLACE_HD double gauss_legendre_quad(const F& f, double a, double b) {
   static_assert(N == 16 || N == 32 || N == 64, "Gauss-Legendre with 16, 32 or 64 nodes");
   const double c = 0.5 * (a + b), hl = 0.5 * (b - a);
   double s = 0.0;
@@ -683,10 +683,10 @@ LAPLACE_HD double gauss_legendre(const F& f, double a, double b) {
  * In `tests/math/test_quadrature.cpp`, tested on monomials times the weight function, \f$x^{2j} e^{-x^2}\f$
  * for \f$j \in \{0, 1, 2, 3\}\f$, against test tolerance \f$10^{-14}\f$ (`doctest::Approx` epsilon).
  *
- * \see quadrature, sinh_sinh(), gauss_laguerre32()
+ * \see quadrature, sinh_sinh_quad(), gauss_laguerre32_quad()
  */
 template <class F>
-LAPLACE_HD double gauss_hermite32(const F& f, double c = 0.0, double s = 1.0) {
+LAPLACE_HD double gauss_hermite32_quad(const F& f, double c = 0.0, double s = 1.0) {
   if (!detail::finite(c) || !detail::scale_ok(s)) return laplace::math::detail::quiet_nan();
   double acc = 0.0;
   for (int i = 0; i < 32; ++i) {
@@ -721,10 +721,10 @@ LAPLACE_HD double gauss_hermite32(const F& f, double c = 0.0, double s = 1.0) {
  * In `tests/math/test_quadrature.cpp`, tested on monomials times the weight function, \f$x^k e^{-x}\f$
  * for \f$k \in \{0, \dots, 9\}\f$, against test tolerance \f$10^{-14}\f$ (`doctest::Approx` epsilon).
  *
- * \see quadrature, exp_sinh(), gauss_hermite32()
+ * \see quadrature, exp_sinh_quad(), gauss_hermite32_quad()
  */
 template <class F>
-LAPLACE_HD double gauss_laguerre32(const F& f, double a = 0.0, double s = 1.0) {
+LAPLACE_HD double gauss_laguerre32_quad(const F& f, double a = 0.0, double s = 1.0) {
   if (!detail::finite(a) || !detail::scale_ok(s)) return laplace::math::detail::quiet_nan();
   double acc = 0.0;
   for (int i = 0; i < 32; ++i) {
@@ -744,8 +744,8 @@ LAPLACE_HD double gauss_laguerre32(const F& f, double a = 0.0, double s = 1.0) {
  * Implements the panel integration rule of statmodels7's `pt_trunc_rule.h`:
  * - The interval \f$[a, b]\f$ is cut at the centre \f$c\f$ and at up to 8 user-supplied interior kink points.
  * - Each finite subpiece \f$[u, v]\f$ is partitioned into doubling geometric panels of widths \f$s, 2s, 4s, \dots, 2^k s\f$
- *   advancing from the end closer to \f$c\f$, with \ref tanh_sinh() evaluated on each panel.
- * - Pieces extending to \f$\pm\infty\f$ use doubling panels over the first \f$63s\f$, followed by \ref exp_sinh() on the unbounded tail.
+ *   advancing from the end closer to \f$c\f$, with \ref tanh_sinh_quad() evaluated on each panel.
+ * - Pieces extending to \f$\pm\infty\f$ use doubling panels over the first \f$63s\f$, followed by \ref exp_sinh_quad() on the unbounded tail.
  * - Convergence is checked on each panel individually; the result is marked converged only if every panel converged.
  *
  * \tparam F Integrand functor type callable as \f$f(x)\f$.
@@ -756,8 +756,8 @@ LAPLACE_HD double gauss_laguerre32(const F& f, double a = 0.0, double s = 1.0) {
  * \param s Base panel width and scale parameter \f$s > 0\f$.
  * \param kinks Optional array of interior kink coordinates (at most 8 used).
  * \param nk Number of elements in `kinks` array.
- * \param o Options specifying stopping tolerance and maximum level (default `de_options{}`).
- * \return A \ref result containing the accumulated integral value, accumulated error, total evaluation count, and combined convergence status.
+ * \param o Options specifying stopping tolerance and maximum level (default `de_quad_options{}`).
+ * \return A \ref quad_result containing the accumulated integral value, accumulated error, total evaluation count, and combined convergence status.
  *
  * \par Domain and special values
  * - Standard domain: \f$-\infty \le a, b \le \infty\f$, finite centre \f$c \in \mathbb{R}\f$, and \f$s > 0\f$.
@@ -777,19 +777,19 @@ LAPLACE_HD double gauss_laguerre32(const F& f, double a = 0.0, double s = 1.0) {
  * 2.8 ulp on pseudo-Huber normalizer (test bound 5.0 ulp, 1557 evaluations);
  * 3.7 ulp on \f$\mathrm{sech}^p\f$ (test bound 6.0 ulp, 1561 evaluations).
  *
- * \see quadrature, tanh_sinh(), exp_sinh(), sinh_sinh(), de_options, result
+ * \see quadrature, tanh_sinh_quad(), exp_sinh_quad(), sinh_sinh_quad(), de_quad_options, quad_result
  */
 template <class F>
-LAPLACE_HD result panels(const F& f, double a, double b, double c, double s, const double* kinks = nullptr, int nk = 0,
-                         const de_options& o = de_options{}) {
+LAPLACE_HD quad_result panels_quad(const F& f, double a, double b, double c, double s, const double* kinks = nullptr, int nk = 0,
+                         const de_quad_options& o = de_quad_options{}) {
   if (a != a || b != b || !detail::finite(c) || !detail::scale_ok(s)) return detail::invalid();
   if (a == b) return detail::empty();
   if (b < a) {  // int_a^b = -int_b^a
-    result r = panels(f, b, a, c, s, kinks, nk, o);
+    quad_result r = panels_quad(f, b, a, c, s, kinks, nk, o);
     r.value = -r.value;
     return r;
   }
-  result r;
+  quad_result r;
   r.converged = true;
   double cut[10];
   int nc = 0;
@@ -801,7 +801,7 @@ LAPLACE_HD result panels(const F& f, double a, double b, double c, double s, con
       const double t = cut[j];
       cut[j] = cut[j - 1], cut[j - 1] = t;
     }
-  auto add = [&](const result& p) {
+  auto add = [&](const quad_result& p) {
     r.value += p.value, r.error += p.error, r.evals += p.evals;
     r.converged = r.converged && p.converged;
   };
@@ -813,10 +813,10 @@ LAPLACE_HD result panels(const F& f, double a, double b, double c, double s, con
       const double next = from_u ? at + width : at - width;
       const bool last = !(width > 0.0) || next == at || (from_u ? !(next < v) : !(next > u));
       if (last) {
-        add(from_u ? tanh_sinh(f, at, v, o) : tanh_sinh(f, u, at, o));
+        add(from_u ? tanh_sinh_quad(f, at, v, o) : tanh_sinh_quad(f, u, at, o));
         return;
       }
-      add(from_u ? tanh_sinh(f, at, next, o) : tanh_sinh(f, next, at, o));
+      add(from_u ? tanh_sinh_quad(f, at, next, o) : tanh_sinh_quad(f, next, at, o));
       at = next;
       width *= 2.0;
     }
@@ -833,16 +833,16 @@ LAPLACE_HD result panels(const F& f, double a, double b, double c, double s, con
       if (inf_hi && ne == 2) {  // the whole line without cuts: split at c
         const double m = c;
         finite(m, m + 63.0 * s);
-        add(exp_sinh(f, m + 63.0 * s, s, o));
+        add(exp_sinh_quad(f, m + 63.0 * s, s, o));
         finite(m - 63.0 * s, m);
-        add(exp_sinh([&](double x) { return f(-x); }, -(m - 63.0 * s), s, o));
+        add(exp_sinh_quad([&](double x) { return f(-x); }, -(m - 63.0 * s), s, o));
         return r;
       }
       finite(v - 63.0 * s, v);
-      add(exp_sinh([&](double x) { return f(-x); }, -(v - 63.0 * s), s, o));
+      add(exp_sinh_quad([&](double x) { return f(-x); }, -(v - 63.0 * s), s, o));
     } else if (i + 2 == ne && inf_hi) {
       finite(u, u + 63.0 * s);
-      add(exp_sinh(f, u + 63.0 * s, s, o));
+      add(exp_sinh_quad(f, u + 63.0 * s, s, o));
     } else {
       finite(u, v);
     }
