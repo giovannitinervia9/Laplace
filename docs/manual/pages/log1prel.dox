@@ -1,0 +1,148 @@
+/**
+\defgroup log1prel Relative logarithm
+\ingroup math
+\brief Relative logarithm function \f$\psi(x) = \log(1 + x)/x\f$ and its derivatives in \f$x\f$ to order 6.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+The name `log1prel` is Laplace's name, chosen by analogy with `exprel`.
+
+## Mathematical definition
+
+The relative logarithm function \f$\psi(x)\f$ is defined for real argument \f$x > -1\f$ with \f$x \ne 0\f$ by
+\f[
+\psi(x) = \frac{\log(1 + x)}{x}
+\f]
+with \f$\psi(0) = 1\f$. Equivalently, \f$\psi(x) = \int_0^1 \frac{\mathrm{d}t}{1 + x t}\f$.
+
+Its derivatives of order \f$k\f$ (\f$k = 1, \dots, 6\f$) with respect to \f$x\f$ are represented by the integral
+\f[
+\psi^{(k)}(x) = \frac{\mathrm{d}^k}{\mathrm{d}x^k} \psi(x) = (-1)^k k! \int_0^1 \frac{t^k}{(1 + x t)^{k+1}} \, \mathrm{d}t
+\f]
+where:
+- \f$x \in (-1, \infty)\f$ is the real argument,
+- \f$k \in \{1, \dots, 6\}\f$ is the derivative order,
+- \f$t \in [0, 1]\f$ is the real integration variable.
+
+For \f$k = 0\f$, the integral yields \f$\psi(x)\f$ itself. At \f$x = 0\f$, the integral evaluates to
+\f[
+\psi^{(k)}(0) = (-1)^k \frac{k!}{k + 1}.
+\f]
+
+## Domain and special values
+
+- **Domain:** Defined for \f$x > -1\f$.
+- **Sign:** For every \f$x > -1\f$ and \f$t \in [0, 1]\f$, \f$1 + x t > 0\f$, so the integrand \f$t^k (1 + x t)^{-(k+1)}\f$ is positive on \f$(0, 1]\f$. Consequently, \f$\psi(x) > 0\f$ for all \f$x > -1\f$, and the \f$k\f$-th derivative \f$\psi^{(k)}(x)\f$ has the constant sign \f$(-1)^k\f$ everywhere on \f$(-1, \infty)\f$.
+- **Special values and boundaries:**
+  - At \f$x = 0\f$: \f$\psi(0) = 1.0\f$ and \f$\psi^{(k)}(0) = (-1)^k \frac{k!}{k + 1}\f$ for \f$k = 1, \dots, 6\f$.
+  - At \f$x = -1\f$: returns \f$+\infty\f$ for \f$\psi(-1)\f$, and \f$(-1)^k \infty\f$ for \f$\psi^{(k)}(-1)\f$ (\f$-\infty\f$ for odd \f$k\f$, \f$+\infty\f$ for even \f$k\f$).
+  - If \f$x < -1\f$, or if \f$x\f$ is NaN: returns quiet NaN.
+  - At \f$x \to +\infty\f$: \f$\psi(+\infty) = 0.0\f$ and \f$\psi^{(k)}(+\infty) = 0.0\f$ for all \f$k = 1, \dots, 6\f$.
+
+## Numerical methods and regimes
+
+For \f$x \ne 0\f$, the function value \f$\psi(x)\f$ is computed directly as `Kokkos::log1p(x) / x`.
+
+The derivatives \f$\psi^{(k)}(x)\f$ are evaluated across five regimes:
+
+1. **Power series** (\f$|x| < 1/4\f$):
+   Differentiating the Maclaurin series of \f$\psi(x)\f$ yields
+   \f[
+   \psi^{(k)}(x) = \sum_{m=0}^\infty \tau_m
+   \f]
+   where \f$m \in \mathbb{Z}_{\ge 0}\f$ is the summation index, with initial term
+   \f[
+   \tau_0 = (-1)^k \frac{k!}{k + 1}
+   \f]
+   and recurrence between consecutive terms
+   \f[
+   \tau_{m+1} = -x \frac{(m + k + 1)^2}{(m + 1)(m + k + 2)} \tau_m.
+   \f]
+   Summation terminates when \f$|\tau_m| \le 4 \varepsilon |\sum|\f$ (iteration cap 300), where \f$\varepsilon = 2^{-52} \approx 2.22 \times 10^{-16}\f$. At \f$x = 0\f$, this returns the exact value \f$\tau_0\f$.
+2. **Gauss-Legendre quadrature** (\f$-4/5 < x \le 6\f$):
+   Evaluated by the 32-point Gauss-Legendre quadrature rule on \f$[0, 1]\f$:
+   \f[
+   \psi^{(k)}(x) = (-1)^k k! \sum_{i=0}^{31} w_i \frac{t_i^k}{(1 + x t_i)^{k+1}}
+   \f]
+   where \f$t_i \in [0, 1]\f$ are the nodes and \f$w_i > 0\f$ are the weights of the 32-point rule on \f$[0, 1]\f$. The integrand has a pole at \f$t = -1/x\f$, which lies strictly outside \f$[0, 1]\f$ for \f$x > -4/5\f$. Because every term has the same sign, the sum has no cancellation.
+3. **Split Gauss-Legendre quadrature** (\f$6 < x \le 20\f$):
+   For \f$x > 6\f$, the integrand \f$t^k (1 + x t)^{-(k+1)}\f$ develops a sharp peak near \f$t = k / x\f$. A single 32-point rule on \f$[0, 1]\f$ does not resolve this peak, and the forward recurrence below cancels in this range. The integral is split at \f$t = 1/4\f$ into \f$[0, 1/4]\f$ and \f$[1/4, 1]\f$, using the 32-point rule on each panel (64 nodes total).
+4. **Forward recurrence** (\f$x \le -4/5\f$ and \f$x > 20\f$):
+   Differentiating \f$x \psi(x) = \log(1 + x)\f$ \f$k\f$ times gives
+   \f[
+   x \psi^{(k)}(x) + k \psi^{(k-1)}(x) = \frac{(-1)^{k-1} (k-1)!}{(1 + x)^k}.
+   \f]
+   Solving for \f$\psi^{(k)}(x)\f$:
+   \f[
+   \psi^{(k)}(x) = \frac{T_k - k \psi^{(k-1)}(x)}{x}, \quad T_k = (-1)^{k-1} (k-1)! u^k, \quad u = \frac{1}{1 + x},
+   \f]
+   started from \f$\psi^{(0)}(x) = \psi(x) = \log(1 + x)/x\f$. For \f$x \le -4/5\f$ and \f$x > 20\f$, this recurrence is numerically stable.
+5. **Limits at boundaries** (\f$x = -1\f$ and \f$x \to +\infty\f$):
+   Evaluated directly by limits: \f$\psi(-1) = +\infty\f$, \f$\psi^{(k)}(-1) = (-1)^k \infty\f$, and \f$\psi(+\infty) = \psi^{(k)}(+\infty) = 0.0\f$.
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
+
+Because \f$\psi(x)\f$ and its derivatives \f$\psi^{(k)}(x)\f$ maintain a constant sign on \f$(-1, \infty)\f$ (no zeros), the error measure is plain relative ulp.
+
+Reference values in `tests/data/reference/log1prel*.csv` are generated by `tools/reference/log1prel.py` using the closed form:
+\f[
+\psi^{(k)}(x) = (-1)^k k! x^{-(k+1)} B_k(1 + x), \quad B_k(a) = \log a + \sum_{j=0}^{k-1} \binom{k}{j} (-1)^{k-j} \frac{a^{j-k} - 1}{j - k}
+\f]
+evaluated at \f$P = 200\f$ and \f$P + 100\f$ bits with extra precision \f$(k + 1) \log_2(1/|x|) + 64\f$ bits near \f$x = 0\f$ to overcome cancellation, verified to agree to \f$2^{-100}\f$ relative and checked against `mpmath.quad`. 1792–2132 points per order are sampled from \f$1 + x = 2^{-53}\f$ to \f$x = 10^{300}\f$.
+
+| Function | Order \f$k\f$ | Measured max error gcc (ulp) | Measured max error CUDA (ulp) | Test bound (ulp) |
+|---|---|---|---|---|
+| \ref laplace::math::log1prel "log1prel()" | 0 | 1.28 | 1.28 | 2.0 |
+| \ref laplace::math::log1prel_d1 "log1prel_d1()" | 1 | 3.94 | 3.94 | 6.0 |
+| \ref laplace::math::log1prel_d2 "log1prel_d2()" | 2 | 5.03 | 5.03 | 7.6 |
+| \ref laplace::math::log1prel_d3 "log1prel_d3()" | 3 | 6.39 | 6.39 | 9.6 |
+| \ref laplace::math::log1prel_d4 "log1prel_d4()" | 4 | 7.06 | 7.06 | 10.6 |
+| \ref laplace::math::log1prel_d5 "log1prel_d5()" | 5 | 8.27 | 8.27 | 12.4 |
+| \ref laplace::math::log1prel_d6 "log1prel_d6()" | 6 | 9.60 | 9.60 | 14.4 |
+
+## Timings
+
+Measured in nanoseconds per call on one gcc thread (`benchmarks/math_rel.cpp`):
+- Power series region (\f$|x| < 1/4\f$): 20–60 ns/call.
+- Single quadrature rule (\f$-4/5 < x \le 6\f$): 20–37 ns/call.
+- Split quadrature rule (\f$6 < x \le 20\f$): 59–68 ns/call.
+- Forward recurrence (\f$x \le -4/5\f$ and \f$x > 20\f$): 22–50 ns/call.
+
+On CUDA (RTX 4070 SUPER): 0.46–0.63 ns/call for the value; for the derivatives 2.8–3.7 ns/call with the series or one rule, 6.1–7.6 ns/call with the split rule, 0.54–0.79 ns/call with the recurrence.
+
+## Example
+
+The following example evaluates \f$\psi(x)\f$ and its first two derivatives inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/math/log1prel.hpp>
+#include <Kokkos_Core.hpp>
+
+void compute_log1prel(const Kokkos::View<const double*>& x,
+                      Kokkos::View<double*>& val,
+                      Kokkos::View<double*>& d1,
+                      Kokkos::View<double*>& d2,
+                      int n) {
+  Kokkos::parallel_for("eval_log1prel", n, KOKKOS_LAMBDA(const int i) {
+    const double x_val = x(i);
+    val(i) = laplace::math::log1prel(x_val);
+    d1(i)  = laplace::math::log1prel_d1(x_val);
+    d2(i)  = laplace::math::log1prel_d2(x_val);
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+- \ref laplace::math::log1prel "log1prel()" — \f$\psi(x) = \log(1 + x)/x\f$
+- \ref laplace::math::log1prel_d1 "log1prel_d1()" — \f$\psi'(x) = -\int_0^1 \frac{t}{(1 + x t)^2} \, \mathrm{d}t\f$
+- \ref laplace::math::log1prel_d2 "log1prel_d2()" — \f$\psi''(x) = 2 \int_0^1 \frac{t^2}{(1 + x t)^3} \, \mathrm{d}t\f$
+- \ref laplace::math::log1prel_d3 "log1prel_d3()" — \f$\psi^{(3)}(x) = -6 \int_0^1 \frac{t^3}{(1 + x t)^4} \, \mathrm{d}t\f$
+- \ref laplace::math::log1prel_d4 "log1prel_d4()" — \f$\psi^{(4)}(x) = 24 \int_0^1 \frac{t^4}{(1 + x t)^5} \, \mathrm{d}t\f$
+- \ref laplace::math::log1prel_d5 "log1prel_d5()" — \f$\psi^{(5)}(x) = -120 \int_0^1 \frac{t^5}{(1 + x t)^6} \, \mathrm{d}t\f$
+- \ref laplace::math::log1prel_d6 "log1prel_d6()" — \f$\psi^{(6)}(x) = 720 \int_0^1 \frac{t^6}{(1 + x t)^7} \, \mathrm{d}t\f$
+*/
