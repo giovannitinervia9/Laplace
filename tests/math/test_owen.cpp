@@ -58,7 +58,7 @@ void check_value(const char* name, auto f, double max_ulp, double max_ulpL) {
 template <int K>
 struct Deriv {
   KOKKOS_INLINE_FUNCTION void operator()(double z, double alpha, double* o) const {
-    laplace::math::shape_deriv<K> r;
+    laplace::math::mixed_partials<K> r;
     if constexpr (K == 1) r = own::log_sn_cdf_d1(z, alpha);
     if constexpr (K == 2) r = own::log_sn_cdf_d2(z, alpha);
     if constexpr (K == 3) r = own::log_sn_cdf_d3(z, alpha);

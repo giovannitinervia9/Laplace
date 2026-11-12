@@ -35,7 +35,7 @@ namespace lo = laplace::math;  // the wrappers
 template <int K>
 struct Deriv {
   KOKKOS_INLINE_FUNCTION void operator()(double z, double nu, double* o) const {
-    lo::shape_deriv<K> r;
+    lo::mixed_partials<K> r;
     if constexpr (K == 1) r = lo::log_student_cdf_d1(z, nu);
     if constexpr (K == 2) r = lo::log_student_cdf_d2(z, nu);
     if constexpr (K == 3) r = lo::log_student_cdf_d3(z, nu);

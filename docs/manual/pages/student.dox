@@ -56,18 +56,18 @@ for all \f$z \in \mathbb{R}\f$ and \f$\nu > 0\f$. The survival function requires
 
 ### Function value
 
-The value \f$\log T_\nu(z)\f$ is computed using the regularized incomplete beta function via `laplace::math::own::beta_inc`:
+The value \f$\log T_\nu(z)\f$ is computed using the regularized incomplete beta function via \ref laplace::math::own::beta_inc "beta_inc()":
 
 - For \f$z < 0\f$: \f$T_\nu(z) = \frac{1}{2} I_x(\nu/2, 1/2)\f$, where \f$x = \nu / (\nu + z^2) \in (0, 1]\f$.
   - If \f$x \le 1/2\f$: evaluated directly as \f$\log I_x(\nu/2, 1/2) - \log 2\f$.
   - If \f$x > 1/2\f$: evaluated as \f$\log(1 - I_{1-x}(1/2, \nu/2)) - \log 2\f$.
-- For \f$z > 0\f$: evaluated by complementation \f$\log T_\nu(z) = \log(1 - S)\f$, where \f$S = T_\nu(-z) = \exp(l_S + l_o)\f$ is computed from the lower tail, retaining the low-order correction \f$l_o\f$ from `beta_inc` to prevent losing \f$|l_S|/2\f$ ulps in the far upper tail.
+- For \f$z > 0\f$: evaluated by complementation \f$\log T_\nu(z) = \log(1 - S)\f$, where \f$S = T_\nu(-z) = \exp(l_S + l_o)\f$ is computed from the lower tail, retaining the low-order correction \f$l_o\f$ from \ref laplace::math::own::beta_inc "beta_inc()" to prevent losing \f$|l_S|/2\f$ ulps in the far upper tail.
 
 ### Derivatives in argument and degrees of freedom
 
 The mixed partial derivatives of order \f$K \in \{1, \dots, 5\}\f$ are evaluated by three-region numerical quadrature. Every function of \f$(z, \nu)\f$ is maintained as a truncated bivariate Taylor polynomial in \f$(\mathrm{d}z, \mathrm{d}\nu)\f$ with 21 coefficients representing \f$\mathrm{d}z^i \mathrm{d}\nu^j / (i! j!)\f$ for \f$i + j \le 5\f$.
 
-The computational regime is chosen by comparing the lower tail probability \f$T_\nu(-|z|)\f$ (computed via `beta_inc`) against the threshold \f$t_{\mathrm{switch}} = 0.2\f$. Outside the centre region (\f$T_\nu(-|z|) \le 0.2\f$), the split between the Gaussian shift and power-law scaling regimes is determined by comparing \f$|z|^2\f$ against \f$4\nu\f$; for \f$z > 0\f$, the code evaluates these regimes on the lower tail at \f$-z\f$ and complements:
+The computational regime is chosen by comparing the lower tail probability \f$T_\nu(-|z|)\f$ (computed via \ref laplace::math::own::beta_inc "beta_inc()") against the threshold \f$t_{\mathrm{switch}} = 0.2\f$. Outside the centre region (\f$T_\nu(-|z|) \le 0.2\f$), the split between the Gaussian shift and power-law scaling regimes is determined by comparing \f$|z|^2\f$ against \f$4\nu\f$; for \f$z > 0\f$, the code evaluates these regimes on the lower tail at \f$-z\f$ and complements:
 
 1. **Centre region** (\f$T_\nu(-|z|) > 0.2\f$):
    The distribution function is split as
@@ -143,12 +143,12 @@ The source does not specify a backend for the measured ulpL column.
 Across alternative methods:
 - **Central finite differences** lose catastrophic accuracy: \f$10^{16}\f$ ulp error at order 1, \f$10^{23}\f$ at order 2, \f$5 \times 10^{28}\f$ at order 3, \f$5 \times 10^{32}\f$ at order 4, and \f$4 \times 10^{35}\f$ at order 5.
 - **Beta composition** loses stability as \f$\nu\f$ grows: \f$2.8 \times 10^7\f$ ulp error at order 1 (68 ulp for \f$\nu < 1\f$), \f$1.7 \times 10^{12}\f$ at order 2, \f$1.3 \times 10^{18}\f$ at order 3, \f$4.7 \times 10^{23}\f$ at order 4, and \f$8.7 \times 10^{28}\f$ at order 5.
-- **Deep tail consistency:** Across 2000 deep tail points, the three-region quadrature agrees with itself at halved step \f$h/2\f$ within 1–50 ulpN, the value via `beta_inc` agrees to within 4 ulp, and comparisons against independent 300-bit mpmath integrals at 8 points agree to within 1–3 ulp.
+- **Deep tail consistency:** Across 2000 deep tail points, the three-region quadrature agrees with itself at halved step \f$h/2\f$ within 1–50 ulpN, the value via \ref laplace::math::own::beta_inc "beta_inc()" agrees to within 4 ulp, and comparisons against independent 300-bit mpmath integrals at 8 points agree to within 1–3 ulp.
 
 ## Timings
 
 Timings measured in nanoseconds per call for arguments with \f$\nu = 2^u\f$ with \f$u\f$ uniform on \f$(-2, 10)\f$, and \f$z = 3 Z\f$ with \f$z\f$ equal to 3 times a standard normal variate \f$Z\f$, on one gcc thread, OpenMP (7 threads), and CUDA (RTX 4070 SUPER):
-- **Function value.** 535 ns/call via `beta_inc` on one gcc thread, 88 ns/call on CUDA.
+- **Function value.** 535 ns/call via \ref laplace::math::own::beta_inc "beta_inc()" on one gcc thread, 88 ns/call on CUDA.
 - **Derivatives of order 1.** 2350 ns/call on one gcc thread.
 - **Derivatives of order 2.** 2810 ns/call on one gcc thread.
 - **Derivatives of order 3.** 3530 ns/call on one gcc thread.
@@ -187,7 +187,7 @@ Functions in this module are called as `laplace::math::NAME`.
 
 ### Types
 
-- \ref laplace::math::own::shape_deriv "shape_deriv" — Container holding \f$K + 1\f$ mixed partial derivative components of order \f$K\f$
+- \ref laplace::math::own::mixed_partials "mixed_partials" — Container holding \f$K + 1\f$ mixed partial derivative components of order \f$K\f$
 
 ### Function values and derivatives
 

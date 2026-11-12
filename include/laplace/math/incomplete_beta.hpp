@@ -60,6 +60,40 @@ struct beta_inc_result {
   double log_i_lo = 0.0, log_ic_lo = 0.0;
 };
 
+/**
+ * \ingroup incomplete_beta
+ * \brief Regularized incomplete beta function \f$I_x(a, b)\f$, complement, and logarithms in one call.
+ *
+ * Computes, in one call, everything the module's single functions return: the regularized incomplete
+ * beta function
+ * \f[
+ * I_x(a, b) = \frac{1}{B(a, b)} \int_0^x t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t,
+ * \f]
+ * its complement \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$, their natural logarithms \f$\log I_x(a, b)\f$
+ * and \f$\log(1 - I_x(a, b))\f$, and the low part of the logarithm of the side computed directly (a double-double).
+ *
+ * The single functions ibeta(), ibetac(), log_ibeta(), and log_ibetac() each call beta_inc() and
+ * keep one field, so one call costs as much as evaluating one of them; use beta_inc() when more than
+ * one is needed.
+ *
+ * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in [0, 1]\f$.
+ * \return A \ref beta_inc_result struct holding \f$I_x(a, b)\f$, \f$1 - I_x(a, b)\f$,
+ * \f$\log I_x(a, b)\f$, \f$\log(1 - I_x(a, b))\f$, and the low part of the logarithm of the directly computed side.
+ *
+ * \par Domain and special values
+ * Those of the single functions (see ibeta(), ibetac(), log_ibeta(), log_ibetac()):
+ * - \f$a > 0, b > 0, x \in [0, 1]\f$: standard domain.
+ * - \f$a \le 0\f$, \f$b \le 0\f$, \f$x < 0\f$, \f$x > 1\f$, or if any argument is NaN: returns quiet NaN for the four values (the low parts are 0).
+ * - At \f$x = 0\f$: \f$I_x(a, b) = 0.0\f$, \f$1 - I_x(a, b) = 1.0\f$, \f$\log I_x(a, b) = -\infty\f$, \f$\log(1 - I_x(a, b)) = 0.0\f$.
+ * - At \f$x = 1\f$: \f$I_x(a, b) = 1.0\f$, \f$1 - I_x(a, b) = 0.0\f$, \f$\log I_x(a, b) = 0.0\f$, \f$\log(1 - I_x(a, b)) = -\infty\f$.
+ *
+ * \par Measured accuracy
+ * Those of the single functions: see ibeta(), ibetac(), log_ibeta(), and log_ibetac().
+ *
+ * \see incomplete_beta, beta_inc_result, ibeta(), ibetac(), log_ibeta(), log_ibetac()
+ */
 LAPLACE_HD beta_inc_result beta_inc(double a, double b, double x) {
   const double nan = math::detail::quiet_nan();
   const double inf = math::detail::pos_inf();

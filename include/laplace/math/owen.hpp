@@ -39,7 +39,7 @@
 // through 1 - F = erf(h / sqrt 2) + F(-h; a) near F = 1.
 //
 // Derivatives of log F (one public function per order, the components of the
-// order in shape_deriv<K>, c[j] = d^K / dz^(K-j) dalpha^j). Every derivative of F
+// order in mixed_partials<K>, c[j] = d^K / dz^(K-j) dalpha^j). Every derivative of F
 // is elementary; the derivatives of log F are not, and their naive composition
 // from those of F cancels like t + R(t) in the derivatives of log Phi. So:
 //   Jbar: at (h + d, a + e) and the same y the integrand of Jbar is the one at
@@ -82,7 +82,7 @@
 
 #include <laplace/core/config.hpp>
 #include <laplace/math/elementary.hpp>
-#include <laplace/math/incomplete_beta_deriv.hpp>  // shape_deriv
+#include <laplace/math/incomplete_beta_deriv.hpp>  // mixed_partials
 #include <laplace/math/normal.hpp>
 
 // On the device the large helpers are subroutines, not inlined into the kernel
@@ -980,8 +980,8 @@ LAPLACE_OWEN_NOINLINE LAPLACE_HD void sn_series(double z, double alpha, const pa
 //   Jbar region   f / F = sqrt(pi/2) erfcx(alpha h / sqrt 2) / Jbar,  g / F = 1 / ((1 + alpha^2) Jbar);
 //   G regions     f / F = sqrt(2 pi) Phi(alpha z) / G,  g / F = exp(-(alpha h)^2/2) / ((1 + alpha^2) G),
 // G = pi exp(h^2/2) F (G0 - Ttilde, or 2 G0 - exp(-eta a^2) Jbar(h, a)).
-LAPLACE_HD shape_deriv<1> sn_d1(double z, double alpha, const params& p) {
-  shape_deriv<1> r;
+LAPLACE_HD mixed_partials<1> sn_d1(double z, double alpha, const params& p) {
+  mixed_partials<1> r;
   if (z != z || alpha != alpha) {
     r.c[0] = r.c[1] = detail::quiet_nan();
     return r;
@@ -1036,7 +1036,7 @@ LAPLACE_HD shape_deriv<1> sn_d1(double z, double alpha, const params& p) {
 
 // the components of order K: c[j] = d^K log F / dz^(K-j) dalpha^j
 template <int K>
-LAPLACE_HD_FORCEINLINE shape_deriv<K> sn_deriv(double z, double alpha, const params& p, int method) {
+LAPLACE_HD_FORCEINLINE mixed_partials<K> sn_deriv(double z, double alpha, const params& p, int method) {
   if constexpr (K == 1) {
     if (method == 0) return sn_d1(z, alpha, p);
   }
@@ -1044,7 +1044,7 @@ LAPLACE_HD_FORCEINLINE shape_deriv<K> sn_deriv(double z, double alpha, const par
   double L[nc<K>];
   scale sc_p, sc_m;
   sn_series<K>(z, alpha, p, method, L, sc_p, sc_m);
-  shape_deriv<K> r;
+  mixed_partials<K> r;
   for (int j = 0; j <= K; ++j) r.c[j] = apply_scale(fact[K - j] * fact[j] * L[ix(K - j, j)], j ? sc_m : sc_p);
   return r;
 }
@@ -1129,7 +1129,7 @@ LAPLACE_HD double log_sn_cdf(double z, double alpha) { return detail_owen::log_s
  *
  * \param z Real argument \f$z \in \mathbb{R}\f$.
  * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
- * \return A shape_deriv of order 1 containing \f$c_0 = \frac{\partial}{\partial z} \log F\f$ in `c[0]` and \f$c_1 = \frac{\partial}{\partial \alpha} \log F\f$ in `c[1]`.
+ * \return A mixed_partials of order 1 containing \f$c_0 = \frac{\partial}{\partial z} \log F\f$ in `c[0]` and \f$c_1 = \frac{\partial}{\partial \alpha} \log F\f$ in `c[1]`.
  *
  * \par Domain and special values
  * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
@@ -1140,7 +1140,7 @@ LAPLACE_HD double log_sn_cdf(double z, double alpha) { return detail_owen::log_s
  *
  * \see owen, log_sn_cdf(), log_sn_cdf_d2()
  */
-LAPLACE_HD shape_deriv<1> log_sn_cdf_d1(double z, double alpha) {
+LAPLACE_HD mixed_partials<1> log_sn_cdf_d1(double z, double alpha) {
   return detail_owen::sn_deriv<1>(z, alpha, detail_owen::params{}, 0);
 }
 
@@ -1159,7 +1159,7 @@ LAPLACE_HD shape_deriv<1> log_sn_cdf_d1(double z, double alpha) {
  *
  * \param z Real argument \f$z \in \mathbb{R}\f$.
  * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
- * \return A shape_deriv of order 2 containing \f$c_j\f$ in `c[j]` for \f$j = 0, 1, 2\f$.
+ * \return A mixed_partials of order 2 containing \f$c_j\f$ in `c[j]` for \f$j = 0, 1, 2\f$.
  *
  * \par Domain and special values
  * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
@@ -1170,7 +1170,7 @@ LAPLACE_HD shape_deriv<1> log_sn_cdf_d1(double z, double alpha) {
  *
  * \see owen, log_sn_cdf(), log_sn_cdf_d1(), log_sn_cdf_d3()
  */
-LAPLACE_HD shape_deriv<2> log_sn_cdf_d2(double z, double alpha) {
+LAPLACE_HD mixed_partials<2> log_sn_cdf_d2(double z, double alpha) {
   return detail_owen::sn_deriv<2>(z, alpha, detail_owen::params{}, 0);
 }
 
@@ -1190,7 +1190,7 @@ LAPLACE_HD shape_deriv<2> log_sn_cdf_d2(double z, double alpha) {
  *
  * \param z Real argument \f$z \in \mathbb{R}\f$.
  * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
- * \return A shape_deriv of order 3 containing \f$c_j\f$ in `c[j]` for \f$j = 0, \dots, 3\f$.
+ * \return A mixed_partials of order 3 containing \f$c_j\f$ in `c[j]` for \f$j = 0, \dots, 3\f$.
  *
  * \par Domain and special values
  * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
@@ -1201,7 +1201,7 @@ LAPLACE_HD shape_deriv<2> log_sn_cdf_d2(double z, double alpha) {
  *
  * \see owen, log_sn_cdf(), log_sn_cdf_d2(), log_sn_cdf_d4()
  */
-LAPLACE_HD shape_deriv<3> log_sn_cdf_d3(double z, double alpha) {
+LAPLACE_HD mixed_partials<3> log_sn_cdf_d3(double z, double alpha) {
   return detail_owen::sn_deriv<3>(z, alpha, detail_owen::params{}, 0);
 }
 
@@ -1222,7 +1222,7 @@ LAPLACE_HD shape_deriv<3> log_sn_cdf_d3(double z, double alpha) {
  *
  * \param z Real argument \f$z \in \mathbb{R}\f$.
  * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
- * \return A shape_deriv of order 4 containing \f$c_j\f$ in `c[j]` for \f$j = 0, \dots, 4\f$.
+ * \return A mixed_partials of order 4 containing \f$c_j\f$ in `c[j]` for \f$j = 0, \dots, 4\f$.
  *
  * \par Domain and special values
  * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
@@ -1233,7 +1233,7 @@ LAPLACE_HD shape_deriv<3> log_sn_cdf_d3(double z, double alpha) {
  *
  * \see owen, log_sn_cdf(), log_sn_cdf_d3(), log_sn_cdf_d5()
  */
-LAPLACE_HD shape_deriv<4> log_sn_cdf_d4(double z, double alpha) {
+LAPLACE_HD mixed_partials<4> log_sn_cdf_d4(double z, double alpha) {
   return detail_owen::sn_deriv<4>(z, alpha, detail_owen::params{}, 0);
 }
 
@@ -1255,7 +1255,7 @@ LAPLACE_HD shape_deriv<4> log_sn_cdf_d4(double z, double alpha) {
  *
  * \param z Real argument \f$z \in \mathbb{R}\f$.
  * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
- * \return A shape_deriv of order 5 containing \f$c_j\f$ in `c[j]` for \f$j = 0, \dots, 5\f$.
+ * \return A mixed_partials of order 5 containing \f$c_j\f$ in `c[j]` for \f$j = 0, \dots, 5\f$.
  *
  * \par Domain and special values
  * - Defined for all \f$z, \alpha \in \mathbb{R}\f$.
@@ -1266,7 +1266,7 @@ LAPLACE_HD shape_deriv<4> log_sn_cdf_d4(double z, double alpha) {
  *
  * \see owen, log_sn_cdf(), log_sn_cdf_d4()
  */
-LAPLACE_HD shape_deriv<5> log_sn_cdf_d5(double z, double alpha) {
+LAPLACE_HD mixed_partials<5> log_sn_cdf_d5(double z, double alpha) {
   return detail_owen::sn_deriv<5>(z, alpha, detail_owen::params{}, 0);
 }
 
@@ -1277,10 +1277,10 @@ namespace laplace::math {
 // What the rest of Laplace calls (docs/numerics.md, 2026-11-09).
 LAPLACE_HD_FORCEINLINE double owens_t(double h, double a) { return own::owens_t(h, a); }
 LAPLACE_HD_FORCEINLINE double log_sn_cdf(double z, double alpha) { return own::log_sn_cdf(z, alpha); }
-LAPLACE_HD_FORCEINLINE shape_deriv<1> log_sn_cdf_d1(double z, double alpha) { return own::log_sn_cdf_d1(z, alpha); }
-LAPLACE_HD_FORCEINLINE shape_deriv<2> log_sn_cdf_d2(double z, double alpha) { return own::log_sn_cdf_d2(z, alpha); }
-LAPLACE_HD_FORCEINLINE shape_deriv<3> log_sn_cdf_d3(double z, double alpha) { return own::log_sn_cdf_d3(z, alpha); }
-LAPLACE_HD_FORCEINLINE shape_deriv<4> log_sn_cdf_d4(double z, double alpha) { return own::log_sn_cdf_d4(z, alpha); }
-LAPLACE_HD_FORCEINLINE shape_deriv<5> log_sn_cdf_d5(double z, double alpha) { return own::log_sn_cdf_d5(z, alpha); }
+LAPLACE_HD_FORCEINLINE mixed_partials<1> log_sn_cdf_d1(double z, double alpha) { return own::log_sn_cdf_d1(z, alpha); }
+LAPLACE_HD_FORCEINLINE mixed_partials<2> log_sn_cdf_d2(double z, double alpha) { return own::log_sn_cdf_d2(z, alpha); }
+LAPLACE_HD_FORCEINLINE mixed_partials<3> log_sn_cdf_d3(double z, double alpha) { return own::log_sn_cdf_d3(z, alpha); }
+LAPLACE_HD_FORCEINLINE mixed_partials<4> log_sn_cdf_d4(double z, double alpha) { return own::log_sn_cdf_d4(z, alpha); }
+LAPLACE_HD_FORCEINLINE mixed_partials<5> log_sn_cdf_d5(double z, double alpha) { return own::log_sn_cdf_d5(z, alpha); }
 
 }  // namespace laplace::math

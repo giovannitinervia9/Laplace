@@ -152,7 +152,7 @@ For \f$h \ge 0\f$ and \f$a \ge 0\f$ (extended to all \f$h, a\f$ by parity):
 
 ### Derivatives of the log distribution function
 
-Each derivative order \f$K \in \{1, \dots, 5\}\f$ returns an instance of `shape_deriv<K>` whose component \f$c_j\f$ (`c[j]`) corresponds to \f$\frac{\partial^K}{\partial z^{K-j} \partial \alpha^j} \log F(z; \alpha)\f$ for \f$j = 0, \dots, K\f$:
+Each derivative order \f$K \in \{1, \dots, 5\}\f$ returns an instance of `mixed_partials<K>` whose component \f$c_j\f$ (`c[j]`) corresponds to \f$\frac{\partial^K}{\partial z^{K-j} \partial \alpha^j} \log F(z; \alpha)\f$ for \f$j = 0, \dots, K\f$:
 
 - **First order:** Evaluated via closed forms:
   \f[
@@ -251,7 +251,7 @@ Functions in this module are called as `laplace::math::NAME`.
 
 ### Types
 
-- \ref laplace::math::own::shape_deriv "shape_deriv" — Container holding \f$K + 1\f$ mixed partial derivative components of order \f$K\f$
+- \ref laplace::math::own::mixed_partials "mixed_partials" — Container holding \f$K + 1\f$ mixed partial derivative components of order \f$K\f$
 
 ### Function values and derivatives
 

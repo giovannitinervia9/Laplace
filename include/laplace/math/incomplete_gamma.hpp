@@ -336,6 +336,40 @@ LAPLACE_HD gamma_inc_result gamma_inc_temme(double a, double x, double phi) {
 
 // P(a, x), Q(a, x) and their logarithms. The Temme route when a is large and x
 // is near a, the classic route elsewhere.
+/**
+ * \ingroup incomplete_gamma
+ * \brief Regularized incomplete gamma functions \f$P(a, x)\f$, \f$Q(a, x)\f$, and logarithms in one call.
+ *
+ * Computes, in one call, everything the module's single functions return: the regularized lower and
+ * upper incomplete gamma functions
+ * \f[
+ * P(a, x) = \frac{1}{\Gamma(a)} \int_0^x t^{a-1} e^{-t} \, \mathrm{d}t, \quad
+ * Q(a, x) = \frac{1}{\Gamma(a)} \int_x^\infty t^{a-1} e^{-t} \, \mathrm{d}t = 1 - P(a, x),
+ * \f]
+ * their natural logarithms \f$\log P(a, x)\f$ and \f$\log Q(a, x)\f$, and the low parts of the logarithms
+ * as double-double numbers.
+ *
+ * The single functions gamma_p(), gamma_q(), log_gamma_p(), and log_gamma_q() each call gamma_inc() and
+ * keep one field, so one call costs as much as evaluating one of them; use gamma_inc() when more than
+ * one is needed.
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return A \ref gamma_inc_result struct holding \f$P(a, x)\f$, \f$Q(a, x)\f$, \f$\log P(a, x)\f$,
+ * \f$\log Q(a, x)\f$, and the low parts of the logarithms.
+ *
+ * \par Domain and special values
+ * Those of the single functions (see gamma_p(), gamma_q(), log_gamma_p(), log_gamma_q()):
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, or \f$x < 0\f$, or if \f$a\f$ or \f$x\f$ is NaN: returns quiet NaN for the four values (the low parts are 0).
+ * - At \f$x = 0\f$: \f$P(a, 0) = 0.0\f$, \f$Q(a, 0) = 1.0\f$, \f$\log P(a, 0) = -\infty\f$, \f$\log Q(a, 0) = 0.0\f$.
+ * - At \f$x = +\infty\f$: \f$P(a, \infty) = 1.0\f$, \f$Q(a, \infty) = 0.0\f$, \f$\log P(a, \infty) = 0.0\f$, \f$\log Q(a, \infty) = -\infty\f$.
+ *
+ * \par Measured accuracy
+ * Those of the single functions: see gamma_p(), gamma_q(), log_gamma_p(), and log_gamma_q().
+ *
+ * \see incomplete_gamma, gamma_inc_result, gamma_p(), gamma_q(), log_gamma_p(), log_gamma_q()
+ */
 LAPLACE_HD gamma_inc_result gamma_inc(double a, double x) {
   using namespace detail_igamma;
   const double nan = math::detail::quiet_nan();

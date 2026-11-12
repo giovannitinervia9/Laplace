@@ -69,7 +69,7 @@ Laplace addresses these issues through two design principles:
 
 ### Forward functions and logarithms
 
-The internal routine `gamma_inc` computes \f$P(a, x)\f$, \f$Q(a, x)\f$, and their logarithms across two main algorithmic routes:
+The function \ref laplace::math::own::gamma_inc "gamma_inc()" computes \f$P(a, x)\f$, \f$Q(a, x)\f$, and their logarithms across two main algorithmic routes:
 
 1. **Temme uniform asymptotic expansion:**
    Evaluated by the internal routine `gamma_inc_temme`, used when \f$a \ge 100.0\f$ and \f$|\eta| \le 0.5\f$ (N. M. Temme 1979; DiDonato and Morris 1986; Boost.Math `igamma_temme_large`):
@@ -253,6 +253,7 @@ Functions in this module are called as `laplace::math::NAME`.
 
 ### Function values and logarithms
 
+- \ref laplace::math::own::gamma_inc "gamma_inc()" — Regularized incomplete gamma functions \f$P(a, x)\f$, \f$Q(a, x)\f$, and logarithms in one call
 - \ref laplace::math::own::gamma_p "gamma_p()" — Regularized lower incomplete gamma function \f$P(a, x)\f$
 - \ref laplace::math::own::gamma_q "gamma_q()" — Regularized upper incomplete gamma function \f$Q(a, x)\f$
 - \ref laplace::math::log_gamma_p "log_gamma_p()" — Natural logarithm of \f$P(a, x)\f$

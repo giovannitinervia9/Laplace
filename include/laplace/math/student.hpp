@@ -4,7 +4,7 @@
 //
 //   own::log_student_cdf(z, nu)          log T_nu(z), by own::beta_inc (below)
 //   own::log_student_cdf_d1 .. _d5        one function per order K, returning
-//                                         shape_deriv<K> with c[j] = d^K / dz^(K-j) dnu^j
+//                                         mixed_partials<K> with c[j] = d^K / dz^(K-j) dnu^j
 //
 // The survival function needs no function of its own: 1 - T_nu(z) = T_nu(-z).
 //
@@ -993,14 +993,14 @@ LAPLACE_HD void derivs_beta(double z, double nu, double* L) {
 // ---------------------------------------------------------------- public helpers
 
 template <int K>
-LAPLACE_HD_FORCEINLINE shape_deriv<K> pick(const double* L) {
-  shape_deriv<K> r;
+LAPLACE_HD_FORCEINLINE mixed_partials<K> pick(const double* L) {
+  mixed_partials<K> r;
   for (int j = 0; j <= K; ++j) r.c[j] = L[ix(K - j, j)] * ibd::factorial(K - j) * ibd::factorial(j);
   return r;
 }
 
 template <int K>
-LAPLACE_HD shape_deriv<K> order(double z, double nu) {
+LAPLACE_HD mixed_partials<K> order(double z, double nu) {
   double L[NC];
   derivs<K>(z, nu, par{}, L);
   return pick<K>(L);
@@ -1074,7 +1074,7 @@ LAPLACE_HD double log_student_cdf(double z, double nu) { return detail_st::log_c
  *
  * \param z Real argument \f$z \in \mathbb{R}\f$.
  * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
- * \return A shape_deriv of order 1 containing \f$c[0]\f$ (\f$z\f$-derivative) and \f$c[1]\f$ (\f$\nu\f$-derivative).
+ * \return A mixed_partials of order 1 containing \f$c[0]\f$ (\f$z\f$-derivative) and \f$c[1]\f$ (\f$\nu\f$-derivative).
  *
  * \par Domain and special values
  * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
@@ -1087,7 +1087,7 @@ LAPLACE_HD double log_student_cdf(double z, double nu) { return detail_st::log_c
  *
  * \see student, log_student_cdf(), log_student_cdf_d2()
  */
-LAPLACE_HD shape_deriv<1> log_student_cdf_d1(double z, double nu) { return detail_st::order<1>(z, nu); }
+LAPLACE_HD mixed_partials<1> log_student_cdf_d1(double z, double nu) { return detail_st::order<1>(z, nu); }
 
 /**
  * \ingroup student
@@ -1103,7 +1103,7 @@ LAPLACE_HD shape_deriv<1> log_student_cdf_d1(double z, double nu) { return detai
  *
  * \param z Real argument \f$z \in \mathbb{R}\f$.
  * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
- * \return A shape_deriv of order 2 containing \f$c[j]\f$ for \f$j = 0, 1, 2\f$.
+ * \return A mixed_partials of order 2 containing \f$c[j]\f$ for \f$j = 0, 1, 2\f$.
  *
  * \par Domain and special values
  * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
@@ -1116,7 +1116,7 @@ LAPLACE_HD shape_deriv<1> log_student_cdf_d1(double z, double nu) { return detai
  *
  * \see student, log_student_cdf(), log_student_cdf_d1(), log_student_cdf_d3()
  */
-LAPLACE_HD shape_deriv<2> log_student_cdf_d2(double z, double nu) { return detail_st::order<2>(z, nu); }
+LAPLACE_HD mixed_partials<2> log_student_cdf_d2(double z, double nu) { return detail_st::order<2>(z, nu); }
 
 /**
  * \ingroup student
@@ -1134,7 +1134,7 @@ LAPLACE_HD shape_deriv<2> log_student_cdf_d2(double z, double nu) { return detai
  *
  * \param z Real argument \f$z \in \mathbb{R}\f$.
  * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
- * \return A shape_deriv of order 3 containing \f$c[j]\f$ for \f$j = 0, \dots, 3\f$.
+ * \return A mixed_partials of order 3 containing \f$c[j]\f$ for \f$j = 0, \dots, 3\f$.
  *
  * \par Domain and special values
  * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
@@ -1147,7 +1147,7 @@ LAPLACE_HD shape_deriv<2> log_student_cdf_d2(double z, double nu) { return detai
  *
  * \see student, log_student_cdf(), log_student_cdf_d2(), log_student_cdf_d4()
  */
-LAPLACE_HD shape_deriv<3> log_student_cdf_d3(double z, double nu) { return detail_st::order<3>(z, nu); }
+LAPLACE_HD mixed_partials<3> log_student_cdf_d3(double z, double nu) { return detail_st::order<3>(z, nu); }
 
 /**
  * \ingroup student
@@ -1166,7 +1166,7 @@ LAPLACE_HD shape_deriv<3> log_student_cdf_d3(double z, double nu) { return detai
  *
  * \param z Real argument \f$z \in \mathbb{R}\f$.
  * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
- * \return A shape_deriv of order 4 containing \f$c[j]\f$ for \f$j = 0, \dots, 4\f$.
+ * \return A mixed_partials of order 4 containing \f$c[j]\f$ for \f$j = 0, \dots, 4\f$.
  *
  * \par Domain and special values
  * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
@@ -1179,7 +1179,7 @@ LAPLACE_HD shape_deriv<3> log_student_cdf_d3(double z, double nu) { return detai
  *
  * \see student, log_student_cdf(), log_student_cdf_d3(), log_student_cdf_d5()
  */
-LAPLACE_HD shape_deriv<4> log_student_cdf_d4(double z, double nu) { return detail_st::order<4>(z, nu); }
+LAPLACE_HD mixed_partials<4> log_student_cdf_d4(double z, double nu) { return detail_st::order<4>(z, nu); }
 
 /**
  * \ingroup student
@@ -1199,7 +1199,7 @@ LAPLACE_HD shape_deriv<4> log_student_cdf_d4(double z, double nu) { return detai
  *
  * \param z Real argument \f$z \in \mathbb{R}\f$.
  * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
- * \return A shape_deriv of order 5 containing \f$c[j]\f$ for \f$j = 0, \dots, 5\f$.
+ * \return A mixed_partials of order 5 containing \f$c[j]\f$ for \f$j = 0, \dots, 5\f$.
  *
  * \par Domain and special values
  * - \f$z \in \mathbb{R}, \nu > 0\f$: standard domain.
@@ -1212,7 +1212,7 @@ LAPLACE_HD shape_deriv<4> log_student_cdf_d4(double z, double nu) { return detai
  *
  * \see student, log_student_cdf(), log_student_cdf_d4()
  */
-LAPLACE_HD shape_deriv<5> log_student_cdf_d5(double z, double nu) { return detail_st::order<5>(z, nu); }
+LAPLACE_HD mixed_partials<5> log_student_cdf_d5(double z, double nu) { return detail_st::order<5>(z, nu); }
 
 }  // namespace laplace::math::own
 
@@ -1221,10 +1221,10 @@ namespace laplace::math {
 // What the rest of Laplace calls (docs/numerics.md, 2026-11-09): the value by
 // own::beta_inc, the derivatives by the three-region quadrature.
 LAPLACE_HD_FORCEINLINE double log_student_cdf(double z, double nu) { return own::log_student_cdf(z, nu); }
-LAPLACE_HD_FORCEINLINE shape_deriv<1> log_student_cdf_d1(double z, double nu) { return own::log_student_cdf_d1(z, nu); }
-LAPLACE_HD_FORCEINLINE shape_deriv<2> log_student_cdf_d2(double z, double nu) { return own::log_student_cdf_d2(z, nu); }
-LAPLACE_HD_FORCEINLINE shape_deriv<3> log_student_cdf_d3(double z, double nu) { return own::log_student_cdf_d3(z, nu); }
-LAPLACE_HD_FORCEINLINE shape_deriv<4> log_student_cdf_d4(double z, double nu) { return own::log_student_cdf_d4(z, nu); }
-LAPLACE_HD_FORCEINLINE shape_deriv<5> log_student_cdf_d5(double z, double nu) { return own::log_student_cdf_d5(z, nu); }
+LAPLACE_HD_FORCEINLINE mixed_partials<1> log_student_cdf_d1(double z, double nu) { return own::log_student_cdf_d1(z, nu); }
+LAPLACE_HD_FORCEINLINE mixed_partials<2> log_student_cdf_d2(double z, double nu) { return own::log_student_cdf_d2(z, nu); }
+LAPLACE_HD_FORCEINLINE mixed_partials<3> log_student_cdf_d3(double z, double nu) { return own::log_student_cdf_d3(z, nu); }
+LAPLACE_HD_FORCEINLINE mixed_partials<4> log_student_cdf_d4(double z, double nu) { return own::log_student_cdf_d4(z, nu); }
+LAPLACE_HD_FORCEINLINE mixed_partials<5> log_student_cdf_d5(double z, double nu) { return own::log_student_cdf_d5(z, nu); }
 
 }  // namespace laplace::math

@@ -29,7 +29,7 @@ template <int K>
 struct Deriv {
   bool upper;
   KOKKOS_INLINE_FUNCTION void operator()(double a, double b, double x, double* o) const {
-    lm::shape_deriv<K> r;
+    lm::mixed_partials<K> r;
     if constexpr (K == 1) r = upper ? lm::log_ibetac_d1(a, b, x) : lm::log_ibeta_d1(a, b, x);
     if constexpr (K == 2) r = upper ? lm::log_ibetac_d2(a, b, x) : lm::log_ibeta_d2(a, b, x);
     if constexpr (K == 3) r = upper ? lm::log_ibetac_d3(a, b, x) : lm::log_ibeta_d3(a, b, x);

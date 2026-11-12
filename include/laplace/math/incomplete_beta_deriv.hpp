@@ -3,7 +3,7 @@
 // (a, b > 0, 0 < x < 1). I_x(a, b) is the regularized incomplete beta function.
 //
 // One function per order: own::log_ibeta_d1 .. log_ibeta_d5 and
-// own::log_ibetac_d1 .. log_ibetac_d5. Order K returns shape_deriv<K>, whose
+// own::log_ibetac_d1 .. log_ibetac_d5. Order K returns mixed_partials<K>, whose
 // component c[j] is d^K / da^(K-j) db^j. They share the private helpers below,
 // which compute every component up to the order asked for.
 //
@@ -130,7 +130,7 @@ namespace laplace::math::own {
  * \tparam K Total order of differentiation, \f$K \in \{1, \dots, 5\}\f$.
  */
 template <int K>
-struct shape_deriv {
+struct mixed_partials {
   /// Array of \f$K + 1\f$ mixed partial derivative components of total order \f$K\f$, where `c[j]` holds the derivative with \f$j\f$ differentiations in the second variable.
   double c[K + 1];
 };
@@ -1509,8 +1509,8 @@ LAPLACE_HD void derivs(double a, double b, double x, bool upper, int method, con
 }
 
 template <int K>
-LAPLACE_HD_FORCEINLINE shape_deriv<K> pick(const double* d) {
-  shape_deriv<K> r;
+LAPLACE_HD_FORCEINLINE mixed_partials<K> pick(const double* d) {
+  mixed_partials<K> r;
   for (int j = 0; j <= K; ++j) r.c[j] = d[ix(K - j, j)];
   return r;
 }
@@ -1519,7 +1519,7 @@ LAPLACE_HD_FORCEINLINE shape_deriv<K> pick(const double* d) {
 constexpr int chosen_method = 1;
 
 template <int K>
-LAPLACE_HD shape_deriv<K> order(double a, double b, double x, bool upper) {
+LAPLACE_HD mixed_partials<K> order(double a, double b, double x, bool upper) {
   double d[NC];
   derivs<K>(a, b, x, upper, chosen_method, quad_par{}, d);
   return pick<K>(d);
@@ -1542,7 +1542,7 @@ LAPLACE_HD shape_deriv<K> order(double a, double b, double x, bool upper) {
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in (0, 1]\f$.
- * \return A shape_deriv of order 1 containing \f$c[0] = \frac{\partial}{\partial a} \log I_x(a, b)\f$ and \f$c[1] = \frac{\partial}{\partial b} \log I_x(a, b)\f$.
+ * \return A mixed_partials of order 1 containing \f$c[0] = \frac{\partial}{\partial a} \log I_x(a, b)\f$ and \f$c[1] = \frac{\partial}{\partial b} \log I_x(a, b)\f$.
  *
  * \par Domain and special values
  * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in (0, 1]\f$: standard domain.
@@ -1552,9 +1552,9 @@ LAPLACE_HD shape_deriv<K> order(double a, double b, double x, bool upper) {
  * \par Measured accuracy
  * Maximum error 1580 ulpN (gcc, CUDA within 1.9 times); test bound 1600.0 ulpN / 55.0 ulpL.
  *
- * \see incomplete_beta, shape_deriv, log_ibeta(), log_ibetac_d1(), log_ibeta_d2()
+ * \see incomplete_beta, mixed_partials, log_ibeta(), log_ibetac_d1(), log_ibeta_d2()
  */
-LAPLACE_HD shape_deriv<1> log_ibeta_d1(double a, double b, double x) { return detail_ibd::order<1>(a, b, x, false); }
+LAPLACE_HD mixed_partials<1> log_ibeta_d1(double a, double b, double x) { return detail_ibd::order<1>(a, b, x, false); }
 
 /**
  * \ingroup incomplete_beta
@@ -1569,7 +1569,7 @@ LAPLACE_HD shape_deriv<1> log_ibeta_d1(double a, double b, double x) { return de
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in (0, 1]\f$.
- * \return A shape_deriv of order 2 containing \f$c[j] = \frac{\partial^2}{\partial a^{2-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, 1, 2\f$.
+ * \return A mixed_partials of order 2 containing \f$c[j] = \frac{\partial^2}{\partial a^{2-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, 1, 2\f$.
  *
  * \par Domain and special values
  * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in (0, 1]\f$: standard domain.
@@ -1579,9 +1579,9 @@ LAPLACE_HD shape_deriv<1> log_ibeta_d1(double a, double b, double x) { return de
  * \par Measured accuracy
  * Maximum error 1340 ulpN (gcc, CUDA within 1.9 times); test bound 1800.0 ulpN / 245.0 ulpL.
  *
- * \see incomplete_beta, shape_deriv, log_ibeta(), log_ibetac_d2(), log_ibeta_d1(), log_ibeta_d3()
+ * \see incomplete_beta, mixed_partials, log_ibeta(), log_ibetac_d2(), log_ibeta_d1(), log_ibeta_d3()
  */
-LAPLACE_HD shape_deriv<2> log_ibeta_d2(double a, double b, double x) { return detail_ibd::order<2>(a, b, x, false); }
+LAPLACE_HD mixed_partials<2> log_ibeta_d2(double a, double b, double x) { return detail_ibd::order<2>(a, b, x, false); }
 
 /**
  * \ingroup incomplete_beta
@@ -1596,7 +1596,7 @@ LAPLACE_HD shape_deriv<2> log_ibeta_d2(double a, double b, double x) { return de
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in (0, 1]\f$.
- * \return A shape_deriv of order 3 containing \f$c[j] = \frac{\partial^3}{\partial a^{3-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, \dots, 3\f$.
+ * \return A mixed_partials of order 3 containing \f$c[j] = \frac{\partial^3}{\partial a^{3-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, \dots, 3\f$.
  *
  * \par Domain and special values
  * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in (0, 1]\f$: standard domain.
@@ -1606,9 +1606,9 @@ LAPLACE_HD shape_deriv<2> log_ibeta_d2(double a, double b, double x) { return de
  * \par Measured accuracy
  * Maximum error 1620 ulpN (gcc, CUDA within 1.9 times); test bound 3100.0 ulpN / 315.0 ulpL.
  *
- * \see incomplete_beta, shape_deriv, log_ibeta(), log_ibetac_d3(), log_ibeta_d2(), log_ibeta_d4()
+ * \see incomplete_beta, mixed_partials, log_ibeta(), log_ibetac_d3(), log_ibeta_d2(), log_ibeta_d4()
  */
-LAPLACE_HD shape_deriv<3> log_ibeta_d3(double a, double b, double x) { return detail_ibd::order<3>(a, b, x, false); }
+LAPLACE_HD mixed_partials<3> log_ibeta_d3(double a, double b, double x) { return detail_ibd::order<3>(a, b, x, false); }
 
 /**
  * \ingroup incomplete_beta
@@ -1623,7 +1623,7 @@ LAPLACE_HD shape_deriv<3> log_ibeta_d3(double a, double b, double x) { return de
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in (0, 1]\f$.
- * \return A shape_deriv of order 4 containing \f$c[j] = \frac{\partial^4}{\partial a^{4-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, \dots, 4\f$.
+ * \return A mixed_partials of order 4 containing \f$c[j] = \frac{\partial^4}{\partial a^{4-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, \dots, 4\f$.
  *
  * \par Domain and special values
  * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in (0, 1]\f$: standard domain.
@@ -1633,9 +1633,9 @@ LAPLACE_HD shape_deriv<3> log_ibeta_d3(double a, double b, double x) { return de
  * \par Measured accuracy
  * Maximum error 1370 ulpN (gcc, CUDA within 1.9 times); test bound 1800.0 ulpN / 115.0 ulpL.
  *
- * \see incomplete_beta, shape_deriv, log_ibeta(), log_ibetac_d4(), log_ibeta_d3(), log_ibeta_d5()
+ * \see incomplete_beta, mixed_partials, log_ibeta(), log_ibetac_d4(), log_ibeta_d3(), log_ibeta_d5()
  */
-LAPLACE_HD shape_deriv<4> log_ibeta_d4(double a, double b, double x) { return detail_ibd::order<4>(a, b, x, false); }
+LAPLACE_HD mixed_partials<4> log_ibeta_d4(double a, double b, double x) { return detail_ibd::order<4>(a, b, x, false); }
 
 /**
  * \ingroup incomplete_beta
@@ -1650,7 +1650,7 @@ LAPLACE_HD shape_deriv<4> log_ibeta_d4(double a, double b, double x) { return de
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in (0, 1]\f$.
- * \return A shape_deriv of order 5 containing \f$c[j] = \frac{\partial^5}{\partial a^{5-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, \dots, 5\f$.
+ * \return A mixed_partials of order 5 containing \f$c[j] = \frac{\partial^5}{\partial a^{5-j} \partial b^j} \log I_x(a, b)\f$ for \f$j = 0, \dots, 5\f$.
  *
  * \par Domain and special values
  * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in (0, 1]\f$: standard domain.
@@ -1660,9 +1660,9 @@ LAPLACE_HD shape_deriv<4> log_ibeta_d4(double a, double b, double x) { return de
  * \par Measured accuracy
  * Maximum error 1950 ulpN (gcc, CUDA within 1.9 times); test bound 3300.0 ulpN / 420.0 ulpL.
  *
- * \see incomplete_beta, shape_deriv, log_ibeta(), log_ibetac_d5(), log_ibeta_d4()
+ * \see incomplete_beta, mixed_partials, log_ibeta(), log_ibetac_d5(), log_ibeta_d4()
  */
-LAPLACE_HD shape_deriv<5> log_ibeta_d5(double a, double b, double x) { return detail_ibd::order<5>(a, b, x, false); }
+LAPLACE_HD mixed_partials<5> log_ibeta_d5(double a, double b, double x) { return detail_ibd::order<5>(a, b, x, false); }
 
 // d^K log(1 - I_x(a, b)) / da^(K-j) db^j in c[j]
 /**
@@ -1678,7 +1678,7 @@ LAPLACE_HD shape_deriv<5> log_ibeta_d5(double a, double b, double x) { return de
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in [0, 1)\f$.
- * \return A shape_deriv of order 1 containing \f$c[0] = \frac{\partial}{\partial a} \log(1 - I_x(a, b))\f$ and \f$c[1] = \frac{\partial}{\partial b} \log(1 - I_x(a, b))\f$.
+ * \return A mixed_partials of order 1 containing \f$c[0] = \frac{\partial}{\partial a} \log(1 - I_x(a, b))\f$ and \f$c[1] = \frac{\partial}{\partial b} \log(1 - I_x(a, b))\f$.
  *
  * \par Domain and special values
  * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in [0, 1)\f$: standard domain.
@@ -1688,9 +1688,9 @@ LAPLACE_HD shape_deriv<5> log_ibeta_d5(double a, double b, double x) { return de
  * \par Measured accuracy
  * Maximum error 1580 ulpN (gcc, CUDA within 1.9 times); test bound 2400.0 ulpN / 180.0 ulpL.
  *
- * \see incomplete_beta, shape_deriv, log_ibetac(), log_ibeta_d1(), log_ibetac_d2()
+ * \see incomplete_beta, mixed_partials, log_ibetac(), log_ibeta_d1(), log_ibetac_d2()
  */
-LAPLACE_HD shape_deriv<1> log_ibetac_d1(double a, double b, double x) { return detail_ibd::order<1>(a, b, x, true); }
+LAPLACE_HD mixed_partials<1> log_ibetac_d1(double a, double b, double x) { return detail_ibd::order<1>(a, b, x, true); }
 
 /**
  * \ingroup incomplete_beta
@@ -1705,7 +1705,7 @@ LAPLACE_HD shape_deriv<1> log_ibetac_d1(double a, double b, double x) { return d
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in [0, 1)\f$.
- * \return A shape_deriv of order 2 containing \f$c[j] = \frac{\partial^2}{\partial a^{2-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, 1, 2\f$.
+ * \return A mixed_partials of order 2 containing \f$c[j] = \frac{\partial^2}{\partial a^{2-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, 1, 2\f$.
  *
  * \par Domain and special values
  * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in [0, 1)\f$: standard domain.
@@ -1715,9 +1715,9 @@ LAPLACE_HD shape_deriv<1> log_ibetac_d1(double a, double b, double x) { return d
  * \par Measured accuracy
  * Maximum error 1340 ulpN (gcc, CUDA within 1.9 times); test bound 2050.0 ulpN / 155.0 ulpL.
  *
- * \see incomplete_beta, shape_deriv, log_ibetac(), log_ibeta_d2(), log_ibetac_d1(), log_ibetac_d3()
+ * \see incomplete_beta, mixed_partials, log_ibetac(), log_ibeta_d2(), log_ibetac_d1(), log_ibetac_d3()
  */
-LAPLACE_HD shape_deriv<2> log_ibetac_d2(double a, double b, double x) { return detail_ibd::order<2>(a, b, x, true); }
+LAPLACE_HD mixed_partials<2> log_ibetac_d2(double a, double b, double x) { return detail_ibd::order<2>(a, b, x, true); }
 
 /**
  * \ingroup incomplete_beta
@@ -1732,7 +1732,7 @@ LAPLACE_HD shape_deriv<2> log_ibetac_d2(double a, double b, double x) { return d
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in [0, 1)\f$.
- * \return A shape_deriv of order 3 containing \f$c[j] = \frac{\partial^3}{\partial a^{3-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, \dots, 3\f$.
+ * \return A mixed_partials of order 3 containing \f$c[j] = \frac{\partial^3}{\partial a^{3-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, \dots, 3\f$.
  *
  * \par Domain and special values
  * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in [0, 1)\f$: standard domain.
@@ -1742,9 +1742,9 @@ LAPLACE_HD shape_deriv<2> log_ibetac_d2(double a, double b, double x) { return d
  * \par Measured accuracy
  * Maximum error 1620 ulpN (gcc, CUDA within 1.9 times); test bound 2450.0 ulpN / 80.0 ulpL.
  *
- * \see incomplete_beta, shape_deriv, log_ibetac(), log_ibeta_d3(), log_ibetac_d2(), log_ibetac_d4()
+ * \see incomplete_beta, mixed_partials, log_ibetac(), log_ibeta_d3(), log_ibetac_d2(), log_ibetac_d4()
  */
-LAPLACE_HD shape_deriv<3> log_ibetac_d3(double a, double b, double x) { return detail_ibd::order<3>(a, b, x, true); }
+LAPLACE_HD mixed_partials<3> log_ibetac_d3(double a, double b, double x) { return detail_ibd::order<3>(a, b, x, true); }
 
 /**
  * \ingroup incomplete_beta
@@ -1759,7 +1759,7 @@ LAPLACE_HD shape_deriv<3> log_ibetac_d3(double a, double b, double x) { return d
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in [0, 1)\f$.
- * \return A shape_deriv of order 4 containing \f$c[j] = \frac{\partial^4}{\partial a^{4-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, \dots, 4\f$.
+ * \return A mixed_partials of order 4 containing \f$c[j] = \frac{\partial^4}{\partial a^{4-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, \dots, 4\f$.
  *
  * \par Domain and special values
  * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in [0, 1)\f$: standard domain.
@@ -1769,9 +1769,9 @@ LAPLACE_HD shape_deriv<3> log_ibetac_d3(double a, double b, double x) { return d
  * \par Measured accuracy
  * Maximum error 1370 ulpN (gcc, CUDA within 1.9 times); test bound 2950.0 ulpN / 75.0 ulpL.
  *
- * \see incomplete_beta, shape_deriv, log_ibetac(), log_ibeta_d4(), log_ibetac_d3(), log_ibetac_d5()
+ * \see incomplete_beta, mixed_partials, log_ibetac(), log_ibeta_d4(), log_ibetac_d3(), log_ibetac_d5()
  */
-LAPLACE_HD shape_deriv<4> log_ibetac_d4(double a, double b, double x) { return detail_ibd::order<4>(a, b, x, true); }
+LAPLACE_HD mixed_partials<4> log_ibetac_d4(double a, double b, double x) { return detail_ibd::order<4>(a, b, x, true); }
 
 /**
  * \ingroup incomplete_beta
@@ -1786,7 +1786,7 @@ LAPLACE_HD shape_deriv<4> log_ibetac_d4(double a, double b, double x) { return d
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in [0, 1)\f$.
- * \return A shape_deriv of order 5 containing \f$c[j] = \frac{\partial^5}{\partial a^{5-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, \dots, 5\f$.
+ * \return A mixed_partials of order 5 containing \f$c[j] = \frac{\partial^5}{\partial a^{5-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, \dots, 5\f$.
  *
  * \par Domain and special values
  * - \f$a > 0, a < +\infty, b > 0, b < +\infty, x \in [0, 1)\f$: standard domain.
@@ -1796,9 +1796,9 @@ LAPLACE_HD shape_deriv<4> log_ibetac_d4(double a, double b, double x) { return d
  * \par Measured accuracy
  * Maximum error 1950 ulpN (gcc, CUDA within 1.9 times); test bound 2950.0 ulpN / 690.0 ulpL.
  *
- * \see incomplete_beta, shape_deriv, log_ibetac(), log_ibeta_d5(), log_ibetac_d4()
+ * \see incomplete_beta, mixed_partials, log_ibetac(), log_ibeta_d5(), log_ibetac_d4()
  */
-LAPLACE_HD shape_deriv<5> log_ibetac_d5(double a, double b, double x) { return detail_ibd::order<5>(a, b, x, true); }
+LAPLACE_HD mixed_partials<5> log_ibetac_d5(double a, double b, double x) { return detail_ibd::order<5>(a, b, x, true); }
 
 }  // namespace laplace::math::own
 
@@ -1806,16 +1806,16 @@ namespace laplace::math {
 
 // What the rest of Laplace calls (docs/numerics.md, 2026-11-09): the series
 // route with the quadrature as fallback; Gauss-Laguerre rays on the host only.
-using own::shape_deriv;
-LAPLACE_HD_FORCEINLINE shape_deriv<1> log_ibeta_d1(double a, double b, double x) { return own::log_ibeta_d1(a, b, x); }
-LAPLACE_HD_FORCEINLINE shape_deriv<2> log_ibeta_d2(double a, double b, double x) { return own::log_ibeta_d2(a, b, x); }
-LAPLACE_HD_FORCEINLINE shape_deriv<3> log_ibeta_d3(double a, double b, double x) { return own::log_ibeta_d3(a, b, x); }
-LAPLACE_HD_FORCEINLINE shape_deriv<4> log_ibeta_d4(double a, double b, double x) { return own::log_ibeta_d4(a, b, x); }
-LAPLACE_HD_FORCEINLINE shape_deriv<5> log_ibeta_d5(double a, double b, double x) { return own::log_ibeta_d5(a, b, x); }
-LAPLACE_HD_FORCEINLINE shape_deriv<1> log_ibetac_d1(double a, double b, double x) { return own::log_ibetac_d1(a, b, x); }
-LAPLACE_HD_FORCEINLINE shape_deriv<2> log_ibetac_d2(double a, double b, double x) { return own::log_ibetac_d2(a, b, x); }
-LAPLACE_HD_FORCEINLINE shape_deriv<3> log_ibetac_d3(double a, double b, double x) { return own::log_ibetac_d3(a, b, x); }
-LAPLACE_HD_FORCEINLINE shape_deriv<4> log_ibetac_d4(double a, double b, double x) { return own::log_ibetac_d4(a, b, x); }
-LAPLACE_HD_FORCEINLINE shape_deriv<5> log_ibetac_d5(double a, double b, double x) { return own::log_ibetac_d5(a, b, x); }
+using own::mixed_partials;
+LAPLACE_HD_FORCEINLINE mixed_partials<1> log_ibeta_d1(double a, double b, double x) { return own::log_ibeta_d1(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<2> log_ibeta_d2(double a, double b, double x) { return own::log_ibeta_d2(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<3> log_ibeta_d3(double a, double b, double x) { return own::log_ibeta_d3(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<4> log_ibeta_d4(double a, double b, double x) { return own::log_ibeta_d4(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<5> log_ibeta_d5(double a, double b, double x) { return own::log_ibeta_d5(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<1> log_ibetac_d1(double a, double b, double x) { return own::log_ibetac_d1(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<2> log_ibetac_d2(double a, double b, double x) { return own::log_ibetac_d2(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<3> log_ibetac_d3(double a, double b, double x) { return own::log_ibetac_d3(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<4> log_ibetac_d4(double a, double b, double x) { return own::log_ibetac_d4(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<5> log_ibetac_d5(double a, double b, double x) { return own::log_ibetac_d5(a, b, x); }
 
 }  // namespace laplace::math

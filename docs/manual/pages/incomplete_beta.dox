@@ -93,7 +93,7 @@ In double precision, Boost.Math forms the incomplete beta function with a prefac
    - **BPSER:** Power series expansion in \f$x\f$, used for small \f$x\f$ and shapes.
    - **BFRAC:** Continued fraction by the modified Lentz method, used for \f$b < 40\f$ when \f$x \le 0.7\f$, for \f$b < 40\f$ when \f$x > 0.7\f$ and \f$a < 500\f$, and for \f$b \ge 40\f$ unless BASYM applies.
    - **BUP:** Finite recurrence summed outwards from the largest term.
-   - **BGRAT:** Asymptotic expansion in terms of the incomplete gamma function via `gamma_inc`, used when one shape is small and the other large.
+   - **BGRAT:** Asymptotic expansion in terms of the incomplete gamma function via \ref laplace::math::own::gamma_inc "gamma_inc()", used when one shape is small and the other large.
    - **BASYM:** Temme's uniform asymptotic expansion for large shapes near the mean, used when \f$\min(a, b) > 100\f$ and \f$\lambda \le 0.03 \min(a, b)\f$.
 4. **Exact parameter lambda.** \f$\lambda = a - (a + b)x\f$ is computed with exact sum and product (fused multiply-add on device, Dekker product on host).
 5. **Double-double logarithmic accumulation:** The function `log_split` is always on: \f$\log x\f$ and \f$\log(1 - x)\f$ are split into two-part double-double representations via `log_split` (measured within 0.49 units of \f$2^{-53}\f$ absolute on the arguments of `dd_log.csv`).
@@ -224,6 +224,7 @@ Functions in this module are called as `laplace::math::NAME`.
 
 ### Function values and logarithms
 
+- \ref laplace::math::own::beta_inc "beta_inc()" — Regularized incomplete beta function \f$I_x(a, b)\f$, complement, and logarithms in one call
 - \ref laplace::math::ibeta "ibeta()" — Regularized incomplete beta function \f$I_x(a, b)\f$
 - \ref laplace::math::ibetac "ibetac()" — Complement of the regularized incomplete beta function \f$1 - I_x(a, b)\f$
 - \ref laplace::math::log_ibeta "log_ibeta()" — Natural logarithm \f$\log I_x(a, b)\f$
@@ -246,7 +247,7 @@ The shape derivative functions are defined in `laplace::math::own` and forwarded
 
 ### Types
 
-- \ref laplace::math::own::shape_deriv "shape_deriv" — Container holding \f$K + 1\f$ mixed partial derivative components of order \f$K\f$
+- \ref laplace::math::own::mixed_partials "mixed_partials" — Container holding \f$K + 1\f$ mixed partial derivative components of order \f$K\f$
 - \ref laplace::math::own::beta_inc_result "beta_inc_result" — Result struct containing \f$I_x\f$, \f$1 - I_x\f$, and their logarithms
 - \ref laplace::math::own::beta_inv_result "beta_inv_result" — Container holding root \f$x\f$ and complement \f$y = 1 - x\f$ from `own` inverse functions
 
