@@ -25,6 +25,7 @@ Every distribution struct provides a uniform set of static members and evaluatio
 | `logpdf(y)` / `logpmf(y)` | `double` | Log-density \f$\log f(y; \theta)\f$ or log-mass \f$\log p(y; \theta)\f$. |
 | `logpdf_d1(y)` ... `_d6(y)` | `sym_tensor<P, K>` | Partial derivatives \f$\frac{\partial^K}{\partial\theta^K} \log f(y; \theta)\f$ for order \f$K \in \{1, \dots, 6\}\f$. |
 | `logpmf_d1(y)` ... `_d6(y)` | `sym_tensor<P, K>` | Partial derivatives \f$\frac{\partial^K}{\partial\theta^K} \log p(y; \theta)\f$ for order \f$K \in \{1, \dots, 6\}\f$. |
+| `logpdf_dy_dk<J, K>(y)` | `sym_tensor<P, K>` | Mixed partial derivatives \f$\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \log f(y; \theta)\f$ with \f$J\f$ derivatives in \f$y\f$ and order-\f$K\f$ symmetric tensor in \f$\theta\f$ (\f$J + K \le 6\f$; continuous distributions only). |
 | `expected_info()` | `sym_tensor<P, 2>` | Expected Fisher information matrix \f$I(\theta) = -\mathbb{E}\left[\frac{\partial^2}{\partial\theta^2} \log f(Y; \theta)\right]\f$. |
 | `expected_info_d1()` ... `_d4()` | `expected_info_tensor<P, K>` | Partial derivatives \f$\frac{\partial^K}{\partial\theta^K} I_{ab}(\theta)\f$ for order \f$K \in \{1, \dots, 4\}\f$. |
 | `cdf(y)` | `double` | Cumulative distribution function \f$F(y) = \mathbb{P}(Y \le y)\f$. |
@@ -39,6 +40,7 @@ Every distribution struct provides a uniform set of static members and evaluatio
 | `center()` | `double` | A rough central location (for the pilot distributions \f$\mu\f$), a hint for placing quadrature nodes. |
 | `scale()` | `double` | A rough spread (a standard deviation or a scale parameter), a hint for the width of quadrature panels. |
 | `param_kinks(j, y)` | `distrib_kinks` | Points of parameter \f$\theta_j\f$ where \f$\log f\f$ fails to be smooth at observation \f$y\f$. |
+| `y_regularity` | `int` | Differentiability order of \f$\log f\f$ in \f$y\f$ (\ref laplace::distrib::infinitely_smooth "infinitely_smooth" or non-negative integer; continuous distributions only). |
 | `y_kinks()` | `distrib_kinks` | Points of \f$y\f$ where \f$\log f\f$ fails to be smooth at parameters \f$\theta\f$. |
 
 ## Parameter descriptor
@@ -63,6 +65,10 @@ For distributions with non-smooth points, regularity fields state the exact degr
   I_{\mu\mu} = \mathbb{E}\left[\left(\frac{\partial}{\partial\mu}\log f\right)^2\right] = \frac{1}{\sigma^2}
   \f]
 - The cumulative distribution function \f$\log F(y)\f$ integrates the density, so it is one order smoother: it is \f$C^1\f$ at \f$\mu = y\f$, and its second derivative in \f$\mu\f$ jumps by \f$2/\sigma^2\f$ at that point.
+
+Continuous distributions also specify `y_regularity`, the differentiability order of \f$\log f(y; \theta)\f$ with respect to the observation \f$y\f$:
+- For smooth distributions such as \ref laplace::distrib::gaussian1_distrib "gaussian1_distrib" and \ref laplace::distrib::gamma1_distrib "gamma1_distrib", `y_regularity = infinitely_smooth`.
+- In \ref laplace::distrib::laplace_distrib "laplace_distrib", `y_regularity = 0`, indicating that \f$\log f\f$ is \f$C^0\f$ in \f$y\f$ with a kink at \f$y = \mu\f$ reported by `y_kinks()`.
 
 ## Symmetric tensors
 
@@ -93,6 +99,23 @@ Consider \f$P = 2\f$ parameters (indices 0 and 1) and derivative order \f$K = 3\
   4. `(1, 1, 1)`: 0 derivatives in \f$\theta_0\f$, 3 in \f$\theta_1\f$. Stored at index `v[3]`.
 
 For any two-parameter distribution (\f$P = 2\f$) and derivative order \f$K\f$, the component with \f$b\f$ derivatives in the second parameter \f$\theta_1\f$ and \f$K - b\f$ derivatives in the first parameter \f$\theta_0\f$ is located at array index \f$b\f$ (`v[b]`).
+
+### Packing of mixed derivatives in observation and parameters
+
+For continuous distributions, `logpdf_dy_dk<J, K>(y)` computes the mixed partial derivatives:
+\f[
+\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \log f(y; \theta)
+\f]
+evaluating \f$J\f$ derivatives with respect to the observation argument \f$y\f$ and an order-\f$K\f$ symmetric derivative tensor with respect to the natural parameters \f$\theta\f$, for total order \f$J + K \le 6\f$. In mathematical terms, these evaluate derivatives in the argument of the density, allowing evaluation at an argument that is itself differentiated.
+
+Each pair \f$(J, K)\f$ is a separate member template instantiation evaluated only when called, leaving the parameter-only derivatives `logpdf_d1()` through `logpdf_d6()` unchanged. For \f$J = 0, K = 0\f$, it evaluates the log-density value in `v[0]`, and for \f$J = 0, K \ge 1\f$, it matches `logpdf_dk<K>(y)`. Discrete distributions do not provide derivatives in \f$y\f$.
+
+Packing follows the standard tensor ordering:
+- The \f$J\f$ derivatives in \f$y\f$ are scalar and precede the parameter tensor.
+- The derivatives in the \f$P\f$ parameters \f$\theta\f$ form a symmetric tensor of order \f$K\f$, returned as \ref laplace::distrib::sym_tensor "sym_tensor<P, K>".
+- Its \f$\binom{P + K - 1}{K}\f$ components are packed over sorted multi-indices \f$0 \le i_0 \le \dots \le i_{K-1} < P\f$ in lexicographic order, identical to \ref laplace::distrib::sym_tensor_position "sym_tensor_position<P, K>()".
+- For \f$K = 0\f$, the container is \ref laplace::distrib::sym_tensor "sym_tensor<P, 0>", which has size 1; the pure derivative \f$\frac{\partial^J}{\partial y^J} \log f(y; \theta)\f$ is stored at array index `v[0]`.
+- For two parameters (\f$P = 2\f$) and any order \f$K \ge 0\f$, the component with \f$b\f$ derivatives in \f$\theta_1\f$ and \f$K - b\f$ in \f$\theta_0\f$ is stored at array index `v[b]`.
 
 ## Expected information tensor
 

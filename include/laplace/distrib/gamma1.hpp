@@ -111,6 +111,11 @@ struct gamma1_distrib {
   static constexpr distrib_kind kind = distrib_kind::continuous;
   /// Number of natural parameters (2).
   static constexpr int n_params = 2;
+  /**
+   * \ingroup distrib_gamma1
+   * \brief Differentiability order of the log-density in the observation \f$y\f$ (\c infinitely_smooth).
+   */
+  static constexpr int y_regularity = infinitely_smooth;  // regularity of log f in y (continuous only)
   /// Descriptors of \c mu and \c phi.
   static constexpr distrib_param_info params[2] = {
       {"mu", 0.0, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth},
@@ -180,6 +185,68 @@ struct gamma1_distrib {
   LAPLACE_HD sym_tensor<2, 5> logpdf_d5(double y) const { return logpdf_dk<5>(y); }
   /// Sixth-order partial derivatives of \f$\log f\f$ in \f$(\mu, \phi)\f$.
   LAPLACE_HD sym_tensor<2, 6> logpdf_d6(double y) const { return logpdf_dk<6>(y); }
+
+  // d^(J+K) l / dy^J dtheta^K, J >= 1. The terms of l with y are -s y/mu + (s - 1) log y, so
+  // with a derivatives in mu, b in phi and s^(b) = d^b s/dphi^b (s^(0) = s):
+  //   J = 1:  -s^(b) (-1)^a a!/mu^(a+1)  +  [a = 0] c_b / y,
+  //   J >= 2: [a = 0] c_b (-1)^(J-1) (J-1)!/y^J,
+  // c_b = s - 1 (b = 0) or s^(b). For J = 1, a = 0 the two are combined as
+  // s^(b) (mu - y)/(mu y) - [b = 0]/y, without forming s^(b)/y - s^(b)/mu apart.
+  // J = 0 is logpdf_dk or the value.
+  /**
+   * \ingroup distrib_gamma1
+   * \brief Evaluates mixed partial derivatives of \f$\log f(y; \mu, \phi)\f$ with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters.
+   *
+   * Evaluates \f$\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \log f(y; \mu, \phi)\f$ as a symmetric tensor of order \f$K\f$ in \f$(\mu, \phi)\f$.
+   * The terms of \f$\ell\f$ with \f$y\f$ are \f$-\frac{s y}{\mu} + (s - 1) \log y\f$, with \f$s = 1/\phi\f$ and \f$s^{(b)} = \frac{\mathrm{d}^b s}{\mathrm{d}\phi^b}\f$.
+   * For \f$J \ge 1\f$, with \f$a = K - b\f$ derivatives in \f$\mu\f$ and \f$b\f$ in \f$\phi\f$:
+   * - For \f$J = 1\f$: if \f$a = 0\f$, evaluates \f$s^{(b)} \frac{\mu - y}{\mu y} - \frac{[b = 0]}{y}\f$; if \f$a \ge 1\f$, evaluates \f$-s^{(b)} \frac{(-1)^a a!}{\mu^{a + 1}}\f$.
+   * - For \f$J \ge 2\f$: if \f$a = 0\f$, evaluates \f$c_b \frac{(-1)^{J - 1} (J - 1)!}{y^J}\f$ where \f$c_0 = s - 1\f$ and \f$c_b = s^{(b)}\f$ (\f$b \ge 1\f$); returns 0 for \f$a \ge 1\f$.
+   * For \f$J = 0\f$, returns parameter derivatives (\f$K \ge 1\f$) or the log-density value (\f$K = 0\f$).
+   *
+   * Agrees with 5-point finite differences in \f$y\f$ and in parameters within relative tolerance \f$10^{-7}\f$.
+   *
+   * \tparam J Derivative order with respect to observation \f$y\f$ (\f$J \ge 0\f$, \f$J + K \le 6\f$).
+   * \tparam K Derivative order with respect to parameters \f$(\mu, \phi)\f$ (\f$K \ge 0\f$, \f$J + K \le 6\f$).
+   * \param y Observation point \f$y \in (0, \infty)\f$.
+   * \return Packed symmetric tensor \c sym_tensor<2, K> of derivatives.
+   * \see distrib_gamma1, logpdf(), logpdf_dk()
+   */
+  template <int J, int K>
+  LAPLACE_HD sym_tensor<2, K> logpdf_dy_dk(double y) const {
+    sym_tensor<2, K> t;
+    if constexpr (J == 0) {
+      if constexpr (K == 0) t[0] = logpdf(y);
+      else t = logpdf_dk<K>(y);
+      return t;
+    } else {
+      using detail_gamma1::fact;
+      const double s = 1.0 / phi;
+      double g[K + 1];
+      if constexpr (K >= 1) detail_gamma1::reciprocal_derivs<K>(s, g);
+      g[0] = s;
+      for (int b = 0; b <= K; ++b) {
+        const int a = K - b;
+        double v = 0.0;
+        if constexpr (J == 1) {
+          if (a == 0) {
+            v = g[b] * (mu - y) / (mu * y) - (b == 0 ? 1.0 / y : 0.0);
+          } else {
+            double im = 1.0 / mu;  // mu^-(a+1)
+            for (int i = 0; i < a; ++i) im /= mu;
+            v = -g[b] * ((a % 2 == 0) ? 1.0 : -1.0) * fact(a) * im;
+          }
+        } else if (a == 0) {
+          double iy = 1.0;
+          for (int i = 0; i < J; ++i) iy /= y;
+          const double cb = b == 0 ? s - 1.0 : g[b];
+          v = cb * ((J % 2 == 1) ? 1.0 : -1.0) * fact(J - 1) * iy;
+        }
+        t[b] = v;
+      }
+      return t;
+    }
+  }
   /** @} */
 
   /**

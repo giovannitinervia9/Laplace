@@ -16,6 +16,9 @@
 //   support_lower(), _upper()     the ends of the support at theta
 //   center(), scale()             rough location and spread, for quadratures
 //   param_kinks(j, y)             points of theta_j at which l is not smooth
+//   y_regularity, y_kinks()       (continuous) regularity of l in y and its non-smooth points
+//   logpdf_dy_dk<J, K>(y)         (continuous) J derivatives in y and the symmetric tensor of
+//                                 order K in theta, computed only when called (J + K <= 6)
 //
 // Derivatives are symmetric tensors packed over the sorted indices
 // i_1 <= ... <= i_K in lexicographic order; with two parameters the

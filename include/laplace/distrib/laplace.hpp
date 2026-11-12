@@ -148,6 +148,12 @@ struct laplace_distrib {
   static constexpr distrib_kind kind = distrib_kind::continuous;
   /// Number of natural parameters (2).
   static constexpr int n_params = 2;
+  // log f is C^0 in y at y = mu (y_kinks)
+  /**
+   * \ingroup distrib_laplace
+   * \brief Differentiability order of the log-density in the observation \f$y\f$ (0, \f$C^0\f$ with a kink at \f$y = \mu\f$).
+   */
+  static constexpr int y_regularity = 0;  // regularity of log f in y (continuous only)
   /// Descriptors of \c mu and \c sigma.
   static constexpr distrib_param_info params[2] = {
       {"mu", -distrib_infinity, distrib_infinity, false, 0, false, 1},
@@ -202,6 +208,50 @@ struct laplace_distrib {
   LAPLACE_HD sym_tensor<2, 5> logpdf_d5(double y) const { return logpdf_dk<5>(y); }
   /// Sixth-order partial derivatives of \f$\log f\f$ in \f$(\mu, \sigma)\f$.
   LAPLACE_HD sym_tensor<2, 6> logpdf_d6(double y) const { return logpdf_dk<6>(y); }
+
+  // d^(J+K) l / dy^J dtheta^K: l depends on y - mu only, so d/dy = -d/dmu and the component
+  // with a derivatives in mu and b in sigma is (-1)^J times the (a + J, b) component of
+  // logpdf_dk; at y = mu the convention sign(0) = 0 of logpdf_dk. J = 0 is logpdf_dk or the value.
+  /**
+   * \ingroup distrib_laplace
+   * \brief Evaluates mixed partial derivatives of \f$\log f(y; \mu, \sigma)\f$ with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters.
+   *
+   * Evaluates \f$\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \log f(y; \mu, \sigma)\f$ as a symmetric tensor of order \f$K\f$ in \f$(\mu, \sigma)\f$.
+   * Because the log-density depends on \f$y - \mu\f$ only, \f$\frac{\partial}{\partial y} = -\frac{\partial}{\partial\mu}\f$. Away from the kink \f$y = \mu\f$,
+   * for \f$J \ge 1\f$ letting \f$a = K - b + J\f$ and \f$b\f$ be the order in \f$\sigma\f$, the component at position \f$b\f$ is
+   * \f$\frac{(-1)^{J + b} b!}{\sigma^{b + 1}} \operatorname{sgn}(z)\f$ for \f$a = 1\f$ and 0 for \f$a > 1\f$, where \f$z = \frac{y - \mu}{\sigma}\f$.
+   * At the kink \f$y = \mu\f$ (\f$z = 0\f$), adopts the symmetric convention \f$\operatorname{sgn}(0) = 0\f$.
+   * For \f$J = 0\f$, returns parameter derivatives (\f$K \ge 1\f$) or the log-density value (\f$K = 0\f$).
+   *
+   * Away from the kink, agrees with 5-point finite differences within relative tolerance \f$10^{-8}\f$.
+   *
+   * \tparam J Derivative order with respect to observation \f$y\f$ (\f$J \ge 0\f$, \f$J + K \le 6\f$).
+   * \tparam K Derivative order with respect to parameters \f$(\mu, \sigma)\f$ (\f$K \ge 0\f$, \f$J + K \le 6\f$).
+   * \param y Observation point \f$y \in (-\infty, \infty)\f$.
+   * \return Packed symmetric tensor \c sym_tensor<2, K> of derivatives.
+   * \see distrib_laplace, logpdf(), logpdf_dk(), y_kinks()
+   */
+  template <int J, int K>
+  LAPLACE_HD sym_tensor<2, K> logpdf_dy_dk(double y) const {
+    sym_tensor<2, K> t;
+    if constexpr (J == 0) {
+      if constexpr (K == 0) t[0] = logpdf(y);
+      else t = logpdf_dk<K>(y);
+      return t;
+    } else {
+      using detail_laplace::fact;
+      const double r = y - mu, is = 1.0 / sigma;
+      const double sg = r > 0.0 ? 1.0 : (r < 0.0 ? -1.0 : 0.0);
+      const double sj = (J % 2 == 0) ? 1.0 : -1.0;
+      double isb = 1.0;
+      for (int b = 0; b <= K; ++b, isb *= is) {
+        const int a = K - b + J;  // a >= 1; a > 1 gives 0 away from the kink
+        const double sgn = (b % 2 == 0) ? 1.0 : -1.0;
+        if (a == 1) t[b] = sj * sgn * fact(b) * sg * isb * is;
+      }
+      return t;
+    }
+  }
   /** @} */
 
   /**

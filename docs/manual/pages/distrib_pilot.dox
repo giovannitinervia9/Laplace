@@ -34,6 +34,33 @@ For total derivative order \f$K \in \{1, \dots, 6\}\f$, let \f$a\f$ denote the n
   \frac{\partial^K}{\partial\mu^a \partial\sigma^b} \ell = 0
   \f]
 
+## Derivatives in the observation and mixed derivatives
+
+For continuous distributions, `logpdf_dy_dk<J, K>(y)` computes the mixed partial derivatives:
+\f[
+\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \ell(\mu, \sigma; y)
+\f]
+as a symmetric tensor \ref laplace::distrib::sym_tensor "sym_tensor<2, K>", with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters \f$(\mu, \sigma)\f$ (\f$J + K \le 6\f$).
+
+Because the Gaussian log-density depends on \f$y\f$ and \f$\mu\f$ solely through the difference \f$y - \mu\f$, differentiation in \f$y\f$ satisfies:
+\f[
+\frac{\partial}{\partial y} = -\frac{\partial}{\partial\mu}
+\f]
+For \f$J \ge 1\f$, let \f$b \in \{0, \dots, K\}\f$ denote the number of derivatives in \f$\sigma\f$ and \f$K - b\f$ the derivatives in \f$\mu\f$. The effective total order in \f$\mu\f$ is \f$a = K - b + J \ge 1\f$. The component at index \f$b\f$ in \ref laplace::distrib::sym_tensor "sym_tensor<2, K>" is \f$(-1)^J\f$ times the \f$(a, b)\f$ component of parameter derivatives:
+- For \f$a = 1\f$ (requiring \f$J = 1\f$ and \f$b = K\f$):
+  \f[
+  \frac{\partial^{J+K}}{\partial y^J \partial\mu^{K-b} \partial\sigma^b} \ell = \frac{(-1)^{J + b} (b + 1)!}{\sigma^{b + 1}} z
+  \f]
+- For \f$a = 2\f$:
+  \f[
+  \frac{\partial^{J+K}}{\partial y^J \partial\mu^{K-b} \partial\sigma^b} \ell = \frac{(-1)^{J + b + 1} (b + 1)!}{\sigma^{b + 2}}
+  \f]
+- For \f$a > 2\f$:
+  \f[
+  \frac{\partial^{J+K}}{\partial y^J \partial\mu^{K-b} \partial\sigma^b} \ell = 0
+  \f]
+For \f$J = 0\f$, \f$K = 0\f$ evaluates the log-density \f$\ell(\mu, \sigma; y)\f$, and \f$J = 0\f$, \f$K \ge 1\f$ matches the parameter derivatives `logpdf_dk<K>(y)`. Each pair \f$(J, K)\f$ is instantiated separately and evaluated only when called.
+
 ## Expected Fisher information
 
 The expected Fisher information matrix \f$I(\mu, \sigma) = -\mathbb{E}\left[\frac{\partial^2}{\partial\theta^2} \ell\right]\f$ is diagonal:
@@ -77,6 +104,7 @@ Only the residual \f$S_2(t)\f$ (of size \f$w^2\f$) is passed through the polynom
 
 ## Regularity and non-smooth points
 
+- `y_regularity = infinitely_smooth`: the log-density is infinitely differentiable in \f$y\f$.
 - `mu`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
 - `sigma`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
 - `param_kinks(j, y)` and `y_kinks()` report `count = 0` (no kinks).
@@ -94,7 +122,7 @@ Measured on the gcc build (CPU) against reference values from mpmath at 300 and 
 
 In the tails, the maximum error of an individual component is \f$1.46 \times 10^3\f$ ulp for `log_cdf` and \f$1.48 \times 10^3\f$ ulp for `log_ccdf` (order 6 at \f$|z| = 7\f$, sitting adjacent to a zero of that component at \f$|z| = 7.3\f$; test bound \f$2.2 \times 10^3\f$ ulp).
 
-Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score within \f$10^{-12}\f$.
+Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score within \f$10^{-12}\f$. Mixed derivatives \ref laplace::distrib::gaussian1_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>()" agree with 5-point finite differences in \f$y\f$ and in parameters within relative tolerance \f$10^{-8}\f$ of the largest component of the order (measured on the gcc build at \f$(\mu, \sigma) = (0.4, 1.3)\f$ across \f$y \in \{-3, 0.2, 1.7, 9\}\f$ and inside a Kokkos kernel).
 */
 
 /**
@@ -129,6 +157,31 @@ The log-density \f$\ell\f$ is continuous everywhere, but possesses a sharp kink 
   \frac{\partial^K}{\partial\mu^a \partial\sigma^b} \ell = 0
   \f]
 At the kink \f$\mu = y\f$ (\f$z = 0\f$), `logpdf_d1()` adopts the symmetric convention \f$\operatorname{sgn}(0) = 0\f$, representing the average of the left- and right-hand limits.
+
+## Derivatives in the observation and mixed derivatives
+
+For continuous distributions, `logpdf_dy_dk<J, K>(y)` computes the mixed partial derivatives:
+\f[
+\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \ell(\mu, \sigma; y)
+\f]
+as a symmetric tensor \ref laplace::distrib::sym_tensor "sym_tensor<2, K>", with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters \f$(\mu, \sigma)\f$ (\f$J + K \le 6\f$).
+
+Because the Laplace log-density depends on \f$y\f$ and \f$\mu\f$ solely through \f$y - \mu\f$, differentiation in \f$y\f$ satisfies:
+\f[
+\frac{\partial}{\partial y} = -\frac{\partial}{\partial\mu}
+\f]
+Away from the kink (\f$y \ne \mu\f$), for \f$J \ge 1\f$, let \f$b \in \{0, \dots, K\}\f$ denote derivatives in \f$\sigma\f$ and \f$K - b\f$ in \f$\mu\f$, with total effective order in \f$\mu\f$ given by \f$a = K - b + J \ge 1\f$. The component at position \f$b\f$ in \ref laplace::distrib::sym_tensor "sym_tensor<2, K>" is \f$(-1)^J\f$ times the \f$(a, b)\f$ component of parameter derivatives:
+- For \f$a = 1\f$ (requiring \f$J = 1\f$ and \f$b = K\f$):
+  \f[
+  \frac{\partial^{J+K}}{\partial y^J \partial\mu^{K-b} \partial\sigma^b} \ell = \frac{(-1)^{J + b} b!}{\sigma^{b + 1}} \operatorname{sgn}(z)
+  \f]
+  where \f$z = \frac{y - \mu}{\sigma}\f$.
+- For \f$a > 1\f$:
+  \f[
+  \frac{\partial^{J+K}}{\partial y^J \partial\mu^{K-b} \partial\sigma^b} \ell = 0
+  \f]
+At the kink \f$y = \mu\f$ (\f$z = 0\f$), `logpdf_dy_dk()` follows the symmetric convention \f$\operatorname{sgn}(0) = 0\f$, matching `logpdf_d1()`.
+For \f$J = 0\f$, \f$K = 0\f$ evaluates \f$\ell(\mu, \sigma; y)\f$, and \f$J = 0\f$, \f$K \ge 1\f$ matches `logpdf_dk<K>(y)`. Each pair \f$(J, K)\f$ is instantiated separately and evaluated only when called.
 
 ## Expected Fisher information
 
@@ -182,6 +235,7 @@ where \f$L_b^{(\alpha)}(u)\f$ is the generalized Laguerre polynomial, computed u
 
 ## Regularity and non-smooth points
 
+- `y_regularity = 0`: the log-density is \f$C^0\f$ in \f$y\f$ with a kink at \f$y = \mu\f$.
 - `mu`: `regularity = 0` (\f$C^0\f$ in \f$\mu\f$), `moves_support = false`, `cdf_regularity = 1` (\f$C^1\f$ in \f$\mu\f$).
 - `sigma`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
 - `param_kinks(0, y)` reports \f$\mu = y\f$ with `continuous_order = 0`.
@@ -201,7 +255,7 @@ Measured on the gcc build (CPU) against reference values from mpmath at 300 and 
 
 In the tails, the maximum error of an individual component is \f$53.9\f$ ulp for `log_cdf` (order 5; test bound \f$81.0\f$ ulp) and \f$35.2\f$ ulp for `log_ccdf` (order 6; test bound \f$53.0\f$ ulp).
 
-Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score (evaluated by numerical quadrature with a knot at the kink \f$y = \mu\f$) within \f$10^{-12}\f$.
+Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score (evaluated by numerical quadrature with a knot at the kink \f$y = \mu\f$) within \f$10^{-12}\f$. Mixed derivatives \ref laplace::distrib::laplace_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>()" away from the kink agree with 5-point finite differences in \f$y\f$ and in parameters within relative tolerance \f$10^{-8}\f$ of the largest component of the order (measured on the gcc build at \f$(\mu, \sigma) = (0.4, 1.3)\f$ across \f$y \in \{-3, 0.2, 1.7, 9\}\f$ and inside a Kokkos kernel).
 */
 
 /**
@@ -237,6 +291,8 @@ With a single parameter \f$\mu\f$, derivatives of order \f$K \in \{1, \dots, 6\}
   \f[
   \frac{\mathrm{d}^K}{\mathrm{d}\mu^K} \ell = (-1)^{K - 1} (K - 1)! \frac{y}{\mu^K}
   \f]
+
+Because the Poisson distribution is discrete on integers \f$y \in \{0, 1, 2, \dots\}\f$, there are no derivatives in \f$y\f$.
 
 ## Expected Fisher information
 
@@ -330,6 +386,35 @@ For total order \f$K \in \{1, \dots, 6\}\f$, let \f$a\f$ denote derivatives in \
   \f]
   The derivatives \f$\frac{\mathrm{d}^K}{\mathrm{d}\phi^K} \delta(1/\phi)\f$ are evaluated via Faà di Bruno's formula over \f$\delta^{(k)}(s)\f$ for \f$k \le K\f$. Although the individual Faà di Bruno terms can cancel by up to \f$10^{10}\f$ among themselves, the total \f$H^{(K)}\f$ remains accurate to within 8 ulp because \f$\delta\f$ is a small correction to the dominant \f$\frac{1}{2}\log s\f$ term.
 
+## Derivatives in the observation and mixed derivatives
+
+For continuous distributions, `logpdf_dy_dk<J, K>(y)` computes the mixed partial derivatives:
+\f[
+\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \ell(\mu, \phi; y)
+\f]
+as a symmetric tensor \ref laplace::distrib::sym_tensor "sym_tensor<2, K>", with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters \f$(\mu, \phi)\f$ (\f$J + K \le 6\f$).
+
+The terms of the log-density \f$\ell(\mu, \phi; y)\f$ containing the observation \f$y\f$ are \f$-\frac{s y}{\mu} + (s - 1) \log y\f$, where \f$s = 1/\phi\f$. Let \f$s^{(b)} = \frac{\mathrm{d}^b s}{\mathrm{d}\phi^b} = \frac{(-1)^b b!}{\phi^{b + 1}}\f$ with \f$s^{(0)} = s\f$. For total order \f$K\f$, let \f$a = K - b\f$ denote derivatives in \f$\mu\f$ and \f$b\f$ derivatives in \f$\phi\f$ (stored at index \f$b\f$ in \ref laplace::distrib::sym_tensor "sym_tensor<2, K>").
+
+For \f$J \ge 1\f$, the derivatives are evaluated in closed form:
+- For \f$J = 1\f$:
+  - If \f$a = 0\f$ (\f$b = K\f$ derivatives in \f$\phi\f$, none in \f$\mu\f$):
+    \f[
+    \frac{\partial^{1+K}}{\partial y \partial\phi^K} \ell = s^{(b)} \frac{\mu - y}{\mu y} - \frac{[b = 0]}{y}
+    \f]
+    where \f$[b = 0]\f$ equals 1 if \f$b = 0\f$ and 0 otherwise. Combining the two terms into a single expression avoids catastrophic cancellation near the mode \f$y = \mu\f$.
+  - If \f$a \ge 1\f$: the \f$\log y\f$ term vanishes under differentiation in \f$\mu\f$, giving:
+    \f[
+    \frac{\partial^{1+K}}{\partial y \partial\mu^a \partial\phi^b} \ell = -s^{(b)} \frac{(-1)^a a!}{\mu^{a + 1}}
+    \f]
+- For \f$J \ge 2\f$: the term linear in \f$y\f$ vanishes. Only the \f$\log y\f$ term contributes when \f$a = 0\f$, and all components with \f$a \ge 1\f$ are zero:
+  \f[
+  \frac{\partial^{J+K}}{\partial y^J \partial\mu^a \partial\phi^b} \ell = \begin{cases} c_b \frac{(-1)^{J - 1} (J - 1)!}{y^J} & a = 0 \\ 0 & a \ge 1 \end{cases}
+  \f]
+  where \f$c_0 = s - 1\f$ for \f$b = 0\f$ and \f$c_b = s^{(b)}\f$ for \f$b \ge 1\f$.
+
+For \f$J = 0\f$, \f$K = 0\f$ evaluates \f$\ell(\mu, \phi; y)\f$, and \f$J = 0\f$, \f$K \ge 1\f$ matches `logpdf_dk<K>(y)`. Each pair \f$(J, K)\f$ is instantiated separately and evaluated only when called.
+
 ## Expected Fisher information
 
 The expected Fisher information matrix is:
@@ -372,6 +457,7 @@ Because the ratio \f$x/a = c\f$ is constant along variations in \f$\phi\f$, eval
 
 ## Regularity and non-smooth points
 
+- `y_regularity = infinitely_smooth`: the log-density is infinitely differentiable in \f$y\f$ on its support \f$y \in (0, \infty)\f$.
 - `mu`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
 - `phi`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
 - `param_kinks(j, y)` and `y_kinks()` report `count = 0` (no kinks).
@@ -385,7 +471,7 @@ Measured on the gcc build (CPU) against reference values from mpmath at 300 and 
 | `log_cdf` derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf.csv` (\f$\phi \in \{0.02, 0.3, 4\}\f$) | 379 | 570 |
 | `log_ccdf` derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf.csv` (\f$\phi \in \{0.02, 0.3, 4\}\f$) | 356 | 540 |
 
-Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score (evaluated by numerical quadrature using tanh-sinh on \f$[0, \mu]\f$ and exp-sinh on \f$[\mu, \infty)\f$) within \f$10^{-12}\f$ for \f$I_{\mu\mu}\f$ and \f$10^{-10}\f$ for \f$I_{\phi\phi}\f$.
+Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score (evaluated by numerical quadrature using tanh-sinh on \f$[0, \mu]\f$ and exp-sinh on \f$[\mu, \infty)\f$) within \f$10^{-12}\f$ for \f$I_{\mu\mu}\f$ and \f$10^{-10}\f$ for \f$I_{\phi\phi}\f$. Mixed derivatives \ref laplace::distrib::gamma1_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>()" agree with 5-point finite differences in \f$y\f$ and in parameters within relative tolerance \f$10^{-7}\f$ of the largest component of the order (measured on the gcc build at \f$(\mu, \phi) = (2, \phi)\f$ for \f$\phi \in \{0.02, 0.3, 4\}\f$ across \f$y \in \{0.3, 1.4, 2, 5\}\f$ and inside a Kokkos kernel).
 
 ## References
 

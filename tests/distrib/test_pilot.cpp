@@ -162,6 +162,71 @@ void check_cdf_derivs(const std::vector<double>& th, double y, bool upper, doubl
   }
 }
 
+// d^(J+K) l / dy^J dtheta^K of a two-parameter continuous distribution, J + K <= 6
+template <class D>
+std::vector<double> yderiv(const D& d, double y, int J, int K) {
+  switch (J * 10 + K) {
+    case 0: return as_vec<2, 0>(d.template logpdf_dy_dk<0, 0>(y));
+    case 1: return as_vec<2, 1>(d.template logpdf_dy_dk<0, 1>(y));
+    case 2: return as_vec<2, 2>(d.template logpdf_dy_dk<0, 2>(y));
+    case 3: return as_vec<2, 3>(d.template logpdf_dy_dk<0, 3>(y));
+    case 4: return as_vec<2, 4>(d.template logpdf_dy_dk<0, 4>(y));
+    case 5: return as_vec<2, 5>(d.template logpdf_dy_dk<0, 5>(y));
+    case 6: return as_vec<2, 6>(d.template logpdf_dy_dk<0, 6>(y));
+    case 10: return as_vec<2, 0>(d.template logpdf_dy_dk<1, 0>(y));
+    case 11: return as_vec<2, 1>(d.template logpdf_dy_dk<1, 1>(y));
+    case 12: return as_vec<2, 2>(d.template logpdf_dy_dk<1, 2>(y));
+    case 13: return as_vec<2, 3>(d.template logpdf_dy_dk<1, 3>(y));
+    case 14: return as_vec<2, 4>(d.template logpdf_dy_dk<1, 4>(y));
+    case 15: return as_vec<2, 5>(d.template logpdf_dy_dk<1, 5>(y));
+    case 20: return as_vec<2, 0>(d.template logpdf_dy_dk<2, 0>(y));
+    case 21: return as_vec<2, 1>(d.template logpdf_dy_dk<2, 1>(y));
+    case 22: return as_vec<2, 2>(d.template logpdf_dy_dk<2, 2>(y));
+    case 23: return as_vec<2, 3>(d.template logpdf_dy_dk<2, 3>(y));
+    case 24: return as_vec<2, 4>(d.template logpdf_dy_dk<2, 4>(y));
+    case 30: return as_vec<2, 0>(d.template logpdf_dy_dk<3, 0>(y));
+    case 31: return as_vec<2, 1>(d.template logpdf_dy_dk<3, 1>(y));
+    case 32: return as_vec<2, 2>(d.template logpdf_dy_dk<3, 2>(y));
+    case 33: return as_vec<2, 3>(d.template logpdf_dy_dk<3, 3>(y));
+    case 40: return as_vec<2, 0>(d.template logpdf_dy_dk<4, 0>(y));
+    case 41: return as_vec<2, 1>(d.template logpdf_dy_dk<4, 1>(y));
+    case 42: return as_vec<2, 2>(d.template logpdf_dy_dk<4, 2>(y));
+    case 50: return as_vec<2, 0>(d.template logpdf_dy_dk<5, 0>(y));
+    case 51: return as_vec<2, 1>(d.template logpdf_dy_dk<5, 1>(y));
+    case 60: return as_vec<2, 0>(d.template logpdf_dy_dk<6, 0>(y));
+    default: return {};
+  }
+}
+
+// every (J, K): against the difference in y of (J - 1, K) and in theta of (J, K - 1)
+template <class D>
+void check_y_derivs(const std::vector<double>& th, double y, double hy, double rel) {
+  for (int J = 1; J <= 6; ++J)
+    for (int K = 0; J + K <= 6; ++K) {
+      const auto exact = yderiv(make<D>(th.data()), y, J, K);
+      double scale = 0.0;
+      for (double e : exact) scale = std::fmax(scale, std::fabs(e));
+      // in y
+      std::vector<std::vector<double>> v;
+      for (double s : {-2.0, -1.0, 1.0, 2.0}) v.push_back(yderiv(make<D>(th.data()), y + s * hy, J - 1, K));
+      for (int i = 0; i < (int)exact.size(); ++i) {
+        const double fd = (v[0][i] - 8.0 * v[1][i] + 8.0 * v[2][i] - v[3][i]) / (12.0 * hy);
+        INFO("dy: J = " << J << ", K = " << K << ", component " << i << ", y = " << y);
+        CHECK(std::fabs(exact[i] - fd) <= rel * scale + 1e-12);
+      }
+      if (K == 0) continue;
+      // in theta
+      for (const auto& idx : sorted_indices(2, K)) {
+        const std::vector<int> lower(idx.begin(), idx.end() - 1);
+        const int j = idx.back();
+        const auto fd = diff5([&](const double* t) { return yderiv(make<D>(t), y, J, K - 1); }, th, j,
+                              1e-3 * std::fmax(1e-3, std::fabs(th[j])));
+        INFO("dtheta: J = " << J << ", K = " << K << ", component " << position_of(2, idx) << ", y = " << y);
+        CHECK(std::fabs(exact[position_of(2, idx)] - fd[position_of(2, lower)]) <= rel * scale + 1e-12);
+      }
+    }
+}
+
 // d^K I against the difference of d^(K-1) I
 template <class D>
 void check_info_derivs(const std::vector<double>& th, double rel) {
@@ -329,6 +394,19 @@ TEST_CASE("distrib: derivatives of log F and log(1 - F) against differences") {
   }
 }
 
+TEST_CASE("distrib: derivatives in y and mixed (y, theta) against differences") {
+  // J = 0 is logpdf_dk, the order K = 0 the value
+  const ld::gamma1_distrib g{2.0, 0.3};
+  CHECK(g.logpdf_dy_dk<0, 0>(1.3)[0] == g.logpdf(1.3));
+  CHECK(g.logpdf_dy_dk<0, 3>(1.3)[2] == g.logpdf_d3(1.3)[2]);
+  for (double y : {-3.0, 0.2, 1.7, 9.0}) check_y_derivs<ld::gaussian1_distrib>({0.4, 1.3}, y, 1e-3, 1e-8);
+  for (double y : {-3.0, 0.2, 1.7, 9.0}) check_y_derivs<ld::laplace_distrib>({0.4, 1.3}, y, 1e-3, 1e-8);
+  for (double phi : {0.02, 0.3, 4.0})
+    for (double y : {0.3, 1.4, 2.0, 5.0}) check_y_derivs<ld::gamma1_distrib>({2.0, phi}, y, 1e-4 * y, 1e-7);
+  CHECK(ld::gaussian1_distrib::y_regularity == ld::infinitely_smooth);
+  CHECK(ld::laplace_distrib::y_regularity == 0);
+}
+
 TEST_CASE("distrib: cdf, ccdf, logarithms, quantile") {
   const ld::gaussian1_distrib g{0.4, 1.3};
   const ld::laplace_distrib l{0.4, 1.3};
@@ -383,7 +461,7 @@ TEST_CASE("distrib: every order inside a kernel") {
         const ld::laplace_distrib l{0.4, 1.3};
         const ld::poisson_distrib p{3.5};
         const ld::gamma1_distrib ga{2.0, 0.3};
-        out(i) = ga.logpdf_d6(0.5 + 0.1 * i)[2] + ga.expected_info_d4().pair[2][4] + g.logpdf_d6(y)[3] + l.logpdf_d6(y)[6] + p.logpmf_d6(double(i % 7))[0] + g.expected_info_d4().pair[2][4] +
+        out(i) = ga.logpdf_d6(0.5 + 0.1 * i)[2] + ga.logpdf_dy_dk<2, 3>(0.5 + 0.1 * i)[1] + g.logpdf_dy_dk<1, 5>(y)[2] + l.logpdf_dy_dk<1, 2>(y)[1] + ga.expected_info_d4().pair[2][4] + g.logpdf_d6(y)[3] + l.logpdf_d6(y)[6] + p.logpmf_d6(double(i % 7))[0] + g.expected_info_d4().pair[2][4] +
                  l.expected_info_d4().pair[0][4] + p.expected_info_d4().pair[0][0] + g.log_cdf(y) + l.log_ccdf(y) +
                  p.log_cdf(double(i % 7));
       });
@@ -394,7 +472,7 @@ TEST_CASE("distrib: every order inside a kernel") {
     const ld::laplace_distrib l{0.4, 1.3};
     const ld::poisson_distrib p{3.5};
     const ld::gamma1_distrib ga{2.0, 0.3};
-    const double r = ga.logpdf_d6(0.5 + 0.1 * i)[2] + ga.expected_info_d4().pair[2][4] + g.logpdf_d6(y)[3] + l.logpdf_d6(y)[6] + p.logpmf_d6(double(i % 7))[0] + g.expected_info_d4().pair[2][4] +
+    const double r = ga.logpdf_d6(0.5 + 0.1 * i)[2] + ga.logpdf_dy_dk<2, 3>(0.5 + 0.1 * i)[1] + g.logpdf_dy_dk<1, 5>(y)[2] + l.logpdf_dy_dk<1, 2>(y)[1] + ga.expected_info_d4().pair[2][4] + g.logpdf_d6(y)[3] + l.logpdf_d6(y)[6] + p.logpmf_d6(double(i % 7))[0] + g.expected_info_d4().pair[2][4] +
                      l.expected_info_d4().pair[0][4] + p.expected_info_d4().pair[0][0] + g.log_cdf(y) + l.log_ccdf(y) +
                      p.log_cdf(double(i % 7));
     CHECK(h(i) == doctest::Approx(r).epsilon(1e-14));

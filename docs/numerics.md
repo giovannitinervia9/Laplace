@@ -2980,3 +2980,37 @@ are not written yet.
 
 **Chosen.** This version. Tested in `tests/distrib/test_pilot.cpp` on gcc and
 CUDA.
+
+## Derivatives of the log-density in y and mixed (y, theta)
+
+**What.** For the continuous distributions of the pilot (gaussian1, laplace,
+gamma1): `logpdf_dy_dk<J, K>(y)`, the derivatives with J derivatives in the
+observation y and the symmetric tensor of order K in the parameters,
+J + K <= 6 (J = 0 is `logpdf_dk`, J = K = 0 the value); and
+`y_regularity`, the regularity of log f in y (laplace: 0, with the kink at
+y = mu given by `y_kinks()`; the others infinitely smooth). Each (J, K) is
+its own function, instantiated only where it is called, so a model that does
+not use derivatives in y pays nothing. They are needed where the argument of
+a density is itself a variable: a prior on a coefficient (the coefficient
+plays the role of y), a random effect, a latent response, a transformation
+of the response with parameters (decided with Giovanni on 2026-11-12,
+note/distrib.md). The Poisson, discrete, has none.
+
+**How.** gaussian1 and laplace depend on y - mu only, so d/dy = -d/dmu and
+the (J, K) component with a derivatives in mu and b in sigma is (-1)^J times
+the (a + J, b) component of the parameter derivatives, already measured
+(Laplace: sign(0) = 0 at y = mu, as for mu). gamma1: the terms of l with y
+are -s y/mu + (s - 1) log y (s = 1/phi), so the components are closed forms
+in powers of 1/mu and 1/y times the derivatives of s in phi; for J = 1 and no
+derivative in mu the two terms are combined as s^(b) (mu - y)/(mu y) - [b = 0]/y,
+whose zero (the mode) is then a single subtraction.
+
+**Measurement.** Every (J, K) with J >= 1 against a 5-point difference in y
+of (J - 1, K) and, for K >= 1, in each parameter of (J, K - 1), relative
+1e-8 (gamma1 1e-7) of the largest component of the order, at gaussian1 and
+laplace (0.4, 1.3), y in {-3, 0.2, 1.7, 9}, and gamma1 (2, phi),
+phi in {0.02, 0.3, 4}, y in {0.3, 1.4, 2, 5}; and inside a Kokkos kernel.
+No mpmath reference: the forms are elementary and each is the exact
+derivative of a measured one.
+
+**Chosen.** This version. Tested in `tests/distrib/test_pilot.cpp`.
