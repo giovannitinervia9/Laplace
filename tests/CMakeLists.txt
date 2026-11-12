@@ -21,6 +21,12 @@ set(LAPLACE_TEST_SOURCES
   math/test_quadrature.cpp
   math/test_double_double.cpp
   bijector/test_scalar.cpp
+  bijector/test_affine.cpp
+  bijector/test_shifted.cpp
+  bijector/test_bounded.cpp
+  bijector/test_power_softplus.cpp
+  bijector/test_box_cox.cpp
+  bijector/test_yeo_johnson.cpp
   math/test_exprel.cpp
   math/test_log1prel.cpp
 )

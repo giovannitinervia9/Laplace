@@ -1607,3 +1607,151 @@ builds, at a few tens of ns per call.
 `tests/math/test_log1prel.cpp` on both builds, with bounds of half again the
 measured errors and exact checks at 0 (phi^(k)(0) = 1/(k + 1),
 psi^(k)(0) = (-1)^k k!/(k + 1)), at the limits and outside the domain.
+
+## Scalar bijectors with parameters, and the speed of every scalar bijector
+
+**What.** Eight maps added to `include/laplace/bijector/scalar.hpp`, one header
+each in `include/laplace/bijector/detail/`, with the parameters as fields of
+`scalar_bijector` (location, scale, exponent, sharpness, lower, upper) and
+static construction functions:
+- `affine`: g(v) = (v - location)/scale, scale != 0 (decreasing for a
+  negative scale);
+- `power`: g(v) = v^exponent on (0, inf), exponent != 0, no derivatives in the
+  exponent; `scalar_bijector::power` maps the exponents 1, 1/2, -1, -2, 0 to
+  identity, sqrt, inverse, inverse_sq, log;
+- `softplus`: g(v) = log(e^(a v) - 1)/a, a = sharpness > 0;
+- `bounded`: g(v) = log(v - a) - log(b - v) on (a, b);
+- `lower_bounded`: g(v) = log(v - a); `upper_bounded`: g(v) = -log(b - v),
+  increasing;
+- `box_cox`: g(v) = (v^lambda - 1)/lambda, log v at lambda = 0;
+- `yeo_johnson`: Box-Cox of 1 + v with lambda for v >= 0, minus Box-Cox of
+  1 - v with 2 - lambda for v < 0.
+For each, as for the maps without parameters: both directions and both
+log-Jacobians to order 6, and the partial derivatives of total order 1-6 in
+(argument, parameters), returned as `bijector_partials<K>` (components
+ordered by the number of derivatives in the second parameter, then in the
+first; the pure derivative is c[0]). `bijector_kinks` declares the point at
+which Yeo-Johnson is only C^2 (v = 0, unless lambda = 1). Invalid parameters
+give NaN everywhere.
+
+**How.** Written by five agents (Haiku) from one brief, reviewed and
+optimized in this session. The forms, each checked against SymPy's
+derivatives of the definitions (scripts `bijector_*_forms.py` and the
+reference scripts):
+- affine and the shifted maps: closed forms in t = v - p1 or p1 - v, single
+  subtractions, exact near the bound; the distances e^u and e^-u exactly;
+- bounded: the logit structure with A = 1/(v - a), B = 1/(b - v), and in the
+  forward log-Jacobian the pairs B^K - S^K, A^K - S^K (S = 1/(b - a))
+  rewritten with the exact factors B - S = p S B and A - S = q S A (written
+  as differences they gave 1e15 ulpC near a bound; 0.6 after);
+- power: the falling factorial times v^(lambda - K), the exponent split as an
+  exact two-sum, with a halved exponent where v^(lambda - K) under- or
+  overflows while the result does not;
+- softplus: h^(K)(u) = a^(K-1) expit^(K-1)(a u); the derivatives in a by
+  Leibniz forms with the part linear in x = a u cancelled analytically; the
+  forward log-Jacobian's mixed orders by a Bernoulli series below x = 3;
+- box_cox: g = L exprel(lambda L) (L = log v) for |lambda L| < 1, the power
+  beyond; d_lambda^k g = L^(k+1) exprel^(k)(lambda L); derivatives involving v
+  through v^(lambda - m) formed as v^lambda divided by v m times; the inverse
+  as exp(S), S = u log1prel(lambda u), its lambda-derivatives through the
+  Bell polynomials of the derivatives of S;
+- yeo_johnson: the same Box-Cox forms on each branch, with log1p for v and u
+  near 0, generated with SymPy common-subexpression elimination.
+
+Three changes made in the review, all measured:
+- **Dispatch not inlined on the device.** With the map chosen at run time the
+  test kernels held the code of all twenty maps and every order in one device
+  function; ptxas failed ("memory allocation failure") even with three build
+  jobs. The dispatch functions are `__noinline__` on the device
+  (`LAPLACE_BIJ_NOINLINE`, as `student.hpp` does).
+- **Box-Cox partials.** The Bell polynomials of the lambda-derivatives of S
+  were rebuilt for every component (21 calls of log1prel_dk at order 6):
+  1188 ns per call of `inverse_partials_d6` on one gcc thread. Formed once,
+  with a new internal `log1prel` routine that returns every order at one
+  point in one pass (`detail_log1prel::derivs_upto`, bit-identical to
+  `log1prel_dk`): 310 ns.
+- **Powers on the host.** The platform's pow of the gcc build (Rtools) costs
+  about 150 ns per call: `power` took 155 ns for its value, Box-Cox and
+  Yeo-Johnson 150-175 ns for their sixth derivatives. `pow_pos(x, y)` (in
+  `scalar_helpers.hpp`) is exp(y log x) on the host, with log x from
+  `ddm::log_split` and the exponent carried as a double-double, and the
+  platform's pow on the device (under 1 ns): `power` 155 -> 42 ns, the sixth
+  derivatives of Box-Cox 173 -> 47 and of Yeo-Johnson 152 -> 37, accuracy
+  unchanged except for `power`, from at most 3.4 to at most 5.9 ulpC (its
+  derivatives split the exponent and call pow twice; the full double-double
+  log gave the same errors at 580 ns). Chosen by Giovanni, 2026-11-12. The
+  integer powers of softplus are repeated products (`pow_int`).
+
+**Measurement.** References `bijector_<map>.csv`: SymPy differentiates the
+definitions in the argument and the parameters to total order 7, mpmath
+evaluates them at two precisions, rows kept if they agree to 2^-100
+(`tools/reference/bijector_param_common.py` and one script per map;
+6239-62203 rows per map). The Box-Cox rows near lambda = 0 were checked
+against an independent evaluation at 300 bits: they agree to 6e-33. The test
+(`tests/bijector/param_common.hpp`) checks every derivative, mixed ones
+included, in ulpC with the scale |f| + |x df/dx| + |p1 df/dp1| + |p2 df/dp2|,
+and checks that c[0] of the partials equals the pure derivative. Maximum ulpC
+over orders 0-6, gcc / CUDA:
+
+| map | forward | inverse | forward log-Jacobian | inverse log-Jacobian | distances |
+|---|---|---|---|---|---|
+| affine | 0.362 / 0.362 | 0.5 / 0.5 | 0.495 / 0.495 | 0.495 / 0.495 | - |
+| power | 4.76 / 4.37 | 5.59 / 4.93 | 5.88 / 5.88 | 5.87 / 5.87 | - |
+| softplus | 7.67 / 7.04 | 4.38 / 4.25 | 18.4 / 18.4 | 3.48 / 3.47 | - |
+| bounded | 1.1 / 1.1 | 7.09 / 5.82 | 1.1 / 1.1 | 7.09 / 5.82 | 0.721 / 0.721, 0.584 / 0.584 |
+| lower_bounded | 0.679 / 0.679 | 0.725 / 0.725 | 0.679 / 0.679 | 0 / 0 | 0.273 / 0.273 |
+| upper_bounded | 0.679 / 0.679 | 0.467 / 0.467 | 0.679 / 0.679 | 0 / 0 | 0.193 / 0.193 |
+| box_cox | 7.97 / 9.71 | 42.8 / 46.3 | 1.28 / 1.28 | 49.4 / 43 | - |
+| yeo_johnson | 26 / 26 | 24.9 / 39.9 | 3.06 / 3.06 | 46.3 / 27.3 | - |
+
+The largest errors: the inverse of Box-Cox and its log-Jacobian at orders 4-6
+(up to 49 ulpC, where |lambda u| is of order 1-10 and the mixed sums
+cancel); Yeo-Johnson's forward map at |v| near 1e18 (26 ulpC) and its inverse
+log-Jacobian at order 6 (46 ulpC at u = -3, lambda = 0.4); softplus's forward
+log-Jacobian at order 6 near a v = 3 (18 ulpC). Not reduced.
+
+Speed of every scalar bijector, `benchmarks/bijector_scalar.cpp` (2^16
+points inside each domain, typical parameters), ns per call: one gcc thread /
+OpenMP with 6 threads / CUDA (RTX 4070 SUPER):
+
+| map | forward | forward_d6 | inverse | inverse_d6 | log-Jacobian fwd / inv | inverse_partials_d1 | inverse_partials_d6 | distance |
+|---|---|---|---|---|---|---|---|---|
+| identity | 4 / 1.1 / 0.40 | 5 / 1.2 / 0.39 | 4 / 1.0 / 0.40 | 4 / 1.5 / 0.39 | 4 / 4 / 0.38-0.39 | 6 / 1.4 / 0.42 | 15 / 2.9 / 0.63 | 5 / 1.2 / 0.42 |
+| log | 7 / 1.6 / 0.50 | 5 / 1.2 / 0.43 | 10 / 3.4 / 0.46 | 10 / 2.0 / 0.45 | 7 / 4 / 0.39-0.51 | 15 / 2.9 / 0.48 | 24 / 4.7 / 0.68 | 11 / 2.3 / 0.48 |
+| logit | 44 / 7.6 / 1.09 | 5 / 1.2 / 0.54 | 11 / 2.2 / 0.50 | 30 / 5.5 / 0.63 | 43 / 49 / 0.65-1.07 | 15 / 3.4 / 0.54 | 42 / 7.4 / 0.83 | 10 / 2.9 / 0.49 |
+| probit | 34 / 6.1 / 2.95 | 49 / 8.7 / 3.64 | 19 / 3.4 / 1.78 | 11 / 3.2 / 0.51 | 36 / 4 / 0.40-2.95 | 14 / 2.9 / 0.51 | 24 / 4.5 / 0.72 | 18 / 5.2 / 1.78 |
+| cauchit | 10 / 2.0 / 0.77 | 11 / 2.3 / 0.79 | 42 / 7.4 / 0.59 | 9 / 2.7 / 0.56 | 46 / 37 / 0.87-1.36 | 11 / 2.2 / 0.53 | 23 / 4.4 / 0.77 | 41 / 7.5 / 0.59 |
+| cloglog | 42 / 7.6 / 0.73 | 36 / 6.6 / 0.68 | 27 / 4.8 / 0.55 | 26 / 4.7 / 0.56 | 44 / 10 / 0.46-0.73 | 27 / 4.9 / 0.56 | 36 / 6.6 / 0.76 | 19 / 3.4 / 0.53 |
+| loglog | 19 / 3.6 / 0.64 | 11 / 3.1 / 0.58 | 19 / 3.6 / 0.54 | 26 / 4.7 / 0.56 | 19 / 10 / 0.46-0.64 | 27 / 5.0 / 0.56 | 35 / 6.3 / 0.77 | 24 / 4.5 / 0.56 |
+| inverse | 4 / 1.6 / 0.40 | 5 / 1.3 / 0.44 | 4 / 1.1 / 0.41 | 4 / 1.1 / 0.44 | 8 / 7 / 0.52-0.53 | 6 / 1.5 / 0.44 | 16 / 3.2 / 0.64 | 4 / 1.1 / 0.42 |
+| inverse_sq | 4 / 1.0 / 0.41 | 5 / 1.3 / 0.43 | 4 / 1.5 / 0.44 | 5 / 1.2 / 0.50 | 8 / 7 / 0.50-0.51 | 6 / 1.6 / 0.48 | 20 / 3.8 / 0.70 | 4 / 1.1 / 0.46 |
+| sqrt | 4 / 1.4 / 0.42 | 5 / 1.3 / 0.48 | 4 / 1.0 / 0.39 | 4 / 1.4 / 0.40 | 8 / 7 / 0.51-0.52 | 6 / 1.3 / 0.42 | 15 / 2.7 / 0.61 | 4 / 1.0 / 0.40 |
+| atanh | 55 / 9.2 / 0.84 | 5 / 1.2 / 0.54 | 29 / 5.3 / 0.56 | 30 / 5.8 / 0.64 | 44 / 53 / 0.78-0.92 | 14 / 2.8 / 0.53 | 44 / 8.1 / 0.84 | 20 / 3.8 / 0.68 |
+| asinh | 31 / 5.7 / 0.65 | 10 / 2.4 / 0.53 | 10 / 1.9 / 0.56 | 10 / 2.1 / 0.55 | 37 / 51 / 0.77-0.88 | 14 / 2.7 / 0.50 | 23 / 4.3 / 0.75 | 11 / 2.2 / 0.57 |
+| affine | 4 / 2.4 / 0.46 | 4 / 1.1 / 0.41 | 4 / 1.4 / 0.44 | 4 / 1.1 / 0.41 | 5 / 4 / 0.55-0.56 | 5 / 1.6 / 0.44 | 21 / 4.2 / 0.75 | 3 / 1.3 / 0.42 |
+| power | 42 / 7.2 / 0.77 | 46 / 8.2 / 0.99 | 50 / 8.6 / 0.95 | 68 / 11.7 / 1.23 | 11 / 11 / 0.66-0.70 | 60 / 10.8 / 1.08 | 81 / 14.3 / 1.46 | 3 / 0.9 / 0.40 |
+| softplus | 37 / 6.6 / 0.92 | 47 / 8.5 / 0.89 | 70 / 12.1 / 0.97 | 33 / 7.1 / 0.91 | 35 / 68 / 0.90-0.91 | 70 / 12.0 / 1.34 | 110 / 20.0 / 6.07 | 3 / 0.9 / 0.41 |
+| bounded | 9 / 2.2 / 0.58 | 11 / 2.7 / 0.54 | 27 / 5.1 / 0.56 | 29 / 5.2 / 0.67 | 12 / 50 / 0.62-0.82 | 14 / 5.5 / 0.73 | 49 / 9.1 / 0.94 | 29 / 5.3 / 0.54 |
+| lower_bounded | 7 / 1.6 / 0.52 | 4 / 1.1 / 0.44 | 10 / 2.2 / 0.47 | 10 / 2.3 / 0.46 | 8 / 4 / 0.40-0.53 | 12 / 2.2 / 0.47 | 27 / 4.9 / 0.64 | 3 / 1.0 / 0.40 |
+| upper_bounded | 8 / 2.0 / 0.53 | 4 / 1.1 / 0.44 | 11 / 2.1 / 0.47 | 11 / 2.1 / 0.46 | 8 / 4 / 0.39-0.53 | 11 / 2.2 / 0.48 | 27 / 4.9 / 0.64 | 9 / 2.9 / 0.47 |
+| box_cox | 35 / 6.1 / 1.06 | 47 / 8.2 / 1.00 | 39 / 6.7 / 0.78 | 65 / 11.5 / 0.83 | 7 / 28 / 0.54-0.72 | 78 / 13.4 / 7.91 | 310 / 56.3 / 46.5 | 4 / 1.0 / 0.47 |
+| yeo_johnson | 46 / 8.7 / 1.16 | 37 / 6.8 / 1.31 | 47 / 9.5 / 1.19 | 36 / 6.6 / 1.26 | 32 / 30 / 0.87-1.03 | 78 / 13.5 / 14.1 | 359 / 60.9 / 99.5 | 3 / 1.0 / 0.45 |
+
+On CUDA the slowest are the partials of order 6 of Box-Cox (47 ns) and
+Yeo-Johnson (99 ns), whose divergent branches and calls of the exprel and
+log1prel derivatives cost most; everything else is within 4 ns.
+
+**What this says.** Every quantity of every map is within 50 ulpC on both
+builds (within 8 ulpC for all maps except Box-Cox, Yeo-Johnson and softplus's
+order-6 log-Jacobian), and within a few tens of ns per call on one gcc thread
+and a few ns on the GPU, except the order-6 partials of Box-Cox and
+Yeo-Johnson.
+
+**Chosen.** This version. Tested on both builds by one test per file in
+`tests/bijector/` (bounds 1.5 times the larger of the gcc and CUDA maxima),
+with exact checks of the special values, the domains, invalid parameters,
+inversion, the distances, the construction functions and the kinks.
+
+**Open.** The order-6 partials of Yeo-Johnson (359 ns on gcc, 99 on CUDA) could
+share the derivatives of log1prel as Box-Cox now does; the largest errors
+listed above were not reduced.

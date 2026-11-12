@@ -79,15 +79,23 @@
 #include <laplace/core/config.hpp>
 #include <laplace/math/elementary.hpp>
 #include <laplace/math/normal.hpp>
+#include <laplace/bijector/detail/scalar_helpers.hpp>
+#include <laplace/bijector/detail/scalar_affine.hpp>
+#include <laplace/bijector/detail/scalar_shifted.hpp>
+#include <laplace/bijector/detail/scalar_bounded.hpp>
+#include <laplace/bijector/detail/scalar_power.hpp>
+#include <laplace/bijector/detail/scalar_softplus.hpp>
+#include <laplace/bijector/detail/scalar_box_cox.hpp>
+#include <laplace/bijector/detail/scalar_yeo_johnson.hpp>
 
 namespace laplace::bijector {
 
 // The maps, named by their forward direction.
 /**
  * \ingroup bijector_scalar
- * \brief Enumeration of parameter-free scalar bijector maps.
+ * \brief Enumeration of scalar bijector maps with and without parameters.
  *
- * Defines twelve bijections \f$g: V \to U\f$ between open intervals:
+ * Defines twenty bijections \f$g: V \to U\f$ between open intervals:
  * - \c identity : \f$g(v) = v\f$, mapping \f$(-\infty, \infty) \to (-\infty, \infty)\f$.
  * - \c log : \f$g(v) = \log v\f$, mapping \f$(0, \infty) \to (-\infty, \infty)\f$.
  * - \c logit : \f$g(v) = \log(v / (1 - v))\f$, mapping \f$(0, 1) \to (-\infty, \infty)\f$.
@@ -100,6 +108,14 @@ namespace laplace::bijector {
  * - \c sqrt : \f$g(v) = \sqrt{v}\f$, mapping \f$(0, \infty) \to (0, \infty)\f$.
  * - \c atanh : \f$g(v) = \operatorname{atanh}(v) = \frac{1}{2}(\log(1+v) - \log(1-v))\f$, mapping \f$(-1, 1) \to (-\infty, \infty)\f$.
  * - \c asinh : \f$g(v) = \operatorname{asinh}(v)\f$, mapping \f$(-\infty, \infty) \to (-\infty, \infty)\f$.
+ * - \c affine : \f$g(v) = (v - \mu)/\sigma\f$, mapping \f$(-\infty, \infty) \to (-\infty, \infty)\f$, parameters \f$\mu\f$ (\c location) and \f$\sigma \neq 0\f$ (\c scale).
+ * - \c power : \f$g(v) = v^\lambda\f$, mapping \f$(0, \infty) \to (0, \infty)\f$, parameter \f$\lambda \neq 0\f$ (\c exponent).
+ * - \c softplus : \f$g(v) = \frac{1}{a}\log(e^{a v} - 1)\f$, mapping \f$(0, \infty) \to (-\infty, \infty)\f$, parameter \f$a > 0\f$ (\c sharpness).
+ * - \c bounded : \f$g(v) = \log(v - a) - \log(b - v)\f$, mapping \f$(a, b) \to (-\infty, \infty)\f$, parameters \f$a\f$ (\c lower) and \f$b\f$ (\c upper) with \f$a < b\f$.
+ * - \c lower_bounded : \f$g(v) = \log(v - a)\f$, mapping \f$(a, \infty) \to (-\infty, \infty)\f$, parameter \f$a\f$ (\c lower).
+ * - \c upper_bounded : \f$g(v) = -\log(b - v)\f$, mapping \f$(-\infty, b) \to (-\infty, \infty)\f$, parameter \f$b\f$ (\c upper).
+ * - \c box_cox : \f$g(v) = (v^\lambda - 1)/\lambda\f$ (\f$\log v\f$ at \f$\lambda = 0\f$), mapping \f$(0, \infty)\f$ to \f$(-1/\lambda, \infty)\f$ for \f$\lambda > 0\f$, \f$(-\infty, -1/\lambda)\f$ for \f$\lambda < 0\f$, and \f$(-\infty, \infty)\f$ for \f$\lambda = 0\f$, parameter \f$\lambda\f$ (\c exponent).
+ * - \c yeo_johnson : \f$g(v) = ((1 + v)^\lambda - 1)/\lambda\f$ for \f$v \ge 0\f$ and \f$-((1 - v)^{2 - \lambda} - 1)/(2 - \lambda)\f$ for \f$v < 0\f$, mapping \f$(-\infty, \infty)\f$ to \f$(-\infty, \infty)\f$ for \f$0 \le \lambda \le 2\f$, \f$(-\infty, -1/\lambda)\f$ for \f$\lambda < 0\f$, and \f$(1/(2 - \lambda), \infty)\f$ for \f$\lambda > 2\f$, parameter \f$\lambda\f$ (\c exponent).
  *
  * \see bijector_scalar, scalar_bijector
  */
@@ -115,269 +131,19 @@ enum class scalar_bijector_map : int {
   inverse_sq,  // (0, inf) -> (0, inf), 1/v^2
   sqrt,        // (0, inf) -> (0, inf)
   atanh,       // (-1, 1) -> R (the rhobit link, Fisher's z)
-  asinh        // R -> R
+  asinh,       // R -> R
+  // maps with parameters (fields of scalar_bijector in brackets)
+  affine,         // R -> R, (v - location)/scale, scale != 0
+  power,          // (0, inf) -> (0, inf), v^exponent, exponent != 0; no derivatives in exponent
+  softplus,       // (0, inf) -> R, log(e^(sharpness v) - 1)/sharpness, sharpness > 0
+  bounded,        // (lower, upper) -> R, log(v - lower) - log(upper - v)
+  lower_bounded,  // (lower, inf) -> R, log(v - lower)
+  upper_bounded,  // (-inf, upper) -> R, -log(upper - v)
+  box_cox,        // (0, inf) -> image depending on exponent, (v^exponent - 1)/exponent
+  yeo_johnson     // R -> image depending on exponent
 };
 
 namespace detail_scalar {
-
-namespace m = laplace::math;
-namespace dn = laplace::math::own::detail_normal;
-
-constexpr double pi = 3.14159265358979323846;
-constexpr double log_pi = 1.14472988584940017414;
-constexpr double log_2 = 0.69314718055994530942;
-constexpr double log_4 = 1.38629436111989061883;
-constexpr double half_log_2pi = 0.91893853320467274178;  // log sqrt(2 pi)
-constexpr double inv_sqrt_2pi = 0.39894228040143267794;
-LAPLACE_HD_FORCEINLINE double nan() { return m::detail::quiet_nan(); }
-LAPLACE_HD_FORCEINLINE double inf() { return m::detail::pos_inf(); }
-
-template <int N>
-LAPLACE_HD_FORCEINLINE double poly(const double (&c)[N], double x) {  // c[0] + c[1] x + ...
-  double s = c[N - 1];
-  for (int i = N - 2; i >= 0; --i) s = s * x + c[i];
-  return s;
-}
-
-template <int K>
-LAPLACE_HD_FORCEINLINE double ipow(double x) {
-  double r = 1.0;
-  for (int i = 0; i < K; ++i) r *= x;
-  return r;
-}
-
-template <int K>
-constexpr double fact() {  // K!
-  double f = 1.0;
-  for (int i = 2; i <= K; ++i) f *= i;
-  return f;
-}
-
-template <int K>
-constexpr double sgn() {  // (-1)^K
-  return K % 2 == 0 ? 1.0 : -1.0;
-}
-
-// S_K(a, b) = sum_(j=0..K-1) a^(K-1-j) b^j, every term positive for a, b > 0
-template <int K>
-LAPLACE_HD_FORCEINLINE double geo_sum(double a, double b) {
-  double s = 0.0, ap = ipow<K - 1>(a), bp = 1.0;
-  const double ia = 1.0 / a;
-  for (int j = 0; j < K; ++j) {
-    s += ap * bp;
-    ap *= ia;
-    bp *= b;
-  }
-  return s;
-}
-
-// log(1 + x^2) without overflow of x^2
-LAPLACE_HD_FORCEINLINE double log1p_sq(double x) {
-  const double ax = Kokkos::fabs(x);
-  if (ax < 1.0) return Kokkos::log1p(x * x);
-  const double i = 1.0 / ax;
-  return 2.0 * m::log(ax) + Kokkos::log1p(i * i);
-}
-
-// c a^K with the constant multiplied first, so that a partial product does not
-// go subnormal before the result does
-template <int K>
-LAPLACE_HD_FORCEINLINE double cpow(double c, double a) {
-  for (int i = 0; i < K; ++i) c *= a;
-  return c;
-}
-// d^K/dv^K of c log v, K >= 1: c (-1)^(K-1) (K-1)! / v^K
-template <int K>
-LAPLACE_HD_FORCEINLINE double log_dk(double c, double v) {
-  return cpow<K>(c * sgn<K - 1>() * fact<K - 1>(), 1.0 / v);
-}
-
-// ---------------------------------------------------------------- shared families
-
-// log cosh u: below |u| = 1 as log1p(cosh u - 1), cosh u - 1 = em^2/(2 (1 + em)),
-// em = expm1(|u|), since |u| + log1p(e^-2|u|) - log 2 cancels to u^2/2 there
-LAPLACE_HD_FORCEINLINE double log_cosh(double u) {
-  const double au = Kokkos::fabs(u);
-  if (au < 1.0) {
-    const double em = Kokkos::expm1(au);
-    return Kokkos::log1p(em * em / (2.0 * (1.0 + em)));
-  }
-  return au + Kokkos::log1p(m::exp(-2.0 * au)) - log_2;
-}
-// tanh: T and S = 1 - T^2 from e = exp(-2|u|)
-struct tanh_parts {
-  double T, S;
-};
-LAPLACE_HD_FORCEINLINE tanh_parts tanh_of(double u) {
-  const double au = Kokkos::fabs(u), e = m::exp(-2.0 * au), d = 1.0 + e;
-  const double T = Kokkos::copysign(-Kokkos::expm1(-2.0 * au) / d, u);
-  return {T, 4.0 * e / (d * d)};
-}
-// d^K tanh u = S P_K(T), K >= 1; P_K in T^2 while T^2 < 1/2, in S = 1 - T^2
-// beyond, where the T^2 form cancels
-template <int K>
-LAPLACE_HD_FORCEINLINE double tanh_dk(double u) {
-  const auto p = tanh_of(u);
-  const double T = p.T, T2 = T * T, S = p.S;
-  const bool small = T2 < 0.5;
-  if constexpr (K == 1) return S;
-  if constexpr (K == 2) return S * (-2.0 * T);
-  if constexpr (K == 3) return S * (small ? 6.0 * T2 - 2.0 : 4.0 - 6.0 * S);
-  if constexpr (K == 4) return S * T * (small ? 16.0 - 24.0 * T2 : 24.0 * S - 8.0);
-  if constexpr (K == 5) {
-    constexpr double c[] = {16.0, -120.0, 120.0};  // the same in T^2 and in S
-    return S * poly(c, small ? T2 : S);
-  }
-  if constexpr (K == 6) {
-    constexpr double a[] = {-272.0, 960.0, -720.0}, b[] = {-32.0, 480.0, -720.0};
-    return S * T * (small ? poly(a, T2) : poly(b, S));
-  }
-}
-
-// r = 1/hypot(1, x), s = x r
-struct rs_parts {
-  double r, s;
-};
-LAPLACE_HD_FORCEINLINE rs_parts rs_of(double x) {
-  const double r = 1.0 / Kokkos::hypot(1.0, x);
-  return {r, x * r};
-}
-// The polynomials below are in s^2 while s^2 < 1/2 and in r^2 = 1 - s^2
-// beyond, where the s^2 forms cancel (their terms grow to 50 times the result).
-// d^M r = r^(M+1) V_M(s)
-template <int M>
-LAPLACE_HD_FORCEINLINE double r_dm(double x) {
-  const auto p = rs_of(x);
-  const double s = p.s, s2 = s * s, r2 = p.r * p.r, rp = ipow<M + 1>(p.r);
-  const bool small = s2 < 0.5;
-  if constexpr (M == 0) return rp;
-  if constexpr (M == 1) return rp * (-s);
-  if constexpr (M == 2) return rp * (small ? 3.0 * s2 - 1.0 : 2.0 - 3.0 * r2);
-  if constexpr (M == 3) return rp * s * (small ? 9.0 - 15.0 * s2 : 15.0 * r2 - 6.0);
-  if constexpr (M == 4) {
-    constexpr double a[] = {9.0, -90.0, 105.0}, b[] = {24.0, -120.0, 105.0};
-    return rp * (small ? poly(a, s2) : poly(b, r2));
-  }
-  if constexpr (M == 5) {
-    constexpr double a[] = {-225.0, 1050.0, -945.0}, b[] = {-120.0, 840.0, -945.0};
-    return rp * s * (small ? poly(a, s2) : poly(b, r2));
-  }
-}
-// d^M r^2 = r^(M+2) W_M(s)
-template <int M>
-LAPLACE_HD_FORCEINLINE double r2_dm(double x) {
-  const auto p = rs_of(x);
-  const double s = p.s, s2 = s * s, r2 = p.r * p.r, rp = ipow<M + 2>(p.r);
-  const bool small = s2 < 0.5;
-  if constexpr (M == 0) return rp;
-  if constexpr (M == 1) return rp * (-2.0 * s);
-  if constexpr (M == 2) return rp * (small ? 8.0 * s2 - 2.0 : 6.0 - 8.0 * r2);
-  if constexpr (M == 3) return rp * s * (small ? 24.0 - 48.0 * s2 : 48.0 * r2 - 24.0);
-  if constexpr (M == 4) {
-    constexpr double a[] = {24.0, -288.0, 384.0}, b[] = {120.0, -480.0, 384.0};
-    return rp * (small ? poly(a, s2) : poly(b, r2));
-  }
-  if constexpr (M == 5) {
-    constexpr double a[] = {-720.0, 3840.0, -3840.0};  // the same in s^2 and in r^2
-    return rp * s * poly(a, small ? s2 : r2);
-  }
-}
-// d^M (s r) = r^(M+1) X_M(s)
-template <int M>
-LAPLACE_HD_FORCEINLINE double sr_dm(double x) {
-  const auto p = rs_of(x);
-  const double s = p.s, s2 = s * s, r2 = p.r * p.r, rp = ipow<M + 1>(p.r);
-  const bool small = s2 < 0.5;
-  if constexpr (M == 0) return rp * s;
-  if constexpr (M == 1) return rp * (small ? 1.0 - 2.0 * s2 : 2.0 * r2 - 1.0);
-  if constexpr (M == 2) return rp * s * (small ? 8.0 * s2 - 6.0 : 2.0 - 8.0 * r2);
-  if constexpr (M == 3) {
-    constexpr double a[] = {-6.0, 48.0, -48.0};  // the same in s^2 and in r^2
-    return rp * poly(a, small ? s2 : r2);
-  }
-  if constexpr (M == 4) {
-    constexpr double a[] = {120.0, -480.0, 384.0}, b[] = {24.0, -288.0, 384.0};
-    return rp * s * (small ? poly(a, s2) : poly(b, r2));
-  }
-  if constexpr (M == 5) {
-    constexpr double a[] = {120.0, -2160.0, 5760.0, -3840.0}, b[] = {-120.0, 2160.0, -5760.0, 3840.0};
-    return rp * (small ? poly(a, s2) : poly(b, r2));
-  }
-}
-
-// d^K/du^K (1 - exp(-e^u)), K >= 1
-template <int K>
-LAPLACE_HD_FORCEINLINE double cloglog_inv_dk(double u) {
-  const double w = m::exp(u);
-  if (!(w <= 1000.0)) return w > 1000.0 ? 0.0 : nan();
-  const double e = m::exp(u - w);
-  if constexpr (K == 1) return e;
-  if constexpr (K == 2) return e * -Kokkos::expm1(u);  // 1 - w, exact near u = 0
-  if constexpr (K == 3) {
-    constexpr double c[] = {1.0, -3.0, 1.0};
-    return e * poly(c, w);
-  }
-  if constexpr (K == 4) {
-    constexpr double c[] = {1.0, -7.0, 6.0, -1.0};
-    return e * poly(c, w);
-  }
-  if constexpr (K == 5) {
-    constexpr double c[] = {1.0, -15.0, 25.0, -10.0, 1.0};
-    return e * poly(c, w);
-  }
-  if constexpr (K == 6) {
-    constexpr double c[] = {1.0, -31.0, 90.0, -65.0, 15.0, -1.0};
-    return e * poly(c, w);
-  }
-}
-
-// phi_(s) = log(-log s) and psi(s) = -t - log(-t): K-th derivatives in s from
-// t = log s and c = 1/(s t)
-template <int K>
-LAPLACE_HD_FORCEINLINE double C_poly(double t) {
-  if constexpr (K == 1) return 1.0;
-  if constexpr (K == 2) return -(1.0 + t);
-  if constexpr (K == 3) {
-    constexpr double c[] = {2.0, 3.0, 2.0};
-    return poly(c, t);
-  }
-  if constexpr (K == 4) {
-    constexpr double c[] = {-6.0, -12.0, -11.0, -6.0};
-    return poly(c, t);
-  }
-  if constexpr (K == 5) {
-    constexpr double c[] = {24.0, 60.0, 70.0, 50.0, 24.0};
-    return poly(c, t);
-  }
-  if constexpr (K == 6) {
-    constexpr double c[] = {-120.0, -360.0, -510.0, -450.0, -274.0, -120.0};
-    return poly(c, t);
-  }
-}
-template <int K>
-LAPLACE_HD_FORCEINLINE double E_poly(double t) {
-  if constexpr (K == 1) return -(1.0 + t);
-  if constexpr (K == 2) {
-    constexpr double c[] = {1.0, 1.0, 1.0};
-    return poly(c, t);
-  }
-  if constexpr (K == 3) {
-    constexpr double c[] = {-2.0, -3.0, -2.0, -2.0};
-    return poly(c, t);
-  }
-  if constexpr (K == 4) {
-    constexpr double c[] = {6.0, 12.0, 11.0, 6.0, 6.0};
-    return poly(c, t);
-  }
-  if constexpr (K == 5) {
-    constexpr double c[] = {-24.0, -60.0, -70.0, -50.0, -24.0, -24.0};
-    return poly(c, t);
-  }
-  if constexpr (K == 6) {
-    constexpr double c[] = {120.0, 360.0, 510.0, 450.0, 274.0, 120.0, 120.0};
-    return poly(c, t);
-  }
-}
 
 // ---------------------------------------------------------------- the maps
 // fwd<K>(v): g^(K)(v), K = 0 the value; inv<K>(u): h^(K)(u);
@@ -797,41 +563,81 @@ LAPLACE_HD_FORCEINLINE double asinh_inv_lj(double u) {  // log cosh u
 }
 
 // ---------------------------------------------------------------- dispatch
+// p1, p2: the parameters of the map, in the order of its partial derivatives
+// (scalar_bijector::parameter_1/2): affine (location, scale); power, box_cox,
+// yeo_johnson (exponent); softplus (sharpness); bounded (lower, upper);
+// lower_bounded (lower); upper_bounded (upper); unused ones are ignored.
 
-LAPLACE_HD_FORCEINLINE double dom_lo(scalar_bijector_map k) {
+LAPLACE_HD_FORCEINLINE double dom_lo(scalar_bijector_map k, double p1, double p2) {
   switch (k) {
-    case scalar_bijector_map::identity:
+    case scalar_bijector_map::identity: return -inf();
     case scalar_bijector_map::asinh: return -inf();
     case scalar_bijector_map::atanh: return -1.0;
+    case scalar_bijector_map::affine: return affine_dom_lo(p1, p2);
+    case scalar_bijector_map::power: return power_dom_lo(p1, p2);
+    case scalar_bijector_map::softplus: return softplus_dom_lo(p1, p2);
+    case scalar_bijector_map::bounded: return bounded_dom_lo(p1, p2);
+    case scalar_bijector_map::lower_bounded: return lower_bounded_dom_lo(p1, p2);
+    case scalar_bijector_map::upper_bounded: return upper_bounded_dom_lo(p1, p2);
+    case scalar_bijector_map::box_cox: return box_cox_dom_lo(p1, p2);
+    case scalar_bijector_map::yeo_johnson: return yeo_johnson_dom_lo(p1, p2);
     default: return 0.0;
   }
 }
-LAPLACE_HD_FORCEINLINE double dom_hi(scalar_bijector_map k) {
+LAPLACE_HD_FORCEINLINE double dom_hi(scalar_bijector_map k, double p1, double p2) {
   switch (k) {
-    case scalar_bijector_map::logit:
-    case scalar_bijector_map::probit:
-    case scalar_bijector_map::cauchit:
-    case scalar_bijector_map::cloglog:
-    case scalar_bijector_map::loglog:
+    case scalar_bijector_map::logit: return 1.0;
+    case scalar_bijector_map::probit: return 1.0;
+    case scalar_bijector_map::cauchit: return 1.0;
+    case scalar_bijector_map::cloglog: return 1.0;
+    case scalar_bijector_map::loglog: return 1.0;
     case scalar_bijector_map::atanh: return 1.0;
+    case scalar_bijector_map::affine: return affine_dom_hi(p1, p2);
+    case scalar_bijector_map::power: return power_dom_hi(p1, p2);
+    case scalar_bijector_map::softplus: return softplus_dom_hi(p1, p2);
+    case scalar_bijector_map::bounded: return bounded_dom_hi(p1, p2);
+    case scalar_bijector_map::lower_bounded: return lower_bounded_dom_hi(p1, p2);
+    case scalar_bijector_map::upper_bounded: return upper_bounded_dom_hi(p1, p2);
+    case scalar_bijector_map::box_cox: return box_cox_dom_hi(p1, p2);
+    case scalar_bijector_map::yeo_johnson: return yeo_johnson_dom_hi(p1, p2);
     default: return inf();
   }
 }
-LAPLACE_HD_FORCEINLINE double img_lo(scalar_bijector_map k) {
+LAPLACE_HD_FORCEINLINE double img_lo(scalar_bijector_map k, double p1, double p2) {
   switch (k) {
-    case scalar_bijector_map::inverse:
-    case scalar_bijector_map::inverse_sq:
+    case scalar_bijector_map::inverse: return 0.0;
+    case scalar_bijector_map::inverse_sq: return 0.0;
     case scalar_bijector_map::sqrt: return 0.0;
+    case scalar_bijector_map::affine: return affine_img_lo(p1, p2);
+    case scalar_bijector_map::power: return power_img_lo(p1, p2);
+    case scalar_bijector_map::softplus: return softplus_img_lo(p1, p2);
+    case scalar_bijector_map::bounded: return bounded_img_lo(p1, p2);
+    case scalar_bijector_map::lower_bounded: return lower_bounded_img_lo(p1, p2);
+    case scalar_bijector_map::upper_bounded: return upper_bounded_img_lo(p1, p2);
+    case scalar_bijector_map::box_cox: return box_cox_img_lo(p1, p2);
+    case scalar_bijector_map::yeo_johnson: return yeo_johnson_img_lo(p1, p2);
     default: return -inf();
   }
 }
-LAPLACE_HD_FORCEINLINE double img_hi(scalar_bijector_map) { return inf(); }
+LAPLACE_HD_FORCEINLINE double img_hi(scalar_bijector_map k, double p1, double p2) {
+  switch (k) {
+    case scalar_bijector_map::affine: return affine_img_hi(p1, p2);
+    case scalar_bijector_map::power: return power_img_hi(p1, p2);
+    case scalar_bijector_map::softplus: return softplus_img_hi(p1, p2);
+    case scalar_bijector_map::bounded: return bounded_img_hi(p1, p2);
+    case scalar_bijector_map::lower_bounded: return lower_bounded_img_hi(p1, p2);
+    case scalar_bijector_map::upper_bounded: return upper_bounded_img_hi(p1, p2);
+    case scalar_bijector_map::box_cox: return box_cox_img_hi(p1, p2);
+    case scalar_bijector_map::yeo_johnson: return yeo_johnson_img_hi(p1, p2);
+    default: return inf();
+  }
+}
 
 LAPLACE_HD_FORCEINLINE bool inside(double x, double lo, double hi) { return x >= lo && x <= hi; }
 
 template <int K>
-LAPLACE_HD double fwd(scalar_bijector_map k, double v) {
-  if (!inside(v, dom_lo(k), dom_hi(k))) return nan();
+LAPLACE_BIJ_NOINLINE LAPLACE_HD double fwd(scalar_bijector_map k, double v, double p1, double p2) {
+  if (!inside(v, dom_lo(k, p1, p2), dom_hi(k, p1, p2))) return nan();
   switch (k) {
     case scalar_bijector_map::identity: return identity_fwd<K>(v);
     case scalar_bijector_map::log: return log_fwd<K>(v);
@@ -845,12 +651,20 @@ LAPLACE_HD double fwd(scalar_bijector_map k, double v) {
     case scalar_bijector_map::sqrt: return sqrt_fwd<K>(v);
     case scalar_bijector_map::atanh: return atanh_fwd<K>(v);
     case scalar_bijector_map::asinh: return asinh_fwd<K>(v);
+    case scalar_bijector_map::affine: return affine_fwd<K>(v, p1, p2);
+    case scalar_bijector_map::power: return power_fwd<K>(v, p1, p2);
+    case scalar_bijector_map::softplus: return softplus_fwd<K>(v, p1, p2);
+    case scalar_bijector_map::bounded: return bounded_fwd<K>(v, p1, p2);
+    case scalar_bijector_map::lower_bounded: return lower_bounded_fwd<K>(v, p1, p2);
+    case scalar_bijector_map::upper_bounded: return upper_bounded_fwd<K>(v, p1, p2);
+    case scalar_bijector_map::box_cox: return box_cox_fwd<K>(v, p1, p2);
+    case scalar_bijector_map::yeo_johnson: return yeo_johnson_fwd<K>(v, p1, p2);
   }
   return nan();
 }
 template <int K>
-LAPLACE_HD double inv(scalar_bijector_map k, double u) {
-  if (!inside(u, img_lo(k), img_hi(k))) return nan();
+LAPLACE_BIJ_NOINLINE LAPLACE_HD double inv(scalar_bijector_map k, double u, double p1, double p2) {
+  if (!inside(u, img_lo(k, p1, p2), img_hi(k, p1, p2))) return nan();
   switch (k) {
     case scalar_bijector_map::identity: return identity_fwd<K>(u);
     case scalar_bijector_map::log: return log_inv<K>(u);
@@ -864,12 +678,20 @@ LAPLACE_HD double inv(scalar_bijector_map k, double u) {
     case scalar_bijector_map::sqrt: return sqrt_inv<K>(u);
     case scalar_bijector_map::atanh: return atanh_inv<K>(u);
     case scalar_bijector_map::asinh: return asinh_inv<K>(u);
+    case scalar_bijector_map::affine: return affine_inv<K>(u, p1, p2);
+    case scalar_bijector_map::power: return power_inv<K>(u, p1, p2);
+    case scalar_bijector_map::softplus: return softplus_inv<K>(u, p1, p2);
+    case scalar_bijector_map::bounded: return bounded_inv<K>(u, p1, p2);
+    case scalar_bijector_map::lower_bounded: return lower_bounded_inv<K>(u, p1, p2);
+    case scalar_bijector_map::upper_bounded: return upper_bounded_inv<K>(u, p1, p2);
+    case scalar_bijector_map::box_cox: return box_cox_inv<K>(u, p1, p2);
+    case scalar_bijector_map::yeo_johnson: return yeo_johnson_inv<K>(u, p1, p2);
   }
   return nan();
 }
 template <int K>
-LAPLACE_HD double fwd_lj(scalar_bijector_map k, double v) {
-  if (!inside(v, dom_lo(k), dom_hi(k))) return nan();
+LAPLACE_BIJ_NOINLINE LAPLACE_HD double fwd_lj(scalar_bijector_map k, double v, double p1, double p2) {
+  if (!inside(v, dom_lo(k, p1, p2), dom_hi(k, p1, p2))) return nan();
   switch (k) {
     case scalar_bijector_map::identity: return 0.0;
     case scalar_bijector_map::log: return log_fwd_lj<K>(v);
@@ -883,12 +705,20 @@ LAPLACE_HD double fwd_lj(scalar_bijector_map k, double v) {
     case scalar_bijector_map::sqrt: return sqrt_fwd_lj<K>(v);
     case scalar_bijector_map::atanh: return atanh_fwd_lj<K>(v);
     case scalar_bijector_map::asinh: return asinh_fwd_lj<K>(v);
+    case scalar_bijector_map::affine: return affine_fwd_lj<K>(v, p1, p2);
+    case scalar_bijector_map::power: return power_fwd_lj<K>(v, p1, p2);
+    case scalar_bijector_map::softplus: return softplus_fwd_lj<K>(v, p1, p2);
+    case scalar_bijector_map::bounded: return bounded_fwd_lj<K>(v, p1, p2);
+    case scalar_bijector_map::lower_bounded: return lower_bounded_fwd_lj<K>(v, p1, p2);
+    case scalar_bijector_map::upper_bounded: return upper_bounded_fwd_lj<K>(v, p1, p2);
+    case scalar_bijector_map::box_cox: return box_cox_fwd_lj<K>(v, p1, p2);
+    case scalar_bijector_map::yeo_johnson: return yeo_johnson_fwd_lj<K>(v, p1, p2);
   }
   return nan();
 }
 template <int K>
-LAPLACE_HD double inv_lj(scalar_bijector_map k, double u) {
-  if (!inside(u, img_lo(k), img_hi(k))) return nan();
+LAPLACE_BIJ_NOINLINE LAPLACE_HD double inv_lj(scalar_bijector_map k, double u, double p1, double p2) {
+  if (!inside(u, img_lo(k, p1, p2), img_hi(k, p1, p2))) return nan();
   switch (k) {
     case scalar_bijector_map::identity: return 0.0;
     case scalar_bijector_map::log: return log_inv_lj<K>(u);
@@ -902,16 +732,117 @@ LAPLACE_HD double inv_lj(scalar_bijector_map k, double u) {
     case scalar_bijector_map::sqrt: return sqrt_inv_lj<K>(u);
     case scalar_bijector_map::atanh: return atanh_inv_lj<K>(u);
     case scalar_bijector_map::asinh: return asinh_inv_lj<K>(u);
+    case scalar_bijector_map::affine: return affine_inv_lj<K>(u, p1, p2);
+    case scalar_bijector_map::power: return power_inv_lj<K>(u, p1, p2);
+    case scalar_bijector_map::softplus: return softplus_inv_lj<K>(u, p1, p2);
+    case scalar_bijector_map::bounded: return bounded_inv_lj<K>(u, p1, p2);
+    case scalar_bijector_map::lower_bounded: return lower_bounded_inv_lj<K>(u, p1, p2);
+    case scalar_bijector_map::upper_bounded: return upper_bounded_inv_lj<K>(u, p1, p2);
+    case scalar_bijector_map::box_cox: return box_cox_inv_lj<K>(u, p1, p2);
+    case scalar_bijector_map::yeo_johnson: return yeo_johnson_inv_lj<K>(u, p1, p2);
   }
   return nan();
+}
+
+// Partial derivatives of total order K in (argument, p1, p2), written to out[]
+// in the order of bijector_partials<K>. Maps without parameters, and power
+// (no derivatives in its exponent), give the pure derivative in c[0]; the
+// others are 0 for maps without parameters and NaN for power.
+template <int K>
+LAPLACE_BIJ_NOINLINE LAPLACE_HD void fwd_partials(scalar_bijector_map k, double x, double p1, double p2, double* out) {
+  constexpr int n = (K + 1) * (K + 2) / 2;
+  if (!inside(x, dom_lo(k, p1, p2), dom_hi(k, p1, p2))) {
+    for (int i = 0; i < n; ++i) out[i] = nan();
+    return;
+  }
+  switch (k) {
+    case scalar_bijector_map::affine: affine_fwd_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::softplus: softplus_fwd_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::bounded: bounded_fwd_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::lower_bounded: lower_bounded_fwd_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::upper_bounded: upper_bounded_fwd_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::box_cox: box_cox_fwd_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::yeo_johnson: yeo_johnson_fwd_partials<K>(x, p1, p2, out); return;
+    default: {
+      const double fill = k == scalar_bijector_map::power ? nan() : 0.0;
+      out[0] = fwd<K>(k, x, p1, p2);
+      for (int i = 1; i < n; ++i) out[i] = fill;
+    }
+  }
+}
+template <int K>
+LAPLACE_BIJ_NOINLINE LAPLACE_HD void inv_partials(scalar_bijector_map k, double x, double p1, double p2, double* out) {
+  constexpr int n = (K + 1) * (K + 2) / 2;
+  if (!inside(x, img_lo(k, p1, p2), img_hi(k, p1, p2))) {
+    for (int i = 0; i < n; ++i) out[i] = nan();
+    return;
+  }
+  switch (k) {
+    case scalar_bijector_map::affine: affine_inv_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::softplus: softplus_inv_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::bounded: bounded_inv_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::lower_bounded: lower_bounded_inv_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::upper_bounded: upper_bounded_inv_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::box_cox: box_cox_inv_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::yeo_johnson: yeo_johnson_inv_partials<K>(x, p1, p2, out); return;
+    default: {
+      const double fill = k == scalar_bijector_map::power ? nan() : 0.0;
+      out[0] = inv<K>(k, x, p1, p2);
+      for (int i = 1; i < n; ++i) out[i] = fill;
+    }
+  }
+}
+template <int K>
+LAPLACE_BIJ_NOINLINE LAPLACE_HD void fwd_lj_partials(scalar_bijector_map k, double x, double p1, double p2, double* out) {
+  constexpr int n = (K + 1) * (K + 2) / 2;
+  if (!inside(x, dom_lo(k, p1, p2), dom_hi(k, p1, p2))) {
+    for (int i = 0; i < n; ++i) out[i] = nan();
+    return;
+  }
+  switch (k) {
+    case scalar_bijector_map::affine: affine_fwd_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::softplus: softplus_fwd_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::bounded: bounded_fwd_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::lower_bounded: lower_bounded_fwd_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::upper_bounded: upper_bounded_fwd_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::box_cox: box_cox_fwd_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::yeo_johnson: yeo_johnson_fwd_lj_partials<K>(x, p1, p2, out); return;
+    default: {
+      const double fill = k == scalar_bijector_map::power ? nan() : 0.0;
+      out[0] = fwd_lj<K>(k, x, p1, p2);
+      for (int i = 1; i < n; ++i) out[i] = fill;
+    }
+  }
+}
+template <int K>
+LAPLACE_BIJ_NOINLINE LAPLACE_HD void inv_lj_partials(scalar_bijector_map k, double x, double p1, double p2, double* out) {
+  constexpr int n = (K + 1) * (K + 2) / 2;
+  if (!inside(x, img_lo(k, p1, p2), img_hi(k, p1, p2))) {
+    for (int i = 0; i < n; ++i) out[i] = nan();
+    return;
+  }
+  switch (k) {
+    case scalar_bijector_map::affine: affine_inv_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::softplus: softplus_inv_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::bounded: bounded_inv_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::lower_bounded: lower_bounded_inv_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::upper_bounded: upper_bounded_inv_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::box_cox: box_cox_inv_lj_partials<K>(x, p1, p2, out); return;
+    case scalar_bijector_map::yeo_johnson: yeo_johnson_inv_lj_partials<K>(x, p1, p2, out); return;
+    default: {
+      const double fill = k == scalar_bijector_map::power ? nan() : 0.0;
+      out[0] = inv_lj<K>(k, x, p1, p2);
+      for (int i = 1; i < n; ++i) out[i] = fill;
+    }
+  }
 }
 
 // The distances of h(u) to the bounds of its range (the domain of g), computed
 // without forming h, where h saturates at a bound other than 0 or infinity:
 // 1 - h(u) of logit is expit(-u), exact while 1 - expit(u) has rounded to 0
 // from u = 37.4. Elsewhere the bound minus h(u) (exact for a bound 0 or infinite).
-LAPLACE_HD double inv_to_upper(scalar_bijector_map k, double u) {
-  if (!inside(u, img_lo(k), img_hi(k))) return nan();
+LAPLACE_BIJ_NOINLINE LAPLACE_HD double inv_to_upper(scalar_bijector_map k, double u, double p1, double p2) {
+  if (!inside(u, img_lo(k, p1, p2), img_hi(k, p1, p2))) return nan();
   switch (k) {
     case scalar_bijector_map::logit: return logit_inv<0>(-u);
     case scalar_bijector_map::probit: return m::Phi(-u);
@@ -923,779 +854,1223 @@ LAPLACE_HD double inv_to_upper(scalar_bijector_map k, double u) {
       const double e = m::exp(-2.0 * u);
       return 2.0 * e / (1.0 + e);
     }
-    default: return dom_hi(k) - inv<0>(k, u);
+    case scalar_bijector_map::affine: return affine_inv_to_upper(u, p1, p2);
+    case scalar_bijector_map::power: return power_inv_to_upper(u, p1, p2);
+    case scalar_bijector_map::softplus: return softplus_inv_to_upper(u, p1, p2);
+    case scalar_bijector_map::bounded: return bounded_inv_to_upper(u, p1, p2);
+    case scalar_bijector_map::lower_bounded: return lower_bounded_inv_to_upper(u, p1, p2);
+    case scalar_bijector_map::upper_bounded: return upper_bounded_inv_to_upper(u, p1, p2);
+    case scalar_bijector_map::box_cox: return box_cox_inv_to_upper(u, p1, p2);
+    case scalar_bijector_map::yeo_johnson: return yeo_johnson_inv_to_upper(u, p1, p2);
+    default: return dom_hi(k, p1, p2) - inv<0>(k, u, p1, p2);
   }
 }
-LAPLACE_HD double inv_to_lower(scalar_bijector_map k, double u) {
-  if (k == scalar_bijector_map::atanh) return inv_to_upper(k, -u);  // 1 + tanh u
-  if (!inside(u, img_lo(k), img_hi(k))) return nan();
-  return inv<0>(k, u) - dom_lo(k);
+LAPLACE_BIJ_NOINLINE LAPLACE_HD double inv_to_lower(scalar_bijector_map k, double u, double p1, double p2) {
+  if (k == scalar_bijector_map::atanh) return inv_to_upper(k, -u, p1, p2);  // 1 + tanh u
+  if (!inside(u, img_lo(k, p1, p2), img_hi(k, p1, p2))) return nan();
+  switch (k) {
+    case scalar_bijector_map::affine: return affine_inv_to_lower(u, p1, p2);
+    case scalar_bijector_map::power: return power_inv_to_lower(u, p1, p2);
+    case scalar_bijector_map::softplus: return softplus_inv_to_lower(u, p1, p2);
+    case scalar_bijector_map::bounded: return bounded_inv_to_lower(u, p1, p2);
+    case scalar_bijector_map::lower_bounded: return lower_bounded_inv_to_lower(u, p1, p2);
+    case scalar_bijector_map::upper_bounded: return upper_bounded_inv_to_lower(u, p1, p2);
+    case scalar_bijector_map::box_cox: return box_cox_inv_to_lower(u, p1, p2);
+    case scalar_bijector_map::yeo_johnson: return yeo_johnson_inv_to_lower(u, p1, p2);
+    default: return inv<0>(k, u, p1, p2) - dom_lo(k, p1, p2);
+  }
 }
 
 }  // namespace detail_scalar
 
 // ---------------------------------------------------------------- the bijector
 
-// A scalar bijector: the map and the inversion flag (inverted: forward is h).
-// Every quantity is a member function, one per order; an inverted bijector
-// swaps the two directions of every pair.
+// The partial derivatives of total order K of a quantity of a scalar bijector in
+// (argument, parameter 1, parameter 2): one component per multiset of K
+// variables, n0 + n1 + n2 = K, ordered by n2 and then by n1, so that the pure
+// derivative in the argument is c[0] and a map with one parameter fills the first
+// K + 1 components. index(n1, n2) gives the position.
 /**
  * \ingroup bijector_scalar
- * \brief Configuration and evaluation struct for scalar bijectors without parameters.
+ * \brief Partial derivatives of total order \f$K\f$ of a bijector quantity in argument and parameters.
  *
- * Represents a scalar bijection \f$g: V \to U\f$ between open intervals \f$V, U \subseteq \mathbb{R}\f$,
- * with inverse \f$h = g^{-1}: U \to V\f$.
+ * Holds the derivatives \f$\frac{\partial^K}{\partial x^{n_0} \partial p_1^{n_1} \partial p_2^{n_2}} f\f$
+ * with \f$n_0 + n_1 + n_2 = K\f$ in an array of size \f$(K + 1)(K + 2) / 2\f$. Components are ordered
+ * by \f$n_2\f$ and then by \f$n_1\f$, accessible via index() as
+ * \f$\mathrm{index}(n_1, n_2) = n_2 (K + 1) - n_2 (n_2 - 1) / 2 + n_1\f$.
  *
- * Holds two data members:
- * - \c map : the chosen bijection (\ref scalar_bijector_map).
- * - \c inverted : whether the bijector is inverted (\c bool).
+ * Component \c c[0] (\f$n_1 = n_2 = 0\f$) is the pure derivative in the argument. A map with one
+ * parameter fills the first \f$K + 1\f$ components (\f$n_2 = 0\f$) and leaves the rest zero.
+ * Maps without parameters have component \c c[0] equal to the pure derivative and the remaining
+ * components zero. For \c power, components involving the exponent are NaN.
  *
- * Every numerical quantity, derivative, log-Jacobian, domain bound, and distance to bounds is a member function.
- * Inverting a bijector (\c inverted = \c true) swaps every pair of forward and inverse operations:
- * forward() evaluates \f$h\f$, inverse() evaluates \f$g\f$, forward_log_jacobian() evaluates \f$\log|h'|\f$,
- * inverse_log_jacobian() evaluates \f$\log|g'|\f$, forward_domain_lower() and forward_domain_upper()
- * return the bounds of \f$U\f$, and inverse_domain_lower() and inverse_domain_upper() return the bounds of \f$V\f$.
+ * \tparam K Total derivative order, \f$1 \le K \le 6\f$.
+ * \see scalar_bijector, bijector_scalar
+ */
+template <int K>
+struct bijector_partials {
+  static constexpr int size = (K + 1) * (K + 2) / 2;
+  double c[size];
+  /**
+   * \brief Computes the component index in array \c c for derivative orders \f$(n_1, n_2)\f$.
+   * \param n1 Order of differentiation in parameter 1.
+   * \param n2 Order of differentiation in parameter 2.
+   * \return Index \f$n_2 (K + 1) - n_2 (n_2 - 1) / 2 + n_1\f$.
+   */
+  LAPLACE_HD static constexpr int index(int n1, int n2) { return n2 * (K + 1) - n2 * (n2 - 1) / 2 + n1; }
+};
+
+// The points at which a map is not smooth: count of them (0 or 1 for a scalar
+// map, up to 4 for a chain), their positions, and the order up to which the map
+// stays continuous there (2 for Yeo-Johnson: its third derivative jumps). At the
+// point itself the derivatives are the right-hand ones.
+/**
+ * \ingroup bijector_scalar
+ * \brief Information about points where a scalar bijector is not smooth.
  *
- * Example:
- * \code{.cpp}
- * const scalar_bijector logit{scalar_bijector_map::logit};
- * double p = logit.inverse(u);
- * \endcode
+ * Declares the non-smooth points: \c count (0 or 1 for a single scalar map),
+ * \c point (positions of the kinks, up to 4), and \c continuous_order (the order
+ * up to which the map remains continuous). For Yeo-Johnson, \c count is 1 at
+ * \f$v = 0\f$ (\f$u = 0\f$) with \c continuous_order equal to 2 (its third
+ * derivative jumps across zero unless \f$\lambda = 1\f$). At the kink itself,
+ * derivatives follow the right-hand convention.
  *
- * \see bijector_scalar, scalar_bijector_map, forward(), inverse()
+ * \see scalar_bijector::forward_kinks(), scalar_bijector::inverse_kinks(), bijector_scalar
+ */
+struct bijector_kinks {
+  int count = 0;
+  double point[4] = {0.0, 0.0, 0.0, 0.0};
+  int continuous_order = 0;
+};
+
+// A scalar bijector: the map, the inversion flag (inverted: forward is h) and the
+// parameters of the maps that have them; each map reads only its own. Every
+// quantity is a member function, one per order; an inverted bijector swaps the
+// two directions of every pair.
+/**
+ * \ingroup bijector_scalar
+ * \brief Configuration and evaluation structure for scalar bijectors.
+ *
+ * Holds the map selection (\c map), an inversion flag (\c inverted), and parameters:
+ * - \c location : location parameter \f$\mu\f$ for \c affine.
+ * - \c scale : scale parameter \f$\sigma \neq 0\f$ for \c affine.
+ * - \c exponent : power or shape parameter \f$\lambda\f$ for \c power (\f$\lambda \neq 0\f$),
+ *   \c box_cox, and \c yeo_johnson.
+ * - \c sharpness : sharpness parameter \f$a > 0\f$ for \c softplus.
+ * - \c lower : lower bound \f$a\f$ for \c bounded and \c lower_bounded.
+ * - \c upper : upper bound \f$b\f$ for \c bounded and \c upper_bounded.
+ *
+ * Each map reads only its own fields; other fields are ignored. Every mathematical quantity
+ * is evaluated via member functions. An inverted bijector (\c inverted == true) swaps the forward
+ * and inverse directions for every member function.
+ *
+ * \see scalar_bijector_map, bijector_partials, bijector_kinks, bijector_scalar
  */
 struct scalar_bijector {
   scalar_bijector_map map = scalar_bijector_map::identity;
   bool inverted = false;
+  double location = 0.0;   // affine
+  double scale = 1.0;      // affine, != 0
+  double exponent = 1.0;   // power (!= 0), box_cox, yeo_johnson
+  double sharpness = 1.0;  // softplus, > 0
+  double lower = 0.0;      // bounded, lower_bounded
+  double upper = 1.0;      // bounded, upper_bounded
+
+  // construction of the maps with parameters; power normalizes its special
+  // exponents to the named maps (1 identity, 1/2 sqrt, -1 inverse, -2 inverse_sq,
+  // 0 log). Invalid parameters give a bijector whose functions return NaN.
+  /**
+   * \ingroup bijector_scalar
+   * \brief Constructs an affine scalar bijector \f$g(v) = (v - \mu) / \sigma\f$.
+   * \param location_ Location parameter \f$\mu\f$.
+   * \param scale_ Nonzero scale parameter \f$\sigma\f$.
+   * \return Configured scalar_bijector for \c affine. If \f$\sigma = 0\f$ or parameters are non-finite, evaluations return NaN.
+   * \see scalar_bijector, bijector_scalar
+   */
+  LAPLACE_HD static scalar_bijector affine(double location_, double scale_) {
+    scalar_bijector b{scalar_bijector_map::affine};
+    b.location = location_;
+    b.scale = scale_;
+    return b;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Constructs a power scalar bijector \f$g(v) = v^\lambda\f$.
+   *
+   * Normalizes special exponents to the corresponding parameter-free maps:
+   * \f$\lambda = 1\f$ to \c identity, \f$\lambda = 0.5\f$ to \c sqrt, \f$\lambda = -1\f$ to \c inverse,
+   * \f$\lambda = -2\f$ to \c inverse_sq, and \f$\lambda = 0\f$ to \c log.
+   * \param exponent_ Exponent \f$\lambda \neq 0\f$.
+   * \return Configured scalar_bijector for \c power or the normalized map. If \f$\lambda\f$ is non-finite, evaluations return NaN.
+   * \see scalar_bijector, bijector_scalar
+   */
+  LAPLACE_HD static scalar_bijector power(double exponent_) {
+    if (exponent_ == 1.0) return scalar_bijector{scalar_bijector_map::identity};
+    if (exponent_ == 0.5) return scalar_bijector{scalar_bijector_map::sqrt};
+    if (exponent_ == -1.0) return scalar_bijector{scalar_bijector_map::inverse};
+    if (exponent_ == -2.0) return scalar_bijector{scalar_bijector_map::inverse_sq};
+    if (exponent_ == 0.0) return scalar_bijector{scalar_bijector_map::log};
+    scalar_bijector b{scalar_bijector_map::power};
+    b.exponent = exponent_;
+    return b;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Constructs a softplus scalar bijector \f$g(v) = \frac{1}{a}\log(e^{a v} - 1)\f$.
+   * \param sharpness_ Sharpness parameter \f$a > 0\f$.
+   * \return Configured scalar_bijector for \c softplus. If \f$a \le 0\f$ or non-finite, evaluations return NaN.
+   * \see scalar_bijector, bijector_scalar
+   */
+  LAPLACE_HD static scalar_bijector softplus(double sharpness_) {
+    scalar_bijector b{scalar_bijector_map::softplus};
+    b.sharpness = sharpness_;
+    return b;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Constructs a Box-Cox scalar bijector \f$g(v) = (v^\lambda - 1)/\lambda\f$.
+   * \param exponent_ Exponent parameter \f$\lambda\f$ (\f$\log v\f$ at \f$\lambda = 0\f$).
+   * \return Configured scalar_bijector for \c box_cox. If \f$\lambda\f$ is non-finite, evaluations return NaN.
+   * \see scalar_bijector, bijector_scalar
+   */
+  LAPLACE_HD static scalar_bijector box_cox(double exponent_) {
+    scalar_bijector b{scalar_bijector_map::box_cox};
+    b.exponent = exponent_;
+    return b;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Constructs a Yeo-Johnson scalar bijector.
+   * \param exponent_ Exponent parameter \f$\lambda\f$.
+   * \return Configured scalar_bijector for \c yeo_johnson. If \f$\lambda\f$ is non-finite, evaluations return NaN.
+   * \see scalar_bijector, bijector_scalar
+   */
+  LAPLACE_HD static scalar_bijector yeo_johnson(double exponent_) {
+    scalar_bijector b{scalar_bijector_map::yeo_johnson};
+    b.exponent = exponent_;
+    return b;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Constructs a lower-bounded scalar bijector \f$g(v) = \log(v - a)\f$.
+   * \param lower_ Finite lower bound \f$a\f$.
+   * \return Configured scalar_bijector for \c lower_bounded. If \f$a\f$ is non-finite, evaluations return NaN.
+   * \see scalar_bijector, bijector_scalar
+   */
+  LAPLACE_HD static scalar_bijector lower_bounded(double lower_) {
+    scalar_bijector b{scalar_bijector_map::lower_bounded};
+    b.lower = lower_;
+    return b;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Constructs an upper-bounded scalar bijector \f$g(v) = -\log(b - v)\f$.
+   * \param upper_ Finite upper bound \f$b\f$.
+   * \return Configured scalar_bijector for \c upper_bounded. If \f$b\f$ is non-finite, evaluations return NaN.
+   * \see scalar_bijector, bijector_scalar
+   */
+  LAPLACE_HD static scalar_bijector upper_bounded(double upper_) {
+    scalar_bijector b{scalar_bijector_map::upper_bounded};
+    b.upper = upper_;
+    return b;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Constructs a bounded scalar bijector \f$g(v) = \log(v - a) - \log(b - v)\f$.
+   * \param lower_ Finite lower bound \f$a\f$.
+   * \param upper_ Finite upper bound \f$b\f$ with \f$a < b\f$.
+   * \return Configured scalar_bijector for \c bounded. If \f$a \ge b\f$ or bounds are non-finite, evaluations return NaN.
+   * \see scalar_bijector, bijector_scalar
+   */
+  LAPLACE_HD static scalar_bijector bounded(double lower_, double upper_) {
+    scalar_bijector b{scalar_bijector_map::bounded};
+    b.lower = lower_;
+    b.upper = upper_;
+    return b;
+  }
+
+  // the parameters in the order of the partial derivatives (see the dispatch)
+  /**
+   * \ingroup bijector_scalar
+   * \brief Returns the first parameter of the map in the order of partial derivatives.
+   *
+   * Returns \c location for \c affine; \c exponent for \c power, \c box_cox, and \c yeo_johnson;
+   * \c sharpness for \c softplus; \c lower for \c bounded and \c lower_bounded;
+   * \c upper for \c upper_bounded; and \f$0.0\f$ otherwise.
+   * \return First parameter value.
+   * \see parameter_2(), parameter_count(), bijector_scalar
+   */
+  LAPLACE_HD double parameter_1() const {
+    switch (map) {
+      case scalar_bijector_map::affine: return location;
+      case scalar_bijector_map::power:
+      case scalar_bijector_map::box_cox:
+      case scalar_bijector_map::yeo_johnson: return exponent;
+      case scalar_bijector_map::softplus: return sharpness;
+      case scalar_bijector_map::bounded:
+      case scalar_bijector_map::lower_bounded: return lower;
+      case scalar_bijector_map::upper_bounded: return upper;
+      default: return 0.0;
+    }
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Returns the second parameter of the map in the order of partial derivatives.
+   *
+   * Returns \c scale for \c affine; \c upper for \c bounded; and \f$0.0\f$ otherwise.
+   * \return Second parameter value.
+   * \see parameter_1(), parameter_count(), bijector_scalar
+   */
+  LAPLACE_HD double parameter_2() const {
+    switch (map) {
+      case scalar_bijector_map::affine: return scale;
+      case scalar_bijector_map::bounded: return upper;
+      default: return 0.0;
+    }
+  }
+  // the number of parameters with partial derivatives (0 for power)
+  /**
+   * \ingroup bijector_scalar
+   * \brief Returns the number of parameters with partial derivatives.
+   *
+   * Returns 2 for \c affine and \c bounded; 1 for \c softplus, \c lower_bounded, \c upper_bounded,
+   * \c box_cox, and \c yeo_johnson; and 0 for \c power and parameter-free maps.
+   * \return Count of differentiated parameters (0, 1, or 2).
+   * \see parameter_1(), parameter_2(), bijector_scalar
+   */
+  LAPLACE_HD int parameter_count() const {
+    switch (map) {
+      case scalar_bijector_map::affine:
+      case scalar_bijector_map::bounded: return 2;
+      case scalar_bijector_map::softplus:
+      case scalar_bijector_map::lower_bounded:
+      case scalar_bijector_map::upper_bounded:
+      case scalar_bijector_map::box_cox:
+      case scalar_bijector_map::yeo_johnson: return 1;
+      default: return 0;
+    }
+  }
 
   // g and its derivatives; h and its derivatives
   /**
    * \ingroup bijector_scalar
    * \brief Evaluates the forward map \f$g(v)\f$.
    *
-   * Computes \f$u = g(v)\f$ mapping domain \f$V\f$ to image \f$U\f$.
-   * When inverted, evaluates \f$h(v)\f$ instead.
+   * Maps an argument \f$v\f$ from the domain \f$V\f$ to \f$u = g(v) \in U\f$.
+   * When inverted is true, evaluates the inverse map \f$h(v)\f$.
    *
-   * \param v Input argument \f$v \in V\f$.
-   * \return The transformed value \f$g(v)\f$, or \f$h(v)\f$ if inverted.
+   * \param v Point in the domain of the forward map.
+   * \return Value \f$g(v)\f$. Outside the closed domain or for invalid parameters, returns quiet NaN.
+   *         On domain boundaries, returns the mathematical limit.
    *
-   * \par Domain and special values
-   * - Standard domain is \f$[v_{\min}, v_{\max}]\f$ given by forward_domain_lower() and forward_domain_upper().
-   * - On boundaries, returns the mathematical limits (for example, \f$\mathrm{logit}(0) = -\infty\f$, \f$\mathrm{logit}(1) = +\infty\f$, \f$\log(0) = -\infty\f$).
-   * - If \f$v\f$ is strictly outside the closed domain or is NaN, returns quiet NaN.
-   *
-   * \par Measured accuracy
-   * Over orders 0 to 6, maximum error in ulpC on gcc / CUDA: log 3.84 / 3.84; logit 3.17 / 3.17; probit 6.17 / 6.17; cauchit 6.19 / 6.19; cloglog 6.73 / 3.12; loglog 4.58 / 3.23; inverse 3.92 / 3.92; inverse_sq 3.09 / 3.09; sqrt 10.9 / 10.9; atanh 2.78 / 2.78; asinh 8.55 / 9.49. The measured plain-ulp errors of the forward value itself, on gcc, are 30.9 ulp for cloglog and 1050 ulp for loglog (near its zero at \f$v = 1/e\f$), within 4.1 ulp for the other maps.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse(), forward_d1(), forward_log_jacobian(), forward_domain_lower(), forward_domain_upper()
+   * Measured accuracy: within 10.9 ulpC for parameter-free maps and within 26 ulpC for maps with parameters.
+   * \see inverse(), forward_d1(), forward_log_jacobian(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward(double v) const {
-    return inverted ? detail_scalar::inv<0>(map, v) : detail_scalar::fwd<0>(map, v);
+    return inverted ? detail_scalar::inv<0>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd<0>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief First derivative of the forward map, \f$g'(v) = \frac{\mathrm{d}}{\mathrm{d}v}g(v)\f$.
+   * \brief Evaluates the first derivative of the forward map, \f$g'(v)\f$.
    *
-   * Computes the first derivative of \f$g(v)\f$ (or \f$h'(v)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return First derivative \f$g'(v)\f$, or \f$h'(v)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward(), forward_d2()
+   * When inverted is true, evaluates \f$h'(v)\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return First derivative \f$g'(v)\f$, or NaN outside the closed domain.
+   * \see forward(), forward_d2(), forward_log_jacobian(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_d1(double v) const {
-    return inverted ? detail_scalar::inv<1>(map, v) : detail_scalar::fwd<1>(map, v);
+    return inverted ? detail_scalar::inv<1>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd<1>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Second derivative of the forward map, \f$g''(v) = \frac{\mathrm{d}^2}{\mathrm{d}v^2}g(v)\f$.
+   * \brief Evaluates the second derivative of the forward map, \f$g''(v)\f$.
    *
-   * Computes the second derivative of \f$g(v)\f$ (or \f$h''(v)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return Second derivative \f$g''(v)\f$, or \f$h''(v)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward(), forward_d1(), forward_d3()
+   * When inverted is true, evaluates \f$h''(v)\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Second derivative \f$g''(v)\f$, or NaN outside the closed domain.
+   * \see forward(), forward_d1(), forward_d3(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_d2(double v) const {
-    return inverted ? detail_scalar::inv<2>(map, v) : detail_scalar::fwd<2>(map, v);
+    return inverted ? detail_scalar::inv<2>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd<2>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Third derivative of the forward map, \f$g^{(3)}(v) = \frac{\mathrm{d}^3}{\mathrm{d}v^3}g(v)\f$.
+   * \brief Evaluates the third derivative of the forward map, \f$g^{(3)}(v)\f$.
    *
-   * Computes the third derivative of \f$g(v)\f$ (or \f$h^{(3)}(v)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return Third derivative \f$g^{(3)}(v)\f$, or \f$h^{(3)}(v)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward(), forward_d2(), forward_d4()
+   * When inverted is true, evaluates \f$h^{(3)}(v)\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Third derivative \f$g^{(3)}(v)\f$, or NaN outside the closed domain.
+   * \see forward(), forward_d2(), forward_d4(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_d3(double v) const {
-    return inverted ? detail_scalar::inv<3>(map, v) : detail_scalar::fwd<3>(map, v);
+    return inverted ? detail_scalar::inv<3>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd<3>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Fourth derivative of the forward map, \f$g^{(4)}(v) = \frac{\mathrm{d}^4}{\mathrm{d}v^4}g(v)\f$.
+   * \brief Evaluates the fourth derivative of the forward map, \f$g^{(4)}(v)\f$.
    *
-   * Computes the fourth derivative of \f$g(v)\f$ (or \f$h^{(4)}(v)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return Fourth derivative \f$g^{(4)}(v)\f$, or \f$h^{(4)}(v)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward(), forward_d3(), forward_d5()
+   * When inverted is true, evaluates \f$h^{(4)}(v)\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Fourth derivative \f$g^{(4)}(v)\f$, or NaN outside the closed domain.
+   * \see forward(), forward_d3(), forward_d5(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_d4(double v) const {
-    return inverted ? detail_scalar::inv<4>(map, v) : detail_scalar::fwd<4>(map, v);
+    return inverted ? detail_scalar::inv<4>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd<4>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Fifth derivative of the forward map, \f$g^{(5)}(v) = \frac{\mathrm{d}^5}{\mathrm{d}v^5}g(v)\f$.
+   * \brief Evaluates the fifth derivative of the forward map, \f$g^{(5)}(v)\f$.
    *
-   * Computes the fifth derivative of \f$g(v)\f$ (or \f$h^{(5)}(v)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return Fifth derivative \f$g^{(5)}(v)\f$, or \f$h^{(5)}(v)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward(), forward_d4(), forward_d6()
+   * When inverted is true, evaluates \f$h^{(5)}(v)\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Fifth derivative \f$g^{(5)}(v)\f$, or NaN outside the closed domain.
+   * \see forward(), forward_d4(), forward_d6(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_d5(double v) const {
-    return inverted ? detail_scalar::inv<5>(map, v) : detail_scalar::fwd<5>(map, v);
+    return inverted ? detail_scalar::inv<5>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd<5>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Sixth derivative of the forward map, \f$g^{(6)}(v) = \frac{\mathrm{d}^6}{\mathrm{d}v^6}g(v)\f$.
+   * \brief Evaluates the sixth derivative of the forward map, \f$g^{(6)}(v)\f$.
    *
-   * Computes the sixth derivative of \f$g(v)\f$ (or \f$h^{(6)}(v)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return Sixth derivative \f$g^{(6)}(v)\f$, or \f$h^{(6)}(v)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward(), forward_d5()
+   * When inverted is true, evaluates \f$h^{(6)}(v)\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Sixth derivative \f$g^{(6)}(v)\f$, or NaN outside the closed domain.
+   * \see forward(), forward_d5(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_d6(double v) const {
-    return inverted ? detail_scalar::inv<6>(map, v) : detail_scalar::fwd<6>(map, v);
+    return inverted ? detail_scalar::inv<6>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd<6>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
    * \brief Evaluates the inverse map \f$h(u) = g^{-1}(u)\f$.
    *
-   * Computes \f$v = h(u)\f$ mapping image \f$U\f$ to domain \f$V\f$.
-   * When inverted, evaluates \f$g(u)\f$ instead.
+   * Maps an argument \f$u\f$ from the image \f$U\f$ back to \f$v = h(u) \in V\f$.
+   * When inverted is true, evaluates the forward map \f$g(u)\f$.
    *
-   * \param u Input argument \f$u \in U\f$.
-   * \return The transformed value \f$h(u)\f$, or \f$g(u)\f$ if inverted.
+   * \param u Point in the domain of the inverse map.
+   * \return Value \f$h(u)\f$. Outside the closed domain or for invalid parameters, returns quiet NaN.
+   *         On domain boundaries, returns the mathematical limit.
    *
-   * \par Domain and special values
-   * - Standard domain is \f$[u_{\min}, u_{\max}]\f$ given by inverse_domain_lower() and inverse_domain_upper().
-   * - On boundaries, returns the mathematical limits (for example, \f$\Phi(-\infty) = 0\f$, \f$\Phi(+\infty) = 1\f$).
-   * - If \f$u\f$ is strictly outside the closed domain or is NaN, returns quiet NaN.
-   *
-   * \par Measured accuracy
-   * Over orders 0 to 6, maximum error in ulpC on gcc / CUDA: log 0.574 / 0.574; logit 10.5 / 10.1; probit 2.28 / 2.28; cauchit 8.63 / 8.63; cloglog 9.98 / 7.61; loglog 11 / 8.49; inverse 3.25 / 3.25; inverse_sq 7.29 / 7.29; sqrt 0.246 / 0.246; atanh 2.67 / 1.67; asinh 0.494 / 0.622. Values (order 0) are within 4.1 ulp on gcc except where ill-conditioned.
-   *
-   * \see bijector_scalar, scalar_bijector, forward(), inverse_d1(), inverse_log_jacobian(), inverse_domain_lower(), inverse_domain_upper()
+   * Measured accuracy: within 11 ulpC for parameter-free maps and within 42.8 ulpC (gcc) / 46.3 ulpC (CUDA) for maps with parameters.
+   * \see forward(), inverse_d1(), inverse_log_jacobian(), inverse_distance_upper(), inverse_distance_lower(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse(double u) const {
-    return inverted ? detail_scalar::fwd<0>(map, u) : detail_scalar::inv<0>(map, u);
+    return inverted ? detail_scalar::fwd<0>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv<0>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief First derivative of the inverse map, \f$h'(u) = \frac{\mathrm{d}}{\mathrm{d}u}h(u)\f$.
+   * \brief Evaluates the first derivative of the inverse map, \f$h'(u)\f$.
    *
-   * Computes the first derivative of \f$h(u)\f$ (or \f$g'(u)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return First derivative \f$h'(u)\f$, or \f$g'(u)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse(), inverse_d2()
+   * When inverted is true, evaluates \f$g'(u)\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return First derivative \f$h'(u)\f$, or NaN outside the closed domain.
+   * \see inverse(), inverse_d2(), inverse_log_jacobian(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_d1(double u) const {
-    return inverted ? detail_scalar::fwd<1>(map, u) : detail_scalar::inv<1>(map, u);
+    return inverted ? detail_scalar::fwd<1>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv<1>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Second derivative of the inverse map, \f$h''(u) = \frac{\mathrm{d}^2}{\mathrm{d}u^2}h(u)\f$.
+   * \brief Evaluates the second derivative of the inverse map, \f$h''(u)\f$.
    *
-   * Computes the second derivative of \f$h(u)\f$ (or \f$g''(u)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return Second derivative \f$h''(u)\f$, or \f$g''(u)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse(), inverse_d1(), inverse_d3()
+   * When inverted is true, evaluates \f$g''(u)\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Second derivative \f$h''(u)\f$, or NaN outside the closed domain.
+   * \see inverse(), inverse_d1(), inverse_d3(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_d2(double u) const {
-    return inverted ? detail_scalar::fwd<2>(map, u) : detail_scalar::inv<2>(map, u);
+    return inverted ? detail_scalar::fwd<2>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv<2>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Third derivative of the inverse map, \f$h^{(3)}(u) = \frac{\mathrm{d}^3}{\mathrm{d}u^3}h(u)\f$.
+   * \brief Evaluates the third derivative of the inverse map, \f$h^{(3)}(u)\f$.
    *
-   * Computes the third derivative of \f$h(u)\f$ (or \f$g^{(3)}(u)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return Third derivative \f$h^{(3)}(u)\f$, or \f$g^{(3)}(u)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse(), inverse_d2(), inverse_d4()
+   * When inverted is true, evaluates \f$g^{(3)}(u)\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Third derivative \f$h^{(3)}(u)\f$, or NaN outside the closed domain.
+   * \see inverse(), inverse_d2(), inverse_d4(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_d3(double u) const {
-    return inverted ? detail_scalar::fwd<3>(map, u) : detail_scalar::inv<3>(map, u);
+    return inverted ? detail_scalar::fwd<3>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv<3>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Fourth derivative of the inverse map, \f$h^{(4)}(u) = \frac{\mathrm{d}^4}{\mathrm{d}u^4}h(u)\f$.
+   * \brief Evaluates the fourth derivative of the inverse map, \f$h^{(4)}(u)\f$.
    *
-   * Computes the fourth derivative of \f$h(u)\f$ (or \f$g^{(4)}(u)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return Fourth derivative \f$h^{(4)}(u)\f$, or \f$g^{(4)}(u)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse(), inverse_d3(), inverse_d5()
+   * When inverted is true, evaluates \f$g^{(4)}(u)\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Fourth derivative \f$h^{(4)}(u)\f$, or NaN outside the closed domain.
+   * \see inverse(), inverse_d3(), inverse_d5(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_d4(double u) const {
-    return inverted ? detail_scalar::fwd<4>(map, u) : detail_scalar::inv<4>(map, u);
+    return inverted ? detail_scalar::fwd<4>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv<4>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Fifth derivative of the inverse map, \f$h^{(5)}(u) = \frac{\mathrm{d}^5}{\mathrm{d}u^5}h(u)\f$.
+   * \brief Evaluates the fifth derivative of the inverse map, \f$h^{(5)}(u)\f$.
    *
-   * Computes the fifth derivative of \f$h(u)\f$ (or \f$g^{(5)}(u)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return Fifth derivative \f$h^{(5)}(u)\f$, or \f$g^{(5)}(u)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse(), inverse_d4(), inverse_d6()
+   * When inverted is true, evaluates \f$g^{(5)}(u)\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Fifth derivative \f$h^{(5)}(u)\f$, or NaN outside the closed domain.
+   * \see inverse(), inverse_d4(), inverse_d6(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_d5(double u) const {
-    return inverted ? detail_scalar::fwd<5>(map, u) : detail_scalar::inv<5>(map, u);
+    return inverted ? detail_scalar::fwd<5>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv<5>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Sixth derivative of the inverse map, \f$h^{(6)}(u) = \frac{\mathrm{d}^6}{\mathrm{d}u^6}h(u)\f$.
+   * \brief Evaluates the sixth derivative of the inverse map, \f$h^{(6)}(u)\f$.
    *
-   * Computes the sixth derivative of \f$h(u)\f$ (or \f$g^{(6)}(u)\f$ if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return Sixth derivative \f$h^{(6)}(u)\f$, or \f$g^{(6)}(u)\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse(), inverse_d5()
+   * When inverted is true, evaluates \f$g^{(6)}(u)\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Sixth derivative \f$h^{(6)}(u)\f$, or NaN outside the closed domain.
+   * \see inverse(), inverse_d5(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_d6(double u) const {
-    return inverted ? detail_scalar::fwd<6>(map, u) : detail_scalar::inv<6>(map, u);
+    return inverted ? detail_scalar::fwd<6>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv<6>(map, u, parameter_1(), parameter_2());
   }
 
   // log|g'(v)| and log|h'(u)|, with their derivatives
   /**
    * \ingroup bijector_scalar
-   * \brief Forward log-Jacobian, \f$\log|g'(v)|\f$.
+   * \brief Evaluates the forward log-Jacobian, \f$\log|g'(v)|\f$.
    *
-   * Computes the forward log-Jacobian \f$\log|\frac{\mathrm{d}}{\mathrm{d}v}g(v)|\f$.
-   * When inverted, evaluates \f$\log|h'(v)|\f$ instead.
+   * When inverted is true, evaluates the inverse log-Jacobian \f$\log|h'(v)|\f$.
    *
-   * \param v Input argument \f$v \in V\f$.
-   * \return The forward log-Jacobian \f$\log|g'(v)|\f$, or \f$\log|h'(v)|\f$ if inverted.
+   * \param v Point in the domain of forward().
+   * \return Value \f$\log|g'(v)|\f$. Outside the closed domain or for invalid parameters, returns quiet NaN.
    *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Over orders 0 to 6, maximum error in ulpC on gcc / CUDA: log 3.84 / 3.84; logit 5.17 / 5.17; probit 6.57 / 6.57; cauchit 5.23 / 5.23; cloglog 4.16 / 3.34; loglog 4.84 / 3.38; inverse 3.92 / 3.92; inverse_sq 3.86 / 3.86; sqrt 2.43 / 2.43; atanh 3.53 / 5.05; asinh 5.35 / 7.85. Identity is 0.
-   *
-   * \see bijector_scalar, scalar_bijector, forward(), inverse_log_jacobian(), forward_log_jacobian_d1()
+   * Measured accuracy: within 6.57 ulpC for parameter-free maps and within 18.4 ulpC for maps with parameters.
+   * \see forward(), forward_log_jacobian_d1(), inverse_log_jacobian(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_log_jacobian(double v) const {
-    return inverted ? detail_scalar::inv_lj<0>(map, v) : detail_scalar::fwd_lj<0>(map, v);
+    return inverted ? detail_scalar::inv_lj<0>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd_lj<0>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief First derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}}{\mathrm{d}v}\log|g'(v)|\f$.
+   * \brief Evaluates the first derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}}{\mathrm{d}v}\log|g'(v)|\f$.
    *
-   * Computes the first derivative of the forward log-Jacobian (or of the inverse log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return First derivative \f$\frac{\mathrm{d}}{\mathrm{d}v}\log|g'(v)|\f$, or \f$\frac{\mathrm{d}}{\mathrm{d}v}\log|h'(v)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward_log_jacobian(), forward_log_jacobian_d2()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}}{\mathrm{d}v}\log|h'(v)|\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return First derivative of forward log-Jacobian, or NaN outside the closed domain.
+   * \see forward_log_jacobian(), forward_log_jacobian_d2(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_log_jacobian_d1(double v) const {
-    return inverted ? detail_scalar::inv_lj<1>(map, v) : detail_scalar::fwd_lj<1>(map, v);
+    return inverted ? detail_scalar::inv_lj<1>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd_lj<1>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Second derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}^2}{\mathrm{d}v^2}\log|g'(v)|\f$.
+   * \brief Evaluates the second derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}^2}{\mathrm{d}v^2}\log|g'(v)|\f$.
    *
-   * Computes the second derivative of the forward log-Jacobian (or of the inverse log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return Second derivative \f$\frac{\mathrm{d}^2}{\mathrm{d}v^2}\log|g'(v)|\f$, or \f$\frac{\mathrm{d}^2}{\mathrm{d}v^2}\log|h'(v)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward_log_jacobian(), forward_log_jacobian_d1(), forward_log_jacobian_d3()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}^2}{\mathrm{d}v^2}\log|h'(v)|\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Second derivative of forward log-Jacobian, or NaN outside the closed domain.
+   * \see forward_log_jacobian(), forward_log_jacobian_d1(), forward_log_jacobian_d3(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_log_jacobian_d2(double v) const {
-    return inverted ? detail_scalar::inv_lj<2>(map, v) : detail_scalar::fwd_lj<2>(map, v);
+    return inverted ? detail_scalar::inv_lj<2>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd_lj<2>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Third derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}^3}{\mathrm{d}v^3}\log|g'(v)|\f$.
+   * \brief Evaluates the third derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}^3}{\mathrm{d}v^3}\log|g'(v)|\f$.
    *
-   * Computes the third derivative of the forward log-Jacobian (or of the inverse log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return Third derivative \f$\frac{\mathrm{d}^3}{\mathrm{d}v^3}\log|g'(v)|\f$, or \f$\frac{\mathrm{d}^3}{\mathrm{d}v^3}\log|h'(v)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward_log_jacobian(), forward_log_jacobian_d2(), forward_log_jacobian_d4()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}^3}{\mathrm{d}v^3}\log|h'(v)|\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Third derivative of forward log-Jacobian, or NaN outside the closed domain.
+   * \see forward_log_jacobian(), forward_log_jacobian_d2(), forward_log_jacobian_d4(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_log_jacobian_d3(double v) const {
-    return inverted ? detail_scalar::inv_lj<3>(map, v) : detail_scalar::fwd_lj<3>(map, v);
+    return inverted ? detail_scalar::inv_lj<3>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd_lj<3>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Fourth derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}^4}{\mathrm{d}v^4}\log|g'(v)|\f$.
+   * \brief Evaluates the fourth derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}^4}{\mathrm{d}v^4}\log|g'(v)|\f$.
    *
-   * Computes the fourth derivative of the forward log-Jacobian (or of the inverse log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return Fourth derivative \f$\frac{\mathrm{d}^4}{\mathrm{d}v^4}\log|g'(v)|\f$, or \f$\frac{\mathrm{d}^4}{\mathrm{d}v^4}\log|h'(v)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward_log_jacobian(), forward_log_jacobian_d3(), forward_log_jacobian_d5()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}^4}{\mathrm{d}v^4}\log|h'(v)|\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Fourth derivative of forward log-Jacobian, or NaN outside the closed domain.
+   * \see forward_log_jacobian(), forward_log_jacobian_d3(), forward_log_jacobian_d5(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_log_jacobian_d4(double v) const {
-    return inverted ? detail_scalar::inv_lj<4>(map, v) : detail_scalar::fwd_lj<4>(map, v);
+    return inverted ? detail_scalar::inv_lj<4>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd_lj<4>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Fifth derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}^5}{\mathrm{d}v^5}\log|g'(v)|\f$.
+   * \brief Evaluates the fifth derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}^5}{\mathrm{d}v^5}\log|g'(v)|\f$.
    *
-   * Computes the fifth derivative of the forward log-Jacobian (or of the inverse log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return Fifth derivative \f$\frac{\mathrm{d}^5}{\mathrm{d}v^5}\log|g'(v)|\f$, or \f$\frac{\mathrm{d}^5}{\mathrm{d}v^5}\log|h'(v)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward_log_jacobian(), forward_log_jacobian_d4(), forward_log_jacobian_d6()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}^5}{\mathrm{d}v^5}\log|h'(v)|\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Fifth derivative of forward log-Jacobian, or NaN outside the closed domain.
+   * \see forward_log_jacobian(), forward_log_jacobian_d4(), forward_log_jacobian_d6(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_log_jacobian_d5(double v) const {
-    return inverted ? detail_scalar::inv_lj<5>(map, v) : detail_scalar::fwd_lj<5>(map, v);
+    return inverted ? detail_scalar::inv_lj<5>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd_lj<5>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Sixth derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}^6}{\mathrm{d}v^6}\log|g'(v)|\f$.
+   * \brief Evaluates the sixth derivative of the forward log-Jacobian, \f$\frac{\mathrm{d}^6}{\mathrm{d}v^6}\log|g'(v)|\f$.
    *
-   * Computes the sixth derivative of the forward log-Jacobian (or of the inverse log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param v Input argument \f$v \in V\f$.
-   * \return Sixth derivative \f$\frac{\mathrm{d}^6}{\mathrm{d}v^6}\log|g'(v)|\f$, or \f$\frac{\mathrm{d}^6}{\mathrm{d}v^6}\log|h'(v)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$v\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, forward_log_jacobian(), forward_log_jacobian_d5()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}^6}{\mathrm{d}v^6}\log|h'(v)|\f$. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Sixth derivative of forward log-Jacobian, or NaN outside the closed domain.
+   * \see forward_log_jacobian(), forward_log_jacobian_d5(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_log_jacobian_d6(double v) const {
-    return inverted ? detail_scalar::inv_lj<6>(map, v) : detail_scalar::fwd_lj<6>(map, v);
+    return inverted ? detail_scalar::inv_lj<6>(map, v, parameter_1(), parameter_2())
+                    : detail_scalar::fwd_lj<6>(map, v, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Inverse log-Jacobian, \f$\log|h'(u)|\f$.
+   * \brief Evaluates the inverse log-Jacobian, \f$\log|h'(u)|\f$.
    *
-   * Computes the inverse log-Jacobian \f$\log|\frac{\mathrm{d}}{\mathrm{d}u}h(u)|\f$.
-   * When inverted, evaluates \f$\log|g'(u)|\f$ instead.
+   * When inverted is true, evaluates the forward log-Jacobian \f$\log|g'(u)|\f$.
    *
-   * \param u Input argument \f$u \in U\f$.
-   * \return The inverse log-Jacobian \f$\log|h'(u)|\f$, or \f$\log|g'(u)|\f$ if inverted.
+   * \param u Point in the domain of inverse().
+   * \return Value \f$\log|h'(u)|\f$. Outside the closed domain or for invalid parameters, returns quiet NaN.
    *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Over orders 0 to 6, maximum error in ulpC on gcc / CUDA: log 0 / 0; logit 10.5 / 10.1; probit 0.832 / 0.832; cauchit 7.78 / 7.78; cloglog 0.969 / 0.969; loglog 0.883 / 0.883; inverse 3.25 / 3.25; inverse_sq 2.79 / 2.79; sqrt 2.95 / 2.95; atanh 2.67 / 1.67; asinh 1.9 / 2.27. Identity is 0.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse(), forward_log_jacobian(), inverse_log_jacobian_d1()
+   * Measured accuracy: within 10.5 ulpC for parameter-free maps and within 49.4 ulpC (gcc) / 43 ulpC (CUDA) for maps with parameters.
+   * \see inverse(), inverse_log_jacobian_d1(), forward_log_jacobian(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_log_jacobian(double u) const {
-    return inverted ? detail_scalar::fwd_lj<0>(map, u) : detail_scalar::inv_lj<0>(map, u);
+    return inverted ? detail_scalar::fwd_lj<0>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv_lj<0>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief First derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}}{\mathrm{d}u}\log|h'(u)|\f$.
+   * \brief Evaluates the first derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}}{\mathrm{d}u}\log|h'(u)|\f$.
    *
-   * Computes the first derivative of the inverse log-Jacobian (or of the forward log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return First derivative \f$\frac{\mathrm{d}}{\mathrm{d}u}\log|h'(u)|\f$, or \f$\frac{\mathrm{d}}{\mathrm{d}u}\log|g'(u)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse_log_jacobian(), inverse_log_jacobian_d2()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}}{\mathrm{d}u}\log|g'(u)|\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return First derivative of inverse log-Jacobian, or NaN outside the closed domain.
+   * \see inverse_log_jacobian(), inverse_log_jacobian_d2(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_log_jacobian_d1(double u) const {
-    return inverted ? detail_scalar::fwd_lj<1>(map, u) : detail_scalar::inv_lj<1>(map, u);
+    return inverted ? detail_scalar::fwd_lj<1>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv_lj<1>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Second derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}^2}{\mathrm{d}u^2}\log|h'(u)|\f$.
+   * \brief Evaluates the second derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}^2}{\mathrm{d}u^2}\log|h'(u)|\f$.
    *
-   * Computes the second derivative of the inverse log-Jacobian (or of the forward log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return Second derivative \f$\frac{\mathrm{d}^2}{\mathrm{d}u^2}\log|h'(u)|\f$, or \f$\frac{\mathrm{d}^2}{\mathrm{d}u^2}\log|g'(u)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse_log_jacobian(), inverse_log_jacobian_d1(), inverse_log_jacobian_d3()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}^2}{\mathrm{d}u^2}\log|g'(u)|\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Second derivative of inverse log-Jacobian, or NaN outside the closed domain.
+   * \see inverse_log_jacobian(), inverse_log_jacobian_d1(), inverse_log_jacobian_d3(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_log_jacobian_d2(double u) const {
-    return inverted ? detail_scalar::fwd_lj<2>(map, u) : detail_scalar::inv_lj<2>(map, u);
+    return inverted ? detail_scalar::fwd_lj<2>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv_lj<2>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Third derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}^3}{\mathrm{d}u^3}\log|h'(u)|\f$.
+   * \brief Evaluates the third derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}^3}{\mathrm{d}u^3}\log|h'(u)|\f$.
    *
-   * Computes the third derivative of the inverse log-Jacobian (or of the forward log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return Third derivative \f$\frac{\mathrm{d}^3}{\mathrm{d}u^3}\log|h'(u)|\f$, or \f$\frac{\mathrm{d}^3}{\mathrm{d}u^3}\log|g'(u)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse_log_jacobian(), inverse_log_jacobian_d2(), inverse_log_jacobian_d4()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}^3}{\mathrm{d}u^3}\log|g'(u)|\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Third derivative of inverse log-Jacobian, or NaN outside the closed domain.
+   * \see inverse_log_jacobian(), inverse_log_jacobian_d2(), inverse_log_jacobian_d4(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_log_jacobian_d3(double u) const {
-    return inverted ? detail_scalar::fwd_lj<3>(map, u) : detail_scalar::inv_lj<3>(map, u);
+    return inverted ? detail_scalar::fwd_lj<3>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv_lj<3>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Fourth derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}^4}{\mathrm{d}u^4}\log|h'(u)|\f$.
+   * \brief Evaluates the fourth derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}^4}{\mathrm{d}u^4}\log|h'(u)|\f$.
    *
-   * Computes the fourth derivative of the inverse log-Jacobian (or of the forward log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return Fourth derivative \f$\frac{\mathrm{d}^4}{\mathrm{d}u^4}\log|h'(u)|\f$, or \f$\frac{\mathrm{d}^4}{\mathrm{d}u^4}\log|g'(u)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse_log_jacobian(), inverse_log_jacobian_d3(), inverse_log_jacobian_d5()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}^4}{\mathrm{d}u^4}\log|g'(u)|\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Fourth derivative of inverse log-Jacobian, or NaN outside the closed domain.
+   * \see inverse_log_jacobian(), inverse_log_jacobian_d3(), inverse_log_jacobian_d5(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_log_jacobian_d4(double u) const {
-    return inverted ? detail_scalar::fwd_lj<4>(map, u) : detail_scalar::inv_lj<4>(map, u);
+    return inverted ? detail_scalar::fwd_lj<4>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv_lj<4>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Fifth derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}^5}{\mathrm{d}u^5}\log|h'(u)|\f$.
+   * \brief Evaluates the fifth derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}^5}{\mathrm{d}u^5}\log|h'(u)|\f$.
    *
-   * Computes the fifth derivative of the inverse log-Jacobian (or of the forward log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return Fifth derivative \f$\frac{\mathrm{d}^5}{\mathrm{d}u^5}\log|h'(u)|\f$, or \f$\frac{\mathrm{d}^5}{\mathrm{d}u^5}\log|g'(u)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse_log_jacobian(), inverse_log_jacobian_d4(), inverse_log_jacobian_d6()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}^5}{\mathrm{d}u^5}\log|g'(u)|\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Fifth derivative of inverse log-Jacobian, or NaN outside the closed domain.
+   * \see inverse_log_jacobian(), inverse_log_jacobian_d4(), inverse_log_jacobian_d6(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_log_jacobian_d5(double u) const {
-    return inverted ? detail_scalar::fwd_lj<5>(map, u) : detail_scalar::inv_lj<5>(map, u);
+    return inverted ? detail_scalar::fwd_lj<5>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv_lj<5>(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Sixth derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}^6}{\mathrm{d}u^6}\log|h'(u)|\f$.
+   * \brief Evaluates the sixth derivative of the inverse log-Jacobian, \f$\frac{\mathrm{d}^6}{\mathrm{d}u^6}\log|h'(u)|\f$.
    *
-   * Computes the sixth derivative of the inverse log-Jacobian (or of the forward log-Jacobian if inverted).
-   * Closed-form formulas for each map are given on \ref bijector_scalar.
-   *
-   * \param u Input argument \f$u \in U\f$.
-   * \return Sixth derivative \f$\frac{\mathrm{d}^6}{\mathrm{d}u^6}\log|h'(u)|\f$, or \f$\frac{\mathrm{d}^6}{\mathrm{d}u^6}\log|g'(u)|\f$ if inverted.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain or is NaN.
-   *
-   * \par Measured accuracy
-   * Within 11 ulpC on gcc and CUDA across all orders; see \ref bijector_scalar.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse_log_jacobian(), inverse_log_jacobian_d5()
+   * When inverted is true, evaluates \f$\frac{\mathrm{d}^6}{\mathrm{d}u^6}\log|g'(u)|\f$. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Sixth derivative of inverse log-Jacobian, or NaN outside the closed domain.
+   * \see inverse_log_jacobian(), inverse_log_jacobian_d5(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_log_jacobian_d6(double u) const {
-    return inverted ? detail_scalar::fwd_lj<6>(map, u) : detail_scalar::inv_lj<6>(map, u);
+    return inverted ? detail_scalar::fwd_lj<6>(map, u, parameter_1(), parameter_2())
+                    : detail_scalar::inv_lj<6>(map, u, parameter_1(), parameter_2());
+  }
+
+  // partial derivatives of total order K in (argument, parameter 1, parameter 2)
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 1 of the forward map in (argument, parameter 1, parameter 2).
+   *
+   * Returns a bijector_partials<1> struct containing 3 components:
+   * - \c c[0] (\f$n_1=0, n_2=0\f$): pure derivative in argument, \f$g'(v)\f$.
+   * - \c c[1] (\f$n_1=1, n_2=0\f$): derivative in parameter 1, \f$\frac{\partial g}{\partial p_1}\f$.
+   * - \c c[2] (\f$n_1=0, n_2=1\f$): derivative in parameter 2, \f$\frac{\partial g}{\partial p_2}\f$.
+   *
+   * When inverted is true, evaluates partial derivatives of the inverse map.
+   * Outside the closed domain or for invalid parameters, all components are quiet NaN.
+   * For \c power, components in the exponent are quiet NaN.
+   * For maps without parameters, components in absent parameters are 0.0.
+   *
+   * Measured accuracy: within 26 ulpC on the conditioned scale.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<1> containing the partial derivatives.
+   * \see forward(), forward_partials_d2(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<1> forward_partials_d1(double v) const {
+    bijector_partials<1> r;
+    if (inverted) detail_scalar::inv_partials<1>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_partials<1>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 2 of the forward map in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<2> in index order. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<2> containing the partial derivatives.
+   * \see forward_partials_d1(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<2> forward_partials_d2(double v) const {
+    bijector_partials<2> r;
+    if (inverted) detail_scalar::inv_partials<2>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_partials<2>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 3 of the forward map in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<3> in index order. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<3> containing the partial derivatives.
+   * \see forward_partials_d2(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<3> forward_partials_d3(double v) const {
+    bijector_partials<3> r;
+    if (inverted) detail_scalar::inv_partials<3>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_partials<3>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 4 of the forward map in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<4> in index order. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<4> containing the partial derivatives.
+   * \see forward_partials_d3(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<4> forward_partials_d4(double v) const {
+    bijector_partials<4> r;
+    if (inverted) detail_scalar::inv_partials<4>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_partials<4>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 5 of the forward map in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<5> in index order. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<5> containing the partial derivatives.
+   * \see forward_partials_d4(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<5> forward_partials_d5(double v) const {
+    bijector_partials<5> r;
+    if (inverted) detail_scalar::inv_partials<5>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_partials<5>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 6 of the forward map in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<6> in index order. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<6> containing the partial derivatives.
+   * \see forward_partials_d5(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<6> forward_partials_d6(double v) const {
+    bijector_partials<6> r;
+    if (inverted) detail_scalar::inv_partials<6>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_partials<6>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 1 of the inverse map in (argument, parameter 1, parameter 2).
+   *
+   * Returns a bijector_partials<1> struct containing 3 components:
+   * - \c c[0] (\f$n_1=0, n_2=0\f$): pure derivative in argument, \f$h'(u)\f$.
+   * - \c c[1] (\f$n_1=1, n_2=0\f$): derivative in parameter 1, \f$\frac{\partial h}{\partial p_1}\f$.
+   * - \c c[2] (\f$n_1=0, n_2=1\f$): derivative in parameter 2, \f$\frac{\partial h}{\partial p_2}\f$.
+   *
+   * When inverted is true, evaluates partial derivatives of the forward map.
+   * Outside the closed domain or for invalid parameters, all components are quiet NaN.
+   * For \c power, components in the exponent are quiet NaN.
+   * For maps without parameters, components in absent parameters are 0.0.
+   *
+   * Measured accuracy: within 24.9 ulpC (gcc) / 39.9 ulpC (CUDA) on the conditioned scale.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<1> containing the partial derivatives.
+   * \see inverse(), inverse_partials_d2(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<1> inverse_partials_d1(double u) const {
+    bijector_partials<1> r;
+    if (inverted) detail_scalar::fwd_partials<1>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_partials<1>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 2 of the inverse map in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<2> in index order. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<2> containing the partial derivatives.
+   * \see inverse_partials_d1(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<2> inverse_partials_d2(double u) const {
+    bijector_partials<2> r;
+    if (inverted) detail_scalar::fwd_partials<2>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_partials<2>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 3 of the inverse map in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<3> in index order. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<3> containing the partial derivatives.
+   * \see inverse_partials_d2(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<3> inverse_partials_d3(double u) const {
+    bijector_partials<3> r;
+    if (inverted) detail_scalar::fwd_partials<3>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_partials<3>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 4 of the inverse map in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<4> in index order. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<4> containing the partial derivatives.
+   * \see inverse_partials_d3(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<4> inverse_partials_d4(double u) const {
+    bijector_partials<4> r;
+    if (inverted) detail_scalar::fwd_partials<4>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_partials<4>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 5 of the inverse map in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<5> in index order. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<5> containing the partial derivatives.
+   * \see inverse_partials_d4(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<5> inverse_partials_d5(double u) const {
+    bijector_partials<5> r;
+    if (inverted) detail_scalar::fwd_partials<5>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_partials<5>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 6 of the inverse map in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<6> in index order. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<6> containing the partial derivatives.
+   * \see inverse_partials_d5(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<6> inverse_partials_d6(double u) const {
+    bijector_partials<6> r;
+    if (inverted) detail_scalar::fwd_partials<6>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_partials<6>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 1 of the forward log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Returns a bijector_partials<1> struct containing 3 components for \f$\log|g'(v)|\f$:
+   * - \c c[0] (\f$n_1=0, n_2=0\f$): pure derivative in argument, \f$\frac{\mathrm{d}}{\mathrm{d}v}\log|g'(v)|\f$.
+   * - \c c[1] (\f$n_1=1, n_2=0\f$): derivative in parameter 1, \f$\frac{\partial}{\partial p_1}\log|g'(v)|\f$.
+   * - \c c[2] (\f$n_1=0, n_2=1\f$): derivative in parameter 2, \f$\frac{\partial}{\partial p_2}\log|g'(v)|\f$.
+   *
+   * When inverted is true, evaluates partial derivatives of the inverse log-Jacobian.
+   * Outside the closed domain or for invalid parameters, all components are quiet NaN.
+   * For \c power, components in the exponent are quiet NaN.
+   * For maps without parameters, components in absent parameters are 0.0.
+   *
+   * Measured accuracy: within 18.4 ulpC on the conditioned scale.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<1> containing the partial derivatives.
+   * \see forward_log_jacobian(), forward_log_jacobian_partials_d2(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<1> forward_log_jacobian_partials_d1(double v) const {
+    bijector_partials<1> r;
+    if (inverted) detail_scalar::inv_lj_partials<1>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_lj_partials<1>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 2 of the forward log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<2> in index order. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<2> containing the partial derivatives.
+   * \see forward_log_jacobian_partials_d1(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<2> forward_log_jacobian_partials_d2(double v) const {
+    bijector_partials<2> r;
+    if (inverted) detail_scalar::inv_lj_partials<2>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_lj_partials<2>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 3 of the forward log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<3> in index order. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<3> containing the partial derivatives.
+   * \see forward_log_jacobian_partials_d2(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<3> forward_log_jacobian_partials_d3(double v) const {
+    bijector_partials<3> r;
+    if (inverted) detail_scalar::inv_lj_partials<3>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_lj_partials<3>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 4 of the forward log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<4> in index order. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<4> containing the partial derivatives.
+   * \see forward_log_jacobian_partials_d3(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<4> forward_log_jacobian_partials_d4(double v) const {
+    bijector_partials<4> r;
+    if (inverted) detail_scalar::inv_lj_partials<4>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_lj_partials<4>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 5 of the forward log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<5> in index order. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<5> containing the partial derivatives.
+   * \see forward_log_jacobian_partials_d4(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<5> forward_log_jacobian_partials_d5(double v) const {
+    bijector_partials<5> r;
+    if (inverted) detail_scalar::inv_lj_partials<5>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_lj_partials<5>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 6 of the forward log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<6> in index order. See \ref bijector_scalar.
+   * \param v Point in the domain of forward().
+   * \return Structure bijector_partials<6> containing the partial derivatives.
+   * \see forward_log_jacobian_partials_d5(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<6> forward_log_jacobian_partials_d6(double v) const {
+    bijector_partials<6> r;
+    if (inverted) detail_scalar::inv_lj_partials<6>(map, v, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::fwd_lj_partials<6>(map, v, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 1 of the inverse log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Returns a bijector_partials<1> struct containing 3 components for \f$\log|h'(u)|\f$:
+   * - \c c[0] (\f$n_1=0, n_2=0\f$): pure derivative in argument, \f$\frac{\mathrm{d}}{\mathrm{d}u}\log|h'(u)|\f$.
+   * - \c c[1] (\f$n_1=1, n_2=0\f$): derivative in parameter 1, \f$\frac{\partial}{\partial p_1}\log|h'(u)|\f$.
+   * - \c c[2] (\f$n_1=0, n_2=1\f$): derivative in parameter 2, \f$\frac{\partial}{\partial p_2}\log|h'(u)|\f$.
+   *
+   * When inverted is true, evaluates partial derivatives of the forward log-Jacobian.
+   * Outside the closed domain or for invalid parameters, all components are quiet NaN.
+   * For \c power, components in the exponent are quiet NaN.
+   * For maps without parameters, components in absent parameters are 0.0.
+   *
+   * Measured accuracy: within 49.4 ulpC (gcc) / 43 ulpC (CUDA) on the conditioned scale.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<1> containing the partial derivatives.
+   * \see inverse_log_jacobian(), inverse_log_jacobian_partials_d2(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<1> inverse_log_jacobian_partials_d1(double u) const {
+    bijector_partials<1> r;
+    if (inverted) detail_scalar::fwd_lj_partials<1>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_lj_partials<1>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 2 of the inverse log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<2> in index order. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<2> containing the partial derivatives.
+   * \see inverse_log_jacobian_partials_d1(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<2> inverse_log_jacobian_partials_d2(double u) const {
+    bijector_partials<2> r;
+    if (inverted) detail_scalar::fwd_lj_partials<2>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_lj_partials<2>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 3 of the inverse log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<3> in index order. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<3> containing the partial derivatives.
+   * \see inverse_log_jacobian_partials_d2(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<3> inverse_log_jacobian_partials_d3(double u) const {
+    bijector_partials<3> r;
+    if (inverted) detail_scalar::fwd_lj_partials<3>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_lj_partials<3>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 4 of the inverse log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<4> in index order. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<4> containing the partial derivatives.
+   * \see inverse_log_jacobian_partials_d3(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<4> inverse_log_jacobian_partials_d4(double u) const {
+    bijector_partials<4> r;
+    if (inverted) detail_scalar::fwd_lj_partials<4>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_lj_partials<4>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 5 of the inverse log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<5> in index order. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<5> containing the partial derivatives.
+   * \see inverse_log_jacobian_partials_d4(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<5> inverse_log_jacobian_partials_d5(double u) const {
+    bijector_partials<5> r;
+    if (inverted) detail_scalar::fwd_lj_partials<5>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_lj_partials<5>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Evaluates partial derivatives of total order 6 of the inverse log-Jacobian in (argument, parameter 1, parameter 2).
+   *
+   * Components are stored in bijector_partials<6> in index order. See \ref bijector_scalar.
+   * \param u Point in the domain of inverse().
+   * \return Structure bijector_partials<6> containing the partial derivatives.
+   * \see inverse_log_jacobian_partials_d5(), bijector_partials, bijector_scalar
+   */
+  LAPLACE_HD bijector_partials<6> inverse_log_jacobian_partials_d6(double u) const {
+    bijector_partials<6> r;
+    if (inverted) detail_scalar::fwd_lj_partials<6>(map, u, parameter_1(), parameter_2(), r.c);
+    else detail_scalar::inv_lj_partials<6>(map, u, parameter_1(), parameter_2(), r.c);
+    return r;
   }
 
   // the domain of forward() and the domain of inverse(), as closed bounds
   /**
    * \ingroup bijector_scalar
-   * \brief Lower bound of the forward domain interval \f$V\f$.
-   *
-   * Returns the infimum of the domain of forward() (the lower bound of \f$V\f$, or of \f$U\f$ if inverted).
-   *
-   * \return Lower bound as a \c double (may be \f$-\infty\f$).
-   *
-   * \see bijector_scalar, scalar_bijector, forward_domain_upper(), inverse_domain_lower()
+   * \brief Returns the lower bound of the domain of forward().
+   * \return Finite or infinite lower bound, or NaN for invalid parameters.
+   * \see forward_domain_upper(), inverse_domain_lower(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_domain_lower() const {
-    return inverted ? detail_scalar::img_lo(map) : detail_scalar::dom_lo(map);
+    return inverted ? detail_scalar::img_lo(map, parameter_1(), parameter_2())
+                    : detail_scalar::dom_lo(map, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Upper bound of the forward domain interval \f$V\f$.
-   *
-   * Returns the supremum of the domain of forward() (the upper bound of \f$V\f$, or of \f$U\f$ if inverted).
-   *
-   * \return Upper bound as a \c double (may be \f$+\infty\f$).
-   *
-   * \see bijector_scalar, scalar_bijector, forward_domain_lower(), inverse_domain_upper()
+   * \brief Returns the upper bound of the domain of forward().
+   * \return Finite or infinite upper bound, or NaN for invalid parameters.
+   * \see forward_domain_lower(), inverse_domain_upper(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_domain_upper() const {
-    return inverted ? detail_scalar::img_hi(map) : detail_scalar::dom_hi(map);
+    return inverted ? detail_scalar::img_hi(map, parameter_1(), parameter_2())
+                    : detail_scalar::dom_hi(map, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Lower bound of the inverse domain interval \f$U\f$.
-   *
-   * Returns the infimum of the domain of inverse() (the lower bound of \f$U\f$, or of \f$V\f$ if inverted).
-   *
-   * \return Lower bound as a \c double (may be \f$-\infty\f$).
-   *
-   * \see bijector_scalar, scalar_bijector, inverse_domain_upper(), forward_domain_lower()
+   * \brief Returns the lower bound of the domain of inverse().
+   * \return Finite or infinite lower bound, or NaN for invalid parameters.
+   * \see inverse_domain_upper(), forward_domain_lower(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_domain_lower() const {
-    return inverted ? detail_scalar::dom_lo(map) : detail_scalar::img_lo(map);
+    return inverted ? detail_scalar::dom_lo(map, parameter_1(), parameter_2())
+                    : detail_scalar::img_lo(map, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Upper bound of the inverse domain interval \f$U\f$.
-   *
-   * Returns the supremum of the domain of inverse() (the upper bound of \f$U\f$, or of \f$V\f$ if inverted).
-   *
-   * \return Upper bound as a \c double (may be \f$+\infty\f$).
-   *
-   * \see bijector_scalar, scalar_bijector, inverse_domain_lower(), forward_domain_upper()
+   * \brief Returns the upper bound of the domain of inverse().
+   * \return Finite or infinite upper bound, or NaN for invalid parameters.
+   * \see inverse_domain_lower(), forward_domain_upper(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_domain_upper() const {
-    return inverted ? detail_scalar::dom_hi(map) : detail_scalar::img_hi(map);
+    return inverted ? detail_scalar::dom_hi(map, parameter_1(), parameter_2())
+                    : detail_scalar::img_hi(map, parameter_1(), parameter_2());
   }
-  // true when the map is decreasing (inverse, inverse_sq); inversion keeps it
+  // true when the map is decreasing; inversion keeps it
   /**
    * \ingroup bijector_scalar
-   * \brief Whether the bijector map is strictly decreasing.
+   * \brief Returns whether the map is strictly decreasing.
    *
-   * Returns \c true for \c inverse and \c inverse_sq, and \c false for all other maps.
-   * Inversion does not change monotonicity.
-   *
-   * \return \c true if strictly decreasing, \c false if strictly increasing.
-   *
-   * \see bijector_scalar, scalar_bijector
+   * Returns true for \c inverse, \c inverse_sq, \c power with negative exponent,
+   * and \c affine with negative scale. Inversion preserves monotonicity.
+   * \return True if decreasing, false if increasing.
+   * \see bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE bool is_decreasing() const {
-    return map == scalar_bijector_map::inverse || map == scalar_bijector_map::inverse_sq;
+    switch (map) {
+      case scalar_bijector_map::inverse:
+      case scalar_bijector_map::inverse_sq: return true;
+      case scalar_bijector_map::power: return exponent < 0.0;
+      case scalar_bijector_map::affine: return scale < 0.0;
+      default: return false;
+    }
   }
+
+  // the points at which forward(), respectively inverse(), is not smooth:
+  // Yeo-Johnson at v = 0 (u = g(0) = 0), unless exponent = 1 (the identity)
+  /**
+   * \ingroup bijector_scalar
+   * \brief Returns the non-smooth points of forward().
+   *
+   * For \c yeo_johnson with \f$\lambda \neq 1\f$, reports 1 kink at \f$v = 0\f$
+   * with \c continuous_order equal to 2.
+   * \return Structure bijector_kinks with kink count, positions, and continuous order.
+   * \see inverse_kinks(), bijector_kinks, bijector_scalar
+   */
+  LAPLACE_HD bijector_kinks forward_kinks() const {
+    bijector_kinks r;
+    if (map == scalar_bijector_map::yeo_johnson && exponent != 1.0) {
+      r.count = 1;
+      r.point[0] = 0.0;
+      r.continuous_order = 2;
+    }
+    return r;
+  }
+  /**
+   * \ingroup bijector_scalar
+   * \brief Returns the non-smooth points of inverse().
+   *
+   * Returns the kinks of the inverse map (for \c yeo_johnson with \f$\lambda \neq 1\f$,
+   * 1 kink at \f$u = g(0) = 0\f$ with \c continuous_order equal to 2).
+   * \return Structure bijector_kinks with kink count, positions, and continuous order.
+   * \see forward_kinks(), bijector_kinks, bijector_scalar
+   */
+  LAPLACE_HD bijector_kinks inverse_kinks() const { return forward_kinks(); }  // g(0) = 0
 
   // The distance of inverse(u) to the upper and to the lower bound of its
   // range (forward_domain_upper(), forward_domain_lower()), computed directly
   // where the difference would cancel.
   /**
    * \ingroup bijector_scalar
-   * \brief Distance of \ref laplace::bijector::scalar_bijector::inverse "inverse()" to the upper bound of its range, \ref forward_domain_upper().
+   * \brief Distance from the inverse map \f$h(u)\f$ to the upper bound of its range.
    *
-   * Computes the distance of \f$h(u)\f$ to the upper bound of its range, evaluated directly without
-   * forming \f$h(u)\f$ where forming the difference would cancel:
-   * - \c logit : \f$\operatorname{expit}(-u)\f$
-   * - \c probit : \f$\Phi(-u)\f$
-   * - \c cauchit : \f$h(-u)\f$
-   * - \c cloglog : \f$\exp(-e^u)\f$
-   * - \c loglog : \f$1 - \exp(-e^{-u})\f$
-   * - \c atanh : \f$2e/(1 + e)\f$ with \f$e = \exp(-2u)\f$ for \f$u > 0\f$ (\f$1 - \tanh u\f$ for \f$u \le 0\f$)
+   * Evaluates \f$\sup(V) - h(u)\f$ directly without forming \f$h(u)\f$ where catastrophic
+   * cancellation would otherwise occur near the bound (e.g. \f$1 - \operatorname{expit}(u) = \operatorname{expit}(-u)\f$
+   * for \c logit, \f$(b - a)\operatorname{expit}(-u)\f$ for \c bounded, \f$e^{-u}\f$ for \c upper_bounded).
+   * Returns \f$+\infty\f$ when the upper bound is \f$+\infty\f$.
+   * When inverted is true, computes the generic difference \c forward_domain_upper() - inverse(u).
    *
-   * For other maps, evaluates the generic form \ref forward_domain_upper() \f$- h(u)\f$ (evaluating to \f$+\infty\f$
-   * when the bound is infinite). When inverted, always evaluates the generic form.
+   * \param u Point in the domain of inverse().
+   * \return Distance to the upper bound, or NaN outside the closed domain or for invalid parameters.
    *
-   * \param u Input argument \f$u \in U\f$.
-   * \return The distance to the upper bound, or quiet NaN if outside domain or NaN.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain of \ref laplace::bijector::scalar_bijector::inverse "inverse()" or is NaN.
-   *
-   * \par Measured accuracy
-   * With ulpC scaled by \f$h'(u)\f$, maximum error over the six maps and both distances is 2.28 ulpC on gcc
-   * and on CUDA (measured for probit lower distance); in plain ulps up to 130 for cloglog (upper distance)
-   * where \f$\exp(-e^u)\f$ carries the rounding of \f$e^u\f$.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse(), forward_domain_upper(), inverse_distance_lower()
+   * Measured accuracy: within 2.28 ulpC across all bounded maps; for \c bounded, 0.721 ulpC; for \c upper_bounded, 0.193 ulpC.
+   * \see inverse(), inverse_distance_lower(), forward_domain_upper(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_distance_upper(double u) const {
     if (inverted) return forward_domain_upper() - inverse(u);
-    return detail_scalar::inv_to_upper(map, u);
+    return detail_scalar::inv_to_upper(map, u, parameter_1(), parameter_2());
   }
   /**
    * \ingroup bijector_scalar
-   * \brief Distance of \ref laplace::bijector::scalar_bijector::inverse "inverse()" to the lower bound of its range, \ref forward_domain_lower().
+   * \brief Distance from the inverse map \f$h(u)\f$ to the lower bound of its range.
    *
-   * Computes the distance of \f$h(u)\f$ to the lower bound of its range:
-   * - \c atanh : \f$2e/(1 + e)\f$ with \f$e = \exp(2u)\f$ for \f$u < 0\f$ (\f$1 + \tanh u\f$ for \f$u \ge 0\f$)
-   * - For \c logit, \c probit, \c cauchit, \c cloglog, \c loglog : evaluates \f$h(u)\f$ directly, since the lower bound is 0.
+   * Evaluates \f$h(u) - \inf(V)\f$ directly without forming \f$h(u)\f$ where catastrophic
+   * cancellation would otherwise occur near the bound (e.g. \f$h(u)\f$ for \c logit,
+   * \f$(b - a)\operatorname{expit}(u)\f$ for \c bounded, \f$e^u\f$ for \c lower_bounded).
+   * Returns \f$+\infty\f$ when the lower bound is \f$-\infty\f$.
+   * When inverted is true, computes the generic difference \c inverse(u) - forward_domain_lower().
    *
-   * For other maps, evaluates the generic form \ref laplace::bijector::scalar_bijector::inverse "inverse()" \f$- \f$ \ref forward_domain_lower() (evaluating to \f$+\infty\f$
-   * when the bound is infinite). When inverted, always evaluates the generic form.
+   * \param u Point in the domain of inverse().
+   * \return Distance to the lower bound, or NaN outside the closed domain or for invalid parameters.
    *
-   * \param u Input argument \f$u \in U\f$.
-   * \return The distance to the lower bound, or quiet NaN if outside domain or NaN.
-   *
-   * \par Domain and special values
-   * Returns quiet NaN if \f$u\f$ is strictly outside the closed domain of \ref laplace::bijector::scalar_bijector::inverse "inverse()" or is NaN.
-   *
-   * \par Measured accuracy
-   * With ulpC scaled by \f$h'(u)\f$, maximum error over the six maps and both distances is 2.28 ulpC on gcc
-   * and on CUDA (measured for probit lower distance); in plain ulps up to 173–174 for loglog (lower distance)
-   * where \f$\exp(-e^{-u})\f$ carries the rounding of \f$e^{-u}\f$.
-   *
-   * \see bijector_scalar, scalar_bijector, inverse(), forward_domain_lower(), inverse_distance_upper()
+   * Measured accuracy: within 2.28 ulpC across all bounded maps; for \c bounded, 0.584 ulpC; for \c lower_bounded, 0.273 ulpC.
+   * \see inverse(), inverse_distance_upper(), forward_domain_lower(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_distance_lower(double u) const {
     if (inverted) return inverse(u) - forward_domain_lower();
-    return detail_scalar::inv_to_lower(map, u);
+    return detail_scalar::inv_to_lower(map, u, parameter_1(), parameter_2());
   }
 };
 

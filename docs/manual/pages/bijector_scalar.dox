@@ -1,7 +1,7 @@
 /**
 \defgroup bijector_scalar Scalar bijectors
 \ingroup bijector
-\brief Scalar bijections without parameters, their inverses, derivatives, and log-Jacobians to order 6.
+\brief Scalar bijections with and without parameters, their inverses, derivatives, log-Jacobians, and parameter partials to order 6.
 
 Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
 
@@ -14,6 +14,10 @@ A scalar bijector is a bijection \f$g: V \to U\f$ between open intervals \f$V, U
 - The derivatives of the inverse map of order \f$k \in \{1, \dots, 6\}\f$ are denoted \f$h^{(k)}(u) = \frac{\mathrm{d}^k}{\mathrm{d}u^k} h(u)\f$.
 - The forward log-Jacobian is the logarithmic derivative \f$\log|g'(v)|\f$, with derivatives \f$\frac{\mathrm{d}^k}{\mathrm{d}v^k}\log|g'(v)|\f$ for \f$k \in \{1, \dots, 6\}\f$.
 - The inverse log-Jacobian is the logarithmic derivative \f$\log|h'(u)|\f$, with derivatives \f$\frac{\mathrm{d}^k}{\mathrm{d}u^k}\log|h'(u)|\f$ for \f$k \in \{1, \dots, 6\}\f$.
+
+For maps with parameters \f$p_1, p_2\f$:
+- The forward map \f$g(v; p_1, p_2)\f$ and inverse map \f$h(u; p_1, p_2)\f$ depend on up to two real parameters.
+- Partial derivatives of total order \f$K \in \{1, \dots, 6\}\f$ in the argument and the parameters \f$(v, p_1, p_2)\f$ or \f$(u, p_1, p_2)\f$ are evaluated simultaneously for \f$g\f$, \f$h\f$, \f$\log|g'|\f$, and \f$\log|h'|\f$.
 
 ## Direction convention
 
@@ -48,17 +52,78 @@ The module defines twelve parameter-free maps in enum \ref laplace::bijector::sc
 
 `atanh` is also known as Fisher's \f$z\f$ transformation.
 
+## Maps with parameters
+
+The module defines eight maps with parameters in enum \ref laplace::bijector::scalar_bijector_map "scalar_bijector_map":
+
+| Name in scalar_bijector_map | Forward map \f$g(v)\f$ | Inverse map \f$h(u)\f$ | Domain \f$V\f$ | Image \f$U\f$ | Parameters | Monotonicity |
+|---|---|---|---|---|---|---|
+| `affine` | \f$(v - \mu) / \sigma\f$ | \f$\mu + \sigma u\f$ | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ | \f$\mu = \text{location} \in (-\infty, \infty)\f$, \f$\sigma = \text{scale} \ne 0\f$ | Increasing (\f$\sigma > 0\f$), Decreasing (\f$\sigma < 0\f$) |
+| `power` | \f$v^\lambda\f$ | \f$u^{1/\lambda}\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ | \f$\lambda = \text{exponent} \ne 0\f$ | Increasing (\f$\lambda > 0\f$), Decreasing (\f$\lambda < 0\f$) |
+| `softplus` | \f$\frac{1}{a}\log(e^{a v} - 1)\f$ | \f$\frac{1}{a}\log(1 + e^{a u})\f$ | \f$(0, \infty)\f$ | \f$(-\infty, \infty)\f$ | \f$a = \text{sharpness} > 0\f$ | Increasing |
+| `bounded` | \f$\log(v - a) - \log(b - v)\f$ | \f$a + (b - a)/(1 + e^{-u})\f$ | \f$(a, b)\f$ | \f$(-\infty, \infty)\f$ | \f$a = \text{lower}\f$, \f$b = \text{upper}\f$ (\f$a < b\f$) | Increasing |
+| `lower_bounded` | \f$\log(v - a)\f$ | \f$a + e^u\f$ | \f$(a, \infty)\f$ | \f$(-\infty, \infty)\f$ | \f$a = \text{lower}\f$ | Increasing |
+| `upper_bounded` | \f$-\log(b - v)\f$ | \f$b - e^{-u}\f$ | \f$(-\infty, b)\f$ | \f$(-\infty, \infty)\f$ | \f$b = \text{upper}\f$ | Increasing |
+| `box_cox` | \f$(v^\lambda - 1)/\lambda\f$ (\f$\log v\f$ at \f$\lambda = 0\f$) | \f$(1 + \lambda u)^{1/\lambda}\f$ (\f$e^u\f$ at \f$\lambda = 0\f$) | \f$(0, \infty)\f$ | \f$(-1/\lambda, \infty)\f$ (\f$\lambda > 0\f$), \f$(-\infty, -1/\lambda)\f$ (\f$\lambda < 0\f$), \f$(-\infty, \infty)\f$ (\f$\lambda = 0\f$) | \f$\lambda = \text{exponent} \in (-\infty, \infty)\f$ | Increasing |
+| `yeo_johnson` | \f$((1 + v)^\lambda - 1)/\lambda\f$ (\f$v \ge 0\f$), \f$-((1 - v)^{2 - \lambda} - 1)/(2 - \lambda)\f$ (\f$v < 0\f$) | \f$(1 + \lambda u)^{1/\lambda} - 1\f$ (\f$u \ge 0\f$), \f$1 - (1 - (2 - \lambda) u)^{1/(2 - \lambda)}\f$ (\f$u < 0\f$) | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ (\f$0 \le \lambda \le 2\f$), \f$(-\infty, -1/\lambda)\f$ (\f$\lambda < 0\f$), \f$(1/(2 - \lambda), \infty)\f$ (\f$\lambda > 2\f$) | \f$\lambda = \text{exponent} \in (-\infty, \infty)\f$ | Increasing |
+
+Static construction functions create bijectors with parameters:
+- \ref laplace::bijector::scalar_bijector::affine "scalar_bijector::affine(location, scale)"
+- \ref laplace::bijector::scalar_bijector::power "scalar_bijector::power(exponent)"
+- \ref laplace::bijector::scalar_bijector::softplus "scalar_bijector::softplus(sharpness)"
+- \ref laplace::bijector::scalar_bijector::bounded "scalar_bijector::bounded(lower, upper)"
+- \ref laplace::bijector::scalar_bijector::lower_bounded "scalar_bijector::lower_bounded(lower)"
+- \ref laplace::bijector::scalar_bijector::upper_bounded "scalar_bijector::upper_bounded(upper)"
+- \ref laplace::bijector::scalar_bijector::box_cox "scalar_bijector::box_cox(exponent)"
+- \ref laplace::bijector::scalar_bijector::yeo_johnson "scalar_bijector::yeo_johnson(exponent)"
+
+The factory \ref laplace::bijector::scalar_bijector::power "scalar_bijector::power()" normalizes standard exponents to parameter-free maps:
+- exponent \f$1\f$ creates `identity`
+- exponent \f$1/2\f$ creates `sqrt`
+- exponent \f$-1\f$ creates `inverse`
+- exponent \f$-2\f$ creates `inverse_sq`
+- exponent \f$0\f$ creates `log`
+
+If parameters are invalid (for example, non-finite values, scale \f$0\f$, exponent \f$0\f$ in direct `power` constructions, sharpness \f$\le 0\f$, or lower bound not strictly less than upper bound), domain bounds evaluate to quiet NaN, and every evaluation function returns quiet NaN.
+
+## Partial derivatives in the parameters
+
+For a total derivative order \f$K \in \{1, \dots, 6\}\f$, the structure \ref laplace::bijector::bijector_partials "bijector_partials<K>" holds a fixed-size array `double c[(K + 1) * (K + 2) / 2]` storing all partial derivatives with respect to the argument and parameters.
+
+For \f$n_0\f$ derivatives in the argument, \f$n_1\f$ derivatives in the first parameter \f$p_1\f$, and \f$n_2\f$ derivatives in the second parameter \f$p_2\f$ such that \f$n_0 + n_1 + n_2 = K\f$, the component is stored at index
+\f[
+\mathrm{index}(n_1, n_2) = n_2(K + 1) - \frac{n_2(n_2 - 1)}{2} + n_1
+\f]
+Components are ordered primarily by the derivative order in the second parameter \f$n_2\f$, and secondarily by the derivative order in the first parameter \f$n_1\f$. The pure derivative in the argument has \f$n_1 = 0, n_2 = 0\f$ and always occupies index \f$0\f$ (`c[0]`).
+
+The parameter query functions \ref laplace::bijector::scalar_bijector::parameter_1 "parameter_1()", \ref laplace::bijector::scalar_bijector::parameter_2 "parameter_2()", and \ref laplace::bijector::scalar_bijector::parameter_count "parameter_count()" return the active parameter values and the parameter count (0, 1, or 2).
+
+For parameter-free maps (`parameter_count() == 0`), component \f$0\f$ is set to the pure derivative of order \f$K\f$, and all remaining components (`c[1 ... ]`) are set to \f$0\f$.
+
+The `power` map does not compute parameter derivatives in its exponent \f$\lambda\f$ (which grow without bound as \f$\lambda \to 0\f$). Its partial derivative functions return the pure derivative in `c[0]`, and fill all other components with quiet NaN.
+
+## Points where a map is not smooth
+
+The structure \ref laplace::bijector::bijector_kinks "bijector_kinks" reports points where a bijector fails to be infinitely differentiable. It provides the number of non-smooth points (`count`), their locations (`points`), and the highest derivative order that is continuous across the point (`continuous_order`).
+
+The Yeo-Johnson map has a kink at \f$v = 0\f$ for the forward map and \f$u = 0\f$ for the inverse map, unless \f$\lambda = 1\f$. Across this point, the map and its first two derivatives are continuous (`continuous_order = 2`), while the third derivative has a finite jump discontinuity of \f$(1 - \lambda)(2 - \lambda)\f$. If \f$\lambda = 1\f$, the map is affine and smooth everywhere (`count = 0`).
+
+At a kink, evaluation functions follow the right-hand convention: on \f$v = 0\f$ or \f$u = 0\f$, values and derivatives evaluate the right-hand branch (\f$v \ge 0\f$ and \f$u \ge 0\f$).
+
+The functions \ref laplace::bijector::scalar_bijector::forward_kinks "forward_kinks()" and \ref laplace::bijector::scalar_bijector::inverse_kinks "inverse_kinks()" return the kinks of the forward and inverse maps. For parameter-free maps and all other parameterized maps, `count` is \f$0\f$.
+
 ## Domain and special values
 
 - **Outside the closed domain:** If an input falls strictly outside the closed domain (or is NaN), every function returns quiet NaN.
 - **Boundaries:** On the boundary of the domain, functions return their mathematical limits (for example, \f$\mathrm{logit}(0) = -\infty\f$, \f$\mathrm{logit}(1) = +\infty\f$, \f$\log(0) = -\infty\f$).
 - **Underflow and overflow:** Nothing is clamped. Where the exact value under- or overflows the range of doubles, the result is 0 or infinity; the tests cover the points where the exact value is a nonzero normal double.
+- **Invalid parameters:** If a parameter is invalid (for example, non-finite, scale \f$0\f$, sharpness \f$\le 0\f$, or lower bound not strictly less than upper bound), domain bounds return quiet NaN and every evaluation function returns quiet NaN.
 
 ## Distances to the bounds
 
 The functions \ref laplace::bijector::scalar_bijector::inverse_distance_upper "inverse_distance_upper()" and \ref laplace::bijector::scalar_bijector::inverse_distance_lower "inverse_distance_lower()" return the distance of \f$h(u)\f$ to the upper and lower bounds of its range (\ref laplace::bijector::scalar_bijector::forward_domain_upper "forward_domain_upper()" and \ref laplace::bijector::scalar_bijector::forward_domain_lower "forward_domain_lower()").
 
-Where \f$h(u)\f$ rounds to a bound other than \f$0\f$, forming the difference directly loses its digits: for logit, \f$1 - h(u)\f$ rounds to \f$0\f$ from \f$u = 37.4\f$, while \f$\mathrm{expit}(-u)\f$ is exact. For the six maps whose range is \f$(0, 1)\f$ or \f$(-1, 1)\f$, the distance is computed directly without forming \f$h(u)\f$:
+Where \f$h(u)\f$ rounds to a bound other than \f$0\f$, forming the difference directly loses its digits: for logit, \f$1 - h(u)\f$ rounds to \f$0\f$ from \f$u = 37.4\f$, while \f$\mathrm{expit}(-u)\f$ is exact. For the six parameter-free maps whose range is \f$(0, 1)\f$ or \f$(-1, 1)\f$, the distance is computed directly without forming \f$h(u)\f$:
 
 | Map | Upper distance | Lower distance |
 |---|---|---|
@@ -69,13 +134,18 @@ Where \f$h(u)\f$ rounds to a bound other than \f$0\f$, forming the difference di
 | `loglog` | \f$h_{\mathrm{cloglog}}(-u) = 1 - \exp(-e^{-u})\f$ | \f$h(u)\f$ |
 | `atanh` | \f$2e/(1 + e)\f$ with \f$e = \exp(-2u)\f$ for \f$u > 0\f$ (\f$1 - \tanh u\f$ for \f$u \le 0\f$) | \f$2e/(1 + e)\f$ with \f$e = \exp(2u)\f$ for \f$u < 0\f$ (\f$1 + \tanh u\f$ for \f$u \ge 0\f$) |
 
+For `bounded`, `lower_bounded`, and `upper_bounded`, distances to finite bounds are computed directly:
+- For `bounded`: upper distance is \f$(b - a)\operatorname{expit}(-u)\f$; lower distance is \f$(b - a)\operatorname{expit}(u)\f$.
+- For `lower_bounded`: lower distance is \f$e^u\f$; upper distance is \f$+\infty\f$.
+- For `upper_bounded`: upper distance is \f$e^{-u}\f$; lower distance is \f$+\infty\f$.
+
 Elsewhere, the generic forms are evaluated: the upper bound minus \f$h(u)\f$, and \f$h(u)\f$ minus the lower bound (evaluating to \f$+\infty\f$ when the bound is infinite). When the bijector is inverted (`b.inverted == true`), the generic form is always evaluated.
 
-The conditioned error ulpC is scaled with \f$h'(u)\f$, the derivative of the distance. Over the six maps and both distances, the maximum error is 2.28 ulpC on gcc and on CUDA (measured for probit lower distance); in plain ulps the error reaches up to 130 for cloglog (upper distance) and 173–174 for loglog (lower distance) where \f$\exp(-e^u)\f$ carries the rounding of \f$e^u\f$ with condition number \f$u e^u\f$.
+The conditioned error ulpC is scaled with \f$h'(u)\f$, the derivative of the distance. Over the six parameter-free maps and both distances, the maximum error is 2.28 ulpC on gcc and on CUDA (measured for probit lower distance); in plain ulps the error reaches up to 130 for cloglog (upper distance) and 173–174 for loglog (lower distance) where \f$\exp(-e^u)\f$ carries the rounding of \f$e^u\f$ with condition number \f$u e^u\f$.
 
 ## Closed forms of maps and derivatives
 
-Every formula is written directly for its direction rather than obtained by numerical inversion, so that each evaluates accurately where the other cancels. The derivative polynomials were derived and verified symbolically using SymPy 1.14.0 (`tools/reference/bijector_forms.py`; Meurer et al. 2017).
+Every formula is written directly for its direction rather than obtained by numerical inversion, so that each evaluates accurately where the other cancels. The derivative polynomials were derived and verified symbolically using SymPy 1.14.0 (`tools/reference/bijector_forms.py`, `tools/reference/bijector_param_common.py`; Meurer et al. 2017).
 
 ### Identity
 
@@ -260,6 +330,122 @@ For `inverse_sq`: \f$g(v) = 1/v^2\f$, \f$h(u) = 1/\sqrt{u}\f$.
 - Inverse: \f$h(u) = \exp(-e^{-u}) = 1 - h_{\mathrm{cloglog}}(-u)\f$, with derivatives \f$h^{(k)}(u) = (-1)^{k+1} h_{\mathrm{cloglog}}^{(k)}(-u)\f$.
 - Inverse log-Jacobian: \f$-u - e^{-u}\f$. First derivative is \f$\mathrm{expm1}(-u)\f$; higher derivatives are \f$(-1)^{k+1} e^{-u}\f$ for \f$k \ge 2\f$.
 
+### Affine
+
+Let \f$\mu = p_1\f$ (location) and \f$\sigma = p_2 \ne 0\f$ (scale), with \f$q = 1/\sigma\f$.
+- Forward: \f$g(v) = (v - \mu)/\sigma = (v - \mu) q\f$.
+  - First derivative: \f$g'(v) = q\f$, and higher derivatives \f$g^{(k)}(v) = 0\f$ for \f$k \ge 2\f$.
+  - Forward log-Jacobian: \f$\log|g'(v)| = -\log|\sigma|\f$. Derivations in argument are \f$0\f$; derivatives in \f$\sigma\f$ are \f$\frac{\partial^k}{\partial\sigma^k}\log|\sigma|^{-1} = (-1)^k(k-1)!/\sigma^k\f$.
+- Inverse: \f$h(u) = \mu + \sigma u\f$.
+  - First derivative: \f$h'(u) = \sigma\f$, and higher derivatives \f$h^{(k)}(u) = 0\f$ for \f$k \ge 2\f$.
+  - Inverse log-Jacobian: \f$\log|h'(u)| = \log|\sigma|\f$.
+- Numerical choices: the difference \f$v - \mu\f$ is formed as a single subtraction, which is exact when \f$v\f$ and \f$\mu\f$ are close. Mixed partials are linear in \f$v, u, \mu\f$ and powers of \f$q\f$, avoiding cancellation.
+
+### Power
+
+Let \f$\lambda = p_1 \ne 0\f$ and \f$\mu = 1/\lambda\f$.
+- Forward: \f$g(v) = v^\lambda\f$.
+  - Forward derivatives: \f$g^{(k)}(v) = F_k v^{\lambda - k}\f$ where \f$F_k = \prod_{j=0}^{k-1}(\lambda - j)\f$.
+  - Forward log-Jacobian: \f$\log|g'(v)| = \log|\lambda| + (\lambda - 1)\log v\f$, with derivatives \f$(\lambda - 1)(-1)^{k-1}(k-1)! v^{-k}\f$ for \f$k \ge 1\f$.
+- Inverse: \f$h(u) = u^\mu\f$.
+  - Inverse derivatives: \f$h^{(k)}(u) = G_k u^{\mu - k}\f$ where \f$G_k = \prod_{j=0}^{k-1}(\mu - j) = \prod_{j=0}^{k-1}(1 - j\lambda)/\lambda\f$.
+  - Inverse log-Jacobian: \f$\log|h'(u)| = -\log|\lambda| + (\mu - 1)\log u\f$, with \f$\mu - 1 = (1 - \lambda)/\lambda\f$.
+- Numerical choices:
+  - The terms \f$v^{\lambda - k}\f$ and \f$u^{\mu - k}\f$ are evaluated by splitting the exponent as \f$s + e\f$ without rounding loss using Knuth's two-sum algorithm, computing \f$x^s(1 + e\log x)\f$.
+  - When \f$x^s\f$ underflows or overflows while \f$F_k x^s\f$ remains finite, the exponent is halved and factors are multiplied sequentially.
+  - Falling factorial factors \f$\mu - j\f$ are computed via \f$\mathrm{fma}(-j, \lambda, 1)/\lambda\f$ to preserve relative accuracy when \f$\lambda \approx 1/j\f$.
+
+### Softplus
+
+Let \f$a = p_1 > 0\f$ (sharpness), \f$x = a v > 0\f$, \f$t = 1/\mathrm{expm1}(x)\f$, and \f$M = \log(1 - e^{-x})\f$.
+- Forward: \f$g(v) = v + \frac{1}{a} M\f$.
+  - First derivative: \f$g'(v) = 1 + t\f$.
+  - Higher derivatives: \f$g^{(k)}(v) = a^{k-1} Q_{k-1}(t)\f$ for \f$k \ge 2\f$, where \f$Q_k(t)\f$ are derivative polynomials of \f$t\f$ with positive coefficients.
+  - Forward log-Jacobian: \f$\log|g'(v)| = -M\f$, with derivatives \f$-a^k t^{(k-1)}(x)\f$.
+- Inverse: let \f$x = a u\f$, \f$\sigma(x) = 1/(1 + e^{-x})\f$, and \f$S = \log(1 + e^x) = x + \log(1 + e^{-x})\f$ for \f$x > 0\f$.
+  - Value: \f$h(u) = S/a\f$.
+  - Derivatives: \f$h^{(k)}(u) = a^{k-1}\sigma^{(k-1)}(x)\f$ using the derivative polynomials of the logistic function.
+  - Inverse log-Jacobian: \f$\log|h'(u)| = \log\sigma(x)\f$, with derivatives \f$-a^k\sigma^{(k-1)}(x)\f$.
+- Numerical choices:
+  - Pure \f$a\f$-derivatives cancel the \f$x\f$-linear parts of \f$Z = \log(e^x - 1)\f$ and \f$S\f$ analytically to avoid catastrophic cancellation.
+  - Mixed partials of the forward log-Jacobian for \f$0 < x < 3\f$ are computed from the Bernoulli series of \f$\lambda(x) = -\log\operatorname{exprel}(-x)\f$ because its derivatives are \f$O(x)\f$ and the closed form cancels. For \f$x \ge 3\f$, the direct derivatives of \f$-\log(1 - e^{-x})\f$ are evaluated.
+
+### Bounded
+
+Let \f$a = p_1\f$ (lower bound) and \f$b = p_2\f$ (upper bound) with \f$a < b\f$.
+Let \f$s = b - a\f$, \f$p = v - a\f$, \f$q = b - v\f$, \f$A = 1/p\f$, \f$B = 1/q\f$, \f$S = 1/s\f$, and \f$D = p - q = 2v - a - b\f$.
+- Forward: \f$g(v) = \log(p/q)\f$.
+  - Forward derivatives: for odd \f$k\f$, \f$g^{(k)}(v) = (k-1)!(A^k + B^k)\f$; for even \f$k\f$, \f$g^{(k)}(v) = (k-1)! D A B S_k(A, B)\f$ with \f$S_k(A, B) = \sum_{j=0}^{k-1} A^{k-1-j} B^j\f$.
+  - Forward log-Jacobian: \f$\log|g'(v)| = \log((s/p)/q)\f$. For even \f$k \ge 2\f$, derivatives are \f$(k-1)!(A^k + B^k)\f$; for odd \f$k \ge 1\f$, \f$(k-1)! D A B S_k(A, B)\f$.
+- Inverse: let \f$p_u = \operatorname{expit}(u)\f$, \f$q_u = \operatorname{expit}(-u)\f$, \f$U = p_u q_u\f$, and \f$D_u = q_u - p_u\f$.
+  - Value: \f$h(u) = a q_u + b p_u\f$.
+  - Derivatives: \f$h^{(k)}(u) = s \sigma_k(U, D_u)\f$ where \f$\sigma_k\f$ are the derivative polynomials of the logistic function.
+  - Inverse log-Jacobian: \f$\log|h'(u)| = \log s + \log(p_u q_u)\f$. First derivative is \f$D_u\f$; higher derivatives are \f$-2\sigma_{k-1}(U, D_u)\f$ for \f$k \ge 2\f$.
+- Distances to bounds: \f$b - h(u) = s q_u\f$ and \f$h(u) - a = s p_u\f$.
+- Numerical choices:
+  - Exact factoring \f$B - S = p S B\f$ and \f$A - S = q S A\f$ in mixed partials avoids differences of large opposing terms near domain boundaries, reducing maximum conditioned error from \f$10^{15}\f$ ulpC to 0.6 ulpC.
+  - Evaluating \f$g(v)\f$ as \f$\log(p/q)\f$ rather than \f$\log p - \log q\f$ avoids 18 eps cancellation near the midpoint.
+
+### Lower-bounded and upper-bounded
+
+For `lower_bounded`: parameter \f$a = p_1\f$ (lower bound), with \f$t = v - a > 0\f$.
+- Forward: \f$g(v) = \log t\f$, with derivatives \f$g^{(k)}(v) = (-1)^{k-1}(k-1)! t^{-k}\f$ for \f$k \ge 1\f$.
+- Forward log-Jacobian: \f$\log|g'(v)| = -\log t = -g(v)\f$, with derivatives \f$-g^{(k)}(v)\f$.
+- Inverse: \f$h(u) = a + e^u\f$, with derivatives \f$h^{(k)}(u) = e^u\f$ for all \f$k \ge 1\f$.
+- Inverse log-Jacobian: \f$\log|h'(u)| = u\f$, with first derivative \f$1\f$ and higher derivatives \f$0\f$.
+- Distance to lower bound: \f$h(u) - a = e^u\f$.
+- Parameter partials: \f$g\f$ depends on \f$v - a\f$ only, so \f$\partial/\partial a = -\partial/\partial v\f$.
+
+For `upper_bounded`: parameter \f$b = p_1\f$ (upper bound), with \f$s = b - v > 0\f$.
+- Forward: \f$g(v) = -\log s\f$, with derivatives \f$g^{(k)}(v) = (k-1)! s^{-k}\f$ for \f$k \ge 1\f$.
+- Forward log-Jacobian: \f$\log|g'(v)| = -\log s = g(v)\f$, with derivatives \f$g^{(k)}(v)\f$.
+- Inverse: \f$h(u) = b - e^{-u}\f$, with derivatives \f$h^{(k)}(u) = (-1)^{k+1} e^{-u}\f$ for all \f$k \ge 1\f$.
+- Inverse log-Jacobian: \f$\log|h'(u)| = -u\f$, with first derivative \f$-1\f$ and higher derivatives \f$0\f$.
+- Distance to upper bound: \f$b - h(u) = e^{-u}\f$.
+- Parameter partials: \f$g\f$ depends on \f$b - v\f$ only, so \f$\partial/\partial b = -\partial/\partial v\f$.
+
+### Box-Cox
+
+Let \f$\lambda = p_1\f$, \f$L = \log v\f$, \f$x = \lambda u\f$, \f$w = 1 + x\f$, \f$t = 1/w\f$, and \f$S = u\operatorname{log1prel}(\lambda u)\f$.
+- Forward: \f$g(v) = L\operatorname{exprel}(\lambda L)\f$ for \f$|\lambda L| < 1\f$, and \f$(v^\lambda - 1)/\lambda\f$ beyond.
+  - Argument derivatives: \f$g^{(k)}(v) = \prod_{j=1}^{k-1}(\lambda - j) v^{\lambda - k}\f$ for \f$k \ge 1\f$.
+  - Parameter derivatives: \f$\frac{\partial^n}{\partial\lambda^n} g(v) = L^{n+1}\operatorname{exprel}^{(n)}(\lambda L)\f$.
+  - Forward log-Jacobian: \f$\log|g'(v)| = (\lambda - 1) L\f$, with derivatives \f$(\lambda - 1)\frac{\mathrm{d}^k}{\mathrm{d}v^k}\log v\f$.
+- Inverse: \f$h(u) = \exp(S)\f$.
+  - Argument derivatives: \f$h^{(k)}(u) = P_k(\lambda)\exp((1 - k\lambda)S)\f$ with \f$P_k(\lambda) = \prod_{r=1}^{k-1}(1 - r\lambda)\f$.
+  - Parameter derivatives: computed from \f$x_j = \frac{\partial^j}{\partial\lambda^j} S = u^{j+1}\operatorname{log1prel}^{(j)}(\lambda u)\f$ via partial Bell polynomials \f$A_n\f$ satisfying \f$\frac{\partial^n}{\partial\lambda^n} h = h A_n\f$.
+  - Inverse log-Jacobian: \f$\log|h'(u)| = (1 - \lambda) S\f$.
+- Distance to lower bound: \f$h(u)\f$ itself; distance to upper bound is \f$+\infty\f$.
+- Numerical choices:
+  - Formulations in \f$\operatorname{exprel}\f$ and \f$\operatorname{log1prel}\f$ prevent division by \f$\lambda\f$, yielding smooth evaluations across \f$\lambda = 0\f$ without branching.
+  - Partial Bell polynomials and derivatives of \f$S\f$ are formed in a single pass across all components.
+
+### Yeo-Johnson
+
+Let \f$\lambda = p_1\f$, \f$c = 2 - \lambda\f$, \f$M = \mathrm{log1p}(v)\f$, \f$N = \mathrm{log1p}(-v)\f$, and \f$a = -u\f$.
+- Forward:
+  \f[
+  g(v) = \begin{cases}
+  M\operatorname{exprel}(\lambda M) = \frac{(1 + v)^\lambda - 1}{\lambda} & \text{for } v \ge 0 \\
+  -N\operatorname{exprel}(c N) = -\frac{(1 - v)^c - 1}{c} & \text{for } v < 0
+  \end{cases}
+  \f]
+  - Derivatives for \f$v \ge 0\f$: \f$g^{(k)}(v) = \prod_{j=1}^{k-1}(\lambda - j) (1 + v)^{\lambda - k}\f$.
+  - Derivatives for \f$v < 0\f$: \f$g^{(k)}(v) = (-1)^{k-1}\prod_{j=0}^{k-2}(1 - \lambda - j) (1 - v)^{c - k}\f$.
+  - Forward log-Jacobian: \f$(\lambda - 1) M\f$ for \f$v \ge 0\f$, and \f$(1 - \lambda) N\f$ for \f$v < 0\f$.
+- Inverse:
+  \f[
+  h(u) = \begin{cases}
+  \mathrm{expm1}(u\operatorname{log1prel}(\lambda u)) = (1 + \lambda u)^{1/\lambda} - 1 & \text{for } u \ge 0 \\
+  -\mathrm{expm1}(a\operatorname{log1prel}(c a)) = 1 - (1 - c u)^{1/c} & \text{for } u < 0
+  \end{cases}
+  \f]
+  - Derivatives for \f$u \ge 0\f$: \f$h^{(k)}(u) = \prod_{j=1}^{k-1}(1 - j\lambda)\exp(u(1 - k\lambda)\operatorname{log1prel}(\lambda u))\f$.
+  - Derivatives for \f$u < 0\f$: \f$h^{(k)}(u) = \prod_{j=0}^{k-2}(1 - \lambda + j c)\exp(u(1 - \lambda + (k-1) c)\operatorname{log1prel}(c a))\f$.
+  - Inverse log-Jacobian: \f$(1 - \lambda) u\operatorname{log1prel}(\lambda u)\f$ for \f$u \ge 0\f$, and \f$(1 - \lambda) u\operatorname{log1prel}(c a)\f$ for \f$u < 0\f$.
+- Numerical choices:
+  - Formulations in \f$\mathrm{log1p}\f$ and \f$\mathrm{expm1}\f$ with \f$\operatorname{exprel}\f$ and \f$\operatorname{log1prel}\f$ avoid cancellation near \f$v = 0\f$ and \f$u = 0\f$, and evaluate smoothly across \f$\lambda = 0\f$ and \f$\lambda = 2\f$ without limits or branching.
+
 ## Numerical considerations and implementation choices
 
 The following numerical choices in `include/laplace/bijector/scalar.hpp` follow from measurements recorded in `docs/numerics.md`:
@@ -269,12 +455,16 @@ The following numerical choices in `include/laplace/bijector/scalar.hpp` follow 
 3. **Log-cosh and log1p formulations:** \f$\log\cosh u\f$ below \f$|u| = 1\f$ is evaluated as \f$\mathrm{log1p}(e_m^2 / (2(1 + e_m)))\f$ where \f$e_m = \mathrm{expm1}(|u|)\f$, because \f$|u| + \mathrm{log1p}(e^{-2|u|}) - \log 2\f$ cancels to \f$u^2/2\f$ near zero (causing errors of \f$10^{17}\f$ ulp at \f$|u| = 10^{-9}\f$). Similarly, \f$-\log(1 - v^2)\f$ of atanh below \f$|v| = 1/2\f$ is computed as \f$-\mathrm{log1p}(-v^2)\f$.
 4. **Power ordering:** Multiplications in \f$c a^k\f$ apply the coefficient \f$c\f$ first so that partial products do not become subnormal or overflow before the final result does. Derivatives of square root and of the inverse of inverse square are evaluated as integer powers of \f$1/\sqrt{\cdot}\f$ (preventing spurious NaN when \f$v < 10^{-102}\f$).
 5. **Exact cancellation in derivative factors:** The factor \f$1 - w = 1 - e^u\f$ in the second derivative of the inverse of cloglog and loglog is computed as \f$-\mathrm{expm1}(u)\f$ (preventing \f$1.4 \times 10^8\f$ ulpC error at \f$u = -1.2 \times 10^{-9}\f$).
+6. **Bounded cancellation avoidance near bounds:** In the mixed partials of the bounded map, the terms \f$B^k - S^k\f$ and \f$A^k - S^k\f$ (where \f$A = 1/(v-a)\f$, \f$B = 1/(b-v)\f$, and \f$S = 1/(b-a)\f$) cancel near the endpoints. Factoring \f$B - S = (v - a) S B\f$ and \f$A - S = (b - v) S A\f$ exactly with geometric sums reduces maximum conditioned error from \f$10^{15}\f$ ulpC to 0.6 ulpC.
+7. **Knuth two-sum exponent splitting in power:** Exponents \f$\lambda - k\f$ and \f$\mu - k\f$ are represented as exact sums of two doubles \f$s + e\f$ using two-sum, evaluating \f$x^s (1 + e \log x)\f$. When \f$x^s\f$ would underflow or overflow while the scaled product remains finite, the exponent is halved.
+8. **Softplus Bernoulli series and Leibniz forms:** Mixed partials of the forward log-Jacobian of softplus are evaluated via a Bernoulli series of \f$-\log\operatorname{exprel}(-x)\f$ for \f$0 < x < 3\f$, where closed-form differences cancel to \f$O(x)\f$. In the pure parameter derivatives of the value functions, the \f$x\f$-linear terms are cancelled analytically.
+9. **Singularity-free Box-Cox and Yeo-Johnson via exprel and log1prel:** Box-Cox and Yeo-Johnson are formulated in \f$\operatorname{exprel}\f$ and \f$\operatorname{log1prel}\f$ and their derivatives, avoiding division by \f$\lambda\f$ or \f$2 - \lambda\f$. All orders evaluate smoothly through \f$\lambda = 0\f$ and \f$\lambda = 2\f$ without branching. For the inverse map, the Bell polynomials of the parameter derivatives of \f$S = u\operatorname{log1prel}(\lambda u)\f$ are computed in a single pass across all components.
 
 ## Measured accuracy
 
 See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
 
-Reference values were computed using SymPy and evaluated with mpmath at precision growing with the point, each row computed at two precisions 120 bits apart and kept only if the two agree to \f$2^{-100}\f$ relative, across 52150 reference rows covering points log-uniform towards zero and domain bounds (down to \f$2^{-1000}\f$ and \f$1 - 2^{-54}\f$), uniform in the interior, and \f$|u|\f$ up to \f$2^{10}\f$ (\f$2^{1000}\f$ for asinh and inverse cauchit; `tools/reference/bijector_scalar.py`, `tests/bijector/test_scalar.cpp`).
+Reference values for maps without parameters were computed using SymPy and evaluated with mpmath at precision growing with the point, each row computed at two precisions 120 bits apart and kept only if the two agree to \f$2^{-100}\f$ relative, across 52150 reference rows covering points log-uniform towards zero and domain bounds (down to \f$2^{-1000}\f$ and \f$1 - 2^{-54}\f$), uniform in the interior, and \f$|u|\f$ up to \f$2^{10}\f$ (\f$2^{1000}\f$ for asinh and inverse cauchit; `tools/reference/bijector_scalar.py`, `tests/bijector/test_scalar.cpp`).
 
 Errors are given in ulpC (\ref accuracy_conditioned "conditioned scale"), with the scale \f$s = |f_k(x)| + |x f_{k+1}(x)|\f$ for the function \f$f_k\f$ of order \f$k\f$ at the point \f$x\f$, \f$f_{k+1}\f$ being the function of the next order; for the distances to the bounds, \f$f_{k+1}\f$ is \f$h'\f$.
 
@@ -295,6 +485,52 @@ The measured maximum error in ulpC over orders 0 to 6 on gcc (OpenMP) and CUDA (
 | asinh | 8.55 / 9.49 | 0.494 / 0.622 | 5.35 / 7.85 | 1.9 / 2.27 |
 
 In plain ulps, values and first derivatives (orders 0–1) are within 4.1 ulp on gcc, except for cloglog (up to 147 ulp) and loglog (up to 1430 ulp) whose values and first derivatives cross zero (loglog at \f$v = 1/e\f$) or are ill-conditioned (\f$\exp(u - e^u)\f$ carrying the rounding of \f$e^u\f$), where their ulpC is at most 2.01. Every quantity is within 11 ulpC on both gcc and CUDA. The accuracy of the distances to the bounds is given in their own section above.
+
+For maps with parameters, reference values were generated by differentiating the definitions symbolically in the argument and parameters with SymPy and evaluating with mpmath at raised precision (`tools/reference/bijector_param_common.py`, `tests/bijector/param_common.hpp`). Errors are measured in ulpC with the \ref accuracy_conditioned "conditioned scale" \f$s = |f| + |x\,\partial f/\partial x| + |p_1\,\partial f/\partial p_1| + |p_2\,\partial f/\partial p_2|\f$.
+
+The measured maximum error in ulpC over orders 0 to 6 on gcc and CUDA (`docs/numerics.md`):
+
+| Map | Forward | Inverse | Forward log-Jacobian | Inverse log-Jacobian | Distances |
+|---|---|---|---|---|---|
+| affine | 0.362 / 0.362 | 0.5 / 0.5 | 0.495 / 0.495 | 0.495 / 0.495 | - |
+| power | 4.76 / 4.37 | 5.59 / 4.93 | 5.88 / 5.88 | 5.87 / 5.87 | - |
+| softplus | 7.67 / 7.04 | 4.38 / 4.25 | 18.4 / 18.4 | 3.48 / 3.47 | - |
+| bounded | 1.1 / 1.1 | 7.09 / 5.82 | 1.1 / 1.1 | 7.09 / 5.82 | 0.721 / 0.721, 0.584 / 0.584 |
+| lower_bounded | 0.679 / 0.679 | 0.725 / 0.725 | 0.679 / 0.679 | 0 / 0 | 0.273 / 0.273 |
+| upper_bounded | 0.679 / 0.679 | 0.467 / 0.467 | 0.679 / 0.679 | 0 / 0 | 0.193 / 0.193 |
+| box_cox | 7.97 / 9.71 | 42.8 / 46.3 | 1.28 / 1.28 | 49.4 / 43 | - |
+| yeo_johnson | 26 / 26 | 24.9 / 39.9 | 3.06 / 3.06 | 46.3 / 27.3 | - |
+
+The largest errors occur in the inverse of Box-Cox and its log-Jacobian at orders 4–6 (up to 49.4 ulpC, where \f$|\lambda u|\f$ is of order 1–10 and the mixed sums cancel), Yeo-Johnson forward map at \f$|v|\f$ near \f$10^{18}\f$ (26 ulpC) and its inverse log-Jacobian at order 6 (46.3 ulpC on gcc at \f$u = -3, \lambda = 0.4\f$), and softplus forward log-Jacobian at order 6 near \f$a v = 3\f$ (18.4 ulpC). Every quantity of every map is within 50 ulpC on both builds, and within 8 ulpC for all maps except Box-Cox, Yeo-Johnson, and the order 6 forward log-Jacobian of softplus.
+
+## Speed
+
+Timings measured in `benchmarks/bijector_scalar.cpp` on \f$2^{16}\f$ points inside each domain with typical parameters, in nanoseconds per call: one gcc thread / OpenMP with 6 threads / CUDA (NVIDIA RTX 4070 SUPER):
+
+| Map | Forward | Forward d6 | Inverse | Inverse d6 | Log-Jacobian fwd / inv | Inverse partials d1 | Inverse partials d6 | Distance |
+|---|---|---|---|---|---|---|---|---|
+| identity | 4 / 1.1 / 0.40 | 5 / 1.2 / 0.39 | 4 / 1.0 / 0.40 | 4 / 1.5 / 0.39 | 4 / 4 / 0.38-0.39 | 6 / 1.4 / 0.42 | 15 / 2.9 / 0.63 | 5 / 1.2 / 0.42 |
+| log | 7 / 1.6 / 0.50 | 5 / 1.2 / 0.43 | 10 / 3.4 / 0.46 | 10 / 2.0 / 0.45 | 7 / 4 / 0.39-0.51 | 15 / 2.9 / 0.48 | 24 / 4.7 / 0.68 | 11 / 2.3 / 0.48 |
+| logit | 44 / 7.6 / 1.09 | 5 / 1.2 / 0.54 | 11 / 2.2 / 0.50 | 30 / 5.5 / 0.63 | 43 / 49 / 0.65-1.07 | 15 / 3.4 / 0.54 | 42 / 7.4 / 0.83 | 10 / 2.9 / 0.49 |
+| probit | 34 / 6.1 / 2.95 | 49 / 8.7 / 3.64 | 19 / 3.4 / 1.78 | 11 / 3.2 / 0.51 | 36 / 4 / 0.40-2.95 | 14 / 2.9 / 0.51 | 24 / 4.5 / 0.72 | 18 / 5.2 / 1.78 |
+| cauchit | 10 / 2.0 / 0.77 | 11 / 2.3 / 0.79 | 42 / 7.4 / 0.59 | 9 / 2.7 / 0.56 | 46 / 37 / 0.87-1.36 | 11 / 2.2 / 0.53 | 23 / 4.4 / 0.77 | 41 / 7.5 / 0.59 |
+| cloglog | 42 / 7.6 / 0.73 | 36 / 6.6 / 0.68 | 27 / 4.8 / 0.55 | 26 / 4.7 / 0.56 | 44 / 10 / 0.46-0.73 | 27 / 4.9 / 0.56 | 36 / 6.6 / 0.76 | 19 / 3.4 / 0.53 |
+| loglog | 19 / 3.6 / 0.64 | 11 / 3.1 / 0.58 | 19 / 3.6 / 0.54 | 26 / 4.7 / 0.56 | 19 / 10 / 0.46-0.64 | 27 / 5.0 / 0.56 | 35 / 6.3 / 0.77 | 24 / 4.5 / 0.56 |
+| inverse | 4 / 1.6 / 0.40 | 5 / 1.3 / 0.44 | 4 / 1.1 / 0.41 | 4 / 1.1 / 0.44 | 8 / 7 / 0.52-0.53 | 6 / 1.5 / 0.44 | 16 / 3.2 / 0.64 | 4 / 1.1 / 0.42 |
+| inverse_sq | 4 / 1.0 / 0.41 | 5 / 1.3 / 0.43 | 4 / 1.5 / 0.44 | 5 / 1.2 / 0.50 | 8 / 7 / 0.50-0.51 | 6 / 1.6 / 0.48 | 20 / 3.8 / 0.70 | 4 / 1.1 / 0.46 |
+| sqrt | 4 / 1.4 / 0.42 | 5 / 1.3 / 0.48 | 4 / 1.0 / 0.39 | 4 / 1.4 / 0.40 | 8 / 7 / 0.51-0.52 | 6 / 1.3 / 0.42 | 15 / 2.7 / 0.61 | 4 / 1.0 / 0.40 |
+| atanh | 55 / 9.2 / 0.84 | 5 / 1.2 / 0.54 | 29 / 5.3 / 0.56 | 30 / 5.8 / 0.64 | 44 / 53 / 0.78-0.92 | 14 / 2.8 / 0.53 | 44 / 8.1 / 0.84 | 20 / 3.8 / 0.68 |
+| asinh | 31 / 5.7 / 0.65 | 10 / 2.4 / 0.53 | 10 / 1.9 / 0.56 | 10 / 2.1 / 0.55 | 37 / 51 / 0.77-0.88 | 14 / 2.7 / 0.50 | 23 / 4.3 / 0.75 | 11 / 2.2 / 0.57 |
+| affine | 4 / 2.4 / 0.46 | 4 / 1.1 / 0.41 | 4 / 1.4 / 0.44 | 4 / 1.1 / 0.41 | 5 / 4 / 0.55-0.56 | 5 / 1.6 / 0.44 | 21 / 4.2 / 0.75 | 3 / 1.3 / 0.42 |
+| power | 42 / 7.2 / 0.77 | 46 / 8.2 / 0.99 | 50 / 8.6 / 0.95 | 68 / 11.7 / 1.23 | 11 / 11 / 0.66-0.70 | 60 / 10.8 / 1.08 | 81 / 14.3 / 1.46 | 3 / 0.9 / 0.40 |
+| softplus | 37 / 6.6 / 0.92 | 47 / 8.5 / 0.89 | 70 / 12.1 / 0.97 | 33 / 7.1 / 0.91 | 35 / 68 / 0.90-0.91 | 70 / 12.0 / 1.34 | 110 / 20.0 / 6.07 | 3 / 0.9 / 0.41 |
+| bounded | 9 / 2.2 / 0.58 | 11 / 2.7 / 0.54 | 27 / 5.1 / 0.56 | 29 / 5.2 / 0.67 | 12 / 50 / 0.62-0.82 | 14 / 5.5 / 0.73 | 49 / 9.1 / 0.94 | 29 / 5.3 / 0.54 |
+| lower_bounded | 7 / 1.6 / 0.52 | 4 / 1.1 / 0.44 | 10 / 2.2 / 0.47 | 10 / 2.3 / 0.46 | 8 / 4 / 0.40-0.53 | 12 / 2.2 / 0.47 | 27 / 4.9 / 0.64 | 3 / 1.0 / 0.40 |
+| upper_bounded | 8 / 2.0 / 0.53 | 4 / 1.1 / 0.44 | 11 / 2.1 / 0.47 | 11 / 2.1 / 0.46 | 8 / 4 / 0.39-0.53 | 11 / 2.2 / 0.48 | 27 / 4.9 / 0.64 | 9 / 2.9 / 0.47 |
+| box_cox | 35 / 6.1 / 1.06 | 47 / 8.2 / 1.00 | 39 / 6.7 / 0.78 | 65 / 11.5 / 0.83 | 7 / 28 / 0.54-0.72 | 78 / 13.4 / 7.91 | 310 / 56.3 / 46.5 | 4 / 1.0 / 0.47 |
+| yeo_johnson | 46 / 8.7 / 1.16 | 37 / 6.8 / 1.31 | 47 / 9.5 / 1.19 | 36 / 6.6 / 1.26 | 32 / 30 / 0.87-1.03 | 78 / 13.5 / 14.1 | 359 / 60.9 / 99.5 | 3 / 1.0 / 0.45 |
+
+On CUDA the slowest are the partial derivatives of order 6 of Box-Cox (46.5 ns) and Yeo-Johnson (99.5 ns), whose divergent branches and evaluations of the exprel and log1prel derivatives account for most of the runtime; all other operations complete within 4 ns. Across all maps, evaluation requires a few tens of nanoseconds on a single CPU thread and a few nanoseconds on the GPU, except for the order 6 partials of Box-Cox and Yeo-Johnson.
 
 ## Example
 
@@ -322,8 +558,27 @@ Functions in this module are member functions of \ref laplace::bijector::scalar_
 
 ### Types
 
-- \ref laplace::bijector::scalar_bijector_map "scalar_bijector_map" — Enumeration of scalar bijector maps without parameters.
+- \ref laplace::bijector::scalar_bijector_map "scalar_bijector_map" — Enumeration of scalar bijector maps with and without parameters.
 - \ref laplace::bijector::scalar_bijector "scalar_bijector" — Scalar bijector configuration structure.
+- \ref laplace::bijector::bijector_partials "bijector_partials" — Fixed-size container for partial derivatives in argument and parameters of order up to 6.
+- \ref laplace::bijector::bijector_kinks "bijector_kinks" — Description of non-smooth points of a scalar bijector.
+
+### Construction of maps with parameters
+
+- \ref laplace::bijector::scalar_bijector::affine "affine()" — Constructs an affine bijector with location and scale.
+- \ref laplace::bijector::scalar_bijector::power "power()" — Constructs a power bijector with exponent.
+- \ref laplace::bijector::scalar_bijector::softplus "softplus()" — Constructs a softplus bijector with sharpness.
+- \ref laplace::bijector::scalar_bijector::bounded "bounded()" — Constructs a bounded bijector with lower and upper bounds.
+- \ref laplace::bijector::scalar_bijector::lower_bounded "lower_bounded()" — Constructs a lower-bounded bijector with lower bound.
+- \ref laplace::bijector::scalar_bijector::upper_bounded "upper_bounded()" — Constructs an upper-bounded bijector with upper bound.
+- \ref laplace::bijector::scalar_bijector::box_cox "box_cox()" — Constructs a Box-Cox bijector with exponent.
+- \ref laplace::bijector::scalar_bijector::yeo_johnson "yeo_johnson()" — Constructs a Yeo-Johnson bijector with exponent.
+
+### Parameter inspection
+
+- \ref laplace::bijector::scalar_bijector::parameter_1 "parameter_1()" — First parameter of the map, or NaN if none.
+- \ref laplace::bijector::scalar_bijector::parameter_2 "parameter_2()" — Second parameter of the map, or NaN if none.
+- \ref laplace::bijector::scalar_bijector::parameter_count "parameter_count()" — Number of parameters of the map (0, 1, or 2).
 
 ### Value and forward derivatives
 
@@ -352,7 +607,7 @@ Functions in this module are member functions of \ref laplace::bijector::scalar_
 - \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d2 "forward_log_jacobian_d2()" — Second derivative of forward log-Jacobian, \f$\frac{\mathrm{d}^2}{\mathrm{d}v^2}\log|g'(v)|\f$.
 - \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d3 "forward_log_jacobian_d3()" — Third derivative of forward log-Jacobian, \f$\frac{\mathrm{d}^3}{\mathrm{d}v^3}\log|g'(v)|\f$.
 - \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d4 "forward_log_jacobian_d4()" — Fourth derivative of forward log-Jacobian, \f$\frac{\mathrm{d}^4}{\mathrm{d}v^4}\log|g'(v)|\f$.
-- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d5 "forward_log_jacobian_d5()" — Fifth derivative of forward log-Jacobian, \f$\frac{\mathrm{d}}{\mathrm{d}v^5}\log|g'(v)|\f$.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d5 "forward_log_jacobian_d5()" — Fifth derivative of forward log-Jacobian, \f$\frac{\mathrm{d}^5}{\mathrm{d}v^5}\log|g'(v)|\f$.
 - \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d6 "forward_log_jacobian_d6()" — Sixth derivative of forward log-Jacobian, \f$\frac{\mathrm{d}^6}{\mathrm{d}v^6}\log|g'(v)|\f$.
 
 ### Inverse log-Jacobian and derivatives
@@ -365,6 +620,42 @@ Functions in this module are member functions of \ref laplace::bijector::scalar_
 - \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_d5 "inverse_log_jacobian_d5()" — Fifth derivative of inverse log-Jacobian, \f$\frac{\mathrm{d}^5}{\mathrm{d}u^5}\log|h'(u)|\f$.
 - \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_d6 "inverse_log_jacobian_d6()" — Sixth derivative of inverse log-Jacobian, \f$\frac{\mathrm{d}^6}{\mathrm{d}u^6}\log|h'(u)|\f$.
 
+### Forward partial derivatives in parameters
+
+- \ref laplace::bijector::scalar_bijector::forward_partials_d1 "forward_partials_d1()" — Partial derivatives of order 1 of the forward map.
+- \ref laplace::bijector::scalar_bijector::forward_partials_d2 "forward_partials_d2()" — Partial derivatives of order 2 of the forward map.
+- \ref laplace::bijector::scalar_bijector::forward_partials_d3 "forward_partials_d3()" — Partial derivatives of order 3 of the forward map.
+- \ref laplace::bijector::scalar_bijector::forward_partials_d4 "forward_partials_d4()" — Partial derivatives of order 4 of the forward map.
+- \ref laplace::bijector::scalar_bijector::forward_partials_d5 "forward_partials_d5()" — Partial derivatives of order 5 of the forward map.
+- \ref laplace::bijector::scalar_bijector::forward_partials_d6 "forward_partials_d6()" — Partial derivatives of order 6 of the forward map.
+
+### Inverse partial derivatives in parameters
+
+- \ref laplace::bijector::scalar_bijector::inverse_partials_d1 "inverse_partials_d1()" — Partial derivatives of order 1 of the inverse map.
+- \ref laplace::bijector::scalar_bijector::inverse_partials_d2 "inverse_partials_d2()" — Partial derivatives of order 2 of the inverse map.
+- \ref laplace::bijector::scalar_bijector::inverse_partials_d3 "inverse_partials_d3()" — Partial derivatives of order 3 of the inverse map.
+- \ref laplace::bijector::scalar_bijector::inverse_partials_d4 "inverse_partials_d4()" — Partial derivatives of order 4 of the inverse map.
+- \ref laplace::bijector::scalar_bijector::inverse_partials_d5 "inverse_partials_d5()" — Partial derivatives of order 5 of the inverse map.
+- \ref laplace::bijector::scalar_bijector::inverse_partials_d6 "inverse_partials_d6()" — Partial derivatives of order 6 of the inverse map.
+
+### Forward log-Jacobian partial derivatives in parameters
+
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_partials_d1 "forward_log_jacobian_partials_d1()" — Partial derivatives of order 1 of the forward log-Jacobian.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_partials_d2 "forward_log_jacobian_partials_d2()" — Partial derivatives of order 2 of the forward log-Jacobian.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_partials_d3 "forward_log_jacobian_partials_d3()" — Partial derivatives of order 3 of the forward log-Jacobian.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_partials_d4 "forward_log_jacobian_partials_d4()" — Partial derivatives of order 4 of the forward log-Jacobian.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_partials_d5 "forward_log_jacobian_partials_d5()" — Partial derivatives of order 5 of the forward log-Jacobian.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_partials_d6 "forward_log_jacobian_partials_d6()" — Partial derivatives of order 6 of the forward log-Jacobian.
+
+### Inverse log-Jacobian partial derivatives in parameters
+
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_partials_d1 "inverse_log_jacobian_partials_d1()" — Partial derivatives of order 1 of the inverse log-Jacobian.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_partials_d2 "inverse_log_jacobian_partials_d2()" — Partial derivatives of order 2 of the inverse log-Jacobian.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_partials_d3 "inverse_log_jacobian_partials_d3()" — Partial derivatives of order 3 of the inverse log-Jacobian.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_partials_d4 "inverse_log_jacobian_partials_d4()" — Partial derivatives of order 4 of the inverse log-Jacobian.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_partials_d5 "inverse_log_jacobian_partials_d5()" — Partial derivatives of order 5 of the inverse log-Jacobian.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_partials_d6 "inverse_log_jacobian_partials_d6()" — Partial derivatives of order 6 of the inverse log-Jacobian.
+
 ### Domain, image and properties
 
 - \ref laplace::bijector::scalar_bijector::forward_domain_lower "forward_domain_lower()" — Lower bound of the domain of \ref laplace::bijector::scalar_bijector::forward "forward()".
@@ -374,6 +665,11 @@ Functions in this module are member functions of \ref laplace::bijector::scalar_
 - \ref laplace::bijector::scalar_bijector::is_decreasing "is_decreasing()" — Whether the map is strictly decreasing.
 - \ref laplace::bijector::scalar_bijector::inverse_distance_upper "inverse_distance_upper()" — Distance of \ref laplace::bijector::scalar_bijector::inverse "inverse()" to \ref laplace::bijector::scalar_bijector::forward_domain_upper "forward_domain_upper()".
 - \ref laplace::bijector::scalar_bijector::inverse_distance_lower "inverse_distance_lower()" — Distance of \ref laplace::bijector::scalar_bijector::inverse "inverse()" to \ref laplace::bijector::scalar_bijector::forward_domain_lower "forward_domain_lower()".
+
+### Non-smooth points
+
+- \ref laplace::bijector::scalar_bijector::forward_kinks "forward_kinks()" — Non-smooth points of the forward map.
+- \ref laplace::bijector::scalar_bijector::inverse_kinks "inverse_kinks()" — Non-smooth points of the inverse map.
 
 ## References
 

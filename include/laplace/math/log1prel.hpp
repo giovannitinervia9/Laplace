@@ -170,6 +170,57 @@ LAPLACE_HD double deriv(double x) {
   return recursion<K>(x);
 }
 
+// psi^(k)(x) for every k = 1..n at once (n <= 6), in out[1..n]; out[0] is not written. The same
+// methods and regions as deriv<K>, with the work shared: one pass over the quadrature nodes and
+// one recursion give every order (the series stays one loop per order). The results are
+// bit-identical to log1prel_d1 ... log1prel_dn. For callers that need several orders at the same
+// point (the derivatives of Box-Cox in its exponent).
+LAPLACE_HD void derivs_upto(int n, double x, double* out) {
+  if (!(x >= -1.0) || x == -1.0 || x == detail::pos_inf() || Kokkos::fabs(x) < 0.25) {
+    for (int k = 1; k <= n; ++k) {
+      switch (k) {
+        case 1: out[1] = deriv<1>(x); break;
+        case 2: out[2] = deriv<2>(x); break;
+        case 3: out[3] = deriv<3>(x); break;
+        case 4: out[4] = deriv<4>(x); break;
+        case 5: out[5] = deriv<5>(x); break;
+        default: out[6] = deriv<6>(x); break;
+      }
+    }
+    return;
+  }
+  if (x > -0.8 && x <= 20.0) {
+    double s[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    const int panels = x <= 6.0 ? 1 : 2;
+    for (int panel = 0; panel < panels; ++panel) {
+      const double a = panels == 1 ? 0.0 : (panel == 0 ? 0.0 : 0.25);
+      const double w = panels == 1 ? 1.0 : (panel == 0 ? 0.25 : 0.75);
+      for (int i = 0; i < 32; ++i) {
+        const double t = panels == 1 ? gl_t(i) : a + w * gl_t(i);
+        const double d = 1.0 + x * t;
+        const double r = t / d;
+        const double wi = panels == 1 ? gl_w(i) : w * gl_w(i);
+        double p = r;
+        for (int k = 1; k <= n; ++k) {
+          if (k > 1) p *= r;
+          s[k] += wi * p / d;
+        }
+      }
+    }
+    for (int k = 1; k <= n; ++k) out[k] = sign_of(k) * factorial_small(k) * s[k];
+    return;
+  }
+  double p = Kokkos::log1p(x) / x;
+  const double u = 1.0 / (1.0 + x);
+  for (int j = 1; j <= n; ++j) {
+    double pw = u;
+    for (int m = 1; m < j; ++m) pw *= u;
+    const double t = -sign_of(j) * factorial_small(j - 1) * pw;
+    p = (t - j * p) / x;
+    out[j] = p;
+  }
+}
+
 }  // namespace detail_log1prel
 
 /**
