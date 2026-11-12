@@ -12,6 +12,8 @@ set(LAPLACE_TEST_SOURCES
   math/test_inverse.cpp
   math/test_normal.cpp
   math/test_gamma_deriv.cpp
+  math/test_gamma_mixed.cpp
+  math/test_gamma_ratio.cpp
   math/test_beta_deriv.cpp
   math/test_student.cpp
   math/test_owen.cpp
@@ -29,6 +31,8 @@ set(LAPLACE_TEST_SOURCES
   bijector/test_yeo_johnson.cpp
   math/test_exprel.cpp
   math/test_log1prel.cpp
+  math/test_stirling.cpp
+  distrib/test_pilot.cpp
   pdmat/test_pilot.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})

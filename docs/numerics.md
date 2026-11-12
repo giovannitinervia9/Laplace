@@ -491,7 +491,7 @@ would bring the central region to a few ulps. The classical Mills ratio
 M(x) = (1 - Phi(x))/phi(x) = sqrt(pi/2) erfcx(x/sqrt 2) is not in the wrapper
 until something needs it.
 
-## Shape derivatives of log P(a, x) and log Q(a, x), orders 1 to 5
+## Shape derivatives of log P(a, x) and log Q(a, x), orders 1 to 6
 
 **What.** `include/laplace/math/incomplete_gamma_deriv.hpp`;
 `laplace::math::log_gamma_p_da1..5` and
@@ -561,6 +561,78 @@ backend (fraction and upper asymptotic series on the host only). Tested in
 
 **Open.** A cheaper quadrature or fewer route boundaries for the device;
 own::exp in the quadrature gives no gain on the new routes.
+
+**Order 6 (2026-11-12).** `log_gamma_p_da6` and `log_gamma_q_da6`, on every
+route of orders 1 to 5 and with the same helpers: the quadrature carries the
+sixth central moment in Pebay's update (M6 += 6 M5 e + 15 M4 e^2 + 20 M3 e^3 +
+15 M2 e^4 + W e^6 + w f^6, only when k = 6, where e is the shift of the old
+points about the new mean, f that of the new point, W the old weight and w the
+new one) and kappa_6 = mu_6 - 15 mu_4 mu_2 - 10 mu_3^2 + 30 mu_2^3 (mu_p the
+central moments); its stopping test weighs a node by (1 + xi)^6 instead of
+(1 + xi)^5 at order 6. The series, the fraction in Taylor form, the closed form
+at small x (four more terms of the series of lambda at order 6) and Temme's
+route carry their Taylor polynomials to degree 6; log erfcx in Temme's route
+gets g_6 = -g_5 (t + 2R) - 4 g_4 (1 + 2 g_2) - 6 g_3^2 (R = phi/Phi, checked
+against SymPy's sixth derivative of log Phi); the complement and the 1/a pole
+of S = Q are generic in the order. Orders 1 to 5 give the same values as
+before except where the fraction was moved (below).
+
+References `log_gamma_{p,q}_da6.csv` (kind `gamma6` of
+tools/reference/incomplete_deriv.py): the 1500 points of orders 1 to 5 (their
+orders 1 to 5, recomputed with the series carried to degree 6, agree with the
+existing files to the double rounding) plus 400 points at the route boundaries
+(x near 1/4, 1, 3/2, 3 and 36; a near 2, 20, 300, 1000 with |x/a - 1| near
+0.3, 0.4, 0.5; x near a - 1/3; a < 2^-4; far tails), all 1900 accepted (240 and
+320 bits agree to 2^-100). Order 5 on the 400 edge points is in
+`log_gamma_{p,q}_da5_edges.csv`, to compare the two orders on the same points.
+
+A defect found on the edge points, and repaired for every order: the
+continued fraction in Taylor form loses accuracy just above x = a. Against the
+quadrature (h = 1/8; bench mode `fracgrid`, log Q, a = 1.6 to 30, 64 points per
+cell of z = (x - a)/sqrt(a)), for z in [-0.25, 0) the difference was 2-7 ulp1 at
+order 2, 560-1500 at order 5 and 5e3-1.4e4 at order 6; for z in [0.5, 0.75) at
+most 6 ulp1 at order 5 and 22.5 at order 6; for z >= 0.75 at most 1.9 and 4.
+On the edge points the route reached 553 (P) and 629 (Q) ulp1 at order 5 and
+9.4e3 at order 6, at a = 4.05, x = 3.72; the 1500 common points had missed
+the band. The fraction is now used only for x >= a + 0.75 sqrt(a) (host only,
+as before; the quadrature takes the band). After the repair, max
+min(ulpL, ulp1) per route, gcc/OpenMP, order 5 (1500 points; edges 400 points)
+and order 6 (1900 points); "+c" is the complement log(1 - S):
+
+| route | P order 5 | P order 5 edges | P order 6 | Q order 5 | Q order 5 edges | Q order 6 |
+|---|---|---|---|---|---|---|
+| Temme | 0.0009 | 0.29 | 0.10 | 0.004 | 8.8 | 14.5 |
+| Temme +c | 0.006 | 0.20 | 0.18 | 0.004 | 0.03 | 0.002 |
+| lower series | 197 | 155 | 771 | | | |
+| lower series +c | | | | 40.9 | 30.3 | 96.3 |
+| closed form, small x | | | | 4.7 | 6.7 | 5.2 |
+| upper asymptotic series | | | | 2.5 | 3.4 | 1.9 |
+| upper asymptotic series +c | 0.0001 | 0.0004 | 0.0001 | | | |
+| fraction in Taylor form | | | | 2.2 | 0.58 | 2.6 |
+| fraction +c | 0.64 | 1.6 | 2.9 | | | |
+| quadrature, upper side | | | | 2.3 | 2.7 | 1.5 |
+| quadrature, upper side +c | 7.8 | 8.4 | 33.3 | | | |
+| all | 197 | 155 | 771 | 40.9 | 30.3 | 96.3 |
+
+Worst points of order 6: P at a = 0.0139, x = 1.045 (lower series), Q at
+a = 2.04, x = 1.56 (complement of the lower series), Temme Q at a = 20.05,
+x = 25.73 (14.5 ulp1, near the boundary |x/a - 1| = 0.3 at a = 20; 8.8 at
+order 5). The growth from order 5 to order 6 is the cancellation between
+kappa_k and psi^(k-1)(a + 1) at small a: psi^(5)(1.014) = 112.5 against
+psi^(4)(1.001) = -24.7, with results of order 1-3, so the same relative error
+of kappa_k (about 6 ulps at both orders) is about 4 times more ulp1 at order
+6. The quadrature is no better there (quad8 1117 ulp1 on the lower-series
+points of order 6). Test bounds (tests/math/test_gamma_deriv.cpp): 1160 (P) and
+145 (Q), gcc only; the CUDA build, whose routes differ (no fraction, no upper
+series, the lower series only for a < 2 and 60 terms), is still to be measured.
+
+ns per call, mixed timing set, orders 1 / 5 / 6, gcc, Serial (1 thread) and
+OpenMP (4 threads), taken while another session's CUDA build (nvcc, ptxas) was
+running: log P 685 / 1044 / 1283 and 179 / 281 / 338; log Q 687 / 1178 / 1473
+and 194 / 318 / 409. By region (Serial, order 5 / 6): a < 1 P 300 / 378, Q 845 /
+1056; centre 1-50 P 1259 / 1565, Q 1233 / 1542; centre a > 50 P 794 / 1003,
+Q 802 / 1017; far lower tail P 375 / 437, Q 697 / 898; far upper tail
+P 1211 / 1584, Q 900 / 1127. Order 6 costs 20-30 per cent more than order 5.
 
 ## Shape derivatives of log I_x(a, b) and log(1 - I_x(a, b)), orders 1 to 5
 
@@ -1754,7 +1826,7 @@ inversion, the distances, the construction functions and the kinks.
 
 **Open.** The order-6 partials of Yeo-Johnson (359 ns on gcc, 99 on CUDA) could
 share the derivatives of log1prel as Box-Cox now does; the largest errors
-listed above were not reduced.
+listed above were not reduced. (Both taken up in the next section.)
 
 ## Refinements of the Box-Cox, Yeo-Johnson and softplus bijectors
 
@@ -1875,6 +1947,647 @@ CUDA maxima for the changed quantities.
 softplus's forward log-Jacobian (above); a cheaper log1prel quadrature on
 the device (one division per node) is a trade of speed against accuracy.
 
+## Stirling's error and its derivatives to order 6
+
+**What.** `include/laplace/math/stirling.hpp`: Stirling's error
+delta(a) = log Gamma(a) - (a - 1/2) log a + a - log sqrt(2 pi), a > 0
+(`stirling_error`), and its derivatives delta^(k)(a), k = 1..6
+(`stirling_error_d1` ... `stirling_error_d6`). delta(a) ~ 1/(12 a) as
+a -> inf and ~ -log(a)/2 as a -> 0. Needed by the gamma distribution: its
+log-density written as -a D(y/mu) + log(a)/2 - log sqrt(2 pi) - delta(a) - log y,
+with a = 1/phi the shape and D(t) = t - 1 - log t, has no cancellation at
+large a, and its derivatives in the shape need delta^(k) to order 6
+(note/distrib.md). The existing `log_gamma_star` (the value only, a >= 10 by
+the series, inside the incomplete gamma) is the same function.
+
+**How.** Four candidates, by region of a:
+- direct: the definition, lgamma(a) - ... and, for k >= 1,
+  psi^(k-1)(a) - d^k[(a - 1/2) log a - a] in closed form. The result is about
+  1/(12 a^2) times its largest term, so the error grows like a^2: 256 ulp at
+  a in [2, 4), 1e3 near 10, 1e30 at 1e15 (order 0). Good below 1 (at most
+  15 ulp), where the pole of psi^(k-1) dominates;
+- asymptotic: the series sum_j B_2j / (2j (2j-1) a^(2j-1)), j <= 20,
+  differentiated term by term, stopped when a term falls below 2^-54 of the
+  sum. Within 8 ulp at every order for a >= 10; at order 6 it loses 84 ulp
+  on [8, 10) and fails below 6;
+- recurrence: delta(a) = delta(a + n) + sum_(j < n) g(a + j), with n the
+  number of unit steps that brings a + n to [10, 11), and
+  g(b) = delta(b) - delta(b + 1) = (b + 1/2) log(1 + 1/b) - 1
+  = atanh(u)/u - 1 = sum_(m >= 1) u^(2m)/(2m + 1), u = 1/(2b + 1).
+  Differentiated term by term, g^(k)(b) = (-2)^k sum_m (2m)(2m+1)...(2m+k-1)
+  u^(2m+k)/(2m + 1): every term of every sum has the sign (-1)^k, so nothing
+  cancels. Within 10 ulp on [1, 10) at every order; below 1/4 the series in
+  u converges too slowly for its cap of 80 terms;
+- Binet's first formula, delta^(k)(a) = (-1)^k int_0^inf t^(k-1) b(t) e^(-a t) dt
+  with b(t) = 1/(e^t - 1) - 1/t + 1/2 > 0 (Taylor series below t = 2), by the
+  exp-sinh rule: 3-7 ulp almost everywhere (spikes of 70 ulp at order 3 near
+  a = 1/2 and 1e4 ulp at order 6 near 1/2), but 7-11 microseconds per call on
+  one gcc thread. Discarded.
+
+Chosen routes: direct below 1, recurrence on [1, 10), asymptotic from 10.
+
+**Measurement.** References `stirling_error*.csv`
+(`tools/reference/stirling.py`): the definition with mpmath's loggamma and
+polygamma, the elementary part in closed form, at 400 and 500 bits (the
+difference cancels by about a^2, 2^100 at 1e15), kept if the two agree to
+2^-100. 1384 rows per order: a log-uniform in [2^-40, 1e15], uniform in
+[1/4, 40], around 1/2, 8 and 12. Maximum ulp of the chosen routes, gcc/OpenMP:
+
+| a | k = 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| (0, 1) direct | 13.2 | 12.7 | 10.8 | 13.4 | 11.7 | 14.8 | 14.2 |
+| [1, 10) recurrence | 3.44 | 3.92 | 3.81 | 6.07 | 6.40 | 9.31 | 9.72 |
+| [10, 1e15] asymptotic | 2.51 | 3.62 | 4.20 | 5.27 | 4.76 | 6.69 | 8.19 |
+
+ns per call on one gcc thread (`benchmarks/math_stirling.cpp`, another
+session's agent building at the same time): direct 5-37; recurrence 59-307
+(the cost grows with the number of steps, n up to 9, and with the order);
+asymptotic 22-44.
+
+**What this says.** Every order is within 15 ulp everywhere; the largest
+errors are those of lgamma and the polygamma functions below 1. The recurrence
+is the slow route, up to 0.3 microseconds at order 6 near a = 1; if the gamma
+distribution at small shapes needs it faster, start the series lower for the
+low orders or shift by fewer steps.
+
+**Chosen.** This version. Tested in `tests/math/test_stirling.cpp` (gcc
+build) with bounds of half again the measured maxima, exact values at a = 1
+(delta(1) = 1 - log sqrt(2 pi), delta'(1) = 1/2 - gamma_E), continuity across
+a = 1 and 10, NaN for a <= 0 and 0 at infinity. On the CUDA build (RTX 4070 SUPER)
+the maxima are 12.0, 13.4, 10.8, 13.4, 11.7, 14.8, 16.1 ulp (orders 0-6), all
+below a = 1, within the test bounds.
+
+## Mixed partial derivatives of log P(a, x) and log Q(a, x), total orders 1 to 6
+
+2026-11-12. `include/laplace/math/incomplete_gamma_mixed.hpp`: for each total
+order K = 1..6, `log_gamma_p_mixed_dK(a, x)` and `log_gamma_q_mixed_dK(a, x)`
+return a `gamma_inc_mixed_partials<K>` whose v[j] = d^K log S / da^(K-j) dx^j,
+j = 0..K (j derivatives in x; the packing of `laplace::distrib::sym_tensor`).
+The gamma distribution in (mu, phi) needs them for log F = log P(s, s y/mu),
+and the Poisson cdf F(k) = Q(k + 1, mu) needs the pure x components (j = K) at
+integer a.
+
+**What cancels.** The obvious formulas use the hazard H = f/S, with f the
+gamma density: d log P/dx = H, d^2 log P/da dx = H (log x - psi(a) - d log P/da),
+d^2 log P/dx^2 = H ((a - 1)/x - 1 - H). Formed from the library's outputs
+(candidate `naive` of the bench), they lose, on the 2971 points below, up to
+6.1e4 ulp1 at order 1 (H = exp(log f - log P) in the far tails), and at order 2
+up to 1.2e5 and 7.3e8 for P and 1.7e3 and 3.5e4 for Q.
+
+**How.** Every route of the derivatives in a (incomplete_gamma_deriv.hpp)
+carries log S(a + h) as a Taylor polynomial in h. Here the routes carry
+log S(a + h, x (1 + e)) as a polynomial in h and in the relative increment e of
+x, of total degree K, and d^(i+j) log S / da^i dx^j = i! j! B_ij / x^j. In the
+variable d = log(t/x) both sides are integrals whose x-dependence is
+exp-linear, like their a-dependence: with y = x - t, raising x to x (1 + e)
+multiplies the integrand by exp(e y) and the prefactor x^a e^-x by
+exp(a log(1 + e) - x e). So for j >= 1, B_ij is a joint cumulant of (d, y)
+divided by i! j!, plus a (-1)^(j-1)/j when i = 0, (-1)^(j-1)/j when i = 1, and
+nothing when i >= 2. B_01 = x d log S/dx is taken in closed form (a/I_L for P,
+-1/I_U for Q). The point mass of the lower side (from its integration by
+parts) does not move with x, while its density part carries the factor
+x (1 + e): log I_L(h, e) = log I_L + K + log(1 + e (pi + (1 - pi)(1 - exp(-K)))),
+with K the joint cumulant generating function and pi the share of the density
+(checked with SymPy in `tools/reference/incomplete_mixed_forms.py`). The
+bivariate logarithm and exponential follow from the Euler operator
+h d/dh + e d/de; they are the two-variable versions of cumulants_from_moments
+and moments_from_cumulants. Routes:
+- quadrature: the same rules and nodes, stored; the joint central moments of
+  (d, y) to total order K are summed in a second pass about the weighted
+  means. Two repairs found by the measurement: the share of the density is
+  summed from the nodes (computed as (W - 1)/W it was 0 at x = 3e-24), and the
+  lower rule runs without the point mass in its running weight (with it, the
+  rule stopped at the first node past t = 0 when the density is 1e-24 of the
+  point mass, and the result was off by a factor 61 at x = 3e-24);
+- lower series: term n gains the factor (1 + e)^n, coefficients C(n, m); the
+  series runs until the tail of every sum of C(n, m) tau_n is below 1e-22 of
+  it;
+- upper asymptotic series: term n gains (1 + e)^-n, coefficients
+  (-1)^m C(n + m - 1, m);
+- closed form at small x and Temme's expansion: each of their series in
+  (h, e); in Temme's, lambda = x/a becomes lambda (1 + e)/(1 + h/a);
+- complement log(1 - S): from the series of log S as in complement_dk, except
+  for the complement of the lower side (log Q where P is small, which includes
+  the Poisson cdf below its mean). There exp of the series of log P cancels in
+  e: its coefficients of e^m add up to C(a, m) and less, to 0 at a = 1 for
+  m >= 2. So S(h, e)/S is formed through the density,
+  S(a + h, x (1 + e)) = S(a + h, x) + x int_0^e f(a + h, x (1 + u)) du, with
+  f(a + h, x (1 + u))/f(a, x) = (1 + h/a) x^h Gamma(a + 1)/Gamma(a + 1 + h)
+  (1 + u)^(a - 1 + h) e^(-x u), and the binomial series of (1 + u)^(a - 1 + h)
+  as products of linear factors. The same density ratio replaces the series in
+  e of the closed form at small x. Measured at order 6 on the complement of
+  the lower series: without it 4.1e4, 2.4e3 and 2.6e3 ulp1 at j = 1, 5, 6;
+  with it 1.05e5, 38.9 and 43.9 (the column j = 1 is the small-a problem
+  below either way);
+- log Q at a < 2, 1/4 <= x < 3/2: the component j = 1 comes from the
+  quadrature of the upper side (order 6, a >= 1: 44 ulp1 against 940
+  without). Its other components are worse there (1.3e4 at j = 6), so only
+  j = 1 is taken from it.
+
+The fraction in Taylor form has no bivariate version; on the host its region
+takes the quadrature.
+
+**References.** `tools/reference/incomplete_mixed.py` (mpmath, 240 and 320
+bits, again at 480 and 640 bits where these disagree), from the definition and
+independent of the transcription: the moments in a of
+J = int exp(a v - e^v) dv over the side (the quadrature of
+incomplete_deriv.py), and the increment of x as the integral of the density
+over [x, x (1 + e)], whose bivariate series in (h, e) is known in closed form.
+A row is kept if the two precisions agree to 2^-100 of max(|f|, 1) (in the far
+lower tail the cumulants with i >= 2 are 1e-14 next to terms of order
+(a/x)^j). 2971 points: the 1500 of incomplete_deriv.py, its 400 boundary
+points, 600 for the derivatives in x (x down to 1e-30 at a < 2, a near 1, x
+near a, the far tails, x near 3/2 and 36, Temme's boundaries, tiny a) and 600
+at integer a from 1 to 1000 with x in [0.05, 1000] (x near a, x down to a/1e4,
+x far above a). 39 points were dropped (the quadrature at 480 bits did not
+converge for x/a below 1e-6, or x near 1e-29). Files
+`log_gamma_{p,q}_mixed_d{K}.csv`, columns a, x, j. The pure a components agree
+with the files of incomplete_deriv.py to 1.1e-16 relative.
+
+**Measurement** (`benchmarks/math_gamma_mixed.cpp`, gcc/OpenMP): maximum over
+the points of min(ulpL, ulp1), by component j = 0..K.
+
+| | K | j = 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|---|
+| P, all a | 1 | 5.37 | 5.36 | | | | | |
+| | 2 | 5.87 | 4.77 | 8.03 | | | | |
+| | 3 | 8.27 | 7.18 | 6.94 | 12.9 | | | |
+| | 4 | 33.4 | 18.7 | 19.7 | 12.4 | 23.5 | | |
+| | 5 | 176 | 60.6 | 35 | 55.9 | 60.2 | 41.4 | |
+| | 6 | 651 | 361 | 209 | 92 | 176 | 217 | 107 |
+| Q, a >= 1 | 1 | 5.18 | 15.1 | | | | | |
+| | 2 | 6.53 | 15.9 | 19.5 | | | | |
+| | 3 | 16.9 | 23.6 | 38.3 | 46.3 | | | |
+| | 4 | 31.2 | 16.1 | 28.1 | 31.9 | 31.7 | | |
+| | 5 | 45.7 | 37.6 | 63.4 | 41.9 | 58.7 | 19.8 | |
+| | 6 | 97.2 | 44 | 235 | 60.3 | 67.6 | 38.9 | 86.2 |
+| Q, 0.1 <= a < 1 | 4 | 21.2 | 1.07e3 | 151 | 68.6 | 34.8 | | |
+| | 5 | 16.9 | 463 | 479 | 198 | 74.8 | 67.9 | |
+| | 6 | 17.7 | 1.05e5 | 2.47e3 | 651 | 194 | 98.9 | 111 |
+| Q, a < 0.1 | 4 | 0.53 | 8.15e3 | 241 | 142 | 74.8 | | |
+| | 5 | 0.55 | 338 | 2.6e4 | 333 | 182 | 94.5 | |
+| | 6 | 0.68 | 1.6e4 | 3.71e3 | 1.04e3 | 431 | 129 | 66.6 |
+
+At orders 1 to 3, Q at a < 1 is within 31, 40.4 and 113. The row "Q, a >= 1"
+excludes a = 1 itself, which falls in the integer group: there order 6, j = 1
+reaches 741 at x = 0.2 (below the quadrature's x = 1/4). For the Poisson cdf
+(522 points at integer a), the pure x components j = K reach, at orders 1 to
+6: Q 3.0, 6.0, 9.0, 12.8, 10.6, 15; P 3.3, 1.5, 3.3, 7.6, 25.4, 16.3. By route
+(order 6, the largest component): Temme 38 (P) and 14.5 (Q), its complement
+1.2; the upper series 1.9, its complement 3e-4; the upper quadrature 86 (Q),
+its complement 217 (P); the lower series 651 (P, j = 0 at a < 0.1) and its
+complement 1.05e5 (Q, small a); the closed form 1.6e4 (Q, small a). The route
+of the device (the series limits of the CUDA build, run on the host, with the
+lower quadrature for a >= 2) has the same maxima within 10 per cent.
+
+ns per call on the timing set of math_gamma_deriv (a in [1/8, 1024],
+x = a e^(z/2)), one gcc thread / OpenMP with 8 threads, measured while another
+session's CUDA test was running: P orders 1-6: 1197/160, 1400/182, 1581/212,
+1867/264, 2246/313, 2788/391; Q: 1340/176, 2423/313, 2679/356, 3135/424,
+3692/517, 4372/621 (the derivatives in a alone take 0.7 to 1.5 us). From
+order 2, Q pays the extra quadrature of its j = 1 component at a < 2; the
+quadrature alone costs 3.4 to 4.8 us per call.
+
+**What this says.** log P is within the errors of the derivatives in a of the
+same order everywhere, and so is log Q for a >= 1, which covers the Poisson
+cdf and the gamma distribution with shape at least 1. The target is not
+reached for log Q at a < 1 and x below about 3/2, in the components with one
+to three derivatives in a and at least one in x, at orders 4 to 6: up to
+1.05e5 ulp1 at order 6, that is 2e-11 absolute. There log Q = log a + log R,
+and each route forms these components from terms that cancel by powers of
+1/a: the complement of P from the series of P in h, whose terms carry the pole
+of log a; the closed form from the cumulants of its factor F, which is a
+difference of terms of order one; the quadrature of the upper side is accurate
+there only for j = 1 and x >= 1/4. Not tried: the upper side's quadrature
+carried down to x -> 0 (its tanh-sinh panels at x < 1/4 lose 1e5 to 1e7 on
+these components as they are), or a series of R in which the derivatives in x
+are taken analytically.
+
+**Chosen.** As above. Tested in `tests/math/test_gamma_mixed.cpp` (gcc build;
+the CUDA build not yet run) with bounds of half again the measured maxima over
+all components: P 8, 12, 20, 50, 265, 980; Q 47, 61, 170, 1.23e4, 3.9e4,
+1.58e5; and the limits at x = 0 and x = infinity.
+
+## Partial derivatives of log P(a, a c) and log Q(a, a c) at fixed ratio, and the Poisson cdf
+
+2026-11-12 (evening). `include/laplace/math/incomplete_gamma_ratio.hpp`: for
+each total order K = 1..6, `log_gamma_p_ratio_mixed_dK(a, c)` and
+`log_gamma_q_ratio_mixed_dK(a, c)` return a `gamma_inc_mixed_partials<K>` with
+v[j] = d^K log S(a, a c) / da^(K-j) dc^j: the derivatives in a are taken at
+fixed ratio c = x/a. The gamma distribution gamma1 (mu, phi) has
+F(y) = P(a, a c) with a = 1/phi and c = y/mu, so a depends on phi alone and c
+on mu alone; its log F and log(1 - F) derivatives
+(`detail_gamma_cdf::gamma1_dk`) are now the product of two univariate Faa di
+Bruno sums over these partials (`laplace::math::bell_partial`), each Bell
+polynomial of 1/phi and of y/mu of one sign. In the same session the Poisson
+cdf's derivatives in mu (the components j = K of
+`log_gamma_{q,p}_mixed_dK(k + 1, mu)`) were repaired in
+incomplete_gamma_mixed.hpp.
+
+**What cancelled (gamma1).** Composed from the partials in (a, x), a
+derivative at fixed c is d/da + c d/dx; at a = x = 50 (phi = 0.02, y = mu)
+the two terms are large and of opposite sign, and the pure phi derivatives
+of order 6 lost 1.7e7 (log F) and 4.1e7 (log(1 - F)) ulp of the order's
+largest component against mpmath (`distrib_log_cdf.csv`, dist 3).
+
+**How.** With x = a c and the increments h of a and g (relative) of c, the
+point (a + h, c (1 + g)) has x' = x (1 + h/a)(1 + g). The prefactor
+A = a log x - x - log Gamma(a) = (1/2) log a - a phi_c - log sqrt(2 pi) - delta(a),
+with phi_c = c - 1 - log c and delta Stirling's error (stirling.hpp), is a
+series in (h, g) without cancellation. In the variable d = log(t/x) of
+incomplete_gamma_mixed.hpp the move multiplies the integrand by
+exp(h w + g (1 + h/a) y), y = -x (e^d - 1), w = d + y/a = (1 - c) d - c (e^d - 1 - d):
+w is formed at each node without the cancellation of d against y/a, vanishes
+at d = 0 and stays small where the measure lies. Routes, the counterparts of
+those of incomplete_gamma_mixed.hpp with the same rules and cut-offs:
+quadrature (joint cumulants of (w, y), then t = g (1 + h/a); on the lower side
+the point mass enters as log(1 + e (1 - (1 - pi) exp(-Kf))) for pi < 1/2 and as
+log(1 + e) + log(1 - e/(1 + e) (1 - pi) exp(-Kf)) for pi >= 1/2, whose
+log(1 + h/a) cancels the -log(a + h) of log P exactly); the lower series and
+the upper asymptotic series, whose factor per term in h, c (a + h)/(a + h + l)
+and (a + h - l)/(c (a + h)), has the Taylor coefficients x/(a + l),
+c l (-1)^(m+1)/(a + l)^(m+1) and (a - l)/x, (-1/a)^(m-1) l/(a x); Temme's
+expansion, where sigma = c - 1 and eta do not move with h and the factor
+sqrt((a + h)/a) of the erfcx term is divided out of G; the complement from exp
+of the series of log S. Below a = 2 the series in (h, e) of
+incomplete_gamma_mixed.hpp is composed with e = h/a + g + h g/a (the fallback,
+which keeps its closed form at small x and its density ratio).
+
+Temme's region, by measurement: Temme's series in (h, g) lost, for
+20 <= a < 300, up to 1e5-3e6 ulp of their value on the components with three
+or more derivatives in c (the quadrature and the series 1e3-4e4), and for
+a < 50 on every component; with no derivative in c (a >= 50) or at most two
+(a >= 100) it was the better (order 6, 100 <= a < 300: j = 0 12 against 284
+ulp, j = 2 1.7e3 against 3.2e4). So Temme is used whole for a >= 300, for
+50 <= a < 300 only for those components, and not below.
+
+**References.** `tools/reference/incomplete_ratio.py` (mpmath): the series in
+(h, e) of incomplete_mixed.mixed_row (from the definition) composed with
+e = h/a + g + h g/a at 240 and 320 bits (480 and 640 where they disagree), rows
+kept at 2^-90 of the order's largest component; 1162 points (a from 1/8 to
+3.3e4, c from 1e-3 to 64: near c = 1, log-uniform, at the route boundaries, at
+large a). Independent check: on 12 points against mpmath.diff of
+log gammainc(a, a c) at 300 bits, max difference 5.1e-77 of the order's scale.
+The same script writes `log_gamma_{p,q}_mixed_poisson_d{K}.csv`: integer a
+from 10 to 1000 and x within 4 sqrt(a) of a, x = a - 1 and x = a (213 points).
+
+**Figures.** "S": the error in ulp of the order's largest component at that
+point in the logarithmic variables, max_j |a^(K-j) c^j v_j| / (a^(K-j) c^j)
+(up to sign the derivatives in (log phi, log mu) of the gamma distribution's
+log F); "O": the error in ulp of the component itself. Bench
+`benchmarks/math_gamma_ratio.cpp`, gcc/OpenMP; max S over all components of
+the order:
+
+| order | P own | P fallback | Q own | Q fallback |
+|---|---|---|---|---|
+| 1 | 1.5e3 | 1.5e3 | 1.7e3 | 1.1e3 |
+| 2 | 2.1e3 | 2.1e3 | 1.4e3 | 817 |
+| 3 | 2.1e3 | 2.8e3 | 1.2e3 | 1.2e3 |
+| 4 | 1.7e3 | 1.0e4 | 1.2e3 | 3.5e3 |
+| 5 | 9.0e3 | 4.5e4 | 5.8e4 | 3.3e4 |
+| 6 | 7.3e4 | 1.4e6 | 6.2e4 | 5.1e4 |
+
+The fallback is the old composition over (a, x). By component at order 6,
+own / fallback, max S for j = 0..6: P 108 / 1.4e6, 134 / 6.7e5, 141 / 1.0e5,
+156 / 8.0e3, 220 / 4.6e3, 3.7e3 / 2.9e3, 7.3e4 / 6.1e4; Q 1.4e3 / 5.1e4,
+862 / 1.9e4, 522 / 9.4e3, 1.2e3 / 7.0e3, 631 / 6.1e3, 1.8e3 / 3.8e3,
+6.2e4 / 3.8e4. The maxima at orders 1-4 are complements log(1 - S) with S near
+1e-250, where exp(log S) carries |log S| eps relative (ulpL 2-3); those at
+orders 5-6 are the pure derivatives in c at a >= 300 near c = 1, from Temme
+and from every other route alike (route quad at order 6: 7.3e4 at j = 6), the
+same loss as the pure derivatives in x of incomplete_gamma_mixed.hpp, which
+its figure min(ulpL, ulp1) does not show (the components are far below 1).
+By route at order 6 (max S over j): the series 0.001-64, the quadrature
+2.6e3 (upper side, 2 <= a < 20, j = 6), the complements 1.2e3-1.4e3, Temme
+(a >= 300) 7.3e4 at j = 6, the fallback (a < 2) 72 (P) and 260 (Q). The device
+limits (devroute) give the same figures within 1 per cent except P order 5
+(1.2e3 against 678 at j = 4).
+
+gamma1 (`distrib_log_cdf.csv`, dist 3, phi = 0.02, 0.3, 4; error in ulp of the
+order's largest component, as in test_pilot.cpp): log F 1.69e7 before, 379
+after; log(1 - F) 4.14e7 before, 356 after (the worst rows: the pure phi
+derivatives of order 6, at y = 9 for log F and y = mu for log(1 - F)).
+
+Speed (ns per call, gcc, the timing set of math_gamma_mixed with c = e^(z/2);
+one thread / OpenMP 8 threads, no other build running at the end of the run):
+P orders 1-6 1711 / 223, 2019 / 313, 2322 / 381, 3341 / 497, 3890 / 595,
+4476 / 787; Q 1957 / 281, 3007 / 467, 3316 / 443, 4255 / 678, 5058 / 876,
+7024 / 1012; the fallback (one route of incomplete_gamma_mixed.hpp and the
+composition) is within 0.7-1.1 times, faster at orders 1-2.
+
+**The Poisson cdf.** The derivatives in mu of log F(k) = log Q(k + 1, mu) lost
+up to 3.86e5 ulp (order 6, k = 40 and 41 at mu = 40), and of log(1 - F) up to
+4.4e3 (k = 39 at mu = 40, order 5), while the mixed section above reported 15
+ulp for integer a. The references are right: the Taylor series of
+F(mu + t) = F(mu) - int_0^t pmf(k; mu + s) ds, formed from the finite sum of
+the pmf at 300 and 500 bits with no gammainc and no finite differences, agree
+with the rows of distrib_log_cdf.csv to the last digit of the double (for example
+d^6 log F / dmu^6 = -6.9957584608560983e-7 at k = 40, mu = 40). The library
+was wrong, and the mixed section's figure min(ulpL, ulp1) hid it: these
+derivatives are 1e-7 to 1e-4, and 3e5 ulp of 7e-7 is 0.2 ulp of 1. The cause
+was density_ratio, used for log Q from the lower side: the binomial series of
+(1 + u)^(a - 1 + h) times that of e^(-x u) sums terms of alternating sign
+that grow like (a x)^(m/2). For a >= 2 and x >= a/2 the factor is now the
+exponential of its logarithm ((a - 1) - x + h) u + (a - 1 + h)
+sum_(m>=2) (-1)^(m-1) u^m/m (below x = a/2 the products are exact at integer a,
+and the exponential lost 4.7e4 at k = 2, mu = 0.5). On the new Poisson points
+the same Temme problem as above appeared, so in incomplete_gamma_mixed.hpp
+too Temme now starts at a = 50 and serves, for a < 300, only the components
+with at most two derivatives in x. Order 6 on the Poisson points, error in ulp
+of the component's largest value over the x of the same a, j = 0..6:
+
+| | log P (j = 0..6) | log Q (j = 0..6) |
+|---|---|---|
+| before (products, Temme from 20) | 4.8e3, 3.1e3, 1.7e4, 4.4e4, 1.0e5, 3.5e3, 2.0e3 | 3.1e5, 4.8e4, 1.5e4, 8.9e3, 1.3e5, 1.9e6, 3.9e8 |
+| now | 1.4e3, 1.1e3, 1.3e3, 2.8e3, 4.1e3, 1.5e3, 1.4e3 | 1.5e3, 588, 548, 397, 384, 345, 339 |
+
+The pilot (dist 2, in ulp of the value): log F 3.86e5 before, 3.84e3 after
+(k = 39 at mu = 40, order 6, value 4.8e-7 next to -7.0e-7 at k = 40 and
+-2.1e-6 at k = 41, absolute error 2.0e-19); log(1 - F) 4.41e3 before, 3.70e3
+after (k = 299 at mu = 300, order 5, value -2.2e-8 next to -1.7e-8 and -1.2e-8,
+absolute error 1.2e-20). The maxima of the mixed test (min(ulpL, ulp1)) did
+not move (P orders 2 and 3 fell from 8.03 and 12.9 to 7.07 and 11.6).
+
+**What this says.** At fixed ratio the large terms in a and c are never
+formed, and gamma1's derivatives fall to the level of the partials they are
+built from (a few hundred ulp of the order's scale). What remains is the
+loss on the high derivatives in c (and in x) at large a near the mean, on
+every route, 1e3-7e4 ulp of the value at orders 5-6.
+
+**Open.** (1) The pure derivatives of order 5-6 in c and in x at a >= 300
+near c = 1: Temme's series and the cumulants of the quadrature both lose
+there; the cause is not established. (2) The complements with S near 1e-250
+carry the |log S| eps of exp(log S), as everywhere in the library. (3) The
+names: `log_gamma_p_ratio_mixed_dK` says "at fixed ratio"; an alternative is
+`log_gamma_p_shape_ratio_dK`.
+
+**Chosen.** The routes at fixed ratio for gamma1 (no choice involved: the old
+composition is the fallback below a = 2 and the candidate `fallback` of the
+bench). For the Poisson cdf, the exponential form of the density ratio for
+a >= 2, x >= a/2 and Temme from a = 50, by the measurements above; to confirm
+on the CUDA build.
+
+## Tails of the log F derivatives of gaussian1 and laplace
+
+2026-11-12 (night). `include/laplace/distrib/gaussian1.hpp` and `laplace.hpp`:
+the derivatives in (mu, sigma) to order 6 of log F and log(1 - F) were all
+built by `detail_location_scale::mixed_dk`, which writes each component as
+sigma^-K sum c_jm z^m L_j, z = (y - mu)/sigma, with L_j the derivatives in z.
+Two places cancelled inside these z-polynomials; each now has a route of its
+own, and mixed_dk stays everywhere else.
+
+**What cancelled.** gaussian1: in its tail log Phi(t) = -t^2/2 - log(-t) + ...,
+and these two parts have no mixed derivatives in (mu, sigma) beyond two in mu
+(the quadratic) or with derivatives in both (the logarithm); carried through
+the z-polynomials with the rest, their large terms cancel to zero and leave
+their rounding error on a small component: 1.57e5 ulp of the component at
+order 6 (3 in mu, 3 in sigma) at z = -27. laplace: on the side where the
+function is log(1 - e^(-|z|)/2), each derivative is a Laguerre-type polynomial
+in z with alternating terms much larger than their sum: 391 ulp of the order's
+largest component at z = -4.9, order 6 in sigma.
+
+**How (gaussian1).** For x = -t >= 4, t = z for log F and -z for log(1 - F),
+and w = 1/x^2,
+log Phi(t) = -t^2/2 - log x - log sqrt(2 pi) - w + S_2(t),
+S_2 = log(x M_0(x)) + w, M_0(x) = int_0^inf exp(-x s - s^2/2) ds. The first parts
+are differentiated in (mu, sigma) in closed form (-(y - mu)^2/(2 sigma^2),
+-log(+-(mu - y)) + log sigma, -sigma^2/(y - mu)^2), and only S_2, of size
+w^2, goes through mixed_dk. Its derivatives in t are those of log M_0 (the
+cumulants kappa_j of the density proportional to exp(-x s - s^2/2), computed
+in math::normal.hpp by a downward recursion of moment ratios) minus their
+exponential limit (j-1)!/x^j and minus the derivatives of -w. Every
+deviation is formed directly, never as a difference: with rho_j = j (1 + e_j)
+the scaled ratios, e_j = -w rho_(j+1)/(1 + w rho_(j+1)) and its part beyond
+first order f_j = e_j + (j+1) w = (j+1) w (w rho_(j+1) - e_(j+1))/(1 + w rho_(j+1))
+are sums of terms of one sign; the moment deviations eps_n and eps2_n follow
+by products of these, and the cumulant deviations by the moment-cumulant
+recursion with its exponential case and its part linear in w subtracted
+exactly (formulas in the header). A first version split off only -t^2/2: the
+errors stayed at 1.57e5 ulp (the logarithm cancels as much); a second split
+off -log x too: 9.3e3 ulp (the -w part has no derivatives beyond two in sigma
+and cancelled in the component with three).
+
+**Switch (gaussian1).** On a grid x = 1 .. 15 step 0.25 and 16 .. 40 (mpmath,
+scratch), largest error in ulp of the component over orders 3 to 6, for
+x in [1, 2): z-polynomials 252, tail route 2.3e6; [2, 4): 1.9e3 and 8.7e3;
+[4, 6): 1.7e3 and 721; [6, 8): 2.9e4 and 5.4e3; [8, 12): 8.4e3 and 490;
+[12, 40]: 8.9e4 and 263. The largest values in each range sit next to zeros
+of a component (order 6 with 3 in sigma at x = 3.4, order 5 with 2 in sigma
+at x = 5.9, order 6 with 2 in sigma at x = 7.3), where any route loses in ulp
+of the component. Below x = 4 the parts are larger than their sum and the
+split loses; the switch is x = 4 (z <= -4 for log F, z >= 4 for log(1 - F)).
+
+**How (laplace).** With p = e^(-|z|)/2, log(1 - e^(-|z|)/2) = -sum_(n>=1) p^n/n,
+and p^n = 2^-n exp(c_n/sigma), c_n = n s (y - mu) (s = 1 for log(1 - F) at
+z < 0, -1 for log F at z > 0). With a = K - b derivatives in mu and b in sigma,
+d^a/dmu^a d^b/dsigma^b exp(c/sigma) = (-n s)^a (-1)^b b! sigma^-(a+b) exp(c/sigma) L_b^(a-1)(n |z|),
+L_b^(alpha) the generalized Laguerre polynomial (identity checked with SymPy
+for a <= 3, b <= 4), computed by its forward three-term recurrence. Terms are
+added until p^n n^K (1 + n |z|)^K is below 2^-60 of its value at n = 1. On a
+grid |z| = 0.05 .. 30 (mpmath, scratch; largest error over all orders), in ulp
+of the component, z-polynomials 3.7, 3.4, 35, 66, 42 at |z| = 0.05, 0.1, 0.2,
+0.3, 0.5 and up to 2.5e4 beyond, series 7.3, 5.5, 14, 7.6, 19 and at most
+1.7e3 beyond (both largest at |z| = 4.6, on components much smaller than
+their order's largest, next to their zeros); in
+ulp of the order's largest component, z-polynomials 3.7, 3.4, 2.7, 2.1, 2.6
+and up to 1.2e3 beyond (4.5), series 4.1, 3.7, 4.0, 3.8, 4.7 and at most 44
+beyond. The two are within a few ulp of each other below |z| = 0.5; the switch
+is |z| = 0.25, where the series starts to win in ulp of the component.
+
+**Measured** (gcc, CPU; `tests/distrib/test_pilot.cpp`, new case on
+`distrib_log_cdf_tails.csv`, written by `tools/reference/distrib_log_cdf_tails.py`:
+1674 rows, gaussian1 |z| = 1.5 .. 35 on the tail side, laplace |z| = 0.05 .. 30
+on the series side, mu = 0.4, sigma = 1.3). Largest error per order, in ulp
+of the component ("own") and of the order's largest component ("scaled"),
+before -> after:
+
+| | order | own | scaled |
+|---|---|---|---|
+| gaussian1 log F | 4 | 776 -> 10.4 | 1.96 -> 2.30 |
+| | 5 | 3.19e3 -> 182 | 3.32 -> 3.70 |
+| | 6 | 1.57e5 -> 1.46e3 | 2.08 -> 4.81 |
+| gaussian1 log(1 - F) | 4 | 773 -> 11.4 | 1.87 -> 2.44 |
+| | 5 | 3.20e3 -> 162 | 2.88 -> 3.88 |
+| | 6 | 1.57e5 -> 1.48e3 | 2.64 -> 4.38 |
+| laplace log F | 3 | 74.6 -> 16.6 | 37.3 -> 16.6 |
+| | 5 | 504 -> 53.9 | 126 -> 13.5 |
+| | 6 | 986 -> 48.9 | 202 -> 16.7 |
+| laplace log(1 - F) | 3 | 59.3 -> 8.84 | 29.6 -> 3.42 |
+| | 5 | 484 -> 24.2 | 121 -> 6.05 |
+| | 6 | 921 -> 35.2 | 190 -> 5.80 |
+
+The errors of gaussian1 in ulp of the order's scale grow by 1 to 3 ulp: the
+closed-form parts are added to a component of their own size with one
+rounding each. Orders 1 to 3 of gaussian1 were already within 5.6 ulp and did not change by
+more than 1 ulp. Per component, order 6 of gaussian1 log F (b derivatives in
+sigma, b = 0..6), own ulp before: 47.8, 576, 7.56e3, 1.57e5, 3.85, 6.28, 2.08;
+after: 47.8, 51.3, 1.46e3, 606, 3.85, 6.28, 4.81 (b = 0, 1, 4, 5 are taken at
+|z| < 4, where nothing changed; 1.46e3 at z = -7 is next to the zero of that
+component at z = -7.3, 606 at z = -2.5 next to the zero at -3.4). laplace log F
+order 6 per component, own ulp before: 15.8, 17.3, 218, 65.1, 986, 139, 202;
+after: 15.8, 13.7, 15.5, 11.1, 48.9, 35.2, 18.7. The largest own errors left
+in laplace log F (13 to 16 ulp at z = 20 and 30) are those of e^(-|z|) under
+the rounding of z = (y - mu)/sigma, which no form in z removes. On the older
+reference file (`distrib_log_cdf.csv`) the worst errors in ulp of the order's
+scale are now 30.9, 29.7 (gaussian1, unchanged: they are at |z| < 4) and 11.2,
+9.86 (laplace; 57.2 and 391 before); in ulp of the component gaussian1 goes
+from 2.65e4, 3.57e4 to 524, 237 (the largest now at z = 1, not in a tail).
+Test bounds are these maxima plus half.
+
+**Cost** (order 6, one thread, ns per call of the detail routes): gaussian1
+on |z| in [4, 40] 2.8-2.9e3 against 3.1-3.3e3 for the z-polynomials (the
+downward recursion is shorter at x >= 4 than log_Phi_dK's, which runs once
+per order); laplace 2.5e3 against 2.6e3 at |z| in [0.25, 0.5], 1.0e3 against
+2.6e3 at [1, 3], 156 against 2.7e3 at [10, 30].
+
+**Open.** The CUDA build was not run for these routes (no CUDA build in this
+session). The gaussian1 route below x = 4 is unchanged: there the order-6
+components with 2 or 3 derivatives in sigma keep up to 1.9e3 ulp of the
+component next to their zeros.
+
+**Chosen.** The tail route for gaussian1 from |z| = 4 and the series route for
+laplace from |z| = 0.25, by the measurements above.
+
+## The pure derivatives of orders 5 and 6 in x and c near the mean at large shapes
+
+2026-11-12 (night). The derivatives d^K log S(a, a c) / dc^K and
+d^K log S(a, x) / dx^K, K = 5, 6, S = P or Q (the component j = K of
+incomplete_gamma_ratio.hpp and incomplete_gamma_mixed.hpp, the derivatives in
+mu of the Poisson and gamma log F), lost 1e3 to 7e4 ulp of the order's scale
+for a >= 300 near c = 1 on every route (open point (1) of the section on the
+partials at fixed ratio).
+Here is the cause, by measurement, and the repair.
+
+**References.** The pure derivatives in x need no quadrature: with
+D = x^a e^-x / Gamma(a), S(a, x (1 + e)) = S +- D int_0^e (1 + u)^(a - 1)
+e^(-x u) du, and the series in e of log S follows from mpmath's gammainc and
+the series of exp((a - 1) log(1 + u) - x u)
+(`tools/reference/incomplete_pure_x.py`, mpmath at 300 and 400 bits, x = a c
+formed exactly). On the 157 points of the ratio files with
+a >= 300 and |c - 1| < 4/sqrt(a) it agrees with log_gamma_{p,q}_ratio_mixed_d{5,6}.csv
+to 2.2e-16 relative (the double of the comparison): the references were right.
+Its grid: a = 300, 1000, 3000, 1e4, 3e4, 1e5 with c = 1 + z/sqrt(a), z from
+-4 to 4 in steps of 1/4, then z to +-11 and |c - 1| up to 0.5.
+
+**Not the cause: the rounding of x = a c.** The routes at fixed ratio form
+x = a c in double. Measured against a second reference at x = fl(a c), the
+errors are the same within a few per cent, so the rounding is not what is
+lost. The condition number of v_K in c, |c v_(K+1) / v_K|, is 100 to 2e3
+away from the zeros of v_K and up to 3e5 next to them: one ulp of c moves v_K
+by that many ulp of its value, so near a zero only the error in units of
+eps (|v_K| + |c v_(K+1)|) is meaningful.
+
+**The causes.** Three, all in Temme's expansion, which serves this region
+(the quadrature without Temme loses 2e5-3e5 ulp of the value at order 6 for
+a >= 3000: the sixth cumulant of y is a small difference of the central
+moments of a measure of width sqrt(a)).
+1. The Taylor coefficients L_m of log erfcx at zeta (log_erfcx_taylor in
+   incomplete_gamma_deriv.hpp), which enter every derivative in x through
+   zeta = |eta| sqrt(a/2), d zeta/dx ~ 1/sqrt(2a). Up to zeta = 1 they came from
+   the recursion in R = phi(t)/Phi(t), t = -sqrt(2) zeta, whose polynomials
+   in t and R cancel: against mpmath, L_6 lost up to 1.4e4 ulp of its value
+   for zeta in [0.5, 1] (5.3e4 next to its zero near zeta = 0.62) and L_5
+   up to 2.2e3.
+   Now, for zeta <= 1/sqrt(2) (t >= -1), L_m = (-sqrt 2)^m g_m(t) plus the
+   terms of zeta^2, with g_m the derivatives of log Phi from normal.hpp's
+   piecewise Chebyshev expansions; above, the downward recursion as before.
+   Maxima over zeta in [0, 2.5] by order 1-6: 2.3, 3.0, 8.3, 15, 39, 170 ulp
+   (the largest from the downward recursion at zeta = 0.75-1.15; the zero of
+   L_6 near zeta = 0.62 excluded).
+2. log G formed by blog of A0 exp(Lz) + sgn S: exp(Lz) carries the moments
+   of the Gaussian part, of size dz^m with dz ~ sqrt(a/2) per derivative, and
+   the logarithm takes them back to cumulants that are small differences of
+   them near zeta = 0. Now log G = Lz + log(1 + sgn S exp(-Lz) / A0)
+   (temme_log_g in incomplete_gamma_mixed.hpp, used by both files): the
+   Gaussian part enters as it is and only the correction, of relative size
+   1/sqrt(a), goes through exp and log. At a = 1e4, Q, order 6: z = 0 193 ->
+   48 ulp of the value, z = 0.25 443 -> 30.
+3. The complement. Below c = 1 Temme gave log Q as log(1 - P) from the series
+   of log P (and log P from Q above), whose exponential and logarithm cancel
+   in the same way: log Q at a = 7827, order 5, lost 880 to 3.7e3 ulp of the
+   value for z in [-0.2, -0.1] and 2.2e4-2.9e4 next to a zero of v_5
+   (z = -0.05 to -0.02), against 1 to 10 for z >= 0 where Q is direct. Erfcx and the derivatives of log Phi hold
+   for negative arguments, so Temme's expansion now gives the side wanted
+   directly also beyond c = 1 while zeta >= -1 (temme_zeta_cross); beyond it
+   the complement is kept, since -a phi and log G cancel in the value and the
+   orders 1-2 as zeta^2 grows.
+
+A fourth loss appeared in the measurement of the repaired Temme: on its
+direct side far from c = 1 (P for c < 1, Q for c > 1) Temme's series loses on
+the derivatives with three or more in c from |c - 1| = 0.25-0.3 on, whatever
+a (likely the truncation of the power series in eta of the coefficients C_k,
+differentiated): order 6, P at a = 300, c = 0.51: 1.1e5 ulp of the value
+against 1.0 for the series; c = 0.74: 41 against 8.5; Q at a = 300, c = 1.49:
+3.3e4 against 52; at a = 1000 P from c = 0.70 and Q from c = 1.32. These
+components now come from the route without Temme for |c - 1| >= 0.25
+(temme_c_band, gm::temme_band), where that route is within 300 ulp.
+
+With the repairs Temme is better than the routes without it for every
+component down to a = 50 within the band: worst error in ulp of the order's
+scale on the ratio references, order 6 (P, Q), Temme for every component from
+a = 300 (the old dispatch) 4.3e3, 5.8e3; from a = 100 4.0e3, 2.3e3; from
+a = 50 2.6e3, 1.9e3 (order 5: 9.0e3, 5.2e3 and 2.1e3, 900); from a = 20 P
+lost 8.8e3 at order 6. So for 50 <= a < 300 Temme now serves every component
+within |c - 1| < 0.25 (and |x/a - 1| < 0.25 in incomplete_gamma_mixed.hpp),
+and outside it those with at most two derivatives (a >= 100) or none (a < 100)
+as before.
+
+**Results.** On the grid, error of the pure derivative of order K in c in
+ulp of its value (max over z in [-4, 4] in steps of 1/4, the zeros of v_K
+included), before / after:
+
+| | a = 300 | 1000 | 3000 | 1e4 | 3e4 | 1e5 |
+|---|---|---|---|---|---|---|
+| P, K = 4 | 711 / 35 | 322 / 39 | 407 / 9.4 | 312 / 17 | 866 / 15 | 1.7e3 / 22 |
+| P, K = 5 | 4.0e3 / 49 | 1.5e3 / 36 | 1.9e3 / 35 | 1.5e3 / 48 | 1.4e3 / 92 | 4.2e3 / 25 |
+| P, K = 6 | 1.3e5 / 1.7e3 | 2.4e4 / 850 | 3.1e5 / 297 | 5.1e4 / 269 | 3.2e4 / 280 | 3.0e4 / 277 |
+| Q, K = 4 | 3.0e3 / 60 | 405 / 15 | 356 / 8.9 | 327 / 11 | 335 / 17 | 295 / 15 |
+| Q, K = 5 | 5.2e3 / 26 | 3.5e3 / 36 | 1.4e3 / 21 | 1.4e3 / 60 | 3.3e4 / 64 | 3.9e3 / 39 |
+| Q, K = 6 | 2.0e5 / 257 | 1.1e4 / 146 | 1.7e5 / 351 | 1.8e4 / 5.9e3 | 2.1e4 / 354 | 2.0e4 / 251 |
+
+Next to the zeros of v_K the error in ulp of the value is set by the
+conditioning; in units of eps (|v_K| + |c v_(K+1)|) the worst over the grid
+is 84 (P, order 6, a = 300; 5.9e3 ulp of the value at a = 1e4, Q, order 6, is 4.5 in these units, at a zero where the condition number is 2.9e5), and in ulp of the largest |v_K| over the z of the same a it is
+27.
+
+The references gained 102 points at a = 300, 1000, 3000, 1e4, 3e4, 1e5 with
+c = 1 + t/sqrt(a), t from -4 to 4 in steps of 1/2
+(log_gamma_{p,q}_ratio_mixed_d{K}.csv, now 1264 points) and 78 points at the
+same a with x = a + t sqrt(a), t from -3 to 3 in steps of 1/2
+(log_gamma_{p,q}_mixed_poisson_d{K}.csv, now 291 points); incomplete_ratio.py
+writes them. Test figures (gcc, ulp of the order's scale), ratio files,
+orders 5 and 6: P 9.0e3, 7.3e4 before, 2050, 2638 now; Q 5.8e4, 6.2e4 before,
+1701, 1892 now. The worst are now below a = 50 near c = 1 (a = 19.8 and 32.1,
+order 6, j = 6, the route without Temme), at a = 13097, c = 1.33 (order 5, P,
+j = 5, the complement of the series, outside Temme's band) and at a = 334,
+c = 0.074 (order 5, Q, j = 0, a complement with S near 1e-250). Bounds 3080, 3960 (P) and 2560, 2840 (Q).
+Poisson files: maxima P 4.73, 9.04, 79.9, 370, 849, 4128 and Q 4.00, 14.2,
+62.4, 174, 715, 1425 at orders 1-6, all at a <= 42; bounds kept (P order 5 at
+2310 to cover 1536 on the CUDA build at a = 12, x = 12, j = 3).
+The pilot (test_pilot.cpp, error in ulp of the order's largest component):
+the Poisson log(1 - F) fell from 3.70e3 to 867 (bound 1.3e3); log F stays at
+3.84e3 (k = 39 at mu = 40, a = 40, below Temme), gamma1 at 379 and 356.
+The mixed partials of incomplete_gamma_mixed.hpp and the derivatives in a of
+incomplete_gamma_deriv.hpp keep their maxima (the tables above unchanged to
+three digits).
+
+Speed (ns per call, gcc, the timing set of the bench, one thread / OpenMP 8
+threads), log_gamma_{p,q}_ratio_mixed_dK, K = 1..6: P 1689 / 227, 1925 / 254,
+2324 / 319, 2652 / 367, 3127 / 439, 3761 / 539; Q 1792 / 234, 2823 / 382,
+3357 / 462, 3772 / 509, 4430 / 628, 5345 / 737: the same as before or faster
+(Temme's expansion now replaces the quadrature for more of the components
+between a = 50 and 300).
+
+**What remains.** (1) Below a = 50 near c = 1 the pure derivatives of order
+6 come from the quadrature, whose cumulants lose up to 2.6e3 ulp of the
+order's scale (a = 19.8); Temme does not help there (its 10 terms in 1/a).
+(2) The downward recursion of log_erfcx_taylor for zeta in (0.71, 1.2) keeps
+up to 170 ulp on L_6. (3) Next to the zeros of v_K the error in ulp of the
+value stays large, as the conditioning allows. (4) The CUDA build is not yet
+run on these changes.
+
+**Chosen.** The three repairs and the dispatch above, by the measurements.
+
 ## Structured matrices: diagonal, compound symmetry and AR(1)
 
 **What.** `include/laplace/pdmat/` (2026-11-12, the pilot of phase 5,
@@ -1986,3 +2699,74 @@ the psdmat structures (`note/pdmat_structures.md` section 8).
 
 **Chosen.** This version; tested in `tests/pdmat/test_pilot.cpp` on gcc and
 CUDA, bounds 1.5 times the larger measured error.
+
+## Univariate distributions: the pilot (gaussian1, laplace, poisson, gamma1)
+
+**What.** `include/laplace/distrib/`: `core.hpp` (the kind, continuous or
+discrete; the descriptor of a parameter, `distrib_param_info`: name, natural
+domain, regularity order of log f, whether it moves the support, regularity
+order of log F; `distrib_kinks`; the packed symmetric tensor `sym_tensor<P, K>`
+over sorted indices in lexicographic order; `expected_info_tensor<P, K>`),
+and four distributions as structs whose fields are the natural parameters:
+`gaussian1_distrib` (mu, sigma), `laplace_distrib` (mu, sigma),
+`poisson_distrib` (mu), `gamma1_distrib` (mu, phi; shape 1/phi). Each has the
+log-density (or log-mass) and its derivatives in the parameters to order 6,
+the expected information I = -E[d^2 l] and its derivatives to order 4 (total
+order 6), the cdf, its complement and their logarithms, the derivatives of
+log F and log(1 - F) to order 6, the quantile (continuous), the support, rough
+center and scale, and the non-smooth points. Decisions in note/distrib.md.
+
+**How.**
+- gaussian1, laplace: closed forms; log F and log(1 - F) are functions of
+  z = (y - mu)/sigma, differentiated in z (log_Phi_dK; for the Laplace
+  polynomials in q = 1/(2 e^z - 1) or, in the tails, the series
+  -sum p^n/n) and carried to (mu, sigma) by the location-scale rules
+  (`detail/location_scale.hpp`; tails: section "Tails of the log F
+  derivatives of gaussian1 and laplace").
+- laplace: l is C^0 in mu at mu = y (derivative sign(0) = 0 there, the mean
+  of the one-sided ones), log F is C^1 there (`cdf_regularity` 1).
+- poisson: the log-mass in saddle-point form
+  -mu D(y/mu) - log sqrt(2 pi y) - delta(y), D(z) = z log z - z + 1, delta
+  Stirling's error: the textbook y log mu - mu - log y! loses 1e-12 absolute
+  at mu = 1000 (the generic cdf by summing the mass went from 1243 to 5.9 ulp
+  there). F(k) = Q(k + 1, mu); the derivatives of log F in mu are the
+  x-derivatives of log Q(k + 1, x) (`incomplete_gamma_mixed.hpp`).
+- gamma1: l = -s D(y/mu) + log(s)/2 - delta(s) - log y - log sqrt(2 pi),
+  s = 1/phi, D(z) = z - 1 - log z (series in w = (y - mu)/mu below
+  |w| = 1/4, the logarithm directly below z = 1/2, where w rounds to -1 for
+  y < mu 2^-53 and the log-density was -inf before the fix). The phi-
+  derivatives of -delta(1/phi) by Faa di Bruno over delta^(k): the terms
+  cancel by up to 1e10 among themselves, but the result stays within 8 ulp
+  of the whole shape term (log(s)/2 differentiated in closed form dominates).
+  I_phiphi = s^2/2 + s^4 delta''(s). log F = log P(a, a c), a = 1/phi,
+  c = y/mu, composed from the partials at fixed ratio
+  (`incomplete_gamma_ratio.hpp`) by two univariate Faa di Bruno sums; the
+  composition over (a, x) cancelled up to 4e7 ulp, because along phi the
+  ratio x/a is fixed.
+
+**Measurement.** Every derivative order of l, of I and of log F against a
+5-point difference of the order below (relative 1e-8, 1e-7 for log F; the
+step scales with the parameter and, for log F, with 1/(1 + |z|)); I against
+the variance of the score (quadrature with a knot at the Laplace kink, where
+-E[l_mumu] = 0; support sum for the Poisson; tanh-sinh plus exp-sinh for the
+gamma at shape 1/4) to 1e-12; log F and log(1 - F) against mpmath
+(`tools/reference/distrib_log_cdf.py`, mpmath.diff at 300 and 400 bits, 2217
+rows; tails `distrib_log_cdf_tails.py`, 1674 rows). Maximum error of log F /
+log(1 - F) derivatives, gcc, in ulp of the largest component of each order
+(the Poisson has one component; near zeros of a component the per-component
+error is larger, see the tails section):
+
+| distribution | log F | log(1 - F) |
+|---|---|---|
+| gaussian1 | 30.9 | 29.7 |
+| laplace | 11.2 | 9.86 |
+| poisson | 3.84e3 (k = 39, mu = 40, order 6, value 4.8e-7 next to -7e-7, absolute 2e-19) | 867 |
+| gamma1 | 379 | 356 |
+
+**Open.** The Poisson and gamma figures are set by the incomplete gamma
+partials below Temme's range near x = a (a < 50), see its sections. rng is
+not a member (it is a generic route). Derivatives in y and cross derivatives
+are not written yet.
+
+**Chosen.** This version. Tested in `tests/distrib/test_pilot.cpp` on gcc and
+CUDA.

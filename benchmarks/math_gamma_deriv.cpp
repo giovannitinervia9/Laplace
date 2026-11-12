@@ -1,5 +1,5 @@
 // Accuracy and speed of the derivatives of log P(a, x) and log Q(a, x) with
-// respect to a, orders 1 to 5 (include/laplace/math/incomplete_gamma_deriv.hpp).
+// respect to a, orders 1 to 6 (include/laplace/math/incomplete_gamma_deriv.hpp).
 // Candidates: the chosen route (own: the series on the lower side where it is
 // short, the quadrature elsewhere); the double-exponential quadrature in
 // d = log(t/x) or u = t - x with 8 nodes per unit of t (quad8) and with 6 and
@@ -11,13 +11,21 @@
 // Each line of bench::report is followed by a breakdown by region: a < 1;
 // a > 1000; for 1 <= a <= 1000 the far lower tail (log P < -20), the far upper
 // tail (log Q < -20) and the rest (mid). ulpL = ulp / max(1, |log|f||).
+// For every candidate a second breakdown by the route that the chosen
+// implementation takes at each point: Temme, the lower
+// series, the closed form at small x, the upper asymptotic series, the fraction
+// in Taylor form, the quadrature on either side; "+c" marks the complement
+// log(1 - S). The files log_gamma_{p,q}_da5_edges hold order 5 on the points at
+// the route boundaries that log_gamma_{p,q}_da6 adds to the 1500 common points.
 //
 // Usage: math_gamma_deriv <reference dir> <output dir> [name filter] [impl filter]
 #include "measure.hpp"
 
 #include <laplace/math/incomplete_gamma_deriv.hpp>
 
+#include <map>
 #include <random>
+#include <type_traits>
 
 namespace {
 
@@ -52,10 +60,14 @@ struct FiniteDiff {
       case 4:
         return (f(a + 2 * h, x) - 4 * f(a + h, x) + 6 * f(a, x) - 4 * f(a - h, x) + f(a - 2 * h, x)) /
                (h * h * h * h);
-      default:
+      case 5:
         return (f(a + 3 * h, x) - 4 * f(a + 2 * h, x) + 5 * f(a + h, x) - 5 * f(a - h, x) + 4 * f(a - 2 * h, x) -
                 f(a - 3 * h, x)) /
                (2 * h * h * h * h * h);
+      default:
+        return (f(a + 3 * h, x) - 6 * f(a + 2 * h, x) + 15 * f(a + h, x) - 20 * f(a, x) + 15 * f(a - h, x) -
+                6 * f(a - 2 * h, x) + f(a - 3 * h, x)) /
+               (h * h * h * h * h * h);
     }
   }
 };
@@ -96,6 +108,58 @@ void breakdown(const bench::Ref& r, const std::vector<double>& y) {
   }
 }
 
+// The route the chosen implementation takes (the dispatch of log_gamma_da_impl
+// and chosen_side on the host, repeated here).
+std::string route_of(int k, double a, double x, bool p) {
+  if (x == 0.0 || !std::isfinite(x)) return "limit";
+  const double sg = std::fabs(x - a) / a;
+  if ((a >= 20.0 && sg < 0.3) || (a >= 300.0 && sg < 0.4) || (a >= 1000.0 && sg < 0.5)) {
+    gd::side_result t;
+    if (gd::temme_side(a, x, k, p, t)) return t.direct ? "temme" : "temme+c";
+  }
+  const bool lower = gd::side_lower(a, x, p);
+  const bool direct = lower == p;
+  const std::string c = direct ? "" : "+c";
+  gd::side_result s;
+  double kap[7], li;
+  if (direct && !lower && x < 1.5 && a < 2.0 && gd::upper_small_x(a, x, k, direct, s)) return "smallx" + c;
+  if ((lower || x >= 36.0) &&
+      gd::series_moments(a, x, lower, k, lower ? gd::nmax_lower_host : gd::nmax_upper_host, kap, li))
+    return (lower ? "lseries" : "useries") + c;
+  if (!lower && x >= (direct ? 1.5 : 3.0) && x >= a + 0.75 * std::sqrt(a) &&
+      gd::fraction_taylor(a, x, k, direct, gd::nmax_fraction_host, s))
+    return "fraction" + c;
+  return (lower ? "quadL" : "quadU") + c;
+}
+
+void route_breakdown(int k, bool p, const bench::Ref& r, const std::vector<double>& y) {
+  struct St {
+    int n = 0, bad = 0;
+    double ulp1 = 0, ulpL = 0, minu = 0;
+    bench::Args worst{};
+  };
+  std::map<std::string, St> st;
+  for (std::size_t i = 0; i < y.size(); ++i) {
+    auto& g = st[route_of(k, r.x[i][0], r.x[i][1], p)];
+    ++g.n;
+    const double hi = r.hi[i];
+    const double e = std::fabs(bench::error_in(y[i], hi, r.lo[i], std::max(std::fabs(hi), 2.2250738585072014e-308)));
+    if (!std::isfinite(e)) {
+      ++g.bad;
+      continue;
+    }
+    const double e1 = std::fabs(bench::error_in(y[i], hi, r.lo[i], std::max(std::fabs(hi), 1.0)));
+    const double eL = e / std::max(1.0, std::fabs(std::log(std::fabs(hi))));
+    g.ulp1 = std::max(g.ulp1, e1);
+    g.ulpL = std::max(g.ulpL, eL);
+    const double u = std::min(e1, eL);
+    if (u > g.minu) g.minu = u, g.worst = r.x[i];
+  }
+  for (const auto& [name, g] : st) {
+    std::printf("    route %-11s n %4d: max %8.4g ulp1, %8.4g ulpL, %8.4g min(ulpL, ulp1) at (%s)%s\n", name.c_str(), g.n,
+                g.ulp1, g.ulpL, g.minu, bench::show(g.worst, 2).c_str(), g.bad ? " NON-FINITE" : "");
+  }
+}
 
 // ---------------------------------------------------------------- profile: where the time goes
 
@@ -103,7 +167,7 @@ void breakdown(const bench::Ref& r, const std::vector<double>& y) {
 struct PQuad {  // quadrature moments on the side the route takes for P
   int e;
   KOKKOS_INLINE_FUNCTION double operator()(double a, double x) const {
-    double kap[6], li;
+    double kap[7], li;
     const bool lower = gd::side_lower(a, x, true);
     if (e == 1) gd::quad_moments<8, 1>(a, x, lower, kap, li);
     else gd::quad_moments<8, 0>(a, x, lower, kap, li);
@@ -112,7 +176,7 @@ struct PQuad {  // quadrature moments on the side the route takes for P
 };
 struct PSeries {  // series moments on that side (nmax huge; upper only for x >= 36)
   KOKKOS_INLINE_FUNCTION double operator()(double a, double x) const {
-    double kap[6], li;
+    double kap[7], li;
     const bool lower = gd::side_lower(a, x, true);
     if (!lower && x < 36.0) return 0.0;
     if (!gd::series_moments(a, x, lower, 5, 100000, kap, li)) return -1.0;
@@ -226,6 +290,8 @@ void profile(std::size_t n, std::mt19937_64& gen) {
     ptime(r.name, "P k5 own", r.t, Deriv{5, true, 0});
     ptime(r.name, "Q k1 own", r.t, Deriv{1, false, 0});
     ptime(r.name, "Q k5 own", r.t, Deriv{5, false, 0});
+    ptime(r.name, "P k6 own", r.t, Deriv{6, true, 0});
+    ptime(r.name, "Q k6 own", r.t, Deriv{6, false, 0});
     ptime(r.name, "P k5 quad8", r.t, Deriv{5, true, 5});
     ptime(r.name, "P k5 no Temme", r.t, Deriv{5, true, 31});
     ptime(r.name, "Q k5 no Temme", r.t, Deriv{5, false, 31});
@@ -273,21 +339,52 @@ int main(int argc, char* argv[]) {
     profile(n, gen);
     return 0;
   }
+  if (ifilter == "fracgrid") {
+    // the fraction in Taylor form against the quadrature (h = 1/8) near x = a:
+    // the largest difference in ulps of max(|f|, 1) over 64 points of x per
+    // cell, for z = (x - a)/sqrt(a) in [z0, z0 + 0.25), log Q, orders 1..6
+    const double as[] = {1.6, 2.5, 4.0, 6.0, 10.0, 15.0, 19.0, 25.0, 30.0};
+    for (const double a : as) {
+      for (double z0 = -0.5; z0 < 2.0; z0 += 0.25) {
+        std::printf("a %5.1f z %5.2f:", a, z0);
+        for (int k = 1; k <= 6; ++k) {
+          double worst = 0;
+          for (int i = 0; i < 64; ++i) {
+            const double x = a + (z0 + 0.25 * i / 64.0) * std::sqrt(a);
+            if (x < 1.5 || gd::choose_lower(a, x)) continue;
+            gd::side_result s;
+            if (!gd::fraction_taylor(a, x, k, true, 2000, s)) continue;
+            const double q = gd::quad_side<8, 0>(a, x, k, false, true).l[k];
+            const double ulp = std::ldexp(1.0, std::ilogb(std::max(std::fabs(q), 1.0)) - 52);
+            worst = std::max(worst, std::fabs(s.l[k] - q) / ulp);
+          }
+          std::printf(" %9.3g", worst);
+        }
+        std::printf("\n");
+      }
+    }
+    return 0;
+  }
 
   auto run = [&](const std::string& name, const char* impl, auto f) {
     if (!filter.empty() && name.find(filter) == std::string::npos) return;
     if (!ifilter.empty() && std::string(impl).find(ifilter) == std::string::npos) return;
     const auto r = bench::read_ref(refdir + "/" + name + ".csv");
     bench::report(name.c_str(), impl, r, f, outdir, t_gamma);
-    breakdown(r, bench::eval_kernel(r.x, f));
+    const auto y = bench::eval_kernel(r.x, f);
+    breakdown(r, y);
+    if constexpr (std::is_same_v<decltype(f), Deriv>) {
+      route_breakdown(f.k, f.p, r, y);  // by the route the chosen implementation takes
+    }
     std::fflush(stdout);
   };
 
-  for (int k = 1; k <= 5; ++k) {
+  for (int k = 1; k <= 6; ++k) {
     for (int side = 0; side < 2; ++side) {
       const bool p = side == 0;
       const std::string name = std::string(p ? "log_gamma_p_da" : "log_gamma_q_da") + std::to_string(k);
       run(name, "own", Deriv{k, p, 0});
+      if (k == 5) run(name + "_edges", "own", Deriv{k, p, 0});
       run(name, "quad8", Deriv{k, p, 5});
       run(name, "noTemme", Deriv{k, p, 31});
       run(name, "quad6", Deriv{k, p, 2});

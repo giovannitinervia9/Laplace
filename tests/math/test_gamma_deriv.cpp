@@ -1,4 +1,4 @@
-// Derivatives of log P(a, x) and log Q(a, x) with respect to a, orders 1 to 5
+// Derivatives of log P(a, x) and log Q(a, x) with respect to a, orders 1 to 6
 // (include/laplace/math/incomplete_gamma_deriv.hpp), against the mpmath
 // references, evaluated in a Kokkos kernel on the default execution space.
 // Bounds: the errors measured on 2026-11-09 on the gcc/OpenMP and CUDA builds
@@ -9,6 +9,10 @@
 // Q orders 1-5: 4.8/4.8, 5.5/7.3, 13.9/13.9, 22.1/23.0, 62.9/67.9
 // (the bounds of P orders 2-4 were 22, 58 and 85 before; order 5 was 420
 // before the evening).
+// Order 6 (2026-11-12, gcc only so far; 1900 points, the 1500 of orders 1-5
+// plus 400 at the route boundaries): P 771 (the lower series at a = 0.0139,
+// x = 1.045, where kappa_6 and psi^(5)(a + 1), both near 113, cancel to 1.7),
+// Q 96.3 (the complement of the lower series at a = 2.04, x = 1.56).
 //
 // The figure per point is the smaller of ulpL = ulp / max(1, |log|f||) (in
 // the far tails the complement log(1 - S) inherits the error of
@@ -40,7 +44,8 @@ struct Deriv {
         case 2: return lm::log_gamma_p_da2(a, x);
         case 3: return lm::log_gamma_p_da3(a, x);
         case 4: return lm::log_gamma_p_da4(a, x);
-        default: return lm::log_gamma_p_da5(a, x);
+        case 5: return lm::log_gamma_p_da5(a, x);
+        default: return lm::log_gamma_p_da6(a, x);
       }
     }
     switch (k) {
@@ -48,7 +53,8 @@ struct Deriv {
       case 2: return lm::log_gamma_q_da2(a, x);
       case 3: return lm::log_gamma_q_da3(a, x);
       case 4: return lm::log_gamma_q_da4(a, x);
-      default: return lm::log_gamma_q_da5(a, x);
+      case 5: return lm::log_gamma_q_da5(a, x);
+      default: return lm::log_gamma_q_da6(a, x);
     }
   }
 };
@@ -85,6 +91,7 @@ TEST_CASE("derivatives of log P(a, x) in a against mpmath") {
   check(3, true, 16.0);
   check(4, true, 35.0);
   check(5, true, 245.0);
+  check(6, true, 1160.0);
 }
 
 TEST_CASE("derivatives of log Q(a, x) in a against mpmath") {
@@ -93,4 +100,5 @@ TEST_CASE("derivatives of log Q(a, x) in a against mpmath") {
   check(3, false, 21.0);
   check(4, false, 35.0);
   check(5, false, 102.0);
+  check(6, false, 145.0);
 }

@@ -1,7 +1,7 @@
 /**
 \defgroup incomplete_gamma Regularized incomplete gamma function
 \ingroup special
-\brief Regularized incomplete gamma functions \f$P(a, x)\f$ and \f$Q(a, x)\f$, their logarithms, shape derivatives to order 5, and inverses.
+\brief Regularized incomplete gamma functions \f$P(a, x)\f$ and \f$Q(a, x)\f$, their logarithms, shape derivatives to order 6, and inverses.
 
 Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
 
@@ -24,7 +24,7 @@ where \f$t \in [x, \infty)\f$.
 
 Laplace computes \f$P(a, x)\f$, \f$Q(a, x)\f$, their natural logarithms \f$\log P(a, x)\f$ and \f$\log Q(a, x)\f$, their shape derivatives
 \f[
-\frac{\partial^k}{\partial a^k} \log P(a, x) \quad \text{and} \quad \frac{\partial^k}{\partial a^k} \log Q(a, x), \quad k = 1, \dots, 5,
+\frac{\partial^k}{\partial a^k} \log P(a, x) \quad \text{and} \quad \frac{\partial^k}{\partial a^k} \log Q(a, x), \quad k = 1, \dots, 6,
 \f]
 and the inverse functions that solve \f$P(a, x) = p\f$, \f$Q(a, x) = q\f$, \f$\log P(a, x) = \log p\f$, and \f$\log Q(a, x) = \log q\f$ for \f$x\f$.
 
@@ -49,7 +49,7 @@ Laplace addresses these issues through two design principles:
 - **Domain:**
   - Forward functions \f$P(a, x)\f$, \f$Q(a, x)\f$, \f$\log P(a, x)\f$, \f$\log Q(a, x)\f$: defined for \f$a > 0\f$ and \f$x \ge 0\f$.
   - Inverses: `gamma_p_inv` for \f$a > 0, p \in [0, 1]\f$; `gamma_q_inv` for \f$a > 0, q \in [0, 1]\f$; `gamma_p_inv_logp` for \f$a > 0, \log p \in (-\infty, 0]\f$; `gamma_q_inv_logq` for \f$a > 0, \log q \in (-\infty, 0]\f$.
-  - Shape derivatives: `log_gamma_p_da1..5` and `log_gamma_q_da1..5` for \f$a > 0, x \ge 0\f$.
+  - Shape derivatives: `log_gamma_p_da1..6` and `log_gamma_q_da1..6` for \f$a > 0, x \ge 0\f$.
 - **Special values and boundaries:**
   - If \f$a \le 0\f$, or if \f$a\f$ or \f$x\f$ is NaN: returns quiet NaN.
   - At \f$x = 0\f$: \f$P(a, 0) = 0.0\f$, \f$Q(a, 0) = 1.0\f$, \f$\log P(a, 0) = -\infty\f$, \f$\log Q(a, 0) = 0.0\f$.
@@ -93,7 +93,7 @@ The function \ref laplace::math::own::gamma_inc "gamma_inc()" computes \f$P(a, x
 
 ### Shape derivatives
 
-The shape derivatives \f$\frac{\partial^k}{\partial a^k}\log P(a, x)\f$ and \f$\frac{\partial^k}{\partial a^k}\log Q(a, x)\f$ (\f$k = 1, \dots, 5\f$) are computed through cumulants of \f$d = \log(t/x)\f$:
+The shape derivatives \f$\frac{\partial^k}{\partial a^k}\log P(a, x)\f$ and \f$\frac{\partial^k}{\partial a^k}\log Q(a, x)\f$ (\f$k = 1, \dots, 6\f$) are computed through cumulants of \f$d = \log(t/x)\f$:
 Relative to the prefactor \f$x^a e^{-x}\f$, the lower and upper incomplete integrals are:
 \f[
 I_L(a) = \frac{a \Gamma(a) P(a, x)}{x^a e^{-x}} = 1 + x \int_{-\infty}^0 \exp\bigl((a + 1)d - x(e^d - 1)\bigr) \, \mathrm{d}d
@@ -123,7 +123,7 @@ Route selection:
 2. **Lower series:** \f$I_L = \sum_n \prod_{j \le n} \frac{x}{a + j}\f$ differentiated term by term (up to 300 terms on host; up to 60 terms for \f$a < 2\f$ on device).
 3. **Small argument closed form:** For upper side at \f$x < 3/2, a < 2\f$.
 4. **Upper asymptotic series:** For \f$x \ge 36\f$ (host only).
-5. **Legendre continued fraction in Taylor form:** Evaluated by modified Lentz method (host only).
+5. **Legendre continued fraction in Taylor form:** Evaluated by modified Lentz method (host only). It is used only for \f$x \ge a + 0.75\sqrt{a}\f$, in addition to \f$x \ge 3/2\f$ (for \f$\log Q\f$) or \f$x \ge 3\f$ (for the complement); closer to \f$a\f$ the quadrature takes over.
 6. **Double-exponential quadrature:** Fixed exp-exp rule (\f$h = 1/8\f$, approximately 65 nodes, quoted from `docs/numerics.md`, tabulated on host and device constant memory) for remaining regions. For the upper side when \f$x < 1/4\f$, two tanh-sinh panels are used on \f$[0, \log(1/x)]\f$ in \f$d\f$, followed by the exp-exp rule in \f$u = t - 1\f$ beyond.
 
 ### Inverses
@@ -173,11 +173,135 @@ Error for shape derivatives is measured, at each point, as the smaller of \ref a
 | \ref laplace::math::own::log_gamma_p_da3 "log_gamma_p_da3()" | 3 | 8.8 | 10.8 | 16.0 |
 | \ref laplace::math::own::log_gamma_p_da4 "log_gamma_p_da4()" | 4 | 23.5 | 23.0 | 35.0 |
 | \ref laplace::math::own::log_gamma_p_da5 "log_gamma_p_da5()" | 5 | 197.0 | 171.0 | 245.0 |
+| \ref laplace::math::own::log_gamma_p_da6 "log_gamma_p_da6()" | 6 | 771.1 | — | 1160.0 |
 | \ref laplace::math::own::log_gamma_q_da1 "log_gamma_q_da1()" | 1 | 4.8 | 4.8 | 7.5 |
 | \ref laplace::math::own::log_gamma_q_da2 "log_gamma_q_da2()" | 2 | 5.5 | 7.3 | 11.0 |
 | \ref laplace::math::own::log_gamma_q_da3 "log_gamma_q_da3()" | 3 | 13.9 | 13.9 | 21.0 |
 | \ref laplace::math::own::log_gamma_q_da4 "log_gamma_q_da4()" | 4 | 22.1 | 23.0 | 35.0 |
 | \ref laplace::math::own::log_gamma_q_da5 "log_gamma_q_da5()" | 5 | 62.9 | 67.9 | 102.0 |
+| \ref laplace::math::own::log_gamma_q_da6 "log_gamma_q_da6()" | 6 | 96.3 | — | 145.0 |
+
+### Mixed derivatives in the shape and the argument
+
+The mixed partial derivatives of total order \f$K \in \{1, \dots, 6\}\f$ of \f$\log P(a, x)\f$ and \f$\log Q(a, x)\f$ are returned in the struct template \ref laplace::math::gamma_inc_mixed_partials "gamma_inc_mixed_partials<K>" with array member `double v[K + 1]`. The component \f$v_j\f$ gives
+\f[
+v_j = \frac{\partial^K}{\partial a^{K-j} \partial x^j} \log S(a, x), \quad j = 0, \dots, K
+\f]
+with \f$j\f$ derivatives in \f$x\f$ and \f$K - j\f$ derivatives in \f$a\f$, where \f$S = P\f$ or \f$Q\f$. In particular, \f$v_0\f$ is the pure derivative in \f$a\f$ alone (the value of \ref laplace::math::own::log_gamma_p_da1 "log_gamma_p_daK()" or \ref laplace::math::own::log_gamma_q_da1 "log_gamma_q_daK()" up to measured errors) and \f$v_K\f$ is the pure derivative in \f$x\f$ alone. The functions are implemented in `laplace::math::own` as \ref laplace::math::own::log_gamma_p_mixed_d1 "log_gamma_p_mixed_d1()" through \ref laplace::math::own::log_gamma_p_mixed_d6 "log_gamma_p_mixed_d6()" and \ref laplace::math::own::log_gamma_q_mixed_d1 "log_gamma_q_mixed_d1()" through \ref laplace::math::own::log_gamma_q_mixed_d6 "log_gamma_q_mixed_d6()", and forwarded to `laplace::math`.
+
+With \f$d = \log(t/x)\f$ and \f$y = x - t\f$, the increments \f$a \to a + h\f$ and \f$x \to x(1 + e)\f$ multiply the integrand of either side by \f$e^{h d + e y}\f$ and the prefactor \f$x^a e^{-x}\f$ by \f$\exp(a\log(1 + e) - x e)\f$. With \f$B_{ij}\f$ denoting the coefficient of \f$h^i e^j\f$ of \f$\log S(a + h, x(1 + e))\f$,
+\f[
+\frac{\partial^{i+j}}{\partial a^i \partial x^j} \log S(a, x) = i! \, j! \, \frac{B_{ij}}{x^j}.
+\f]
+For \f$j \ge 1\f$:
+\f[
+B_{01} = x \frac{\partial}{\partial x}\log S(a, x) = \begin{cases} \displaystyle\frac{a}{I_L}, & S = P, \\[6pt] \displaystyle -\frac{1}{I_U}, & S = Q, \end{cases}
+\f]
+where \f$I_L\f$ and \f$I_U\f$ are the lower and upper incomplete gamma integrals defined above. For higher orders in \f$e\f$:
+\f[
+B_{0j} = a \frac{(-1)^{j-1}}{j} + \frac{\kappa_{0j}}{j!} \quad (j \ge 2), \qquad B_{1j} = \frac{(-1)^{j-1}}{j} + \frac{\kappa_{1j}}{j!}, \qquad B_{ij} = \frac{\kappa_{ij}}{i! \, j!} \quad (i \ge 2),
+\f]
+where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d\f$ and \f$j\f$ copies of \f$y\f$ under the normalized measure of the side. For \f$i \ge 2\f$, the mixed partials are cumulants alone. The point mass of the lower side does not move with \f$x\f$ while its density part carries a factor \f$x(1 + e)\f$: with \f$K(h, e)\f$ the joint cumulant generating function and \f$\pi\f$ the mass of the density part,
+\f[
+\log I_L(h, e) = \log I_L + K(h, e) + \log\bigl(1 + e (\pi + (1 - \pi)(1 - e^{-K(h, e)}))\bigr),
+\f]
+whose terms in \f$h\f$ alone are those of \f$K\f$: the derivatives in \f$a\f$ are unchanged.
+
+The numerical routes follow those of the shape derivatives (quadrature, lower series, upper asymptotic series, closed form at small \f$x\f$, Temme's expansion, complement) carried in two increments instead of one; the continued fraction has no bivariate version and its region takes the quadrature on the host. Temme's expansion is used from \f$a = 50\f$ and, for \f$a < 300\f$, only for the components with at most two derivatives in \f$x\f$. For the complement of the lower side, \f$S(a + h, x(1 + e))/S\f$ is formed through the density integral
+\f[
+S(a + h, x(1 + e)) = S(a + h, x) + x \int_0^e f(a + h, x(1 + u)) \, \mathrm{d}u
+\f]
+with \f$f(a + h, x(1 + u))/f(a, x)\f$ in closed form; `density_ratio` forms its factor \f$(1 + u)^{a - 1 + h} e^{-x u}\f$ as the exponential of its logarithm for \f$a \ge 2\f$, \f$x \ge a/2\f$ (products of linear factors otherwise). For \f$\log Q\f$ at \f$a < 2\f$, \f$1/4 \le x < 3/2\f$, the component \f$j = 1\f$ comes from the quadrature of the upper side. SymPy (version 1.14.0; Meurer and others 2017; see \ref derivation "How formulas are derived") checks the bivariate logarithm and exponential recursions, the point-mass formula of the lower side, the explicit terms in \f$e\f$, and the closed forms of \f$B_{01}\f$ (`tools/reference/incomplete_mixed_forms.py`). Reference values are computed from the definition with mpmath (`tools/reference/incomplete_mixed.py`) across 2971 points, including 522 at integer \f$a\f$.
+
+Error is measured at each point as the smaller of \ref accuracy_ulpL "ulpL" and \ref accuracy_ulp1 "ulp1", and the table gives the maximum over all components \f$j = 0, \dots, K\f$ on gcc/OpenMP (tested in `tests/math/test_gamma_mixed.cpp`, which passes on the gcc and CUDA builds). This measure does not show the error of a component much smaller than 1, such as the pure derivatives in \f$x\f$ near \f$x = a\f$ at large \f$a\f$; their accuracy in ulp of the component's own scale is given with the derivatives at fixed ratio below.
+
+| Function | Order \f$K\f$ | Measured max error gcc (ulp) | Test bound (ulp) |
+|---|---|---|---|
+| \ref laplace::math::own::log_gamma_p_mixed_d1 "log_gamma_p_mixed_d1()" | 1 | 5.37 | 8.0 |
+| \ref laplace::math::own::log_gamma_p_mixed_d2 "log_gamma_p_mixed_d2()" | 2 | 8.03 | 12.0 |
+| \ref laplace::math::own::log_gamma_p_mixed_d3 "log_gamma_p_mixed_d3()" | 3 | 12.9 | 20.0 |
+| \ref laplace::math::own::log_gamma_p_mixed_d4 "log_gamma_p_mixed_d4()" | 4 | 33.4 | 50.0 |
+| \ref laplace::math::own::log_gamma_p_mixed_d5 "log_gamma_p_mixed_d5()" | 5 | 176.0 | 265.0 |
+| \ref laplace::math::own::log_gamma_p_mixed_d6 "log_gamma_p_mixed_d6()" | 6 | 651.0 | 980.0 |
+| \ref laplace::math::own::log_gamma_q_mixed_d1 "log_gamma_q_mixed_d1()" | 1 | 31.0 | 47.0 |
+| \ref laplace::math::own::log_gamma_q_mixed_d2 "log_gamma_q_mixed_d2()" | 2 | 40.4 | 61.0 |
+| \ref laplace::math::own::log_gamma_q_mixed_d3 "log_gamma_q_mixed_d3()" | 3 | 113.0 | 170.0 |
+| \ref laplace::math::own::log_gamma_q_mixed_d4 "log_gamma_q_mixed_d4()" | 4 | 8150.0 | 12300.0 |
+| \ref laplace::math::own::log_gamma_q_mixed_d5 "log_gamma_q_mixed_d5()" | 5 | 2.6e4 | 3.9e4 |
+| \ref laplace::math::own::log_gamma_q_mixed_d6 "log_gamma_q_mixed_d6()" | 6 | 1.05e5 | 1.58e5 |
+
+For \f$a \ge 1\f$, the maximum error of \f$Q\f$ over all components remains between 5.18 and 235 ulp across orders 1 to 6 (5.18, 19.5, 46.3, 31.9, 63.4, and 235 ulp). For \f$a < 1\f$ and \f$x\f$ below about \f$3/2\f$, \f$\log Q\f$ falls short in components with one to three derivatives in \f$a\f$ and at least one in \f$x\f$ at orders 4 to 6 (up to \f$1.05 \times 10^5\f$ ulp1), because \f$\log Q = \log a + \log R\f$ and each route forms these components from terms that cancel by powers of \f$1/a\f$: the complement of \f$P\f$ carries the pole of \f$\log a\f$, while the cumulants of the closed form cancel between terms of order one of its factor \f$F\f$.
+
+Timings in nanoseconds per call on the timing set (\f$a \in [1/8, 1024]\f$, \f$x = a e^{z/2}\f$), one gcc thread / OpenMP 8 threads, measured while another program was running:
+- \f$\log P\f$ orders 1–6: 1197 / 160, 1400 / 182, 1581 / 212, 1867 / 264, 2246 / 313, 2788 / 391 ns/call.
+- \f$\log Q\f$ orders 1–6: 1340 / 176, 2423 / 313, 2679 / 356, 3135 / 424, 3692 / 517, 4372 / 621 ns/call.
+From order 2, \f$\log Q\f$ pays the extra quadrature of its \f$j = 1\f$ component at \f$a < 2\f$.
+
+### Derivatives at fixed ratio of the argument to the shape
+
+The partial derivatives of total order \f$K \in \{1, \dots, 6\}\f$ of \f$\log P(a, ac)\f$ and \f$\log Q(a, ac)\f$ in \f$a\f$ at fixed ratio \f$c = x/a\f$ and in \f$c\f$ are returned in the struct template \ref laplace::math::gamma_inc_mixed_partials "gamma_inc_mixed_partials<K>" with array member `double v[K + 1]`. The component \f$v_j\f$ gives
+\f[
+v_j = \frac{\partial^K}{\partial a^{K-j} \partial c^j} \log S(a, ac), \quad j = 0, \dots, K
+\f]
+where \f$S = P\f$ or \f$Q\f$, the partial derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$v_K = a^K \frac{\partial^K}{\partial x^K}\log S(a, x)\f$. The functions are implemented in `laplace::math::own` as \ref laplace::math::own::log_gamma_p_ratio_mixed_d1 "log_gamma_p_ratio_mixed_d1()" through \ref laplace::math::own::log_gamma_p_ratio_mixed_d6 "log_gamma_p_ratio_mixed_d6()" and \ref laplace::math::own::log_gamma_q_ratio_mixed_d1 "log_gamma_q_ratio_mixed_d1()" through \ref laplace::math::own::log_gamma_q_ratio_mixed_d6 "log_gamma_q_ratio_mixed_d6()", and forwarded to `laplace::math`.
+
+A derivative in \f$a\f$ at fixed \f$c\f$ is \f$\partial_a + c\,\partial_x\f$; at large \f$a\f$ near \f$c = 1\f$ the two terms are large and of opposite sign, so composing the partials of \ref laplace::math::own::log_gamma_p_mixed_d1 "log_gamma_p_mixed_dK()" into derivatives at fixed \f$c\f$ cancels (by up to \f$4 \times 10^7\f$ ulp at \f$a = x = 50\f$, order 6). Carrying the increment of \f$a\f$ with \f$c\f$ fixed from the start avoids forming this cancellation.
+
+With the increments \f$h\f$ of \f$a\f$ and \f$g\f$ (relative) of \f$c\f$, the displaced point has \f$x' = x(1 + h/a)(1 + g)\f$. The prefactor
+\f[
+A(a, c) = a\log x - x - \log\Gamma(a) = \tfrac12\log a - a\varphi_c - \log\sqrt{2\pi} - \delta(a),
+\f]
+with \f$\varphi_c = c - 1 - \log c \ge 0\f$ (evaluated without cancellation via \f$-\mathrm{log1pmx}(c - 1)\f$ near \f$c = 1\f$) and \f$\delta(a)\f$ Stirling's error (see \ref stirling), gives \f$\log Q = A + \log I_U\f$ and \f$\log P = A - \log a + \log I_L\f$, where \f$I_L\f$ and \f$I_U\f$ are the incomplete gamma integrals defined above. The move multiplies the integrand in \f$d = \log(t/x)\f$ by \f$\exp(hw + g(1 + h/a)y)\f$, with \f$y = -x(e^d - 1)\f$ and
+\f[
+w = d + y/a = (1 - c)d - c(e^d - 1 - d).
+\f]
+\f$w\f$ is formed at each node as written without cancellation, vanishing at \f$d = 0\f$ and staying small where the measure lies. The derivatives are joint cumulants of \f$(w, y)\f$ rescaled by \f$t = g(1 + h/a)\f$, plus the explicit series terms of \f$A\f$. On the lower side the point mass at \f$d = 0\f$ enters through
+\f[
+\log\bigl(1 + e(1 - (1 - \pi)e^{-K_f})\bigr) \quad (\pi < 1/2),
+\f]
+or for \f$\pi \ge 1/2\f$,
+\f[
+\log(1 + e) + \log\bigl(1 - \tfrac{e}{1+e}(1 - \pi)e^{-K_f}\bigr),
+\f]
+with \f$e = (1 + h/a)(1 + g) - 1\f$, \f$\pi\f$ the mass of the density part, and \f$K_f\f$ the joint cumulant series of \f$(w, y)\f$. In the second form, \f$\log(1 + e) = \log(1 + h/a) + \log(1 + g)\f$ is written out, and its first term cancels the \f$-\log(a + h)\f$ of \f$\log P\f$ exactly. With \f$R_{ij}\f$ denoting the series coefficient of \f$h^i g^j\f$ in \f$\log S(a + h, c(1 + g)) - \log S(a, c)\f$:
+\f[
+\frac{\partial^{i+j}}{\partial a^i\partial c^j}\log S(a, ac) = i!\,j!\,\frac{R_{ij}}{c^j}.
+\f]
+
+The numerical routes follow those of the mixed partials with the same rules and cut-offs, differing in the following:
+- **Quadrature:** evaluates the joint cumulants of \f$(w, y)\f$, rescaled to \f$g\f$ by \f$t = g(1 + h/a)\f$.
+- **Lower series:** the factor \f$c(a + h)/(a + h + n)\f$ has Taylor coefficients in \f$h\f$ given by \f$x/(a + n)\f$ and \f$c n (-1)^{m+1}/(a + n)^{m+1}\f$ (\f$m \ge 1\f$), with term \f$n\f$ carrying \f$(1 + g)^n\f$.
+- **Upper asymptotic series:** the factor \f$(a + h - n)/(c(a + h))\f$ has Taylor coefficients in \f$h\f$ given by \f$(a - n)/x\f$ and \f$(-1/a)^{m-1} n / (a x)\f$ (\f$m \ge 1\f$), with term \f$n\f$ carrying \f$(1 + g)^{-n}\f$.
+- **Temme's expansion:** at fixed \f$c\f$, \f$\sigma = c - 1\f$ and \f$\eta\f$ do not move with \f$h\f$, and \f$\sqrt{(a + h)/a}\f$ is divided out of \f$G\f$. It is used whole for \f$a \ge 300\f$ (\f$|c - 1| < 0.4\f$, and \f$< 0.5\f$ for \f$a \ge 1000\f$). For \f$50 \le a < 300\f$ in its band (\f$|c - 1| < 0.3\f$), it serves only the components with no derivative in \f$c\f$ (\f$a < 100\f$) or at most two (\f$a \ge 100\f$), with the other components taken from the series or quadrature; for \f$|c - 1| < 0.25\f$ it serves all components down to \f$a = 50\f$. Temme's expansion is not used below \f$a = 50\f$.
+- **Complement:** \f$\log(1 - S)\f$ from \f$\exp\f$ of the series of \f$\log S\f$.
+- **Fallback:** below \f$a = 2\f$, the series in \f$(h, e)\f$ of \ref laplace::math::own::log_gamma_p_mixed_d1 "incomplete_gamma_mixed" is composed with \f$e = h/a + g + hg/a\f$.
+
+Error is measured in units in the last place of the order's largest component at that point in the logarithmic variables:
+\f[
+\max_j \frac{|a^{K-j} c^j v_j|}{a^{K-j} c^j}
+\f]
+against mpmath references (`tools/reference/incomplete_ratio.py`, 1162 points at 240 and 320 bits; checked on 12 points against `mpmath.diff` of regularized `gammainc(a, a c)` at 300 bits, agreement \f$5.1 \times 10^{-77}\f$ of scale), measured on gcc/OpenMP (tested in `tests/math/test_gamma_ratio.cpp` on the gcc and CUDA builds; the bound of \f$\log P\f$ at order 5 covers the CUDA maximum, 4193 ulp at \f$a = 39.9\f$, \f$c = 0.997\f$):
+
+| Function | Order \f$K\f$ | Measured max error gcc (ulp) | Test bound (ulp) |
+|---|---|---|---|
+| \ref laplace::math::own::log_gamma_p_ratio_mixed_d1 "log_gamma_p_ratio_mixed_d1()" | 1 | 1496.0 | 2250.0 |
+| \ref laplace::math::own::log_gamma_p_ratio_mixed_d2 "log_gamma_p_ratio_mixed_d2()" | 2 | 2113.0 | 3200.0 |
+| \ref laplace::math::own::log_gamma_p_ratio_mixed_d3 "log_gamma_p_ratio_mixed_d3()" | 3 | 2082.0 | 3150.0 |
+| \ref laplace::math::own::log_gamma_p_ratio_mixed_d4 "log_gamma_p_ratio_mixed_d4()" | 4 | 1736.0 | 2650.0 |
+| \ref laplace::math::own::log_gamma_p_ratio_mixed_d5 "log_gamma_p_ratio_mixed_d5()" | 5 | 2050.0 | 6300.0 |
+| \ref laplace::math::own::log_gamma_p_ratio_mixed_d6 "log_gamma_p_ratio_mixed_d6()" | 6 | 2638.0 | 3960.0 |
+| \ref laplace::math::own::log_gamma_q_ratio_mixed_d1 "log_gamma_q_ratio_mixed_d1()" | 1 | 1704.0 | 2600.0 |
+| \ref laplace::math::own::log_gamma_q_ratio_mixed_d2 "log_gamma_q_ratio_mixed_d2()" | 2 | 1432.0 | 2150.0 |
+| \ref laplace::math::own::log_gamma_q_ratio_mixed_d3 "log_gamma_q_ratio_mixed_d3()" | 3 | 1204.0 | 1850.0 |
+| \ref laplace::math::own::log_gamma_q_ratio_mixed_d4 "log_gamma_q_ratio_mixed_d4()" | 4 | 1179.0 | 1800.0 |
+| \ref laplace::math::own::log_gamma_q_ratio_mixed_d5 "log_gamma_q_ratio_mixed_d5()" | 5 | 1701.0 | 2560.0 |
+| \ref laplace::math::own::log_gamma_q_ratio_mixed_d6 "log_gamma_q_ratio_mixed_d6()" | 6 | 1892.0 | 2840.0 |
+
+The maxima of orders 1–4 are complements with \f$S\f$ near \f$10^{-250}\f$, where the error of \f$\exp(\log S)\f$ dominates. The maxima of orders 5–6 are near \f$c = 1\f$ below \f$a = 50\f$, where Temme's expansion is not used and the quadrature loses up to about \f$2.6 \times 10^3\f$ ulp of the order's scale. For \f$a \ge 300\f$ near \f$c = 1\f$ Temme's expansion evaluates the wanted side directly, takes \f$\log G\f$ as \f$L_z + \log(1 + S e^{-L_z}/A_0)\f$, and takes the derivatives of \f$\log \mathrm{erfcx}\f$ for \f$\zeta \le 1/\sqrt{2}\f$ from the piecewise Chebyshev derivatives of \f$\log\Phi\f$ (\ref normal): there the pure derivatives in \f$c\f$ of orders 5 and 6 are within 25–92 and 146–1700 ulp of their value (5900 at a zero whose condition number is \f$2.9 \times 10^5\f$), and within 27 ulp of the order's largest component. On the points at integer \f$a\f$ (from 10 to 1000, \f$x\f$ within \f$4\sqrt{a}\f$ of \f$a\f$, 213 points; error in ulp of the component's largest value over the \f$x\f$ of the same \f$a\f$), the order 6 error is at most \f$1.4 \times 10^3\f$ ulp for \f$\log P\f$ and \f$1.5 \times 10^3\f$ ulp for \f$\log Q\f$; test bounds across orders 1–6 are 7.1, 19, 170, 700, 2310, 6200 for \f$P\f$ and 6.0, 21.5, 109, 480, 1080, 2180 for \f$Q\f$.
+
+Timings in nanoseconds per call on the timing set with \f$c = e^{z/2}\f$, one gcc thread / OpenMP 8 threads:
+- \f$\log P\f$ orders 1–6: 1711 / 223, 2019 / 313, 2322 / 381, 3341 / 497, 3890 / 595, 3761 / 539 ns/call.
+- \f$\log Q\f$ orders 1–6: 1957 / 281, 3007 / 467, 3316 / 443, 4255 / 678, 5058 / 876, 5345 / 737 ns/call.
 
 ### Inverse accuracy
 
@@ -205,6 +329,7 @@ Timings in nanoseconds per call across platforms (gcc 14.2 1 thread, OpenMP, and
   - \f$\log P\f$: 647 / 1059 ns/call (gcc 1 thread), 105 / 148 ns/call (OpenMP 8), 125 / 145 ns/call (CUDA).
   - \f$\log Q\f$: 534 / 1192 ns/call (gcc 1 thread), 141 / 195 ns/call (CUDA).
   - By region on CUDA for order 5: \f$a > 50\f$ near the centre 33–34 ns, \f$a < 1\f$ 41–90 ns, far tails 52–140 ns.
+  - Order 6 (gcc 1 thread only, measured under load while another build was running): \f$\log P\f$ 1283 ns/call, \f$\log Q\f$ 1473 ns/call (orders 1 / 5 / 6 in that run: 685 / 1044 / 1283 ns for \f$\log P\f$, 687 / 1178 / 1473 ns for \f$\log Q\f$; order 6 costs 20–30 per cent more than order 5).
 - Inverses:
   Measured before the double-double change (gcc 1 thread / OpenMP 8 / CUDA):
   - `gamma_p_inv` on bulk set: 750 / 102 / 83 ns/call (330 ns on MSVC 1 thread).
@@ -250,6 +375,7 @@ Functions in this module are called as `laplace::math::NAME`.
 ### Types
 
 - \ref laplace::math::own::gamma_inc_result "gamma_inc_result" — Result struct containing \f$P(a, x)\f$, \f$Q(a, x)\f$, and their logarithms
+- \ref laplace::math::gamma_inc_mixed_partials "gamma_inc_mixed_partials" — Result struct containing mixed partial derivatives of \f$\log P(a, x)\f$ or \f$\log Q(a, x)\f$ of total order \f$K\f$
 
 ### Function values and logarithms
 
@@ -263,13 +389,45 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::log_gamma_p_da3 "log_gamma_p_da3()" — Third shape derivative \f$\frac{\partial^3}{\partial a^3}\log P(a, x)\f$
 - \ref laplace::math::own::log_gamma_p_da4 "log_gamma_p_da4()" — Fourth shape derivative \f$\frac{\partial^4}{\partial a^4}\log P(a, x)\f$
 - \ref laplace::math::own::log_gamma_p_da5 "log_gamma_p_da5()" — Fifth shape derivative \f$\frac{\partial^5}{\partial a^5}\log P(a, x)\f$
+- \ref laplace::math::own::log_gamma_p_da6 "log_gamma_p_da6()" — Sixth shape derivative \f$\frac{\partial^6}{\partial a^6}\log P(a, x)\f$
 - \ref laplace::math::own::log_gamma_q_da1 "log_gamma_q_da1()" — First shape derivative \f$\frac{\partial}{\partial a}\log Q(a, x)\f$
 - \ref laplace::math::own::log_gamma_q_da2 "log_gamma_q_da2()" — Second shape derivative \f$\frac{\partial^2}{\partial a^2}\log Q(a, x)\f$
 - \ref laplace::math::own::log_gamma_q_da3 "log_gamma_q_da3()" — Third shape derivative \f$\frac{\partial^3}{\partial a^3}\log Q(a, x)\f$
 - \ref laplace::math::own::log_gamma_q_da4 "log_gamma_q_da4()" — Fourth shape derivative \f$\frac{\partial^4}{\partial a^4}\log Q(a, x)\f$
 - \ref laplace::math::own::log_gamma_q_da5 "log_gamma_q_da5()" — Fifth shape derivative \f$\frac{\partial^5}{\partial a^5}\log Q(a, x)\f$
+- \ref laplace::math::own::log_gamma_q_da6 "log_gamma_q_da6()" — Sixth shape derivative \f$\frac{\partial^6}{\partial a^6}\log Q(a, x)\f$
 - \ref laplace::math::own::gamma_p_inv "gamma_p_inv()" — Inverse of \f$P(a, x) = p\f$
 - \ref laplace::math::own::gamma_q_inv "gamma_q_inv()" — Inverse of \f$Q(a, x) = q\f$
 - \ref laplace::math::own::gamma_p_inv_logp "gamma_p_inv_logp()" — Inverse of \f$\log P(a, x) = \log p\f$
 - \ref laplace::math::own::gamma_q_inv_logq "gamma_q_inv_logq()" — Inverse of \f$\log Q(a, x) = \log q\f$
+
+### Mixed partial derivatives
+
+- \ref laplace::math::own::log_gamma_p_mixed_d1 "log_gamma_p_mixed_d1()" — First mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_p_mixed_d2 "log_gamma_p_mixed_d2()" — Second mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_p_mixed_d3 "log_gamma_p_mixed_d3()" — Third mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_p_mixed_d4 "log_gamma_p_mixed_d4()" — Fourth mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_p_mixed_d5 "log_gamma_p_mixed_d5()" — Fifth mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_p_mixed_d6 "log_gamma_p_mixed_d6()" — Sixth mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_q_mixed_d1 "log_gamma_q_mixed_d1()" — First mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_q_mixed_d2 "log_gamma_q_mixed_d2()" — Second mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_q_mixed_d3 "log_gamma_q_mixed_d3()" — Third mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_q_mixed_d4 "log_gamma_q_mixed_d4()" — Fourth mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_q_mixed_d5 "log_gamma_q_mixed_d5()" — Fifth mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$
+- \ref laplace::math::own::log_gamma_q_mixed_d6 "log_gamma_q_mixed_d6()" — Sixth mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$
+
+### Partial derivatives at fixed ratio
+
+- \ref laplace::math::own::log_gamma_p_ratio_mixed_d1 "log_gamma_p_ratio_mixed_d1()" — First partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_p_ratio_mixed_d2 "log_gamma_p_ratio_mixed_d2()" — Second partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_p_ratio_mixed_d3 "log_gamma_p_ratio_mixed_d3()" — Third partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_p_ratio_mixed_d4 "log_gamma_p_ratio_mixed_d4()" — Fourth partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_p_ratio_mixed_d5 "log_gamma_p_ratio_mixed_d5()" — Fifth partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_p_ratio_mixed_d6 "log_gamma_p_ratio_mixed_d6()" — Sixth partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_q_ratio_mixed_d1 "log_gamma_q_ratio_mixed_d1()" — First partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_q_ratio_mixed_d2 "log_gamma_q_ratio_mixed_d2()" — Second partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_q_ratio_mixed_d3 "log_gamma_q_ratio_mixed_d3()" — Third partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_q_ratio_mixed_d4 "log_gamma_q_ratio_mixed_d4()" — Fourth partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_q_ratio_mixed_d5 "log_gamma_q_ratio_mixed_d5()" — Fifth partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
+- \ref laplace::math::own::log_gamma_q_ratio_mixed_d6 "log_gamma_q_ratio_mixed_d6()" — Sixth partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed \f$c\f$) and \f$c\f$
 */

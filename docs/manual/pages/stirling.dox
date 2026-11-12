@@ -1,0 +1,176 @@
+/**
+\defgroup stirling Stirling's error
+\ingroup special
+\brief Stirling's error \f$\delta(a)\f$ and its derivatives in \f$a\f$ to order 6.
+
+Functions in this module are marked `LAPLACE_HD_FORCEINLINE` and can be called on the host and inside Kokkos kernels on the device.
+
+## Mathematical definition
+
+Stirling's error \f$\delta(a)\f$, also known as the Binet function, is defined for positive real argument \f$a > 0\f$ by
+\f[
+\delta(a) = \log \Gamma(a) - \left(a - \frac{1}{2}\right) \log a + a - \frac{1}{2} \log(2\pi)
+\f]
+where:
+- \f$a \in (0, \infty)\f$ is the positive real argument.
+
+The function \f$\delta(a)\f$ represents the remainder of Stirling's series for \f$\log \Gamma(a)\f$.
+
+Its derivatives of order \f$k\f$ (\f$k = 1, \dots, 6\f$) with respect to \f$a\f$ are denoted \f$\delta^{(k)}(a)\f$:
+\f[
+\delta^{(k)}(a) = \frac{\mathrm{d}^k}{\mathrm{d}a^k} \delta(a)
+\f]
+where:
+- \f$k \in \{1, \dots, 6\}\f$ is the derivative order.
+
+Asymptotic limits of \f$\delta(a)\f$:
+- As \f$a \to \infty\f$, \f$\delta(a) \sim \frac{1}{12a}\f$.
+- As \f$a \to 0\f$, \f$\delta(a) \sim -\frac{1}{2} \log a\f$.
+
+## Domain and special values
+
+- **Domain:** Defined for \f$a \in (0, \infty)\f$.
+- **Special values and boundaries:**
+  - At \f$a = 1\f$: \f$\delta(1) = 1 - \frac{1}{2}\log(2\pi) \approx 0.08106146679532726\f$.
+  - At \f$a = 1\f$ for the first derivative: \f$\delta'(1) = \frac{1}{2} - \gamma \approx -0.07721566490153286\f$, with \f$\gamma\f$ Euler's constant.
+  - If \f$a \le 0\f$ or \f$a\f$ is NaN: returns quiet NaN.
+  - At \f$a \to +\infty\f$: \f$\delta(+\infty) = 0.0\f$ and \f$\delta^{(k)}(+\infty) = 0.0\f$ for all \f$k = 1, \dots, 6\f$.
+
+## Motivation: cancellation in direct evaluation
+
+Evaluating \f$\delta(a)\f$ directly from the definition \f$\log \Gamma(a) - (a - \frac{1}{2})\log a + a - \frac{1}{2}\log(2\pi)\f$, or computing its derivatives \f$\delta^{(k)}(a)\f$ as \f$\psi^{(k-1)}(a) - \frac{\mathrm{d}^k}{\mathrm{d}a^k}[(a - \frac{1}{2})\log a - a]\f$, suffers severe numerical cancellation as \f$a\f$ grows.
+Because \f$\delta(a) \sim \frac{1}{12a}\f$, the exact value is roughly \f$\frac{1}{12a^2}\f$ times the largest term subtracted. In standard double precision, the relative error of the direct formula grows like \f$a^2\f$: about 256 ulp on \f$[2, 4)\f$, \f$10^3\f$ ulp near \f$a = 10\f$, and \f$10^{30}\f$ ulp at \f$a = 10^{15}\f$.
+To maintain high precision across the entire domain \f$a \in (0, \infty)\f$, Laplace avoids direct subtraction for \f$a \ge 1.0\f$ and evaluates \f$\delta(a)\f$ and its derivatives across three numerical regimes.
+
+## Numerical methods and regimes
+
+The evaluation of \f$\delta(a)\f$ and \f$\delta^{(k)}(a)\f$ (\f$k = 1, \dots, 6\f$) is partitioned into three regimes:
+
+1. **Direct evaluation** (\f$a < 1.0\f$):
+   Evaluates the definition using \ref laplace::math::lgamma "lgamma()", \ref laplace::math::digamma "digamma()", and \ref laplace::math::polygamma "polygamma()":
+   For \f$k = 0\f$:
+   \f[
+   \delta(a) = \log \Gamma(a) - \left(a - \frac{1}{2}\right) \log a + a - \frac{1}{2} \log(2\pi)
+   \f]
+   For \f$k = 1\f$:
+   \f[
+   \delta'(a) = \psi(a) - \log a + \frac{1}{2a}
+   \f]
+   For \f$k \ge 2\f$:
+   \f[
+   \delta^{(k)}(a) = \psi^{(k-1)}(a) - (-1)^k \left(\frac{(k-2)!}{a^{k-1}} + \frac{(k-1)!}{2a^k}\right)
+   \f]
+   where \f$\psi^{(k-1)}(a)\f$ is the polygamma function of order \f$k - 1\f$.
+   In this region, the pole of the polygamma functions at the origin dominates the expression, so cancellation remains small (within 15 ulp).
+
+2. **Recurrence** (\f$1.0 \le a < 10.0\f$):
+   Shifts the argument upward to \f$a + n \ge 10.0\f$ using the recurrence
+   \f[
+   \delta(a) = \delta(a + n) + \sum_{j=0}^{n-1} g(a + j)
+   \f]
+   where \f$n = \lceil 10 - a \rceil\f$ is the number of unit steps that brings \f$a + n\f$ into \f$[10, 11)\f$, \f$\delta(a + n)\f$ is evaluated by the asymptotic series, and
+   \f[
+   g(b) = \delta(b) - \delta(b + 1) = \left(b + \frac{1}{2}\right) \log\left(1 + \frac{1}{b}\right) - 1 = \sum_{m=1}^\infty \frac{u^{2m}}{2m + 1}
+   \f]
+   with \f$u = \frac{1}{2b + 1}\f$.
+   Differentiating term by term with respect to \f$b\f$ yields
+   \f[
+   g^{(k)}(b) = (-2)^k \sum_{m=1}^\infty \frac{(2m)(2m + 1)\cdots(2m + k - 1)}{2m + 1} u^{2m + k}
+   \f]
+   where \f$m \in \mathbb{Z}_{\ge 1}\f$ is the summation index. Because \f$u > 0\f$, every term in the sum for \f$g^{(k)}(b)\f$ has the same sign \f$(-1)^k\f$, so no cancellation occurs.
+   The recurrence for order \f$k\f$ is
+   \f[
+   \delta^{(k)}(a) = \delta^{(k)}(a + n) + \sum_{j=0}^{n-1} g^{(k)}(a + j)
+   \f]
+   with \f$\delta^{(k)}(a + n)\f$ computed by the asymptotic series. Summation in \f$m\f$ terminates when a term is \f$\le 2^{-54}\f$ of the partial sum (iteration cap 80).
+
+3. **Asymptotic series** (\f$a \ge 10.0\f$):
+   Evaluates the asymptotic expansion
+   \f[
+   \delta(a) \sim \sum_{j=1}^{20} \frac{B_{2j}}{2j(2j - 1) a^{2j - 1}}
+   \f]
+   where \f$B_{2j}\f$ are the even Bernoulli numbers, differentiated term by term for order \f$k\f$:
+   \f[
+   \delta^{(k)}(a) \sim (-1)^k \sum_{j=1}^{20} \frac{B_{2j}}{2j(2j - 1)} \left(\prod_{i=0}^{k-1} (2j - 1 + i)\right) a^{-(2j - 1 + k)}
+   \f]
+   where \f$j \in \{1, \dots, 20\}\f$ is the term index. For \f$k = 0\f$, the empty product is 1.
+   Summation terminates when a term's absolute value is \f$\le 2^{-54}\f$ of the absolute partial sum.
+   The 20 coefficients \f$\frac{B_{2j}}{2j(2j - 1)}\f$ in the header were computed with mpmath (Johansson and others).
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
+
+Because \f$\delta(a)\f$ and its derivatives have no zeros on \f$(0, \infty)\f$, the error measure is plain relative ulp.
+
+Reference values in `tests/data/reference/stirling_error*.csv` are generated by `tools/reference/stirling.py` evaluating the definition using mpmath's `loggamma` and `polygamma` at 400 and 500 bits, verified to agree to \f$2^{-100}\f$ relative. 1384 points per order are sampled log-uniformly in \f$[2^{-40}, 10^{15}]\f$, uniformly in \f$[1/4, 40]\f$, and around candidate thresholds \f$1/2\f$, \f$8\f$, and \f$12\f$.
+
+Maximum relative error in ulp across the three routes on gcc/OpenMP (`docs/numerics.md`):
+
+| Region and route | \f$k = 0\f$ | \f$k = 1\f$ | \f$k = 2\f$ | \f$k = 3\f$ | \f$k = 4\f$ | \f$k = 5\f$ | \f$k = 6\f$ |
+|---|---|---|---|---|---|---|---|
+| \f$(0, 1)\f$ direct | 13.2 | 12.7 | 10.8 | 13.4 | 11.7 | 14.8 | 14.2 |
+| \f$[1, 10)\f$ recurrence | 3.44 | 3.92 | 3.81 | 6.07 | 6.40 | 9.31 | 9.72 |
+| \f$[10, 10^{15}]\f$ asymptotic | 2.51 | 3.62 | 4.20 | 5.27 | 4.76 | 6.69 | 8.19 |
+
+Overall measured maxima on gcc and CUDA (RTX 4070 SUPER), with test bounds from `tests/math/test_stirling.cpp`:
+
+| Function | Order \f$k\f$ | Measured max error gcc (ulp) | Measured max error CUDA (ulp) | Test bound (ulp) |
+|---|---|---|---|---|
+| \ref laplace::math::stirling_error "stirling_error()" | 0 | 13.2 | 12.0 | 20.0 |
+| \ref laplace::math::stirling_error_d1 "stirling_error_d1()" | 1 | 12.7 | 13.4 | 19.0 |
+| \ref laplace::math::stirling_error_d2 "stirling_error_d2()" | 2 | 10.8 | 10.8 | 16.5 |
+| \ref laplace::math::stirling_error_d3 "stirling_error_d3()" | 3 | 13.4 | 13.4 | 20.0 |
+| \ref laplace::math::stirling_error_d4 "stirling_error_d4()" | 4 | 11.7 | 11.7 | 17.5 |
+| \ref laplace::math::stirling_error_d5 "stirling_error_d5()" | 5 | 14.8 | 14.8 | 22.0 |
+| \ref laplace::math::stirling_error_d6 "stirling_error_d6()" | 6 | 14.2 | 16.1 | 21.5 |
+
+On CUDA, all maxima occur on the direct route below \f$a = 1.0\f$. Test bounds are set to approximately 1.5 times the measured gcc maxima.
+
+## Timings
+
+Measured in nanoseconds per call on one gcc thread (`benchmarks/math_stirling.cpp`):
+- Direct route (\f$a < 1.0\f$): 5–37 ns/call.
+- Recurrence route (\f$1.0 \le a < 10.0\f$): 59–307 ns/call (cost grows with the number of unit shift steps \f$n \le 9\f$ and with the derivative order).
+- Asymptotic route (\f$a \ge 10.0\f$): 22–44 ns/call.
+
+No CUDA timings were taken for this module.
+
+## Example
+
+The following example evaluates \f$\delta(a)\f$ and its first two derivatives inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/math/stirling.hpp>
+#include <Kokkos_Core.hpp>
+
+void compute_stirling(const Kokkos::View<const double*>& a,
+                      Kokkos::View<double*>& val,
+                      Kokkos::View<double*>& d1,
+                      Kokkos::View<double*>& d2,
+                      int n) {
+  Kokkos::parallel_for("eval_stirling", n, KOKKOS_LAMBDA(const int i) {
+    const double a_val = a(i);
+    val(i) = laplace::math::stirling_error(a_val);
+    d1(i)  = laplace::math::stirling_error_d1(a_val);
+    d2(i)  = laplace::math::stirling_error_d2(a_val);
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+- \ref laplace::math::stirling_error "stirling_error()" — Stirling's error \f$\delta(a)\f$
+- \ref laplace::math::stirling_error_d1 "stirling_error_d1()" — First derivative \f$\delta'(a)\f$
+- \ref laplace::math::stirling_error_d2 "stirling_error_d2()" — Second derivative \f$\delta''(a)\f$
+- \ref laplace::math::stirling_error_d3 "stirling_error_d3()" — Third derivative \f$\delta^{(3)}(a)\f$
+- \ref laplace::math::stirling_error_d4 "stirling_error_d4()" — Fourth derivative \f$\delta^{(4)}(a)\f$
+- \ref laplace::math::stirling_error_d5 "stirling_error_d5()" — Fifth derivative \f$\delta^{(5)}(a)\f$
+- \ref laplace::math::stirling_error_d6 "stirling_error_d6()" — Sixth derivative \f$\delta^{(6)}(a)\f$
+
+## References
+
+- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic (version 1.3.0), http://mpmath.org
+*/

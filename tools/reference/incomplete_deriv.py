@@ -1,12 +1,15 @@
 """Reference values of the derivatives of log P(a, x), log Q(a, x),
-log I_x(a, b) and log(1 - I_x(a, b)) with respect to the shapes, orders 1 to 5,
+log I_x(a, b) and log(1 - I_x(a, b)) with respect to the shapes, orders 1 to 5
+(6 for the gamma),
 computed with mpmath.
 
 Usage (from the repository root):
-    python -I tools/reference/incomplete_deriv.py gamma|beta [n_points] [workers]
+    python -I tools/reference/incomplete_deriv.py gamma|gamma6|beta [n_points] [workers]
 
 Files (format as in incomplete.py: the arguments, then hi, lo):
     log_gamma_p_da{k}.csv, log_gamma_q_da{k}.csv        a, x       d^k/da^k, k = 1..5
+    log_gamma_p_da6.csv, log_gamma_q_da6.csv            a, x       d^6/da^6 (kind gamma6)
+    log_gamma_p_da5_edges.csv, log_gamma_q_da5_edges.csv  a, x     d^5/da^5 on the edge points only
     log_ibeta_d{i}{j}.csv, log_ibetac_d{i}{j}.csv       a, b, x    d^(i+j)/da^i db^j, 1 <= i + j <= 5
 
 Method. With v = log t (gamma) the incomplete integral of one side is
@@ -29,6 +32,15 @@ of log Gamma (polygamma); then log S and log(1 - S) are formed as series
 (log(1 + u), exp(u) by their power series, u without constant term), and the
 derivative is the coefficient times i! j!. Nothing cancels except in
 log(1 - S) where S is near 1, which the working precision covers.
+
+Order 6 (kind gamma6, added 2026-11-12). The series are carried to degree 6
+on the same 1500 points as orders 1 to 5 (same seed), plus points at the
+boundaries of the routes of incomplete_gamma_deriv.hpp (edge_args: x near
+1/4, 1, 3/2, 3 and 36; a near 2, 20, 300 and 1000 with |x/a - 1| near 0.3,
+0.4 and 0.5; x near a - 1/3; tiny a; far tails). Only the order-6 files are
+written, and the order-5 values on the edge points (for comparing the two
+orders on the same points); the orders 1 to 5 on the common points are
+compared with the files already written, as a check of the run.
 
 Checks. Every row is computed at two precisions (240 and 320 bits) with
 different quadrature degrees, and kept only if the two agree to 2^-100
@@ -349,8 +361,54 @@ def agree(u, v):
     return abs(u - v) <= mpmath.mpf(2) ** -100 * abs(v) or u == v
 
 
+def edge_args(rng, n):
+    """points at the boundaries of the routes of incomplete_gamma_deriv.hpp"""
+    out = []
+
+    def jitter(v, rel=0.05):
+        return v * (1.0 + rng.uniform(-rel, rel))
+
+    for i in range(n):
+        k = i % 10
+        if k == 0:  # small x, a < 2: the closed form and the side choice (x = 1/4, 1, 3/2)
+            a = log_uniform(rng, -10, 0) * rng.choice([1.0, 1.9])
+            x = jitter(rng.choice([0.25, 1.0, 1.5]))
+        elif k == 1:  # a near 2, x < 3/2 or just above
+            a = jitter(2.0, 0.02)
+            x = log_uniform(rng, -12, 0)
+        elif k == 2:  # the fraction in Taylor form starts at x = 3/2 (log Q) and 3 (complement)
+            a = log_uniform(rng, -6, 4)
+            x = jitter(rng.choice([1.5, 3.0]), 0.03)
+        elif k == 3:  # the upper asymptotic series starts at x = 36
+            a = rng.uniform(0.01, 34.0)
+            x = jitter(36.0, 0.03)
+        elif k in (4, 5):  # Temme's boundaries in a and in |x/a - 1|
+            a = jitter(rng.choice([20.0, 300.0, 1000.0, 20.0, 300.0]), 0.03)
+            sg = rng.choice([0.3, 0.4, 0.5]) * (1.0 + rng.uniform(-0.06, 0.06))
+            x = a * (1.0 + (sg if rng.random() < 0.5 else -sg))
+        elif k == 6:  # the side choice x = a - 1/3 for a >= 1
+            a = log_uniform(rng, 0, 12)
+            x = a - 1.0 / 3.0 + rng.uniform(-1.0, 1.0) * min(1.0, 0.2 * math.sqrt(a))
+        elif k == 7:  # tiny a: the pole 1/a of the complement of Q
+            a = log_uniform(rng, -10, -4)
+            x = log_uniform(rng, -20, 6)
+        elif k == 8:  # far lower tail of large shapes
+            a = log_uniform(rng, 4, 13)
+            x = a * rng.uniform(0.001, 0.5)
+        else:  # far upper tail
+            a = log_uniform(rng, -3, 13)
+            x = a + math.sqrt(a) * rng.uniform(8.0, 40.0) + rng.uniform(0.0, 40.0)
+        if x > 0.0:
+            out.append((a, x))
+    return out
+
+
 def work_gamma(args):
-    a, x = args
+    global KMAX
+    if len(args) == 3:
+        a, x, KMAX = args
+    else:
+        a, x = args
     try:
         p1, q1, S1, chk = gamma_row(a, x, 240, 8)
         p2, q2, S2, _ = gamma_row(a, x, 320, 10)
@@ -387,6 +445,8 @@ def main():
     kind = sys.argv[1]
     n = int(sys.argv[2]) if len(sys.argv) > 2 else (1500 if kind == "gamma" else 600)
     workers = int(sys.argv[3]) if len(sys.argv) > 3 else 4
+    if kind == "gamma6":
+        return main_gamma6(n, workers)
     rng = random.Random(f"{SEED}-{kind}")
     args = gamma_args(rng, n) if kind == "gamma" else beta_args(rng, n)
     with Pool(workers) as pool:
@@ -410,6 +470,50 @@ def main():
                     continue
                 write(OUT / f"log_ibeta_d{i}{j}.csv", "a,b,x", [(r[1], r[2][0][(i, j)]) for r in good])
                 write(OUT / f"log_ibetac_d{i}{j}.csv", "a,b,x", [(r[1], r[2][1][(i, j)]) for r in good])
+
+
+def read_ref(path):
+    rows = {}
+    with path.open() as fh:
+        next(fh)
+        for line in fh:
+            f = line.strip().split(",")
+            key = (float.fromhex(f[0]), float.fromhex(f[1]))
+            rows[key] = mpmath.mpf(float.fromhex(f[2])) + mpmath.mpf(float.fromhex(f[3]))
+    return rows
+
+
+def main_gamma6(n_edges, workers):
+    common = gamma_args(random.Random(f"{SEED}-gamma"), 1500)
+    edges = edge_args(random.Random(f"{SEED}-gamma6-edges"), n_edges)
+    args = [(a, x, 6) for a, x in common + edges]
+    with Pool(workers) as pool:
+        res = pool.map(work_gamma, args, chunksize=4)
+    counts = {}
+    for r in res:
+        counts[r[0]] = counts.get(r[0], 0) + 1
+        if r[0] != "ok" and counts[r[0]] <= 5:
+            print("dropped", r[0], r[1], r[2] if r[0] == "error" else "", flush=True)
+    print("counts", counts, flush=True)
+    good = [r for r in res if r[0] == "ok"]
+    # orders 1-5 on the common points against the files written by kind gamma
+    for side, name in ((0, "p"), (1, "q")):
+        for k in range(1, 6):
+            old = read_ref(OUT / f"log_gamma_{name}_da{k}.csv")
+            worst, cnt = mpmath.mpf(0), 0
+            for r in good[: len(common)]:
+                key = (r[1][0], r[1][1])
+                if key in old:
+                    v = r[2][side][k - 1]
+                    worst = max(worst, abs(v - old[key]) / max(abs(v), 1))
+                    cnt += 1
+            print(f"order {k} {name}: {cnt} common rows, max |new - old| / max(|f|, 1) = {mpmath.nstr(worst, 3)}",
+                  flush=True)
+    edge_set = set(edges)
+    for side, name in ((0, "p"), (1, "q")):
+        write(OUT / f"log_gamma_{name}_da6.csv", "a,x", [(r[1], r[2][side][5]) for r in good])
+        write(OUT / f"log_gamma_{name}_da5_edges.csv", "a,x",
+              [(r[1], r[2][side][4]) for r in good if (r[1][0], r[1][1]) in edge_set])
 
 
 if __name__ == "__main__":

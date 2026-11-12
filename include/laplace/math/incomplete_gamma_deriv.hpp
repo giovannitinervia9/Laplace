@@ -1,9 +1,9 @@
 // Derivatives of log P(a, x) and log Q(a, x) with respect to the shape a,
-// orders 1 to 5, Laplace's own (a > 0, x >= 0). P and Q = 1 - P are the
+// orders 1 to 6, Laplace's own (a > 0, x >= 0). P and Q = 1 - P are the
 // regularized lower and upper incomplete gamma functions.
 //
-// One function per order: own::log_gamma_p_da1 .. log_gamma_p_da5 and
-// own::log_gamma_q_da1 .. log_gamma_q_da5. They share the private helpers
+// One function per order: own::log_gamma_p_da1 .. log_gamma_p_da6 and
+// own::log_gamma_q_da1 .. log_gamma_q_da6 (order 6 added on 2026-11-12). They share the private helpers
 // below, which compute the derivatives up to the order asked for.
 //
 // Mathematics. With v = log t and d = v - log x, the integrals of the two sides
@@ -39,6 +39,16 @@
 // would otherwise cancel inside b_j (1e-8 relative at a = 0.009, order 5).
 // In the far tails the complement inherits the relative error of
 // rho = exp(log S - log(1 - S)), about |log S| ulps.
+//
+// Order 6 uses the same routes and helpers as orders 1 to 5: the quadrature
+// carries the sixth central moment (M6 in central, only when k = 6) and
+// kappa_6 = mu_6 - 15 mu_4 mu_2 - 10 mu_3^2 + 30 mu_2^3; the series, the
+// fraction, the closed form at small x and Temme's expansion carry their
+// Taylor polynomials to degree 6; log erfcx in Temme's route gets
+// g_6 = -g_5 (t + 2R) - 4 g_4 (1 + 2 g_2) - 6 g_3^2. Measured on 2026-11-12
+// (docs/numerics.md): the largest errors, at small a where kappa_6 and
+// psi^(5)(a + 1) (about 113 to 121 for a < 0.02) cancel, are about 4 times
+// those of order 5, the same relative error of kappa_k.
 //
 // Three ways of computing the cumulants kappa_k are written:
 //
@@ -76,7 +86,8 @@
 //    (temme_side), on both sides and both backends.
 // 7. Legendre's continued fraction by the modified Lentz scheme in Taylor form
 //    (fraction_taylor) for the upper side at x >= 3/2 (log Q) or x >= 3
-//    (complement), on the host only.
+//    (complement), and x >= a + 0.75 sqrt(a) (closer to a its high orders lose
+//    accuracy, see chosen_side), on the host only.
 // The chosen route (log_gamma_da_impl, chosen_side): 6 where it applies; then
 // on the side of the smaller probability (log P from the lower side for a < 2,
 // x < 3/2) 5, 2 or 4, 7, and the quadrature for what remains. The series
@@ -115,7 +126,7 @@ constexpr double ln_half = -0.69314718055994530942;
 struct side_result {
   bool lower, direct;
   double log_s;
-  double l[6];  // l[k] = d^k log S / da^k (or d^k log R / da^k), k = 1..order
+  double l[7];  // l[k] = d^k log S / da^k (or d^k log R / da^k), k = 1..order
 };
 
 // e^d - 1 - d without cancellation: its Taylor series for |d| <= 1/2, where
@@ -197,9 +208,10 @@ LAPLACE_HD bool choose_lower(double a, double x) {
   return lp < ln_half;
 }
 
-// C(n, i), n, i <= 4
+// C(n, i), n, i <= 5
 LAPLACE_HD_FORCEINLINE double binom(int n, int i) {
-  constexpr double c[5][5] = {{1, 0, 0, 0, 0}, {1, 1, 0, 0, 0}, {1, 2, 1, 0, 0}, {1, 3, 3, 1, 0}, {1, 4, 6, 4, 1}};
+  constexpr double c[6][6] = {{1, 0, 0, 0, 0, 0}, {1, 1, 0, 0, 0, 0}, {1, 2, 1, 0, 0, 0},
+                              {1, 3, 3, 1, 0, 0}, {1, 4, 6, 4, 1, 0}, {1, 5, 10, 10, 5, 1}};
   return c[n][i];
 }
 
@@ -226,7 +238,7 @@ LAPLACE_HD void moments_from_cumulants(int k, const double* c, double* m) {
 
 // d^k log(1 - S) / da^k from the derivatives of log S.
 LAPLACE_HD double complement_dk(int k, const side_result& s, double a) {
-  double b[6], M[6], c[6];
+  double b[7], M[7], c[7];
   moments_from_cumulants(k, s.l, b);  // b_j = R^(j) / R
   // S^(j)/S = b_j + p j b_(j-1) / a
   if (!s.lower) {
@@ -281,11 +293,12 @@ LAPLACE_HD side_result from_cumulants(double a, double x, int k, bool lower, boo
 
 // ---------------------------------------------------------------- candidate 1: quadrature
 
-// Weighted central moments of order 2..5 of the points seen so far, updated
+// Weighted central moments of order 2..6 of the points seen so far, updated
 // one point at a time (Pebay 2008): W the total weight, m the mean,
-// M_p = sum w_i (y_i - m)^p.
+// M_p = sum w_i (y_i - m)^p. M6 is carried only when six is true (order 6).
 struct central {
-  double W = 0, m = 0, M2 = 0, M3 = 0, M4 = 0, M5 = 0;
+  double W = 0, m = 0, M2 = 0, M3 = 0, M4 = 0, M5 = 0, M6 = 0;
+  bool six = false;
   LAPLACE_HD void add(double w, double y) {
     const double W1 = W + w;
     const double delta = y - m;
@@ -294,6 +307,7 @@ struct central {
     const double e2 = e * e, e3 = e2 * e;
     const double f2 = f * f, f3 = f2 * f;
     // M_p' = sum_{j=0}^{p} C(p, j) M_(p-j) e^j + w f^p, with M_1 = 0 and M_0 = W
+    if (six) M6 += 6.0 * M5 * e + 15.0 * M4 * e2 + 20.0 * M3 * e3 + 15.0 * M2 * e2 * e2 + W * e3 * e3 + w * f3 * f3;
     M5 += 5.0 * M4 * e + 10.0 * M3 * e2 + 10.0 * M2 * e3 + W * e3 * e2 + w * f3 * f2;
     M4 += 4.0 * M3 * e + 6.0 * M2 * e2 + W * e2 * e2 + w * f2 * f2;
     M3 += 3.0 * M2 * e + W * e3 + w * f3;
@@ -421,7 +435,7 @@ LAPLACE_HD_FORCEINLINE void ts_node(int j, double& near, double& wq) {
 // Where a half-line rule starts and when it stops. The first node is
 // t = -29/8: below it xi (1 + e^-t) h < 1e-17 (2^-56). The rule stops at the
 // first node past t = 0 whose contribution w (1 + xi)^5 to the moments of
-// order up to five is below cut times the running weight (cut = 1e-25 before
+// order up to five (w (1 + xi)^6 for order six) is below cut times the running weight (cut = 1e-25 before
 // 2026-11-09 evening; the measured choice is below).
 constexpr int ee_first = -29;
 constexpr double ee_cut = 1e-20;
@@ -438,8 +452,8 @@ constexpr double ee_cut = 1e-20;
 //
 // The lower side in d, from 0 towards -infinity, scale sc; the integrand is
 // x exp(r d - x (e^d - 1 - d)), r = a + 1 - x.
-template <int NH, int E, int S = 1>
-LAPLACE_HD void lower_rule(central& c, double r, double x) {
+template <int NH, int E, int S = 1, class C = central>
+LAPLACE_HD void lower_rule(C& c, double r, double x) {
   const double sc = 1.0 / Kokkos::sqrt(r * r + x);
   const bool gauss = r * r < x;
   const double f = sc * x * S;
@@ -451,7 +465,8 @@ LAPLACE_HD void lower_rule(central& c, double r, double x) {
     if (w > 0.0) c.add(w, d);
     if (j > 0) {
       const double z = 1.0 + xi, z2 = z * z;
-      if (!(w * z2 * z2 * z > ee_cut * c.W)) break;
+      const double wz = c.six ? w * z2 * z2 * z2 : w * z2 * z2 * z;
+      if (!(wz > ee_cut * c.W)) break;
     }
   }
 }
@@ -464,8 +479,8 @@ LAPLACE_HD void lower_rule(central& c, double r, double x) {
 // For t0 = x the exponent, with the factor 1/t = exp(-log1p(z))/x folded in, is
 // (a - 1 - x) z + (a - 1) log1pmx(z), without the cancellation of a d against u
 // near x = a.
-template <int NH, int E, int S = 1>
-LAPLACE_HD void upper_rule(central& c, double a, double x, double t0, double d0) {
+template <int NH, int E, int S = 1, class C = central>
+LAPLACE_HD void upper_rule(C& c, double a, double x, double t0, double d0) {
   const double slope = (a - 1.0) / t0 - 1.0;
   const double curv = a > 1.0 ? (a - 1.0) / (t0 * t0) : 0.0;
   const double sc = 1.0 / Kokkos::sqrt(slope * slope + curv);
@@ -494,7 +509,8 @@ LAPLACE_HD void upper_rule(central& c, double a, double x, double t0, double d0)
     if (w > 0.0) c.add(w, d);
     if (j > 0) {
       const double zz = 1.0 + xi, z2 = zz * zz;
-      if (!(w * z2 * z2 * zz > ee_cut * c.W)) break;
+      const double wz = c.six ? w * z2 * z2 * z2 : w * z2 * z2 * zz;
+      if (!(wz > ee_cut * c.W)) break;
     }
   }
 }
@@ -502,8 +518,8 @@ LAPLACE_HD void upper_rule(central& c, double a, double x, double t0, double d0)
 // Tanh-sinh on [d0, d0 + L] in d: d = d0 + L/2 (1 + tanh(pi/2 sinh t)), the
 // distance to the nearer end computed directly, t in [-3.5, 3.5]; integrand
 // exp(r d - x (e^d - 1 - d)).
-template <int NH, int E, int S = 1>
-LAPLACE_HD void tanh_sinh_quad(central& c, double d0, double L, const log_integrand& g) {
+template <int NH, int E, int S = 1, class C = central>
+LAPLACE_HD void tanh_sinh_quad(C& c, double d0, double L, const log_integrand& g) {
   const int J = (7 * NH) / 2 / S * S;
   for (int j = -J; j <= J; j += S) {
     double fr, wq;
@@ -515,10 +531,12 @@ LAPLACE_HD void tanh_sinh_quad(central& c, double d0, double L, const log_integr
   }
 }
 
-// The cumulants kappa_k of d on the side and log I by the quadrature.
+// The cumulants kappa_k of d on the side and log I by the quadrature; kappa_6
+// only for k = 6 (kap has 7 elements).
 template <int NH, int E, int SL = 1, int SU = 1, int ST = 1, int ST2 = 1, int SPLIT = 3>
-LAPLACE_HD void quad_moments(double a, double x, bool lower, double* kap, double& log_i) {
+LAPLACE_HD void quad_moments(double a, double x, bool lower, double* kap, double& log_i, int k = 5) {
   central c;
+  c.six = k >= 6;
   if (lower) {
     c.W = 1.0;  // the point mass at d = 0
     const double r = (a - x) + 1.0;
@@ -547,20 +565,22 @@ LAPLACE_HD void quad_moments(double a, double x, bool lower, double* kap, double
   kap[3] = c.M3 / W;
   kap[4] = c.M4 / W - 3.0 * kap[2] * kap[2];
   kap[5] = c.M5 / W - 10.0 * kap[3] * kap[2];
+  // kappa_6 = mu_6 - 15 mu_4 mu_2 - 10 mu_3^2 + 30 mu_2^3 (mu_p the central moments)
+  if (c.six) kap[6] = c.M6 / W - 15.0 * (c.M4 / W) * kap[2] - 10.0 * kap[3] * kap[3] + 30.0 * kap[2] * kap[2] * kap[2];
   log_i = math::log(W);
 }
 
 template <int SL, int SU, int ST, int ST2, int SPLIT = 3>
 LAPLACE_HD side_result quad_side_s(double a, double x, int k, bool lower, bool direct) {
-  double kap[6], log_i;
-  quad_moments<8, 0, SL, SU, ST, ST2, SPLIT>(a, x, lower, kap, log_i);
+  double kap[7], log_i;
+  quad_moments<8, 0, SL, SU, ST, ST2, SPLIT>(a, x, lower, kap, log_i, k);
   return from_cumulants(a, x, k, lower, direct, log_i, kap);
 }
 
 template <int NH, int E>
 LAPLACE_HD side_result quad_side(double a, double x, int k, bool lower, bool direct) {
-  double kap[6], log_i;
-  quad_moments<NH, E>(a, x, lower, kap, log_i);
+  double kap[7], log_i;
+  quad_moments<NH, E>(a, x, lower, kap, log_i, k);
   return from_cumulants(a, x, k, lower, direct, log_i, kap);
 }
 
@@ -615,10 +635,10 @@ LAPLACE_HD bool series_moments(double a, double x, bool lower, int k, int nmax, 
   }
   if (n_end < 0) return false;
   const double mu = s1 / s0;
-  double T[6], S[6];
+  double T[7], S[7];
   T[0] = 1.0;
-  for (int i = 1; i <= 5; ++i) T[i] = T[i - 1] * (-mu) / i;
-  for (int i = 0; i <= 5; ++i) S[i] = T[i];
+  for (int i = 1; i <= k; ++i) T[i] = T[i - 1] * (-mu) / i;
+  for (int i = 0; i <= k; ++i) S[i] = T[i];
   if (lower) {
     for (int n = 1; n <= n_end; ++n) {
       const double z = -1.0 / (a + n), q = -x * z;
@@ -638,7 +658,7 @@ LAPLACE_HD bool series_moments(double a, double x, bool lower, int k, int nmax, 
       for (int i = 0; i <= k; ++i) S[i] += T[i];
     }
   }
-  double m[6];
+  double m[7];
   m[0] = 1.0;
   double fact = 1.0;
   for (int i = 1; i <= k; ++i) {
@@ -653,7 +673,7 @@ LAPLACE_HD bool series_moments(double a, double x, bool lower, int k, int nmax, 
 }
 
 LAPLACE_HD side_result series_lower(double a, double x, int k, bool direct) {
-  double kap[6], log_i;
+  double kap[7], log_i;
   series_moments(a, x, true, k, 1000000, kap, log_i);
   return from_cumulants(a, x, k, true, direct, log_i, kap);
 }
@@ -666,9 +686,9 @@ LAPLACE_HD side_result series_lower(double a, double x, int k, bool direct) {
 // A_n[k] = b_n A_(n-1)[k] - A_(n-1)[k-1] + a_n A_(n-2)[k] + n A_(n-2)[k-1].
 // The four arrays are rescaled by A_n[0] at every step.
 LAPLACE_HD side_result fraction_upper(double a, double x, int k, bool direct) {
-  double Am[6] = {1, 0, 0, 0, 0, 0}, Bm[6] = {0, 0, 0, 0, 0, 0};
-  double A[6] = {x + 1.0 - a, -1.0, 0, 0, 0, 0}, B[6] = {1, 0, 0, 0, 0, 0};
-  double g_prev[6] = {0, 0, 0, 0, 0, 0};
+  double Am[7] = {1, 0, 0, 0, 0, 0}, Bm[7] = {0, 0, 0, 0, 0, 0, 0};
+  double A[7] = {x + 1.0 - a, -1.0, 0, 0, 0, 0}, B[7] = {1, 0, 0, 0, 0, 0};
+  double g_prev[7] = {0, 0, 0, 0, 0, 0, 0};
   {
     const double s = 1.0 / A[0];
     for (int i = 0; i <= k; ++i) A[i] *= s, B[i] *= s, Am[i] *= s;
@@ -677,7 +697,7 @@ LAPLACE_HD side_result fraction_upper(double a, double x, int k, bool direct) {
     const double bn = x + (2.0 * n + 1.0) - a;
     const double an = n * (a - n);
     const double dn = n;
-    double An[6], Bn[6];
+    double An[7], Bn[7];
     An[0] = bn * A[0] + an * Am[0];
     Bn[0] = bn * B[0] + an * Bm[0];
     for (int i = 1; i <= k; ++i) {
@@ -686,7 +706,7 @@ LAPLACE_HD side_result fraction_upper(double a, double x, int k, bool direct) {
     }
     const double s = 1.0 / An[0];
     bool done = true;
-    double g[6];
+    double g[7];
     for (int i = 0; i <= k; ++i) {
       Am[i] = A[i] * s;
       Bm[i] = B[i] * s;
@@ -704,7 +724,7 @@ LAPLACE_HD side_result fraction_upper(double a, double x, int k, bool direct) {
     for (int i = 0; i <= k; ++i) g_prev[i] = g[i];
     if (done && n > 2) break;
   }
-  double mA[6], mB[6], kA[6], kB[6], kap[6];
+  double mA[7], mB[7], kA[7], kB[7], kap[7];
   mA[0] = mB[0] = 1.0;
   double fact = 1.0;
   for (int i = 1; i <= k; ++i) {
@@ -756,7 +776,7 @@ LAPLACE_HD bool upper_small_x(double a, double x, int k, bool direct, side_resul
   const double lx = math::log(x);
   const double lg1p = Kokkos::log1p(boost::math::tgamma1pm1(a, math::detail::boost_policy()));
   // Taylor coefficients (in h, at a) of L(a + h) and of lambda(a + h)
-  double Lc[6], lam[6];
+  double Lc[7], lam[7];
   Lc[0] = a * lx - lg1p;
   if (!(Kokkos::fabs(Lc[0]) <= 2.0)) return false;
   Lc[1] = lx - math::digamma(a + 1.0);
@@ -771,8 +791,9 @@ LAPLACE_HD bool upper_small_x(double a, double x, int k, bool direct, side_resul
     KOKKOS_IF_ON_DEVICE((cz = tab::d_lgam_c;))
     for (int j = 0; j <= k; ++j) lam[j] = 0.0;
     // lambda_j = sum_{m>=j} c_(m+1) C(m, j) a^(m-j), summed from the small end;
-    // terms to m = M with a^M M^5 / 5! below 2^-60
-    int M = a < 1e-3 ? 12 : static_cast<int>(-53.4 / math::log(a)) + 8;
+    // terms to m = M with a^M M^5 / 5! below 2^-60 (order 6: four more terms,
+    // for the factor C(M, 6) / a^6 of the last term of lambda_6)
+    int M = a < 1e-3 ? 12 + (k > 5 ? 4 : 0) : static_cast<int>(-53.4 / math::log(a)) + (k > 5 ? 12 : 8);
     if (M > 90) M = 90;
     for (int m = M; m >= 0; --m) {
       // Horner in a for each j: lam[j] = lam[j] * a + c_(m+1) C(m, j)
@@ -795,13 +816,13 @@ LAPLACE_HD bool upper_small_x(double a, double x, int k, bool direct, side_resul
     }
   }
   // c(h) = -L(a + h)/(a + h) = lambda(a + h) - log x
-  double cc[6];
+  double cc[7];
   cc[0] = lam[0] - lx;
   for (int j = 1; j <= k; ++j) cc[j] = lam[j];
   // sinhc(z + dz(h)), z = L/2, dz = sum_{j>=1} L_j/2 h^j: sum_m sinhc^(m)(z)/m! dz^m
   const double z = 0.5 * Lc[0];
   // sinhc^(m)(z)/m! = sum_n C(2n, m) z^(2n-m)/(2n+1)!, |z| <= 1, n <= 12
-  double sig[6] = {0, 0, 0, 0, 0, 0};
+  double sig[7] = {0, 0, 0, 0, 0, 0, 0};
   {
     double zpow[25];
     zpow[0] = 1.0;
@@ -816,7 +837,7 @@ LAPLACE_HD bool upper_small_x(double a, double x, int k, bool direct, side_resul
       }
     }
   }
-  double dz[6], pw[6], S[6];
+  double dz[7], pw[7], S[7];
   dz[0] = 0.0;
   for (int j = 1; j <= k; ++j) dz[j] = 0.5 * Lc[j];
   // S = sum_m sig[m] dz^m, the powers of dz as truncated series
@@ -824,7 +845,7 @@ LAPLACE_HD bool upper_small_x(double a, double x, int k, bool direct, side_resul
   pw[0] = 1.0;
   S[0] = sig[0];
   for (int m = 1; m <= k; ++m) {
-    double nw[6] = {0, 0, 0, 0, 0, 0};
+    double nw[7] = {0, 0, 0, 0, 0, 0, 0};
     for (int i = 0; i <= k; ++i)
       for (int j = 1; i + j <= k; ++j) nw[i + j] += pw[i] * dz[j];
     for (int j = 0; j <= k; ++j) {
@@ -833,7 +854,7 @@ LAPLACE_HD bool upper_small_x(double a, double x, int k, bool direct, side_resul
     }
   }
   // e^(L(a + h)/2) = e^(L/2) exp(dz(h)): e_n = (1/n) sum_j j dz_j e_(n-j)
-  double E[6];
+  double E[7];
   E[0] = 1.0;
   for (int n = 1; n <= k; ++n) {
     double acc = 0.0;
@@ -842,7 +863,7 @@ LAPLACE_HD bool upper_small_x(double a, double x, int k, bool direct, side_resul
   }
   const double eh = math::exp(z);
   // K(a + h) = sum_{n>=1} (-x)^n/n! 1/(a + n + h): K_j = sum_n (-x)^n/n! (-1)^j/(a + n)^(j+1)
-  double Kc[6] = {0, 0, 0, 0, 0, 0};
+  double Kc[7] = {0, 0, 0, 0, 0, 0, 0};
   double term = 1.0;
   for (int n = 1; n < 60; ++n) {
     term *= -x / n;
@@ -855,7 +876,7 @@ LAPLACE_HD bool upper_small_x(double a, double x, int k, bool direct, side_resul
     if (Kokkos::fabs(term) <= 1e-20 * Kokkos::fabs(Kc[0])) break;
   }
   // F = c S - eh E K
-  double F[6];
+  double F[7];
   for (int j = 0; j <= k; ++j) {
     double acc = 0.0, ek = 0.0;
     for (int i = 0; i <= j; ++i) {
@@ -865,7 +886,7 @@ LAPLACE_HD bool upper_small_x(double a, double x, int k, bool direct, side_resul
     F[j] = acc - eh * ek;
   }
   if (!(F[0] > 0.0)) return false;
-  double m[6], kap[6];
+  double m[7], kap[7];
   m[0] = 1.0;
   fact = 1.0;
   for (int j = 1; j <= k; ++j) {
@@ -906,13 +927,15 @@ LAPLACE_HD bool upper_small_x(double a, double x, int k, bool direct, side_resul
 //   log S = -a phi - log(2 pi a)/2 + log G,  a phi = a (lambda - 1 - log lambda),
 // whose first two terms have exact derivatives in a (log lambda, then
 // -(-1)^k (k-2)!/a^(k-1); and -(-1)^(k-1) (k-1)!/(2 a^k)), and G is carried as
-// a Taylor polynomial of degree k <= 5 in the increment h of a: lambda(a + h)
+// a Taylor polynomial of degree k <= 6 in the increment h of a: lambda(a + h)
 // = x/(a + h) gives mu = lambda - 1 exactly, eta(mu) comes from its power
 // series (eta = mu - mu^2/3 + 7 mu^3/36 - ..., 91 terms written by mpmath),
 // the C_k by their derivatives in eta composed with the series of eta, and
 // erfcx(zeta(a + h)) = erfcx(zeta) exp(sum_m L_m dzeta^m) with L_m the
-// derivatives of log erfcx divided by m!: for zeta <= 1 from R = phi(t)/Phi(t),
-// t = -sqrt(2) zeta, and the recursion of include/laplace/math/normal.hpp; above
+// derivatives of log erfcx divided by m!: for zeta <= 1/sqrt(2) from the
+// derivatives of log Phi at t = -sqrt(2) zeta (include/laplace/math/normal.hpp,
+// its piecewise Chebyshev expansions; until 2026-11-12, night, the recursion
+// in R = phi(t)/Phi(t) up to zeta = 1, which lost 5e4 ulp at order 6); above
 // by its downward recursion for the cumulants of exp(-x s - s^2/2) on s > 0
 // (x = -t), which gives L_m m! = (-sqrt 2)^m kappa_m without the cancellation of
 // 2 zeta against R.
@@ -950,23 +973,24 @@ LAPLACE_HD_FORCEINLINE void taylor_shift(const double* c, int N, double x0, int 
 // derivatives of log erfcx at z >= 0, divided by m!: Lm[m], m = 1..k
 LAPLACE_HD void log_erfcx_taylor(double z, int k, double* Lm) {
   constexpr double sqrt2 = 1.41421356237309504880;
-  double L[6] = {0, 0, 0, 0, 0, 0};
+  double L[7] = {0, 0, 0, 0, 0, 0, 0};
   const double t = -sqrt2 * z;
-  // the recursion from R only up to z = 1 (t = -1.41), as in normal.hpp: up to
-  // z = 2.5 it saved 40-175 divisions (10 per cent of the time) but its fifth
-  // derivative lost relative accuracy (3.1e3 ulpL against 294 at a = 707,
-  // x = 622)
-  if (z <= 1.0) {
-    const double R = own::inv_mills(t);
-    const double g2 = -R * (t + R);
-    const double g3 = -g2 * (t + 2.0 * R) - R;
-    const double g4 = -g3 * (t + 2.0 * R) - 2.0 * g2 * (1.0 + g2);
-    const double g5 = -g4 * (t + 2.0 * R) - 3.0 * g3 * (1.0 + 2.0 * g2);
-    L[1] = 2.0 * z - sqrt2 * R;
-    L[2] = 2.0 + 2.0 * g2;
-    L[3] = -2.0 * sqrt2 * g3;
-    L[4] = 4.0 * g4;
-    L[5] = -4.0 * sqrt2 * g5;
+  // Up to z = 1/sqrt(2) (t >= -1) from the derivatives g_m of log Phi at t,
+  // L_m = (-sqrt 2)^m g_m plus the terms of z^2, with g_m from normal.hpp's
+  // piecewise Chebyshev expansions; above, the downward recursion below.
+  // Until 2026-11-12 (night) the g_m came here from the recursion in
+  // R = phi(t)/Phi(t) up to z = 1, whose polynomials in t and R cancel: the
+  // Taylor coefficient L_6 lost up to 5.3e4 ulp of its value for z in
+  // [0.3, 1] (2.2e3 for L_5), against 80 for the downward recursion at
+  // z = 1.05, and that loss went whole into the pure derivatives of order 5
+  // and 6 in x of Temme's expansion at large a (docs/numerics.md).
+  if (z <= 0.70710678118654752440) {
+    L[1] = 2.0 * z - sqrt2 * math::log_Phi_d1(t);
+    if (k >= 2) L[2] = 2.0 + 2.0 * math::log_Phi_d2(t);
+    if (k >= 3) L[3] = -2.0 * sqrt2 * math::log_Phi_d3(t);
+    if (k >= 4) L[4] = 4.0 * math::log_Phi_d4(t);
+    if (k >= 5) L[5] = -4.0 * sqrt2 * math::log_Phi_d5(t);
+    if (k >= 6) L[6] = 8.0 * math::log_Phi_d6(t);
   } else {
     // as in normal.hpp's log_Phi_dk: the scaled ratios rho_j = x r_j, downward
     const double x = -t;
@@ -974,12 +998,12 @@ LAPLACE_HD void log_erfcx_taylor(double z, int k, double* Lm) {
     const int K = k + 20 + static_cast<int>(Kokkos::ceil(300.0 * w));
     const double K1 = K + 1.0;
     double rho = 2.0 * K1 / (1.0 + Kokkos::sqrt(1.0 + 4.0 * K1 * w));
-    double r[6] = {0, 0, 0, 0, 0, 0};
+    double r[7] = {0, 0, 0, 0, 0, 0, 0};
     for (int j = K; j >= 1; --j) {
       rho = j / (1.0 + w * rho);
       if (j <= k) r[j] = rho;
     }
-    double mu[6], kap[6];
+    double mu[7], kap[7];
     mu[0] = 1.0;
     for (int j = 1; j <= k; ++j) mu[j] = mu[j - 1] * r[j];
     cumulants_from_moments(k, mu, kap);
@@ -1009,7 +1033,7 @@ LAPLACE_HD bool temme_side(double a, double x, int k, bool want_p, side_result& 
   KOKKOS_IF_ON_HOST((dd = tab::eta_d; cc = tab::temme_c;))
   KOKKOS_IF_ON_DEVICE((dd = tab::d_eta_d; cc = tab::d_temme_c;))
   // eta^(m)(sigma)/m!, m = 0..k, from eta = sum_n d_n mu^n
-  double em[6] = {0, 0, 0, 0, 0, 0};
+  double em[7] = {0, 0, 0, 0, 0, 0, 0};
   {
     const double as = Kokkos::fabs(sigma);
     int M = as < 1e-3 ? 12 : static_cast<int>(-53.4 / math::log(as)) + 8;
@@ -1018,7 +1042,7 @@ LAPLACE_HD bool temme_side(double a, double x, int k, bool want_p, side_result& 
   }
   const double eta = em[0];
   // dmu^m has the coefficient lam^m C(j-1, m-1) (-1/a)^j at h^j; de = eta(h) - eta
-  double de[6] = {0, 0, 0, 0, 0, 0};
+  double de[7] = {0, 0, 0, 0, 0, 0, 0};
   {
     double ph = 1.0;  // (-1/a)^j
     for (int j = 1; j <= k; ++j) {
@@ -1033,12 +1057,12 @@ LAPLACE_HD bool temme_side(double a, double x, int k, bool want_p, side_result& 
     }
   }
   // powers of de (no constant term): P[m] = de^m
-  double P[6][6];
-  for (int j = 0; j <= 5; ++j) P[0][j] = 0.0, P[1][j] = de[j];
+  double P[7][7];
+  for (int j = 0; j <= 6; ++j) P[0][j] = 0.0, P[1][j] = de[j];
   P[0][0] = 1.0;
   for (int m = 2; m <= k; ++m) ser_mul(P[m - 1], de, P[m], k);
   // S(h) = sum_i C_i(eta(h)) (a + h)^-i by Horner in w = 1/(a + h)
-  double w[6], S[6] = {0, 0, 0, 0, 0, 0};
+  double w[7], S[7] = {0, 0, 0, 0, 0, 0, 0};
   {
     double f = ia;
     for (int j = 0; j <= k; ++j) {
@@ -1049,9 +1073,9 @@ LAPLACE_HD bool temme_side(double a, double x, int k, bool want_p, side_result& 
   for (int i = 9; i >= 0; --i) {
     // C_i^(m)(eta)/m!
     const int b = off[i], e = off[i + 1];
-    double cm[6] = {0, 0, 0, 0, 0, 0};
+    double cm[7] = {0, 0, 0, 0, 0, 0, 0};
     taylor_shift(cc + b, e - b, eta, k, cm);
-    double T[6];
+    double T[7];
     ser_mul(S, w, T, k);
     for (int j = 0; j <= k; ++j) {
       double acc = 0.0;
@@ -1060,7 +1084,7 @@ LAPLACE_HD bool temme_side(double a, double x, int k, bool want_p, side_result& 
     }
   }
   // sqrt((a + h)/a) = (1 + h/a)^(1/2)
-  double sq[6];
+  double sq[7];
   {
     double c = 1.0, f = 1.0;
     for (int j = 0; j <= k; ++j) {
@@ -1072,19 +1096,19 @@ LAPLACE_HD bool temme_side(double a, double x, int k, bool want_p, side_result& 
   const double sgn = lower ? -1.0 : 1.0;
   const double rt = Kokkos::sqrt(0.5 * a);
   // zeta(h) = sgn eta(h) sqrt((a + h)/2)
-  double ez[6], zh[6];
+  double ez[7], zh[7];
   ez[0] = sgn * eta;
   for (int j = 1; j <= k; ++j) ez[j] = sgn * de[j];
   ser_mul(ez, sq, zh, k);
   const double zeta = rt * zh[0];
   if (!(zeta >= 0.0)) return false;
-  double dz[6];
+  double dz[7];
   dz[0] = 0.0;
   for (int j = 1; j <= k; ++j) dz[j] = rt * zh[j];
-  double Lm[6];
+  double Lm[7];
   log_erfcx_taylor(zeta, k, Lm);
   // Lz = sum_m Lm dz^m, then E = exp(Lz)
-  double Lz[6] = {0, 0, 0, 0, 0, 0}, pw[6], tmp[6];
+  double Lz[7] = {0, 0, 0, 0, 0, 0, 0}, pw[7], tmp[7];
   for (int j = 0; j <= k; ++j) pw[j] = dz[j];
   for (int m = 1; m <= k; ++m) {
     for (int j = 0; j <= k; ++j) Lz[j] += Lm[m] * pw[j];
@@ -1093,7 +1117,7 @@ LAPLACE_HD bool temme_side(double a, double x, int k, bool want_p, side_result& 
       for (int j = 0; j <= k; ++j) pw[j] = tmp[j];
     }
   }
-  double E[6];
+  double E[7];
   E[0] = 1.0;
   for (int n = 1; n <= k; ++n) {
     double acc = 0.0;
@@ -1103,11 +1127,11 @@ LAPLACE_HD bool temme_side(double a, double x, int k, bool want_p, side_result& 
   // G = sqrt(pi a/2) erfcx(zeta) sq E + sgn S
   constexpr double sqrt_pi_half = 1.25331413731550025121;
   const double A0 = sqrt_pi_half * Kokkos::sqrt(a) * math::erfcx(zeta);
-  double AE[6], G[6];
+  double AE[7], G[7];
   ser_mul(sq, E, AE, k);
   for (int j = 0; j <= k; ++j) G[j] = A0 * AE[j] + sgn * S[j];
   if (!(G[0] > 0.0)) return false;
-  double mom[6], kap[6];
+  double mom[7], kap[7];
   mom[0] = 1.0;
   double fact = 1.0;
   for (int j = 1; j <= k; ++j) {
@@ -1163,8 +1187,8 @@ LAPLACE_HD_FORCEINLINE void ser_recip(const double* p, double* r, int k) {
 }
 
 LAPLACE_HD bool fraction_taylor(double a, double x, int k, bool direct, int nmax, side_result& s) {
-  double C[6], D[6], L[6], Labs[6], t[6], u[6];
-  for (int j = 0; j <= 5; ++j) C[j] = D[j] = L[j] = Labs[j] = 0.0;
+  double C[7], D[7], L[7], Labs[7], t[7], u[7];
+  for (int j = 0; j <= 6; ++j) C[j] = D[j] = L[j] = Labs[j] = 0.0;
   const double b0 = x + 1.0 - a;
   if (!(b0 > 0.0)) return false;
   C[0] = b0;
@@ -1197,7 +1221,7 @@ LAPLACE_HD bool fraction_taylor(double a, double x, int k, bool direct, int nmax
     C[0] += bn;
     if (k >= 1) C[1] -= 1.0;
     // Delta = C D and its log: l_0 = log Delta_0, l_j from l' = Delta'/Delta
-    double Dl[6], l[6];
+    double Dl[7], l[7];
     ser_mul(C, D, Dl, k);
     const double i0 = 1.0 / Dl[0];
     for (int j = 1; j <= k; ++j) {
@@ -1224,7 +1248,7 @@ LAPLACE_HD bool fraction_taylor(double a, double x, int k, bool direct, int nmax
   if (!conv) return false;
   logK += math::log(prod);
   // log I_U = -log K: cumulants kappa_j = -j! L_j
-  double kap[6];
+  double kap[7];
   double fact = 1.0;
   for (int j = 1; j <= k; ++j) {
     fact *= j;
@@ -1265,7 +1289,7 @@ constexpr int nmax_fraction_device = 0;
 template <int E, bool SMALLX = true>
 LAPLACE_HD side_result chosen_side(double a, double x, int k, bool lower, bool direct, int nmax_lower,
                                    int nmax_upper, int nmax_fraction = 0) {
-  double kap[6], log_i;
+  double kap[7], log_i;
   if (SMALLX && direct && !lower && x < 1.5 && a < 2.0) {
     side_result s;
     if (upper_small_x(a, x, k, direct, s)) return s;
@@ -1274,12 +1298,16 @@ LAPLACE_HD side_result chosen_side(double a, double x, int k, bool lower, bool d
     return from_cumulants(a, x, k, lower, direct, log_i, kap);
   // the fraction in Taylor form: for log Q from x = 3/2 (at most 0.25 of the
   // test bounds), for the complement (log P) from x = 3 (0.11; between 3/2 and 3
-  // it reached 0.91 of the bound of order 1)
-  if (!lower && x >= (direct ? 1.5 : 3.0) && nmax_fraction > 0) {
+  // it reached 0.91 of the bound of order 1). Not within 0.75 sqrt(a) above
+  // x = a (measured on 2026-11-12 against the quadrature, log Q, a = 1.6..30):
+  // for z = (x - a)/sqrt(a) in [-0.25, 0) the fraction differed by 2-7 ulp1
+  // at order 2, 560-1500 at order 5 and 5e3-1.4e4 at order 6; for z >= 0.75
+  // by at most 1.9 ulp1 at order 5 and 4 at order 6.
+  if (!lower && x >= (direct ? 1.5 : 3.0) && x >= a + 0.75 * Kokkos::sqrt(a) && nmax_fraction > 0) {
     side_result s;
     if (fraction_taylor(a, x, k, direct, nmax_fraction, s)) return s;
   }
-  quad_moments<8, E>(a, x, lower, kap, log_i);
+  quad_moments<8, E>(a, x, lower, kap, log_i, k);
   return from_cumulants(a, x, k, lower, direct, log_i, kap);
 }
 
@@ -1390,7 +1418,7 @@ LAPLACE_HD double log_gamma_da(int k, double a, double x, bool want_p, int metho
 
 }  // namespace detail_gamma_deriv
 
-// d^k log P(a, x) / da^k and d^k log Q(a, x) / da^k, k = 1..5
+// d^k log P(a, x) / da^k and d^k log Q(a, x) / da^k, k = 1..6
 /**
  * \ingroup incomplete_gamma
  * \brief First derivative of \f$\log P(a, x)\f$ with respect to the shape \f$a\f$.
@@ -1531,9 +1559,38 @@ LAPLACE_HD double log_gamma_p_da4(double a, double x) { return detail_gamma_deri
  * \par Measured accuracy
  * Maximum error 197.0 ulp (gcc) / 171.0 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 245.0 ulp.
  *
- * \see incomplete_gamma, log_gamma_p(), log_gamma_p_da4(), log_gamma_q_da5()
+ * \see incomplete_gamma, log_gamma_p(), log_gamma_p_da4(), log_gamma_p_da6(), log_gamma_q_da5()
  */
 LAPLACE_HD double log_gamma_p_da5(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(5, a, x, true, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Sixth derivative of \f$\log P(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the sixth shape derivative:
+ * \f[
+ * \frac{\partial^6}{\partial a^6} \log P(a, x) = \kappa_6 - \psi^{(5)}(a + 1)
+ * \f]
+ * where \f$\psi^{(5)}(z) = \frac{\mathrm{d}^6}{\mathrm{d}z^6}\log \Gamma(z)\f$ is the polygamma function of order 5, and \f$\kappa_6\f$ is the
+ * sixth cumulant of \f$d = \log(t/x)\f$ under the normalized lower incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial^6}{\partial a^6}\log P(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$-\psi^{(5)}(a + 1)\f$.
+ * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 771.1 ulp (gcc) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 1160.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_p(), log_gamma_p_da5(), log_gamma_q_da6()
+ */
+LAPLACE_HD double log_gamma_p_da6(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(6, a, x, true, 0); }
 
 /**
  * \ingroup incomplete_gamma
@@ -1675,9 +1732,38 @@ LAPLACE_HD double log_gamma_q_da4(double a, double x) { return detail_gamma_deri
  * \par Measured accuracy
  * Maximum error 62.9 ulp (gcc) / 67.9 ulp (CUDA) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 102.0 ulp.
  *
- * \see incomplete_gamma, log_gamma_q(), log_gamma_q_da4(), log_gamma_p_da5()
+ * \see incomplete_gamma, log_gamma_q(), log_gamma_q_da4(), log_gamma_q_da6(), log_gamma_p_da5()
  */
 LAPLACE_HD double log_gamma_q_da5(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(5, a, x, false, 0); }
+
+/**
+ * \ingroup incomplete_gamma
+ * \brief Sixth derivative of \f$\log Q(a, x)\f$ with respect to the shape \f$a\f$.
+ *
+ * Computes the sixth shape derivative:
+ * \f[
+ * \frac{\partial^6}{\partial a^6} \log Q(a, x) = \kappa_6 - \psi^{(5)}(a)
+ * \f]
+ * where \f$\psi^{(5)}(z) = \frac{\mathrm{d}^6}{\mathrm{d}z^6}\log \Gamma(z)\f$ is the polygamma function of order 5, and \f$\kappa_6\f$ is the
+ * sixth cumulant of \f$d = \log(t/x)\f$ under the normalized upper incomplete gamma measure
+ * (defined on \ref incomplete_gamma).
+ *
+ * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param x Non-negative argument \f$x \in [0, \infty)\f$.
+ * \return The value of \f$\frac{\partial^6}{\partial a^6}\log Q(a, x)\f$.
+ *
+ * \par Domain and special values
+ * - \f$a > 0, x \ge 0\f$: standard domain.
+ * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
+ * - \f$x = 0\f$: returns \f$0.0\f$.
+ * - \f$x = +\infty\f$: returns \f$-\psi^{(5)}(a)\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error 96.3 ulp (gcc) in \f$\min(\text{ulpL}, \text{ulp1})\f$; test bound 145.0 ulp.
+ *
+ * \see incomplete_gamma, log_gamma_q(), log_gamma_q_da5(), log_gamma_p_da6()
+ */
+LAPLACE_HD double log_gamma_q_da6(double a, double x) { return detail_gamma_deriv::log_gamma_da_impl<true>(6, a, x, false, 0); }
 
 }  // namespace laplace::math::own
 
@@ -1691,10 +1777,12 @@ LAPLACE_HD_FORCEINLINE double log_gamma_p_da2(double a, double x) { return own::
 LAPLACE_HD_FORCEINLINE double log_gamma_p_da3(double a, double x) { return own::log_gamma_p_da3(a, x); }
 LAPLACE_HD_FORCEINLINE double log_gamma_p_da4(double a, double x) { return own::log_gamma_p_da4(a, x); }
 LAPLACE_HD_FORCEINLINE double log_gamma_p_da5(double a, double x) { return own::log_gamma_p_da5(a, x); }
+LAPLACE_HD_FORCEINLINE double log_gamma_p_da6(double a, double x) { return own::log_gamma_p_da6(a, x); }
 LAPLACE_HD_FORCEINLINE double log_gamma_q_da1(double a, double x) { return own::log_gamma_q_da1(a, x); }
 LAPLACE_HD_FORCEINLINE double log_gamma_q_da2(double a, double x) { return own::log_gamma_q_da2(a, x); }
 LAPLACE_HD_FORCEINLINE double log_gamma_q_da3(double a, double x) { return own::log_gamma_q_da3(a, x); }
 LAPLACE_HD_FORCEINLINE double log_gamma_q_da4(double a, double x) { return own::log_gamma_q_da4(a, x); }
 LAPLACE_HD_FORCEINLINE double log_gamma_q_da5(double a, double x) { return own::log_gamma_q_da5(a, x); }
+LAPLACE_HD_FORCEINLINE double log_gamma_q_da6(double a, double x) { return own::log_gamma_q_da6(a, x); }
 
 }  // namespace laplace::math

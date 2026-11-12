@@ -8,4 +8,7 @@
 
 \defgroup bijector Bijectors
 \brief Bijections between intervals, with their inverses, derivatives and log-Jacobians.
+
+\defgroup distrib Distributions
+\brief Univariate probability distributions, their densities, log-likelihood derivatives, expected information and cumulative distributions.
 */
