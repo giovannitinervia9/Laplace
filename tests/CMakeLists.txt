@@ -20,6 +20,7 @@ set(LAPLACE_TEST_SOURCES
   math/test_faa_di_bruno.cpp
   math/test_quadrature.cpp
   math/test_double_double.cpp
+  bijector/test_scalar.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

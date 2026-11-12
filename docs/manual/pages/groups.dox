@@ -5,4 +5,7 @@
 \defgroup special Special functions
 \ingroup math
 \brief Gamma, beta, normal, Student t, Owen's T and Bessel functions, with their derivatives.
+
+\defgroup bijector Bijectors
+\brief Bijections between intervals, with their inverses, derivatives and log-Jacobians.
 */

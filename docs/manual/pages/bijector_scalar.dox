@@ -1,0 +1,392 @@
+/**
+\defgroup bijector_scalar Scalar bijectors
+\ingroup bijector
+\brief Scalar bijections without parameters, their inverses, derivatives, and log-Jacobians to order 6.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Mathematical definition and convention
+
+A scalar bijector is a bijection \f$g: V \to U\f$ between open intervals \f$V, U \subseteq \mathbb{R}\f$, with an inverse \f$h = g^{-1}: U \to V\f$.
+- The forward map \f$g(v)\f$ maps an argument \f$v \in V\f$ to \f$u = g(v) \in U\f$.
+- The inverse map \f$h(u)\f$ maps an argument \f$u \in U\f$ to \f$v = h(u) \in V\f$.
+- The derivatives of the forward map of order \f$k \in \{1, \dots, 6\}\f$ are denoted \f$g^{(k)}(v) = \frac{\mathrm{d}^k}{\mathrm{d}v^k} g(v)\f$.
+- The derivatives of the inverse map of order \f$k \in \{1, \dots, 6\}\f$ are denoted \f$h^{(k)}(u) = \frac{\mathrm{d}^k}{\mathrm{d}u^k} h(u)\f$.
+- The forward log-Jacobian is the logarithmic derivative \f$\log|g'(v)|\f$, with derivatives \f$\frac{\mathrm{d}^k}{\mathrm{d}v^k}\log|g'(v)|\f$ for \f$k \in \{1, \dots, 6\}\f$.
+- The inverse log-Jacobian is the logarithmic derivative \f$\log|h'(u)|\f$, with derivatives \f$\frac{\mathrm{d}^k}{\mathrm{d}u^k}\log|h'(u)|\f$ for \f$k \in \{1, \dots, 6\}\f$.
+
+## Direction convention
+
+Laplace uses one object for the link of a distrib parameter, the transformation of a distrib, and the constraint on a parameter. The forward map \f$g\f$ goes from the constrained side to the unconstrained one and is named as statistics names it (`log` maps \f$(0,\infty)\f$ onto \f$\mathbb{R}\f$, `logit` maps \f$(0,1)\f$ onto \f$\mathbb{R}\f$); where both sides are constrained or neither is (inverse, inverse_sq, sqrt; identity, asinh), forward goes from the quantity of the model to the scale of the linear predictor. A link therefore evaluates the inverse \f$h\f$ (\f$\theta = h(\eta)\f$, where \f$\eta \in U\f$ is the linear predictor and \f$\theta \in V\f$ is the model parameter).
+
+## Inversion
+
+An inverted bijector, constructed with `scalar_bijector{scalar_bijector_map, true}`, swaps the forward and inverse directions:
+- `scalar_bijector{scalar_bijector_map::log, true}` is the exponential map.
+- Every function of an inverted bijector evaluates the function of the opposite direction: `forward` evaluates \f$h\f$, `forward_d3` evaluates \f$h^{(3)}\f$, `inverse` evaluates \f$g\f$, `inverse_d3` evaluates \f$g^{(3)}\f$, `forward_log_jacobian` evaluates \f$\log|h'|\f$, and `inverse_log_jacobian` evaluates \f$\log|g'|\f$.
+- The domain of an inverted bijector is the image of the forward map (\f$U\f$), and its image is the domain of the forward map (\f$V\f$).
+- Monotonicity (`b.is_decreasing()`) is unchanged by inversion.
+
+## Summary of maps
+
+The module defines twelve parameter-free maps in enum \ref laplace::bijector::scalar_bijector_map "scalar_bijector_map":
+
+| Name in scalar_bijector_map | Forward map \f$g(v)\f$ | Inverse map \f$h(u)\f$ | Domain \f$V\f$ | Image \f$U\f$ | Monotonicity |
+|---|---|---|---|---|---|
+| `identity` | \f$v\f$ | \f$u\f$ | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
+| `log` | \f$\log v\f$ | \f$e^u\f$ | \f$(0, \infty)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
+| `logit` | \f$\log(v / (1 - v))\f$ | \f$1 / (1 + e^{-u})\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
+| `probit` | \f$\Phi^{-1}(v)\f$ | \f$\Phi(u)\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
+| `cauchit` | \f$\tan(\pi(v - 1/2))\f$ | \f$\frac{1}{\pi}\mathrm{atan2}(1, -u)\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
+| `cloglog` | \f$\log(-\log(1 - v))\f$ | \f$1 - \exp(-e^u)\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
+| `loglog` | \f$-\log(-\log v)\f$ | \f$\exp(-e^{-u})\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
+| `inverse` | \f$1 / v\f$ | \f$1 / u\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ | Decreasing |
+| `inverse_sq` | \f$1 / v^2\f$ | \f$1 / \sqrt{u}\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ | Decreasing |
+| `sqrt` | \f$\sqrt{v}\f$ | \f$u^2\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ | Increasing |
+| `atanh` | \f$\frac{1}{2}\log((1+v)/(1-v))\f$ | \f$\tanh u\f$ | \f$(-1, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
+| `asinh` | \f$\mathrm{asinh}(v)\f$ | \f$\sinh u\f$ | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
+
+`atanh` is the map that statmodels7 and other software call the rhobit link (Fisher's \f$z\f$).
+
+## Domain and special values
+
+- **Outside the closed domain:** If an input falls strictly outside the closed domain (or is NaN), every function returns quiet NaN.
+- **Boundaries:** On the boundary of the domain, functions return their mathematical limits (for example, \f$\mathrm{logit}(0) = -\infty\f$, \f$\mathrm{logit}(1) = +\infty\f$, \f$\log(0) = -\infty\f$).
+- **Underflow and overflow:** Nothing is clamped. Where the exact value under- or overflows the range of doubles, the result is 0 or infinity; the tests cover the points where the exact value is a nonzero normal double.
+- **Clamping:** Nothing is clamped in this version. Clamping of saturated values and derivatives is under study and is not part of this release.
+
+## Distances to the bounds
+
+The functions \ref laplace::bijector::scalar_bijector::inverse_distance_upper "inverse_distance_upper()" and \ref laplace::bijector::scalar_bijector::inverse_distance_lower "inverse_distance_lower()" return the distance of \f$h(u)\f$ to the upper and lower bounds of its range (\ref laplace::bijector::scalar_bijector::forward_domain_upper "forward_domain_upper()" and \ref laplace::bijector::scalar_bijector::forward_domain_lower "forward_domain_lower()").
+
+Where \f$h(u)\f$ rounds to a bound other than \f$0\f$, forming the difference directly loses its digits: for logit, \f$1 - h(u)\f$ rounds to \f$0\f$ from \f$u = 37.4\f$, while \f$\mathrm{expit}(-u)\f$ is exact. For the six maps whose range is \f$(0, 1)\f$ or \f$(-1, 1)\f$, the distance is computed directly without forming \f$h(u)\f$:
+
+| Map | Upper distance | Lower distance |
+|---|---|---|
+| `logit` | \f$\mathrm{expit}(-u)\f$ | \f$h(u)\f$ |
+| `probit` | \f$\Phi(-u)\f$ | \f$h(u)\f$ |
+| `cauchit` | \f$h(-u)\f$ | \f$h(u)\f$ |
+| `cloglog` | \f$\exp(-e^u)\f$ | \f$h(u)\f$ |
+| `loglog` | \f$h_{\mathrm{cloglog}}(-u) = 1 - \exp(-e^{-u})\f$ | \f$h(u)\f$ |
+| `atanh` | \f$2e/(1 + e)\f$ with \f$e = \exp(-2u)\f$ for \f$u > 0\f$ (\f$1 - \tanh u\f$ for \f$u \le 0\f$) | \f$2e/(1 + e)\f$ with \f$e = \exp(2u)\f$ for \f$u < 0\f$ (\f$1 + \tanh u\f$ for \f$u \ge 0\f$) |
+
+Elsewhere, the generic forms are evaluated: the upper bound minus \f$h(u)\f$, and \f$h(u)\f$ minus the lower bound (evaluating to \f$+\infty\f$ when the bound is infinite). When the bijector is inverted (`b.inverted == true`), the generic form is always evaluated.
+
+The conditioned error ulpC is scaled with \f$h'(u)\f$, the derivative of the distance. Over the six maps and both distances, the maximum error is 2.28 ulpC on gcc and on CUDA (measured for probit lower distance); in plain ulps the error reaches up to 130 for cloglog (upper distance) and 173–174 for loglog (lower distance) where \f$\exp(-e^u)\f$ carries the rounding of \f$e^u\f$ with condition number \f$u e^u\f$.
+
+## Closed forms of maps and derivatives
+
+Every formula is written directly for its direction rather than obtained by numerical inversion, so that each evaluates accurately where the other cancels. The derivative polynomials were derived and verified symbolically using SymPy 1.14.0 (`tools/reference/bijector_forms.py`; Meurer et al. 2017).
+
+### Identity
+
+- Forward: \f$g(v) = v\f$, \f$g'(v) = 1\f$, and \f$g^{(k)}(v) = 0\f$ for \f$k \ge 2\f$.
+- Inverse: \f$h(u) = u\f$, \f$h'(u) = 1\f$, and \f$h^{(k)}(u) = 0\f$ for \f$k \ge 2\f$.
+- Forward and inverse log-Jacobians: \f$\log|g'(v)| = 0\f$ and \f$\log|h'(u)| = 0\f$, with derivatives equal to \f$0\f$ for all \f$k \ge 1\f$.
+
+### Logarithm
+
+- Forward: \f$g(v) = \log v\f$, with derivatives for \f$k \ge 1\f$:
+  \f[
+  g^{(k)}(v) = (-1)^{k-1}(k-1)!\,v^{-k}
+  \f]
+- Inverse: \f$h(u) = e^u\f$, with derivatives \f$h^{(k)}(u) = e^u\f$ for all \f$k \ge 0\f$.
+- Forward log-Jacobian: \f$\log|g'(v)| = -\log v\f$, with derivatives \f$(-1)^k(k-1)!\,v^{-k}\f$ for \f$k \ge 1\f$.
+- Inverse log-Jacobian: \f$\log|h'(u)| = u\f$, with first derivative \f$1\f$ and higher derivatives equal to \f$0\f$ for \f$k \ge 2\f$.
+
+### Logit
+
+Let \f$p = v\f$, \f$q = 1 - v\f$, \f$a = 1/p\f$, \f$b = 1/q\f$, and \f$S_k(a, b) = \sum_{j=0}^{k-1} a^{k-1-j} b^j\f$.
+- Forward: \f$g(v) = \log p - \log q\f$, evaluated as \f$\log p - \mathrm{log1p}(-p)\f$ for \f$v < 1/2\f$ and \f$\mathrm{log1p}(-q) - \log q\f$ for \f$v \ge 1/2\f$.
+- Forward derivatives:
+  \f[
+  g^{(k)}(v) = (k-1)!\left((-1)^{k-1} a^k + b^k\right)
+  \f]
+  For odd \f$k\f$: \f$g^{(k)}(v) = (k-1)!(a^k + b^k)\f$.
+  For even \f$k\f$: using \f$b^k - a^k = (b - a)S_k(a, b) = (2p - 1) a b S_k(a, b)\f$, the derivative is computed as
+  \f[
+  g^{(k)}(v) = (k-1)!(2p - 1) a b S_k(a, b)
+  \f]
+  Since every term in \f$S_k(a, b)\f$ is positive for \f$p, q > 0\f$, no cancellation of large opposing terms occurs.
+- Forward log-Jacobian: \f$\log|g'(v)| = -\log p - \log q\f$.
+  For even \f$k \ge 2\f$: \f$(k-1)!(a^k + b^k)\f$.
+  For odd \f$k \ge 1\f$: \f$(k-1)!(2p - 1) a b S_k(a, b)\f$.
+- Inverse: let \f$e = \exp(-|u|)\f$, \f$d = 1 + e\f$, \f$U = p q = e / d^2\f$, and \f$D = q - p = -\mathrm{sgn}(u)|\mathrm{expm1}(-|u|)| / d\f$. The value is \f$h(u) = 1/d\f$ for \f$u \ge 0\f$ and \f$e/d\f$ for \f$u < 0\f$. Derivatives satisfy \f$h^{(k)}(u) = U (A_k(U) + D B_k(U))\f$:
+  - \f$h'(u) = U\f$
+  - \f$h''(u) = U D\f$
+  - \f$h^{(3)}(u) = U (1 - 6U)\f$
+  - \f$h^{(4)}(u) = U D (1 - 12U)\f$
+  - \f$h^{(5)}(u) = U (1 - 30U + 120U^2)\f$
+  - \f$h^{(6)}(u) = U D (1 - 60U + 360U^2)\f$
+- Inverse log-Jacobian: \f$\log|h'(u)| = \log(p q) = -(|u| + 2\mathrm{log1p}(e))\f$. First derivative is \f$D\f$; for \f$k \ge 2\f$, \f$\frac{\mathrm{d}^k}{\mathrm{d}u^k}\log|h'(u)| = -2 h^{(k-1)}(u)\f$.
+
+### Probit
+
+Let \f$\Phi\f$ be the standard normal cumulative distribution function and \f$\phi(z) = \frac{1}{\sqrt{2\pi}}e^{-z^2/2}\f$ its density.
+- Forward: \f$z = g(v) = \Phi^{-1}(v)\f$.
+- Reciprocal density: \f$1/\phi(z)\f$ is computed through the Mills ratio \f$m(z) = \Phi(z)/\phi(z) = \sqrt{\pi/2}\operatorname{erfcx}(-z/\sqrt{2})\f$ as \f$1/\phi(z) = m(z)/v\f$ for \f$v \le 1/2\f$, and via \f$\sqrt{\pi/2}\operatorname{erfcx}(z/\sqrt{2})/(1 - v)\f$ for \f$v > 1/2\f$. Evaluating from \f$v\f$ rather than \f$\exp(z^2/2)\f$ at a rounded \f$z\f$ avoids relative error up to \f$z^2 \varepsilon\f$ (1050 ulp at \f$v = 3.4 \times 10^{-118}\f$).
+- Forward derivatives: \f$g^{(k)}(v) = Q_k(z) / \phi(z)^k\f$, where polynomials \f$Q_k(z)\f$ satisfy \f$Q_1 = 1\f$ and \f$Q_{k+1} = Q_k' + k z Q_k\f$:
+  - \f$Q_1(z) = 1\f$
+  - \f$Q_2(z) = z\f$
+  - \f$Q_3(z) = 1 + 2z^2\f$
+  - \f$Q_4(z) = z(7 + 6z^2)\f$
+  - \f$Q_5(z) = 7 + 46z^2 + 24z^4\f$
+  - \f$Q_6(z) = z(127 + 326z^2 + 120z^4)\f$
+  Every coefficient has the same sign for each parity, guaranteeing no cancellation.
+- Forward log-Jacobian: \f$-\log\phi(z) = \frac{z^2}{2} + \log\sqrt{2\pi}\f$, with derivatives \f$R_k(z) / \phi(z)^k\f$ where \f$R_1 = z\f$ and \f$R_{k+1} = R_k' + k z R_k\f$:
+  - \f$R_1(z) = z\f$
+  - \f$R_2(z) = 1 + z^2\f$
+  - \f$R_3(z) = z(4 + 2z^2)\f$
+  - \f$R_4(z) = 4 + 18z^2 + 6z^4\f$
+  - \f$R_5(z) = z(52 + 96z^2 + 24z^4)\f$
+  - \f$R_6(z) = 52 + 548z^2 + 600z^4 + 120z^6\f$
+- Inverse: \f$h(u) = \Phi(u)\f$, with derivatives \f$h^{(k)}(u) = (-1)^{k-1}\mathrm{He}_{k-1}(u)\phi(u)\f$ using probabilists' Hermite polynomials:
+  - \f$h'(u) = \phi(u)\f$
+  - \f$h''(u) = -u \phi(u)\f$
+  - \f$h^{(3)}(u) = (u^2 - 1)\phi(u)\f$
+  - \f$h^{(4)}(u) = u(3 - u^2)\phi(u)\f$
+  - \f$h^{(5)}(u) = (3 - 6u^2 + u^4)\phi(u)\f$
+  - \f$h^{(6)}(u) = u(-15 + 10u^2 - u^4)\phi(u)\f$
+- Inverse log-Jacobian: \f$\log|h'(u)| = \log\phi(u) = -(\frac{u^2}{2} + \log\sqrt{2\pi})\f$. First derivative is \f$-u\f$, second derivative is \f$-1\f$, and higher derivatives are \f$0\f$ for \f$k \ge 3\f$.
+
+### Cauchit
+
+Let \f$z = g(v) = \tan(\pi(v - 1/2))\f$. To avoid evaluating \f$\tan\f$ near its poles, \f$z\f$ is computed as \f$-1/\tan(\pi v)\f$ for \f$v < 1/4\f$, as \f$1/\tan(\pi(1 - v))\f$ for \f$v > 3/4\f$ (\f$1 - v\f$ exact there), and as \f$\tan(\pi(v - 1/2))\f$ for \f$1/4 \le v \le 3/4\f$.
+- Forward derivatives: \f$g^{(k)}(v) = \pi^k T_k(z)\f$, where \f$T_k(z)\f$ are the derivative polynomials of tangent:
+  - \f$T_1(z) = 1 + z^2\f$
+  - \f$T_2(z) = 2z(1 + z^2)\f$
+  - \f$T_3(z) = 2 + 8z^2 + 6z^4\f$
+  - \f$T_4(z) = z(16 + 40z^2 + 24z^4)\f$
+  - \f$T_5(z) = 16 + 136z^2 + 240z^4 + 120z^6\f$
+  - \f$T_6(z) = z(272 + 1232z^2 + 1680z^4 + 720z^6)\f$
+- Forward log-Jacobian: \f$\log|g'(v)| = \log\pi + \log(1 + z^2)\f$. First derivative is \f$2\pi z\f$; for \f$k \ge 2\f$, \f$\frac{\mathrm{d}^k}{\mathrm{d}v^k}\log|g'(v)| = 2\pi^k T_{k-1}(z)\f$.
+- Inverse: \f$h(u) = \frac{1}{\pi}\mathrm{atan2}(1, -u)\f$, which avoids catastrophic cancellation as \f$u \to -\infty\f$. With auxiliary quantities \f$r = (1 + u^2)^{-1/2} = 1/\operatorname{hypot}(1, u)\f$ and \f$s = u r\f$ (\f$|s| < 1\f$, \f$r^2 = 1 - s^2\f$), derivatives are \f$h^{(k)}(u) = \frac{1}{\pi} r^{k+1} W_{k-1}(s)\f$, evaluated in \f$s^2\f$ for \f$s^2 < 1/2\f$ and in \f$r^2\f$ for \f$s^2 \ge 1/2\f$:
+  - \f$W_0(s) = 1\f$
+  - \f$W_1(s) = -2s\f$
+  - \f$W_2(s) = 8s^2 - 2 = 6 - 8r^2\f$
+  - \f$W_3(s) = s(24 - 48s^2) = s(48r^2 - 24)\f$
+  - \f$W_4(s) = 24 - 288s^2 + 384s^4 = 120 - 480r^2 + 384r^4\f$
+  - \f$W_5(s) = s(-720 + 3840s^2 - 3840s^4) = s(-720 + 3840r^2 - 3840r^4)\f$
+- Inverse log-Jacobian: \f$\log|h'(u)| = -\log\pi - \log(1 + u^2)\f$. Derivatives are \f$-2 r^{k} X_{k-1}(s)\f$, where \f$X_m(s)\f$ are evaluated in \f$s^2\f$ for \f$s^2 < 1/2\f$ and in \f$r^2\f$ for \f$s^2 \ge 1/2\f$:
+  - \f$X_0(s) = s\f$
+  - \f$X_1(s) = 1 - 2s^2 = 2r^2 - 1\f$
+  - \f$X_2(s) = s(8s^2 - 6) = s(2 - 8r^2)\f$
+  - \f$X_3(s) = -6 + 48s^2 - 48s^4 = -6 + 48r^2 - 48r^4\f$
+  - \f$X_4(s) = s(120 - 480s^2 + 384s^4) = s(24 - 288r^2 + 384r^4)\f$
+  - \f$X_5(s) = 120 - 2160s^2 + 5760s^4 - 3840s^6 = -120 + 2160r^2 - 5760r^4 + 3840r^6\f$
+
+### Inverse and inverse square
+
+For `inverse`: \f$g(v) = 1/v\f$, \f$h(u) = 1/u\f$.
+- Forward and inverse: \f$g^{(k)}(v) = (-1)^k k!\,v^{-(k+1)}\f$.
+- Forward and inverse log-Jacobians: \f$-2\log v\f$, with derivatives \f$2(-1)^k(k-1)!\,v^{-k}\f$ for \f$k \ge 1\f$.
+
+For `inverse_sq`: \f$g(v) = 1/v^2\f$, \f$h(u) = 1/\sqrt{u}\f$.
+- Forward: \f$g(v) = v^{-2}\f$, with derivatives \f$g^{(k)}(v) = (-1)^k(k+1)!\,v^{-(k+2)}\f$.
+- Forward log-Jacobian: \f$\log 2 - 3\log v\f$, with derivatives \f$3(-1)^k(k-1)!\,v^{-k}\f$ for \f$k \ge 1\f$.
+- Inverse: with \f$r = 1/\sqrt{u}\f$, \f$h^{(k)}(u) = c_k r^{2k+1}\f$ where \f$c_k = \prod_{j=0}^{k-1}(-\frac{1}{2} - j)\f$:
+  - \f$c_0 = 1\f$, \f$c_1 = -1/2\f$, \f$c_2 = 3/4\f$, \f$c_3 = -15/8\f$, \f$c_4 = 105/16\f$, \f$c_5 = -945/32\f$, \f$c_6 = 10395/64\f$.
+- Inverse log-Jacobian: \f$-\log 2 - \frac{3}{2}\log u\f$, with derivatives \f$\frac{3}{2}(-1)^k(k-1)!\,u^{-k}\f$ for \f$k \ge 1\f$.
+
+### Square root
+
+- Forward: \f$g(v) = \sqrt{v}\f$. Derivatives are computed as powers of \f$1/\sqrt{v}\f$: \f$g^{(k)}(v) = d_k (1/\sqrt{v})^{2k-1}\f$ where \f$d_k = \prod_{j=0}^{k-1}(\frac{1}{2} - j)\f$:
+  - \f$d_0 = 1\f$, \f$d_1 = 1/2\f$, \f$d_2 = -1/4\f$, \f$d_3 = 3/8\f$, \f$d_4 = -15/16\f$, \f$d_5 = 105/32\f$, \f$d_6 = -945/64\f$.
+- Forward log-Jacobian: \f$-\log 2 - \frac{1}{2}\log v\f$, with derivatives \f$\frac{1}{2}(-1)^k(k-1)!\,v^{-k}\f$ for \f$k \ge 1\f$.
+- Inverse: \f$h(u) = u^2\f$, \f$h'(u) = 2u\f$, \f$h''(u) = 2\f$, and \f$h^{(k)}(u) = 0\f$ for \f$k \ge 3\f$.
+- Inverse log-Jacobian: \f$\log 2 + \log u\f$, with derivatives \f$(-1)^{k-1}(k-1)!\,u^{-k}\f$ for \f$k \ge 1\f$.
+
+### Inverse hyperbolic tangent
+
+- Forward: \f$g(v) = \operatorname{atanh}(v) = \frac{1}{2}(\mathrm{log1p}(v) - \mathrm{log1p}(-v))\f$.
+- Forward derivatives: with \f$a = 1/(1 - v)\f$ and \f$b = 1/(1 + v)\f$,
+  \f[
+  g^{(k)}(v) = \frac{(k-1)!}{2}\left(a^k + (-1)^{k-1} b^k\right)
+  \f]
+  For odd \f$k\f$: \f$\frac{(k-1)!}{2}(a^k + b^k)\f$.
+  For even \f$k\f$: \f$(k-1)! v a b S_k(a, b)\f$.
+- Forward log-Jacobian: \f$-\log(1 - v^2)\f$, computed as \f$-\mathrm{log1p}(-v^2)\f$ for \f$|v| < 1/2\f$ and \f$-\mathrm{log1p}(-v) - \mathrm{log1p}(v)\f$ for \f$|v| \ge 1/2\f$. For even \f$k \ge 2\f$: \f$(k-1)!(a^k + b^k)\f$; for odd \f$k \ge 1\f$: \f$2(k-1)! v a b S_k(a, b)\f$.
+- Inverse: \f$h(u) = \tanh u\f$. With \f$e = \exp(-2|u|)\f$, \f$d = 1 + e\f$, \f$T = \mathrm{copysign}(-\mathrm{expm1}(-2|u|) / d, u)\f$, and \f$S = 1 - T^2 = 4e / d^2\f$, derivatives are \f$h^{(k)}(u) = S P_k(T)\f$, evaluated in \f$T^2\f$ for \f$T^2 < 1/2\f$ and in \f$S\f$ for \f$T^2 \ge 1/2\f$:
+  - \f$P_1 = 1\f$
+  - \f$P_2 = -2T\f$
+  - \f$P_3 = 6T^2 - 2 = 4 - 6S\f$
+  - \f$P_4 = T(16 - 24T^2) = T(24S - 8)\f$
+  - \f$P_5 = 16 - 120T^2 + 120T^4 = 16 - 120S + 120S^2\f$
+  - \f$P_6 = T(-272 + 960T^2 - 720T^4) = T(-32 + 480S - 720S^2)\f$
+- Inverse log-Jacobian: \f$\log(1 - \tanh^2 u) = -2\log\cosh u\f$, with first derivative \f$-2\tanh u\f$ and higher derivatives \f$-2 h^{(k-1)}(u) = -2 S P_{k-1}(T)\f$ for \f$k \ge 2\f$.
+
+### Inverse hyperbolic sine
+
+- Forward: \f$g(v) = \mathrm{asinh}(v)\f$. With \f$r = (1 + v^2)^{-1/2}\f$ and \f$s = v r\f$, derivatives are \f$g^{(k)}(v) = r^k V_{k-1}(s)\f$, evaluated in \f$s^2\f$ for \f$s^2 < 1/2\f$ and in \f$r^2\f$ for \f$s^2 \ge 1/2\f$:
+  - \f$V_0 = 1\f$
+  - \f$V_1 = -s\f$
+  - \f$V_2 = 3s^2 - 1 = 2 - 3r^2\f$
+  - \f$V_3 = s(9 - 15s^2) = s(15r^2 - 6)\f$
+  - \f$V_4 = 9 - 90s^2 + 105s^4 = 24 - 120r^2 + 105r^4\f$
+  - \f$V_5 = s(-225 + 1050s^2 - 945s^4) = s(-120 + 840r^2 - 945r^4)\f$
+- Forward log-Jacobian: \f$\log r = -\frac{1}{2}\log(1 + v^2)\f$, with derivatives \f$-r^k X_{k-1}(s)\f$ for \f$k \ge 1\f$, with \f$X_m\f$ as defined for cauchit.
+- Inverse: \f$h(u) = \sinh u\f$, with derivatives \f$h^{(k)}(u) = \sinh u\f$ for even \f$k\f$, and \f$\cosh u\f$ for odd \f$k\f$.
+- Inverse log-Jacobian: \f$\log\cosh u\f$, with first derivative \f$\tanh u\f$ and higher derivatives \f$S P_{k-1}(T)\f$ for \f$k \ge 2\f$.
+
+### Complementary log-log
+
+- Forward: with \f$t = \mathrm{log1p}(-v) = \log(1 - v)\f$, \f$g(v) = \log(-t)\f$.
+- Forward derivatives: with \f$c = 1 / ((1 - v)t)\f$, \f$g^{(k)}(v) = (-1)^k C_k(t) c^k\f$:
+  - \f$C_1(t) = 1\f$
+  - \f$C_2(t) = -(1 + t)\f$
+  - \f$C_3(t) = 2 + 3t + 2t^2\f$
+  - \f$C_4(t) = -(6 + 12t + 11t^2 + 6t^3)\f$
+  - \f$C_5(t) = 24 + 60t + 70t^2 + 50t^3 + 24t^4\f$
+  - \f$C_6(t) = -(120 + 360t + 510t^2 + 450t^3 + 274t^4 + 120t^5)\f$
+- Forward log-Jacobian: \f$-t - \log(-t)\f$, with derivatives \f$(-1)^k E_k(t) c^k\f$, where \f$E_k(t) = -C_k(t) + (-1)^k(k-1)!\,t^k\f$:
+  - \f$E_1(t) = -(1 + t)\f$
+  - \f$E_2(t) = 1 + t + t^2\f$
+  - \f$E_3(t) = -(2 + 3t + 2t^2 + 2t^3)\f$
+  - \f$E_4(t) = 6 + 12t + 11t^2 + 6t^3 + 6t^4\f$
+  - \f$E_5(t) = -(24 + 60t + 70t^2 + 50t^3 + 24t^4 + 24t^5)\f$
+  - \f$E_6(t) = 120 + 360t + 510t^2 + 450t^3 + 274t^4 + 120t^5 + 120t^6\f$
+- Inverse: with \f$w = e^u\f$, \f$h(u) = 1 - e^{-w} = -\mathrm{expm1}(-w)\f$. Derivatives are \f$h^{(k)}(u) = \exp(u - w) P_k(w)\f$ for \f$w \le 1000\f$ (returning \f$0.0\f$ for \f$w > 1000\f$ where \f$\exp(u - w)\f$ underflows):
+  - \f$P_1(w) = 1\f$
+  - \f$P_2(w) = 1 - w = -\mathrm{expm1}(u)\f$ (evaluated via \f$\mathrm{expm1}\f$ to avoid cancellation near \f$u = 0\f$)
+  - \f$P_3(w) = 1 - 3w + w^2\f$
+  - \f$P_4(w) = 1 - 7w + 6w^2 - w^3\f$
+  - \f$P_5(w) = 1 - 15w + 25w^2 - 10w^3 + w^4\f$
+  - \f$P_6(w) = 1 - 31w + 90w^2 - 65w^3 + 15w^4 - w^5\f$
+- Inverse log-Jacobian: \f$u - e^u\f$. First derivative is \f$-\mathrm{expm1}(u)\f$; higher derivatives are \f$-e^u\f$ for \f$k \ge 2\f$.
+
+### Log-log
+
+- Forward: with \f$t = \log v\f$ and \f$c = 1 / (v t)\f$, \f$g(v) = -\log(-t)\f$, with derivatives \f$g^{(k)}(v) = -C_k(t) c^k\f$ using the polynomials \f$C_k(t)\f$ from complementary log-log.
+- Forward log-Jacobian: \f$-t - \log(-t)\f$, with derivatives \f$E_k(t) c^k\f$ using \f$E_k(t)\f$ from complementary log-log.
+- Inverse: \f$h(u) = \exp(-e^{-u}) = 1 - h_{\mathrm{cloglog}}(-u)\f$, with derivatives \f$h^{(k)}(u) = (-1)^{k+1} h_{\mathrm{cloglog}}^{(k)}(-u)\f$.
+- Inverse log-Jacobian: \f$-u - e^{-u}\f$. First derivative is \f$\mathrm{expm1}(-u)\f$; higher derivatives are \f$(-1)^{k+1} e^{-u}\f$ for \f$k \ge 2\f$.
+
+## Numerical considerations and implementation choices
+
+The following numerical choices in `include/laplace/bijector/scalar.hpp` follow from measurements recorded in `docs/numerics.md`:
+
+1. **Probit reciprocal density:** Computing \f$1/\phi(z)\f$ from \f$v\f$ via the Mills ratio \f$m(z) = \Phi(z)/\phi(z) = \sqrt{\pi/2}\operatorname{erfcx}(-z/\sqrt{2})\f$ for \f$v \le 1/2\f$ and \f$\sqrt{\pi/2}\operatorname{erfcx}(z/\sqrt{2})/(1 - v)\f$ for \f$v > 1/2\f$, rather than evaluating \f$\exp(z^2/2)\f$ at a rounded \f$z\f$. The rounding of \f$z\f$ would induce a relative error of \f$z^2 \varepsilon\f$ (reaching 1050 ulp at \f$v = 3.4 \times 10^{-118}\f$ for the second derivative, against 6.2 ulp with the Mills ratio).
+2. **Expansion switching for hyperbolic and rational families:** The polynomials of \f$\tanh\f$ and of the \f$r, s\f$ family are evaluated in \f$T^2\f$ (or \f$s^2\f$) for values below \f$1/2\f$, and in \f$S = 1 - T^2\f$ (or \f$r^2 = 1 - s^2\f$) above \f$1/2\f$, where the \f$T^2\f$ forms suffer from cancellation with individual terms growing to 50 times the result (reducing maximum error from 48 ulpC to 8.6 ulpC).
+3. **Log-cosh and log1p formulations:** \f$\log\cosh u\f$ below \f$|u| = 1\f$ is evaluated as \f$\mathrm{log1p}(e_m^2 / (2(1 + e_m)))\f$ where \f$e_m = \mathrm{expm1}(|u|)\f$, because \f$|u| + \mathrm{log1p}(e^{-2|u|}) - \log 2\f$ cancels to \f$u^2/2\f$ near zero (causing errors of \f$10^{17}\f$ ulp at \f$|u| = 10^{-9}\f$). Similarly, \f$-\log(1 - v^2)\f$ of atanh below \f$|v| = 1/2\f$ is computed as \f$-\mathrm{log1p}(-v^2)\f$.
+4. **Power ordering:** Multiplications in \f$c a^k\f$ apply the coefficient \f$c\f$ first so that partial products do not become subnormal or overflow before the final result does. Derivatives of square root and of the inverse of inverse square are evaluated as integer powers of \f$1/\sqrt{\cdot}\f$ (preventing spurious NaN when \f$v < 10^{-102}\f$).
+5. **Exact cancellation in derivative factors:** The factor \f$1 - w = 1 - e^u\f$ in the second derivative of the inverse of cloglog and loglog is computed as \f$-\mathrm{expm1}(u)\f$ (preventing \f$1.4 \times 10^8\f$ ulpC error at \f$u = -1.2 \times 10^{-9}\f$).
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
+
+Reference values were computed using SymPy and evaluated with mpmath at precision growing with the point, each row computed at two precisions 120 bits apart and kept only if the two agree to \f$2^{-100}\f$ relative, across 52150 reference rows covering points log-uniform towards zero and domain bounds (down to \f$2^{-1000}\f$ and \f$1 - 2^{-54}\f$), uniform in the interior, and \f$|u|\f$ up to \f$2^{10}\f$ (\f$2^{1000}\f$ for asinh and inverse cauchit; `tools/reference/bijector_scalar.py`, `tests/bijector/test_scalar.cpp`).
+
+Two error metrics are measured:
+- **Relative ulp:**
+  \f[
+  \text{ulp} = \frac{|y - \text{exact}|}{\text{ulp}(\max(|\text{exact}|, 2^{-1022}))}
+  \f]
+- **Conditioned ulpC:**
+  \f[
+  \text{ulpC} = \frac{|y - \text{exact}|}{\text{ulp}(\max(|\text{exact}| + |x f_{k+1}(x)|, 2^{-1022}))}
+  \f]
+  where \f$y\f$ is the computed value, \f$\text{exact} = f_k(x)\f$ is the reference value, and \f$f_{k+1}(x)\f$ is the derivative of the next order at \f$x\f$. The metric ulpC measures error in units of the perturbation that a 1-ulp variation in \f$x\f$ causes (relative error divided by \f$1 +\f$ condition number), remaining bounded near the zeros of higher-order derivatives where relative ulp diverges.
+
+The measured maximum error in ulpC over orders 0 to 6 on gcc (OpenMP) and CUDA (`docs/numerics.md`):
+
+| Map | Forward | Inverse | Forward log-Jacobian | Inverse log-Jacobian |
+|---|---|---|---|---|
+| log | 3.84 / 3.84 | 0.574 / 0.574 | 3.84 / 3.84 | 0 / 0 |
+| logit | 3.17 / 3.17 | 10.5 / 10.1 | 5.17 / 5.17 | 10.5 / 10.1 |
+| probit | 6.17 / 6.17 | 2.28 / 2.28 | 6.57 / 6.57 | 0.832 / 0.832 |
+| cauchit | 6.19 / 6.19 | 8.63 / 8.63 | 5.23 / 5.23 | 7.78 / 7.78 |
+| cloglog | 6.73 / 3.12 | 9.98 / 7.61 | 4.16 / 3.34 | 0.969 / 0.969 |
+| loglog | 4.58 / 3.23 | 11 / 8.49 | 4.84 / 3.38 | 0.883 / 0.883 |
+| inverse | 3.92 / 3.92 | 3.25 / 3.25 | 3.92 / 3.92 | 3.25 / 3.25 |
+| inverse_sq | 3.09 / 3.09 | 7.29 / 7.29 | 3.86 / 3.86 | 2.79 / 2.79 |
+| sqrt | 10.9 / 10.9 | 0.246 / 0.246 | 2.43 / 2.43 | 2.95 / 2.95 |
+| atanh | 2.78 / 2.78 | 2.67 / 1.67 | 3.53 / 5.05 | 2.67 / 1.67 |
+| asinh | 8.55 / 9.49 | 0.494 / 0.622 | 5.35 / 7.85 | 1.9 / 2.27 |
+
+In plain ulps, values and first derivatives (orders 0–1) are within 4.1 ulp on gcc, except for cloglog (up to 147 ulp) and loglog (up to 1430 ulp) whose values and first derivatives cross zero (loglog at \f$v = 1/e\f$) or are ill-conditioned (\f$\exp(u - e^u)\f$ carrying the rounding of \f$e^u\f$), where their ulpC is at most 2.01. Every quantity is within 11 ulpC on both gcc and CUDA. For the distances to the bounds, with ulpC scaled with \f$h'(u)\f$ (the derivative of the distance), the maximum error over the six maps and both distances is 2.28 ulpC on gcc and on CUDA (measured for probit lower distance); in plain ulps the error reaches up to 130 for cloglog (upper distance) and 173–174 for loglog (lower distance) where \f$\exp(-e^u)\f$ carries the rounding of \f$e^u\f$ with condition number \f$u e^u\f$.
+
+## Example
+
+The following example evaluates the inverse link \f$h(\eta)\f$ and its first derivative \f$h'(\eta)\f$ inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/bijector/scalar.hpp>
+#include <Kokkos_Core.hpp>
+
+void evaluate_links(const Kokkos::View<const double*>& eta,
+                    Kokkos::View<double*>& theta,
+                    Kokkos::View<double*>& dtheta,
+                    int n) {
+  const laplace::bijector::scalar_bijector b{laplace::bijector::scalar_bijector_map::logit};
+  Kokkos::parallel_for("evaluate_links", n, KOKKOS_LAMBDA(const int i) {
+    const double u = eta(i);
+    theta(i)  = b.inverse(u);
+    dtheta(i) = b.inverse_d1(u);
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are member functions of \ref laplace::bijector::scalar_bijector "scalar_bijector".
+
+### Types
+
+- \ref laplace::bijector::scalar_bijector_map "scalar_bijector_map" — Enumeration of scalar bijector maps without parameters.
+- \ref laplace::bijector::scalar_bijector "scalar_bijector" — Scalar bijector configuration structure.
+
+### Value and forward derivatives
+
+- \ref laplace::bijector::scalar_bijector::forward "forward()" — Evaluates the forward map \f$g(v)\f$.
+- \ref laplace::bijector::scalar_bijector::forward_d1 "forward_d1()" — First derivative of the forward map, \f$g'(v)\f$.
+- \ref laplace::bijector::scalar_bijector::forward_d2 "forward_d2()" — Second derivative of the forward map, \f$g''(v)\f$.
+- \ref laplace::bijector::scalar_bijector::forward_d3 "forward_d3()" — Third derivative of the forward map, \f$g^{(3)}(v)\f$.
+- \ref laplace::bijector::scalar_bijector::forward_d4 "forward_d4()" — Fourth derivative of the forward map, \f$g^{(4)}(v)\f$.
+- \ref laplace::bijector::scalar_bijector::forward_d5 "forward_d5()" — Fifth derivative of the forward map, \f$g^{(5)}(v)\f$.
+- \ref laplace::bijector::scalar_bijector::forward_d6 "forward_d6()" — Sixth derivative of the forward map, \f$g^{(6)}(v)\f$.
+
+### Inverse value and inverse derivatives
+
+- \ref laplace::bijector::scalar_bijector::inverse "inverse()" — Evaluates the inverse map \f$h(u)\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_d1 "inverse_d1()" — First derivative of the inverse map, \f$h'(u)\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_d2 "inverse_d2()" — Second derivative of the inverse map, \f$h''(u)\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_d3 "inverse_d3()" — Third derivative of the inverse map, \f$h^{(3)}(u)\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_d4 "inverse_d4()" — Fourth derivative of the inverse map, \f$h^{(4)}(u)\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_d5 "inverse_d5()" — Fifth derivative of the inverse map, \f$h^{(5)}(u)\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_d6 "inverse_d6()" — Sixth derivative of the inverse map, \f$h^{(6)}(u)\f$.
+
+### Forward log-Jacobian and derivatives
+
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian "forward_log_jacobian()" — Forward log-Jacobian, \f$\log|g'(v)|\f$.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d1 "forward_log_jacobian_d1()" — First derivative of forward log-Jacobian, \f$\frac{\mathrm{d}}{\mathrm{d}v}\log|g'(v)|\f$.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d2 "forward_log_jacobian_d2()" — Second derivative of forward log-Jacobian, \f$\frac{\mathrm{d}^2}{\mathrm{d}v^2}\log|g'(v)|\f$.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d3 "forward_log_jacobian_d3()" — Third derivative of forward log-Jacobian, \f$\frac{\mathrm{d}^3}{\mathrm{d}v^3}\log|g'(v)|\f$.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d4 "forward_log_jacobian_d4()" — Fourth derivative of forward log-Jacobian, \f$\frac{\mathrm{d}^4}{\mathrm{d}v^4}\log|g'(v)|\f$.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d5 "forward_log_jacobian_d5()" — Fifth derivative of forward log-Jacobian, \f$\frac{\mathrm{d}}{\mathrm{d}v^5}\log|g'(v)|\f$.
+- \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d6 "forward_log_jacobian_d6()" — Sixth derivative of forward log-Jacobian, \f$\frac{\mathrm{d}^6}{\mathrm{d}v^6}\log|g'(v)|\f$.
+
+### Inverse log-Jacobian and derivatives
+
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian "inverse_log_jacobian()" — Inverse log-Jacobian, \f$\log|h'(u)|\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_d1 "inverse_log_jacobian_d1()" — First derivative of inverse log-Jacobian, \f$\frac{\mathrm{d}}{\mathrm{d}u}\log|h'(u)|\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_d2 "inverse_log_jacobian_d2()" — Second derivative of inverse log-Jacobian, \f$\frac{\mathrm{d}^2}{\mathrm{d}u^2}\log|h'(u)|\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_d3 "inverse_log_jacobian_d3()" — Third derivative of inverse log-Jacobian, \f$\frac{\mathrm{d}^3}{\mathrm{d}u^3}\log|h'(u)|\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_d4 "inverse_log_jacobian_d4()" — Fourth derivative of inverse log-Jacobian, \f$\frac{\mathrm{d}^4}{\mathrm{d}u^4}\log|h'(u)|\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_d5 "inverse_log_jacobian_d5()" — Fifth derivative of inverse log-Jacobian, \f$\frac{\mathrm{d}^5}{\mathrm{d}u^5}\log|h'(u)|\f$.
+- \ref laplace::bijector::scalar_bijector::inverse_log_jacobian_d6 "inverse_log_jacobian_d6()" — Sixth derivative of inverse log-Jacobian, \f$\frac{\mathrm{d}^6}{\mathrm{d}u^6}\log|h'(u)|\f$.
+
+### Domain, image and properties
+
+- \ref laplace::bijector::scalar_bijector::forward_domain_lower "forward_domain_lower()" — Lower bound of the domain of \ref laplace::bijector::scalar_bijector::forward "forward()".
+- \ref laplace::bijector::scalar_bijector::forward_domain_upper "forward_domain_upper()" — Upper bound of the domain of \ref laplace::bijector::scalar_bijector::forward "forward()".
+- \ref laplace::bijector::scalar_bijector::inverse_domain_lower "inverse_domain_lower()" — Lower bound of the domain of \ref laplace::bijector::scalar_bijector::inverse "inverse()".
+- \ref laplace::bijector::scalar_bijector::inverse_domain_upper "inverse_domain_upper()" — Upper bound of the domain of \ref laplace::bijector::scalar_bijector::inverse "inverse()".
+- \ref laplace::bijector::scalar_bijector::is_decreasing "is_decreasing()" — Whether the map is strictly decreasing.
+- \ref laplace::bijector::scalar_bijector::inverse_distance_upper "inverse_distance_upper()" — Distance of \ref laplace::bijector::scalar_bijector::inverse "inverse()" to \ref laplace::bijector::scalar_bijector::forward_domain_upper "forward_domain_upper()".
+- \ref laplace::bijector::scalar_bijector::inverse_distance_lower "inverse_distance_lower()" — Distance of \ref laplace::bijector::scalar_bijector::inverse "inverse()" to \ref laplace::bijector::scalar_bijector::forward_domain_lower "forward_domain_lower()".
+
+## References
+
+- A. Meurer, C. P. Smith, M. Paprocki, O. Čertík, S. B. Kirpichev, M. Rocklin, A. Kumar, S. Ivanov, J. K. Moore, S. Singh, T. Rathnayake, S. Vig, B. E. Granger, R. P. Muller, F. Bonazzi, H. Gupta, S. Vats, F. Johansson, F. Pedregosa, M. J. Curry, A. R. Terrel, Š. Roučka, A. Saboo, I. Fernando, S. Kulal, R. Cimrman, and A. Huff (2017). SymPy: symbolic computing in Python. *PeerJ Computer Science*, 3:e103.
+*/

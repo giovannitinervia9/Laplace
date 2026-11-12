@@ -1399,3 +1399,102 @@ positive and finite, gives NaN and `converged` = false (NaN for the fixed Gauss
 rules). Valid inputs give the same results as before. Tested in
 `tests/math/test_quadrature.cpp` ("reversed, empty and invalid arguments"), on
 CPU and CUDA.
+
+## Scalar bijectors without parameters
+
+**What.** `include/laplace/bijector/scalar.hpp` (namespace `laplace::bijector`):
+twelve maps g: V -> U between intervals with their inverses h = g^-1, named by
+the forward direction, which goes from the constrained side to the
+unconstrained one: identity, log, logit, probit, cauchit, cloglog, loglog,
+inverse (1/v), inverse_sq (1/v^2), sqrt, atanh (the rhobit link), asinh. For
+each, the value and the derivatives of order 1-6 of both directions, and the
+log-Jacobians log|g'(v)| and log|h'(u)| with their derivatives of order 1-6:
+28 member functions of the type `scalar_bijector` (map chosen by the enum
+`scalar_bijector_map`), one per quantity and order: `forward`, `forward_d1`
+... `forward_d6`, `inverse`, `inverse_d1` ..., `forward_log_jacobian` ...,
+`inverse_log_jacobian` .... A flag inverts the bijector (exp is log
+inverted). Nothing is clamped (decided with the clamping study: see below).
+
+**How.** Every quantity is written directly for its direction, from
+auxiliary quantities that do not cancel: for logit p, q = 1 - p, U = p q and
+D = q - p = -tanh(u/2) from one exp(-|u|), and the forward derivatives of even
+order as (2p - 1) a b S_K(a, b) with a = 1/p, b = 1/q and S_K a sum of
+positive terms; for atanh T = tanh u and S = 1 - T^2 from exp(-2|u|); for asinh
+and the inverse of cauchit r = 1/hypot(1, x) and s = x r; for cloglog and
+loglog t = log s and c = 1/(s t). The derivatives are these quantities times
+polynomials derived and checked with SymPy 1.14.0
+(`tools/reference/bijector_forms.py`). Five choices came out of the
+measurement:
+
+- probit: 1/phi(z) at z = Phi^-1(v) computed as m(z)/v, with the Mills-type
+  ratio m(z) = Phi(z)/phi(z) = sqrt(pi/2) erfcx(-z/sqrt 2) (and 1 - v, -z
+  above 1/2). Through exp(z^2/2) the rounding of z costs z^2 eps: 1050 ulp at
+  v = 3.4e-118 for the second derivative, against 6.2 ulp now.
+- The polynomials of tanh and of the r, s family are written in T^2 (s^2)
+  below 1/2 and in S = 1 - T^2 (r^2 = 1 - s^2) above, where the T^2 forms
+  cancel (terms up to 50 times the result): up to 48 ulpC before, 8.6 after.
+- log cosh u below |u| = 1 as log1p(em^2/(2 (1 + em))), em = expm1(|u|), and
+  -log(1 - v^2) of atanh below |v| = 1/2 as -log1p(-v^2): the forms used
+  elsewhere cancel to u^2 and v^2 there (errors of 1e17 ulp at |u| = 1e-9).
+- Powers multiplied with the constant first (c a^K), and the derivatives of
+  sqrt and of the inverse of inverse_sq as powers of 1/sqrt: a^K went
+  subnormal or overflowed before the result did (sqrt: NaN from v < 1e-102).
+- The factor 1 - w = 1 - e^u in the second derivative of the inverse of
+  cloglog (and loglog) as -expm1(u): 1.4e8 ulpC at u = -1.2e-9 before.
+
+**Measurement.** References `bijector_<map>.csv`
+(`tools/reference/bijector_scalar.py`): every map in SymPy by its definition,
+differentiated symbolically and evaluated with mpmath (the forward probit by
+Newton on Phi and series reversion), at a precision that grows with the point,
+twice 120 bits apart, rows kept if the two agree to 2^-100; zero, non-finite
+and subnormal values dropped. 52150 rows: points log-uniform towards 0 and
+towards the bounds (down to 2^-1000 and to 1 - 2^-54), uniform in the middle,
+|u| up to 2^10 (2^1000 for the inverse of cauchit and for asinh). Two errors:
+ulp, relative; ulpC, in ulps of |f_k(x)| + |x f_(k+1)(x)|, the error that one
+ulp of relative perturbation of x would cause, which stays meaningful near
+the zeros of the derivatives of high order (there ulp grows without bound).
+Maximum ulpC over the orders 0-6, gcc / CUDA:
+
+| map | forward | inverse | forward log-Jacobian | inverse log-Jacobian |
+|---|---|---|---|---|
+| log | 3.84 / 3.84 | 0.574 / 0.574 | 3.84 / 3.84 | 0 / 0 |
+| logit | 3.17 / 3.17 | 10.5 / 10.1 | 5.17 / 5.17 | 10.5 / 10.1 |
+| probit | 6.17 / 6.17 | 2.28 / 2.28 | 6.57 / 6.57 | 0.832 / 0.832 |
+| cauchit | 6.19 / 6.19 | 8.63 / 8.63 | 5.23 / 5.23 | 7.78 / 7.78 |
+| cloglog | 6.73 / 3.12 | 9.98 / 7.61 | 4.16 / 3.34 | 0.969 / 0.969 |
+| loglog | 4.58 / 3.23 | 11 / 8.49 | 4.84 / 3.38 | 0.883 / 0.883 |
+| inverse | 3.92 / 3.92 | 3.25 / 3.25 | 3.92 / 3.92 | 3.25 / 3.25 |
+| inverse_sq | 3.09 / 3.09 | 7.29 / 7.29 | 3.86 / 3.86 | 2.79 / 2.79 |
+| sqrt | 10.9 / 10.9 | 0.246 / 0.246 | 2.43 / 2.43 | 2.95 / 2.95 |
+| atanh | 2.78 / 2.78 | 2.67 / 1.67 | 3.53 / 5.05 | 2.67 / 1.67 |
+| asinh | 8.55 / 9.49 | 0.494 / 0.622 | 5.35 / 7.85 | 1.9 / 2.27 |
+
+(The inverse log-Jacobian of log is u itself; its other rows are constants
+and are checked exactly.) In plain ulps the values and first derivatives
+(orders 0-1) are within 4.1 ulp on gcc, except for cloglog (up to 147 ulp)
+and loglog (up to 1430 ulp), whose values and first derivatives cross zero
+(loglog at v = 1/e) or are ill-conditioned (exp(u - e^u) carries the rounding
+of e^u); their ulpC there is at most 2.01. Timings not measured yet.
+
+**Distances to the bounds** (added 2026-11-12, option 2 of
+`note/clamping/clamping.md`). `b.inverse_distance_upper(u)` and
+`b.inverse_distance_lower(u)` return the distance of h(u) to the upper and
+lower bound of its range, computed without forming h where h saturates at a
+bound other than 0 or infinity: 1 - h(u) is expit(-u) for logit, Phi(-u) for
+probit, h(-u) for cauchit, exp(-e^u) for cloglog, the cloglog inverse at -u
+for loglog, 2e/(1 + e) with e = exp(-2u) for 1 - tanh u; elsewhere the bound
+minus h(u). References: the same script, bound - h and h - bound evaluated as
+written with 1200 more bits (rows below 2^-1022 dropped), for the six maps
+whose range is (0, 1) or (-1, 1). ulpC scaled with h'(u), the derivative of
+the distance. Maximum over the six maps and the two distances: 2.28 ulpC on
+gcc and on CUDA (probit, lower distance); in plain ulps up to 130 (cloglog,
+upper) and 173-174 (loglog, lower), where exp(-e^u) carries the rounding of
+e^u, condition number u e^u.
+
+**What this says.** Every quantity is within 11 ulps of the error that the
+rounding of its argument alone would cause, on both builds; the largest
+errors are in the derivatives of order 5-6 near their zeros.
+
+**Chosen.** This version. Tested in `tests/bijector/test_scalar.cpp` on both
+builds, with bounds of half again the measured errors per map, and exactly
+for the constant derivatives, the identity, inversion and the domain.
