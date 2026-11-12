@@ -17,7 +17,7 @@ A scalar bijector is a bijection \f$g: V \to U\f$ between open intervals \f$V, U
 
 ## Direction convention
 
-Laplace uses one object for the link of a distrib parameter, the transformation of a distrib, and the constraint on a parameter. The forward map \f$g\f$ goes from the constrained side to the unconstrained one and is named as statistics names it (`log` maps \f$(0,\infty)\f$ onto \f$\mathbb{R}\f$, `logit` maps \f$(0,1)\f$ onto \f$\mathbb{R}\f$); where both sides are constrained or neither is (inverse, inverse_sq, sqrt; identity, asinh), forward goes from the quantity of the model to the scale of the linear predictor. A link therefore evaluates the inverse \f$h\f$ (\f$\theta = h(\eta)\f$, where \f$\eta \in U\f$ is the linear predictor and \f$\theta \in V\f$ is the model parameter).
+The forward map \f$g\f$ goes from the constrained side to the unconstrained one and carries the usual name of the map: `log` maps \f$(0,\infty)\f$ onto \f$\mathbb{R}\f$, `logit` maps \f$(0,1)\f$ onto \f$\mathbb{R}\f$. For the maps whose two sides are both constrained or both unconstrained (inverse, inverse_sq, sqrt; identity, asinh), the forward direction is the one given in the table of maps below.
 
 ## Inversion
 
@@ -46,14 +46,13 @@ The module defines twelve parameter-free maps in enum \ref laplace::bijector::sc
 | `atanh` | \f$\frac{1}{2}\log((1+v)/(1-v))\f$ | \f$\tanh u\f$ | \f$(-1, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
 | `asinh` | \f$\mathrm{asinh}(v)\f$ | \f$\sinh u\f$ | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
 
-`atanh` is the map that statmodels7 and other software call the rhobit link (Fisher's \f$z\f$).
+`atanh` is also known as Fisher's \f$z\f$ transformation.
 
 ## Domain and special values
 
 - **Outside the closed domain:** If an input falls strictly outside the closed domain (or is NaN), every function returns quiet NaN.
 - **Boundaries:** On the boundary of the domain, functions return their mathematical limits (for example, \f$\mathrm{logit}(0) = -\infty\f$, \f$\mathrm{logit}(1) = +\infty\f$, \f$\log(0) = -\infty\f$).
 - **Underflow and overflow:** Nothing is clamped. Where the exact value under- or overflows the range of doubles, the result is 0 or infinity; the tests cover the points where the exact value is a nonzero normal double.
-- **Clamping:** Nothing is clamped in this version. Clamping of saturated values and derivatives is under study and is not part of this release.
 
 ## Distances to the bounds
 
@@ -277,16 +276,7 @@ See \ref accuracy "How accuracy is measured" for how accuracy figures, error met
 
 Reference values were computed using SymPy and evaluated with mpmath at precision growing with the point, each row computed at two precisions 120 bits apart and kept only if the two agree to \f$2^{-100}\f$ relative, across 52150 reference rows covering points log-uniform towards zero and domain bounds (down to \f$2^{-1000}\f$ and \f$1 - 2^{-54}\f$), uniform in the interior, and \f$|u|\f$ up to \f$2^{10}\f$ (\f$2^{1000}\f$ for asinh and inverse cauchit; `tools/reference/bijector_scalar.py`, `tests/bijector/test_scalar.cpp`).
 
-Two error metrics are measured:
-- **Relative ulp:**
-  \f[
-  \text{ulp} = \frac{|y - \text{exact}|}{\text{ulp}(\max(|\text{exact}|, 2^{-1022}))}
-  \f]
-- **Conditioned ulpC:**
-  \f[
-  \text{ulpC} = \frac{|y - \text{exact}|}{\text{ulp}(\max(|\text{exact}| + |x f_{k+1}(x)|, 2^{-1022}))}
-  \f]
-  where \f$y\f$ is the computed value, \f$\text{exact} = f_k(x)\f$ is the reference value, and \f$f_{k+1}(x)\f$ is the derivative of the next order at \f$x\f$. The metric ulpC measures error in units of the perturbation that a 1-ulp variation in \f$x\f$ causes (relative error divided by \f$1 +\f$ condition number), remaining bounded near the zeros of higher-order derivatives where relative ulp diverges.
+Errors are given in ulpC (\ref accuracy_conditioned "conditioned scale"), with the scale \f$s = |f_k(x)| + |x f_{k+1}(x)|\f$ for the function \f$f_k\f$ of order \f$k\f$ at the point \f$x\f$, \f$f_{k+1}\f$ being the function of the next order; for the distances to the bounds, \f$f_{k+1}\f$ is \f$h'\f$.
 
 The measured maximum error in ulpC over orders 0 to 6 on gcc (OpenMP) and CUDA (`docs/numerics.md`):
 
@@ -304,25 +294,24 @@ The measured maximum error in ulpC over orders 0 to 6 on gcc (OpenMP) and CUDA (
 | atanh | 2.78 / 2.78 | 2.67 / 1.67 | 3.53 / 5.05 | 2.67 / 1.67 |
 | asinh | 8.55 / 9.49 | 0.494 / 0.622 | 5.35 / 7.85 | 1.9 / 2.27 |
 
-In plain ulps, values and first derivatives (orders 0–1) are within 4.1 ulp on gcc, except for cloglog (up to 147 ulp) and loglog (up to 1430 ulp) whose values and first derivatives cross zero (loglog at \f$v = 1/e\f$) or are ill-conditioned (\f$\exp(u - e^u)\f$ carrying the rounding of \f$e^u\f$), where their ulpC is at most 2.01. Every quantity is within 11 ulpC on both gcc and CUDA. For the distances to the bounds, with ulpC scaled with \f$h'(u)\f$ (the derivative of the distance), the maximum error over the six maps and both distances is 2.28 ulpC on gcc and on CUDA (measured for probit lower distance); in plain ulps the error reaches up to 130 for cloglog (upper distance) and 173–174 for loglog (lower distance) where \f$\exp(-e^u)\f$ carries the rounding of \f$e^u\f$ with condition number \f$u e^u\f$.
+In plain ulps, values and first derivatives (orders 0–1) are within 4.1 ulp on gcc, except for cloglog (up to 147 ulp) and loglog (up to 1430 ulp) whose values and first derivatives cross zero (loglog at \f$v = 1/e\f$) or are ill-conditioned (\f$\exp(u - e^u)\f$ carrying the rounding of \f$e^u\f$), where their ulpC is at most 2.01. Every quantity is within 11 ulpC on both gcc and CUDA. The accuracy of the distances to the bounds is given in their own section above.
 
 ## Example
 
-The following example evaluates the inverse link \f$h(\eta)\f$ and its first derivative \f$h'(\eta)\f$ inside a `Kokkos::parallel_for` kernel:
+The following example evaluates the inverse map \f$h(u)\f$ of logit and its first derivative \f$h'(u)\f$ inside a `Kokkos::parallel_for` kernel:
 
 \code{.cpp}
 #include <laplace/bijector/scalar.hpp>
 #include <Kokkos_Core.hpp>
 
-void evaluate_links(const Kokkos::View<const double*>& eta,
-                    Kokkos::View<double*>& theta,
-                    Kokkos::View<double*>& dtheta,
+void evaluate_expit(const Kokkos::View<const double*>& u,
+                    Kokkos::View<double*>& h,
+                    Kokkos::View<double*>& dh,
                     int n) {
   const laplace::bijector::scalar_bijector b{laplace::bijector::scalar_bijector_map::logit};
-  Kokkos::parallel_for("evaluate_links", n, KOKKOS_LAMBDA(const int i) {
-    const double u = eta(i);
-    theta(i)  = b.inverse(u);
-    dtheta(i) = b.inverse_d1(u);
+  Kokkos::parallel_for("evaluate_expit", n, KOKKOS_LAMBDA(const int i) {
+    h(i)  = b.inverse(u(i));
+    dh(i) = b.inverse_d1(u(i));
   });
 }
 \endcode

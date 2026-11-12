@@ -3,7 +3,7 @@
 // A bijector is a bijection g: V -> U between open intervals, with inverse
 // h = g^-1. Forward goes from the constrained side to the unconstrained one,
 // in the direction that statistics names the map (decisions of 2026-11-12,
-// note/bijectors.md): log maps (0, inf) onto R, logit maps (0, 1) onto R. A
+// docs/numerics.md): log maps (0, inf) onto R, logit maps (0, 1) onto R. A
 // link evaluates h (theta = h(eta)), a transformer g (z = g(y)), a
 // constraint h (theta = h(u)). Inverting a bijector (scalar_bijector::inverted) swaps
 // every pair below; exp is log inverted.
@@ -72,8 +72,8 @@
 //
 // Outside the closed domain (or NaN) every function returns NaN. On a
 // bound the formulas give their limits (logit(0) = -inf). Nothing is clamped
-// here: where a value saturates or a derivative under- or overflows is the
-// subject of note/clamping/, still open.
+// (decided 2026-11-12): the exact function is computed, and
+// the distances to the bounds are given where 1 - h(u) would cancel.
 #pragma once
 
 #include <laplace/core/config.hpp>
@@ -959,7 +959,7 @@ LAPLACE_HD double inv_to_lower(scalar_bijector_map k, double u) {
  * Example:
  * \code{.cpp}
  * const scalar_bijector logit{scalar_bijector_map::logit};
- * double theta = logit.inverse(eta);
+ * double p = logit.inverse(u);
  * \endcode
  *
  * \see bijector_scalar, scalar_bijector_map, forward(), inverse()

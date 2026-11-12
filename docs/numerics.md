@@ -1476,8 +1476,7 @@ and loglog (up to 1430 ulp), whose values and first derivatives cross zero
 (loglog at v = 1/e) or are ill-conditioned (exp(u - e^u) carries the rounding
 of e^u); their ulpC there is at most 2.01. Timings not measured yet.
 
-**Distances to the bounds** (added 2026-11-12, option 2 of
-`note/clamping/clamping.md`). `b.inverse_distance_upper(u)` and
+**Distances to the bounds** (added 2026-11-12). `b.inverse_distance_upper(u)` and
 `b.inverse_distance_lower(u)` return the distance of h(u) to the upper and
 lower bound of its range, computed without forming h where h saturates at a
 bound other than 0 or infinity: 1 - h(u) is expit(-u) for logit, Phi(-u) for
