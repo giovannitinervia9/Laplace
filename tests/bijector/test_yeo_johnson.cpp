@@ -2,7 +2,7 @@
 // mpmath references (tools/reference/bijector_yeo_johnson.py, through param_common.hpp),
 // and exact checks: the special values, the kink at 0, the image for each lambda,
 // NaN for an invalid lambda, inversion, the distances, the constructor and the kinks.
-// Bounds: 1.5 times the errors measured on the gcc/OpenMP build on 2026-11-12 (the table
+// Bounds: 1.5 times the larger of the errors measured on the gcc/OpenMP and CUDA builds on 2026-11-12 (the table
 // with LAPLACE_PRINT_ERRORS=1).
 #include <doctest/doctest.h>
 
@@ -32,12 +32,13 @@ bool close(double a, double b, double rel = 1e-14) {
 }  // namespace
 
 TEST_CASE("bijector yeo_johnson: accuracy against mpmath") {
-  // 1.5 times the measured maxima of ulpC (LAPLACE_PRINT_ERRORS=1), gcc/OpenMP, 2026-11-12
+  // 1.5 times the measured maxima of ulpC (LAPLACE_PRINT_ERRORS=1), the larger of gcc/OpenMP and
+  // CUDA, after the refinements of 2026-11-12 (the forward log-Jacobian: gcc, earlier that day)
   static const double bound[6][7] = {
-      {31, 39, 26, 33, 29, 28, 36},  // forward
-      {3, 4, 6, 9, 30, 60, 22},      // inverse (order 5: 39.9 ulpC on CUDA)
+      {3, 5, 3, 4, 5, 7, 9},         // forward
+      {3, 4, 6, 13, 18, 46, 31},     // inverse
       {2, 2, 2, 4, 4, 4, 5},         // forward log-Jacobian
-      {3, 2, 7, 10, 9, 18, 70},      // inverse log-Jacobian
+      {3, 2, 6, 10, 6, 7, 10},       // inverse log-Jacobian
       {-1, -1, -1, -1, -1, -1, -1},  // distances: +inf, no rows
       {-1, -1, -1, -1, -1, -1, -1},
   };

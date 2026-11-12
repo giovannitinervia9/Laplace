@@ -172,9 +172,12 @@ LAPLACE_HD double deriv(double x) {
 
 // psi^(k)(x) for every k = 1..n at once (n <= 6), in out[1..n]; out[0] is not written. The same
 // methods and regions as deriv<K>, with the work shared: one pass over the quadrature nodes and
-// one recursion give every order (the series stays one loop per order). The results are
-// bit-identical to log1prel_d1 ... log1prel_dn. For callers that need several orders at the same
-// point (the derivatives of Box-Cox in its exponent).
+// one recursion give every order (the series stays one loop per order). In the quadrature each
+// node forms r = t/d and r/d, d = 1 + x t, and the orders by products with r: two divisions per
+// node instead of n + 1, and the same number of roundings as quadrature<K>. The results are then
+// not bit-identical to log1prel_dk there, and are within its measured errors (docs/numerics.md,
+// section on the refinements of the Box-Cox, Yeo-Johnson and softplus bijectors). For callers
+// that need several orders at the same point (Box-Cox, Yeo-Johnson).
 LAPLACE_HD void derivs_upto(int n, double x, double* out) {
   if (!(x >= -1.0) || x == -1.0 || x == detail::pos_inf() || Kokkos::fabs(x) < 0.25) {
     for (int k = 1; k <= n; ++k) {
@@ -200,10 +203,10 @@ LAPLACE_HD void derivs_upto(int n, double x, double* out) {
         const double d = 1.0 + x * t;
         const double r = t / d;
         const double wi = panels == 1 ? gl_w(i) : w * gl_w(i);
-        double p = r;
+        double p = r / d;  // r^k / d, k = 1..n: two divisions per node instead of n + 1
         for (int k = 1; k <= n; ++k) {
           if (k > 1) p *= r;
-          s[k] += wi * p / d;
+          s[k] += wi * p;
         }
       }
     }

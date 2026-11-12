@@ -36,13 +36,15 @@ TEST_CASE("box_cox: references") {
   // bound[which][order]: the largest ulpC accepted (which: forward, inverse, forward log-Jacobian,
   // inverse log-Jacobian; the distances are checked exactly below and have no reference rows)
   // measured on the gcc build (2026-11-12): forward 1.61, 3.05, 4.33, 3.99, 4.93, 6.27, 7.97;
-  // inverse 1, 4.31, 4.99, 6.8, 13.9, 23, 42.8; forward log-Jacobian 1.28, 0.77, 0.67, 0.46, 0.77,
-  // 0.64, 0.48; inverse log-Jacobian 1.18, 3.85, 2.32, 1.83, 13.2, 28.8, 49.4
+  // forward log-Jacobian 1.28, 0.77, 0.67, 0.46, 0.77, 0.64, 0.48. Inverse and inverse
+  // log-Jacobian after the refinements of 2026-11-12 (shared log1prel pass, the log-Jacobian's
+  // partials from scalar_yeo_johnson.hpp), the larger of gcc and CUDA: inverse 1.12, 4.31, 5.44,
+  // 8.76, 13.9, 23, 46.3; inverse log-Jacobian 1.18, 5.22, 2.32, 2.08, 2.76, 3.77, 6.61
   static const double bound[6][7] = {
       {2.5, 5, 6.5, 6, 7.5, 9.5, 12},
-      {2, 6.5, 7.5, 10, 21, 35, 64},
+      {2, 6.5, 8.5, 13.5, 21, 35, 70},
       {2, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5},
-      {2, 6, 3.5, 3, 20, 43, 74},
+      {2, 8, 3.5, 3.5, 4.5, 6, 10},
       {-1, -1, -1, -1, -1, -1, -1},
       {-1, -1, -1, -1, -1, -1, -1}};
   bijector_param_test::check_map("box_cox", map_t::box_cox, bound);

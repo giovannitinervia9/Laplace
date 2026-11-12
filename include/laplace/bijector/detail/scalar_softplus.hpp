@@ -50,10 +50,11 @@ LAPLACE_HD_FORCEINLINE bool softplus_valid(double a) { return a > 0.0 && Kokkos:
 
 // ---------------------------------------------------------------- integer helpers, orders <= 6
 
-LAPLACE_HD_FORCEINLINE double sp_binom(int n, int k) {  // C(n, k), 0 <= k <= n <= 6
-  double c = 1.0;
-  for (int i = 1; i <= k; ++i) c = c * double(n - k + i) / double(i);
-  return c;
+LAPLACE_HD_FORCEINLINE double sp_binom(int n, int k) {  // C(n, k), 0 <= k <= n <= 6, exact
+  // integer arithmetic: the double division of the device is slow (FP64 at 1/64 rate)
+  int c = 1;
+  for (int i = 1; i <= k; ++i) c = c * (n - k + i) / i;
+  return double(c);
 }
 LAPLACE_HD_FORCEINLINE double sp_ff(int m, int j) {  // m (m - 1) ... (m - j + 1)
   double f = 1.0;

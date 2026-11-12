@@ -231,6 +231,16 @@ def check():
 
 # ---------------------------------------------------------------- C++ output
 
+def yj_pow_cxx(z, sexp):
+    """(1 + z)^s with s = k + a, k an integer and a = lambda or -lambda: yj_pow(1 + z, a, k), so that
+    the exponent is not rounded (lambda - k and 2 - lambda - k are not doubles)"""
+    k = sexp.subs(lam, 0)
+    a = sp.expand(sexp - k)
+    if not k.is_Integer or a not in (lam, -lam):
+        raise ValueError(f"exponent not k +- lambda: {sexp}")
+    return f"yj_pow(1.0 + {cxx(z)}, {cxx(a)}, {int(k)})"
+
+
 def cxx(e):
     if e.is_Symbol:
         return e.name
@@ -255,52 +265,175 @@ def cxx(e):
     if isinstance(e, EM1):
         return f"Kokkos::expm1({cxx(e.args[0])})"
     if isinstance(e, POW1P):
-        return f"Kokkos::pow(1.0 + {cxx(e.args[0])}, {cxx(e.args[1])})"
+        return yj_pow_cxx(e.args[0], e.args[1])
     if isinstance(e, LOG1P):
         return f"Kokkos::log1p({cxx(e.args[0])})"
-    for j, cls in enumerate(EX):
-        if isinstance(e, cls):
-            name = "m::exprel" if j == 0 else f"m::exprel_d{j}"
-            return f"{name}({cxx(e.args[0])})"
-    for j, cls in enumerate(LR):
-        if isinstance(e, cls):
-            name = "m::log1prel" if j == 0 else f"m::log1prel_d{j}"
-            return f"{name}({cxx(e.args[0])})"
     raise ValueError(f"cannot print {e} ({type(e)})")
+
+
+def shared_log1prel(exprs, indent):
+    """The derivatives of log1prel in the expressions all share one argument (lambda u, or
+    (lambda - 2) u on the negative branch). They are replaced by the entries of an array lr[]
+    filled by one call of log1prel and one of detail_log1prel::derivs_upto, which gives every
+    order in one pass (bit-identical to log1prel_dK), instead of one call per order."""
+    atoms = set()
+    for e in exprs:
+        atoms |= {a for a in e.atoms(sp.Function) if type(a) in LR}
+    if not atoms:
+        return exprs, []
+    args = {a.args[0] for a in atoms}
+    z = next(iter(args))
+    for a in args:
+        if sp.simplify(a - z) != 0:
+            raise ValueError(f"log1prel at two different arguments: {args}")
+    orders = {LR.index(type(a)) for a in atoms}
+    nmax = max(orders)
+    sub = {a: sp.Symbol(f"lr[{LR.index(type(a))}]") for a in atoms}
+    lines = [f"{indent}const double z = {cxx(sp.factor(z))};", f"{indent}double lr[{nmax + 1}];"]
+    if 0 in orders:
+        lines.append(f"{indent}lr[0] = m::log1prel(z);")
+    if nmax >= 1:
+        lines.append(f"{indent}m::detail_log1prel::derivs_upto({nmax}, z, lr);")
+    return [e.xreplace(sub) for e in exprs], lines
+
+
+def shared_exprel(exprs, indent):
+    """The derivatives of exprel appear at y = s log1p(X), one per function: log1p(X) and exprel
+    are computed first, exprel by yj_exprel_d, which takes the power (1 + X)^s where |y| is large."""
+    atoms = set()
+    for e in exprs:
+        atoms |= {a for a in e.atoms(sp.Function) if type(a) in EX}
+    if not atoms:
+        return exprs, []
+    lines, sub = [], {}
+    for n, a in enumerate(sorted(atoms, key=str)):
+        y = a.args[0]
+        logs = [f for f in sp.Mul.make_args(y) if isinstance(f, LOG1P)]
+        if len(logs) != 1:
+            raise ValueError(f"exprel argument not s log1p(X): {y}")
+        X = logs[0].args[0]
+        sexp = sp.factor(y / logs[0])
+        j = EX.index(type(a))
+        k = sexp.subs(lam, 0)
+        lines += [f"{indent}const double lp{n} = Kokkos::log1p({cxx(X)});",
+                  f"{indent}const double ex{n} = yj_exprel_d<{j}>(({cxx(sexp)}) * lp{n}, {cxx(X)}, "
+                  f"{cxx(sp.expand(sexp - k))}, {int(k)});"]
+        sub[a] = sp.Symbol(f"ex{n}")
+        sub[logs[0]] = sp.Symbol(f"lp{n}")
+    return [e.xreplace(sub) for e in exprs], lines
+
+
+def shared_pow(exprs, indent):
+    """the powers (1 + z)^s, computed first by yj_pow (before the common subexpressions, which would
+    hide the form k +- lambda of the exponent)"""
+    atoms = set()
+    for e in exprs:
+        atoms |= e.atoms(POW1P)
+    lines, sub = [], {}
+    for n, a in enumerate(sorted(atoms, key=str)):
+        lines.append(f"{indent}const double pw{n} = {yj_pow_cxx(*a.args)};")
+        sub[a] = sp.Symbol(f"pw{n}")
+    return [e.xreplace(sub) for e in exprs], lines
 
 
 def emit(exprs, indent):
     """the statements computing the expressions (common subexpressions named t0, t1, ...)"""
+    exprs, lines = shared_log1prel(exprs, indent)
+    exprs, more = shared_exprel(exprs, indent)
+    lines += more
+    exprs, more = shared_pow(exprs, indent)
+    lines += more
     reps, red = sp.cse(exprs, symbols=sp.numbered_symbols("t"))
-    lines = [f"{indent}const double {s.name} = {cxx(e)};" for s, e in reps]
+    lines += [f"{indent}const double {s.name} = {cxx(e)};" for s, e in reps]
     return lines, [cxx(e) for e in red]
 
 
-def branch_block(q, K, mode, indent):
-    """C++ statements for the order K of quantity q, for both branches: mode 'pure' returns
-    the single expression, 'partials' writes out[n1] for n1 = 0..K."""
+INV_LJ_SWITCH = 0.5
+E = sp.Symbol("e")
+
+
+def inv_lj_factored(b, K, exprs, indent):
+    """The mixed derivatives of log|h'| (at least one derivative in u and one in lambda) are
+    rational in u and lambda; expanded by SymPy their terms cancel when |z| is large, z = lambda u
+    (u >= 0) or (lambda - 2) u (u < 0): at u = -3, lambda = 0.4, order (3, 3), the terms are 96
+    times the result (46 ulpC). Written in e = 1/(1 + z) and factored, the same derivative is a
+    power of e times a short polynomial in e, 13 times more accurate there; the factored form
+    divides by lambda (or 2 - lambda), so it is used for |z| > INV_LJ_SWITCH only, where those
+    are bounded away from 0 unless |u| is large."""
+    s = lam if b == "pos" else -(2 - lam)  # z = s u
+    x_of_e = (1 / E - 1) / s
+    alt = []
+    for n1, e in enumerate(exprs):
+        n0 = K - n1
+        alt.append(sp.factor(sp.simplify(e.subs(x, x_of_e))) if n0 >= 1 and n1 >= 1 else e)
+    exprs2, pre = shared_log1prel(alt, indent + "  ")
+    reps, red = sp.cse(exprs2, symbols=sp.numbered_symbols("f"))
+    lines = [f"{indent}const double zs = {cxx(sp.factor(s * x))};",
+             f"{indent}if (Kokkos::fabs(zs) > {INV_LJ_SWITCH}) {{",
+             f"{indent}  const double e = 1.0 / (1.0 + zs);"]
+    lines += pre
+    lines += [f"{indent}  const double {t.name} = {cxx(v)};" for t, v in reps]
+    lines += [f"{indent}  out[{n1}] = {r};" for n1, r in enumerate(cxx(v) for v in red)]
+    lines += [f"{indent}  return;", f"{indent}}}"]
+    return lines
+
+
+def branch_body(q, b, K, mode, indent):
+    """C++ statements for the order K of quantity q on branch b: mode 'pure' returns the single
+    expression, 'partials' writes out[n1] for n1 = 0..K and returns."""
+    if mode == "pure":
+        exprs = [base(q, b, K)]
+    else:
+        exprs = []
+        for n1 in range(0, K + 1):
+            e = base(q, b, K - n1)
+            if n1:
+                e = sp.diff(e, lam, n1)
+            exprs.append(e)
     out = []
-    for b in ("pos", "neg"):
-        if mode == "pure":
-            exprs = [base(q, b, K)]
-        else:
-            exprs = []
-            for n1 in range(0, K + 1):
-                e = base(q, b, K - n1)
-                if n1:
-                    e = sp.diff(e, lam, n1)
-                exprs.append(e)
-        lines, red = emit(exprs, indent + "  ")
-        cond = "if (x >= 0.0) {" if b == "pos" else "{"
-        out.append(f"{indent}{cond}" if b == "pos" else f"{indent}{{")
-        out += lines
-        if mode == "pure":
-            out.append(f"{indent}  return {red[0]};")
-        else:
-            out += [f"{indent}  out[{n1}] = {r};" for n1, r in enumerate(red)]
-            out.append(f"{indent}  return;")
-        out.append(f"{indent}}}")
+    if q == "inv_lj" and mode == "partials" and K >= 2:
+        out += inv_lj_factored(b, K, exprs, indent)
+    lines, red = emit(exprs, indent)
+    out += lines
+    if mode == "pure":
+        out.append(f"{indent}return {red[0]};")
+    else:
+        out += [f"{indent}out[{n1}] = {r};" for n1, r in enumerate(red)]
+        out.append(f"{indent}return;")
     return out
+
+
+def branch_block(q, K, mode, indent):
+    """both branches; the positive branch of the partials of log|h'| is a call of
+    yeo_johnson_inv_lj_pos_partials, which Box-Cox shares"""
+    out = [f"{indent}if (x >= 0.0) {{"]
+    if q == "inv_lj" and mode == "partials":
+        out += [f"{indent}  yeo_johnson_inv_lj_pos_partials<{K}>(x, p1, out);", f"{indent}  return;"]
+    else:
+        out += branch_body(q, "pos", K, mode, indent + "  ")
+    out.append(f"{indent}}}")
+    out.append(f"{indent}{{")
+    out += branch_body(q, "neg", K, mode, indent + "  ")
+    out.append(f"{indent}}}")
+    return out
+
+
+def inv_lj_pos_function():
+    """d^(K - n1)_u d^n1_lambda of (1 - lambda) u log1prel(lambda u) = (1 - lambda) log(1 + lambda u)/lambda,
+    n1 = 0..K, in out[0..K]: the positive branch of log|h'| of Yeo-Johnson, and log|h'| of Box-Cox
+    (scalar_box_cox.hpp) for every u > -1/lambda. The other entries of out are not written."""
+    lines = ["// d^(K - n1)_u d^n1_lambda [(1 - lambda) log(1 + lambda u)/lambda], n1 = 0..K, in out[0..K] (the",
+             "// other entries are not written): log|h'| of Yeo-Johnson for u >= 0, and log|h'| of Box-Cox",
+             "// (scalar_box_cox.hpp) for every u with 1 + lambda u > 0.",
+             "template <int K>",
+             "LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out) {",
+             "  static_assert(K >= 1 && K <= 6, \"order 1 to 6\");"]
+    for K in range(1, KMAX + 1):
+        lines.append(f"  if constexpr (K == {K}) {{")
+        lines += branch_body("inv_lj", "pos", K, "partials", "    ")
+        lines.append("  }")
+    lines += ["}", ""]
+    return lines
 
 
 CPP_NAME = {"fwd": "yeo_johnson_fwd", "inv": "yeo_johnson_inv",
@@ -311,6 +444,8 @@ def generate_functions():
     lines = []
     for q in ("fwd", "inv", "fwd_lj", "inv_lj"):
         name = CPP_NAME[q]
+        if q == "inv_lj":
+            lines += inv_lj_pos_function()
         # pure derivatives, K = 0..6
         lines.append("template <int K>")
         lines.append(f"LAPLACE_HD double {name}(double x, double p1, double p2) {{")
@@ -368,7 +503,9 @@ PREAMBLE = """// Scalar bijector yeo_johnson (laplace::bijector::detail_scalar).
 //                     their u-derivatives (1 - lambda)(-1)^(n-1)(n-1)! lambda^(n-1)(1+lambda u)^(-n)
 //                     and (1 - lambda)(n-1)! c^(n-1)(1 - c u)^(-n)
 // The lambda-derivatives are SymPy's chain rule on these forms: the derivative of exprel
-// is exprel_d1, that of log1prel is log1prel_d1, and so on to order 6. Every form is
+// is exprel_d1, that of log1prel is log1prel_d1, and so on to order 6; the derivatives of
+// log1prel that one function needs (all at one argument per branch) come from one call of
+// m::detail_log1prel::derivs_upto, which gives every order in one pass. Every form is
 // regular at lambda = 0 and at lambda = 2, so no limit is taken; the function is
 // a function of lambda with no branch at 0 or 2. The forms and the checks are
 // in tools/reference/bijector_yeo_johnson_forms.py (SymPy 1.14.0), which writes this file.
@@ -390,6 +527,43 @@ PREAMBLE = """// Scalar bijector yeo_johnson (laplace::bijector::detail_scalar).
 namespace laplace::bijector::detail_scalar {
 
 LAPLACE_HD_FORCEINLINE bool yeo_johnson_valid(double p1) { return p1 - p1 == 0.0; }  // finite
+
+// w^(a + k) for w > 0, a = lambda or -lambda and k an integer (|k| <= 6): pow_pos(w, a) multiplied
+// or divided by w |k| times, so that the exponent a + k (lambda - 2 or 2 - lambda, say) is not
+// rounded: its rounding error, eps |a + k| at most, would be multiplied by log w (by 41 at
+// w = 1e18: 20 ulpC in g'' measured on 2026-11-12). Where the products overflow or underflow
+// while the power does not, pow_pos(w, a + k).
+LAPLACE_HD_FORCEINLINE double yj_pow(double w, double a, int k) {
+  double r = pow_pos(w, a);
+  for (int i = 0; i < k; ++i) r *= w;
+  for (int i = 0; i < -k; ++i) r /= w;
+  if (!(r > 0.0) || !Kokkos::isfinite(r)) return pow_pos(w, a + k);
+  return r;
+}
+
+// exprel^(J)(y) at y = s log1p(X), s = a + k as in yj_pow. For 8 <= |y| < 700 and |X| >= 1, by the
+// forward recursion of exprel (the method of m::exprel_dJ there) started from E = (1 + X)^s by
+// yj_pow instead of exp(y): the rounding of log1p(X), of s and of the product s log1p(X) is then
+// not amplified by |y| (at v = -1.15e18, lambda = 1e-9 it gave 26 ulpC in d_lambda g). For
+// |X| >= 1 the rounding of 1 + X is within the perturbation of X that ulpC allows. Elsewhere
+// m::exprel_dJ(y).
+template <int J>
+LAPLACE_HD double yj_exprel_d(double y, double X, double a, int k) {
+  const double ay = Kokkos::fabs(y);
+  if (ay >= 8.0 && ay < 700.0 && Kokkos::fabs(X) >= 1.0) {
+    const double E = yj_pow(1.0 + X, a, k);
+    double p = (E - 1.0) / y;
+    for (int j = 1; j <= J; ++j) p = (E - j * p) / y;
+    return p;
+  }
+  if constexpr (J == 0) return m::exprel(y);
+  if constexpr (J == 1) return m::exprel_d1(y);
+  if constexpr (J == 2) return m::exprel_d2(y);
+  if constexpr (J == 3) return m::exprel_d3(y);
+  if constexpr (J == 4) return m::exprel_d4(y);
+  if constexpr (J == 5) return m::exprel_d5(y);
+  if constexpr (J == 6) return m::exprel_d6(y);
+}
 
 """
 

@@ -52,6 +52,7 @@
 #pragma once
 
 #include <laplace/bijector/detail/scalar_helpers.hpp>
+#include <laplace/bijector/detail/scalar_yeo_johnson.hpp>
 #include <laplace/math/exprel.hpp>
 #include <laplace/math/log1prel.hpp>
 
@@ -71,10 +72,11 @@ LAPLACE_HD_FORCEINLINE double bc_fact(int k) {
   return f;
 }
 LAPLACE_HD_FORCEINLINE double bc_sgn(int k) { return (k & 1) ? -1.0 : 1.0; }  // (-1)^k
-LAPLACE_HD_FORCEINLINE double bc_binom(int n, int k) {
-  double r = 1.0;
-  for (int i = 1; i <= k; ++i) r = r * (n - k + i) / i;
-  return r;
+LAPLACE_HD_FORCEINLINE double bc_binom(int n, int k) {  // C(n, k), 0 <= k <= n <= 6, exact
+  // integer arithmetic: the double division of the device is slow (FP64 at 1/64 rate)
+  int c = 1;
+  for (int i = 1; i <= k; ++i) c = c * (n - k + i) / i;
+  return double(c);
 }
 // a (a - 1) ... (a - k + 1), k factors
 LAPLACE_HD_FORCEINLINE double bc_falling(double a, int k) {
@@ -292,6 +294,11 @@ LAPLACE_HD void box_cox_inv_partials(double u, double lam, double p2, double* ou
   bc_bell(K, u, lam, A);
   const double S = bc_S(u, lam);
   const double t = 1.0 / (1.0 + lam * u);
+  double C[K + 1][K + 1];  // the binomial coefficients, by Pascal's rule (exact; bc_binom divides)
+  for (int n = 0; n <= K; ++n) {
+    C[n][0] = C[n][n] = 1.0;
+    for (int k = 1; k < n; ++k) C[n][k] = C[n - 1][k - 1] + C[n - 1][k];
+  }
   for (int n1 = 0; n1 <= K; ++n1) {
     const int Kd = K - n1;
     if (Kd == 0) {
@@ -304,8 +311,8 @@ LAPLACE_HD void box_cox_inv_partials(double u, double lam, double p2, double* ou
     for (int j = 0; j <= n1; ++j)
       for (int i = 0; i <= n1 - j; ++i) {
         const int q = n1 - j - i;
-        s += bc_binom(n1, j) * bc_binom(n1 - j, i) * P[j] * A[i] * bc_sgn(q) * bc_rising(Kd, q) *
-             bc_pow_int(u, q) * bc_pow_int(t, q);
+        s += C[n1][j] * C[n1 - j][i] * P[j] * A[i] * bc_sgn(q) * bc_rising(Kd, q) * bc_pow_int(u, q) *
+             bc_pow_int(t, q);
       }
     out[n1] = m::exp((1.0 - Kd * lam) * S) * s;
   }
@@ -316,11 +323,15 @@ LAPLACE_HD void box_cox_fwd_lj_partials(double v, double lam, double p2, double*
   for (int i = 0; i < size; ++i) out[i] = 0.0;
   for (int n1 = 0; n1 <= K; ++n1) out[n1] = bc_fwd_lj_any(K - n1, n1, v, lam);
 }
+// log|h'| = (1 - lambda) log(1 + lambda u)/lambda is the positive branch of Yeo-Johnson's: its
+// partials are generated there (scalar_yeo_johnson.hpp), where the mixed ones are written in
+// e = 1/(1 + lambda u) for |lambda u| > 1/2 (the sums T_(K,n) above cancel there: up to 49 ulpC
+// at orders 4-6, measured 2026-11-12)
 template <int K>
 LAPLACE_HD void box_cox_inv_lj_partials(double u, double lam, double p2, double* out) {
   constexpr int size = (K + 1) * (K + 2) / 2;
   for (int i = 0; i < size; ++i) out[i] = 0.0;
-  for (int n1 = 0; n1 <= K; ++n1) out[n1] = bc_inv_lj_any(K - n1, n1, u, lam);
+  yeo_johnson_inv_lj_pos_partials<K>(u, lam, out);
 }
 
 LAPLACE_HD_FORCEINLINE double box_cox_dom_lo(double p1, double p2) { return bc_finite(p1) ? 0.0 : nan(); }
