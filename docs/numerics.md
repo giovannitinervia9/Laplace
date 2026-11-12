@@ -1597,7 +1597,8 @@ derivatives 30-44); log1prel 20-60 in the series region, 20-37 with one rule,
 log1prel 0.46-0.63 for the value, 2.8-3.7 for the derivatives with the series
 or one rule, 6.1-7.6 with two rules, 0.54-0.79 with the recursion. The two-rule
 quadrature costs about 2.5 times the recursion on one gcc thread and about 10
-times on this GPU.
+times on this GPU. Kept on every backend (Giovanni, 2026-11-12): the same
+algorithm and accuracy on CPU and GPU.
 
 **What this says.** Both functions are within 10 ulp at every order on both
 builds, at a few tens of ns per call.
