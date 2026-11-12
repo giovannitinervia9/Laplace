@@ -105,7 +105,7 @@ def _logPhi_derivs(t, n, prec):
 
 def logPhi_deriv(t, k):
     """d^k log Phi / dt^k at t, checked at two precisions."""
-    extra = 12 * max(0, math.ceil(math.log2(abs(t)))) if t < -1 else 0
+    extra = (12 if k <= 5 else 16) * max(0, math.ceil(math.log2(abs(t)))) if t < -1 else 0
     p1 = 200 + extra
     a = _logPhi_derivs(t, k, p1)[k - 1]
     b = _logPhi_derivs(t, k, p1 + 80)[k - 1]
@@ -191,7 +191,7 @@ def rows_for(name, rng):
     return rows
 
 
-NAMES = ["erfcx", "Phi", "log_Phi"] + [f"log_Phi_d{k}" for k in range(1, 6)] + ["Phi_inv_logp"]
+NAMES = ["erfcx", "Phi", "log_Phi"] + [f"log_Phi_d{k}" for k in range(1, 7)] + ["Phi_inv_logp"]
 ARGNAMES = {"erfcx": "x", "Phi": "x", "log_Phi": "x", "Phi_inv_logp": "logp"}
 
 

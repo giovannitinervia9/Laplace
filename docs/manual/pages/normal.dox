@@ -1,7 +1,7 @@
 /**
 \defgroup normal Normal distribution function
 \ingroup special
-\brief Standard normal distribution function \f$\Phi(x)\f$, complementary error functions \f$\operatorname{erfc}(x)\f$ and \f$\operatorname{erfcx}(x)\f$, log distribution function \f$\log \Phi(x)\f$ with derivatives in the argument to order 5, and quantile functions from probability and log-probability.
+\brief Standard normal distribution function \f$\Phi(x)\f$, complementary error functions \f$\operatorname{erfc}(x)\f$ and \f$\operatorname{erfcx}(x)\f$, log distribution function \f$\log \Phi(x)\f$ with derivatives in the argument to order 6, and quantile functions from probability and log-probability.
 
 Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
 
@@ -27,7 +27,7 @@ where:
 - \f$x \in \mathbb{R}\f$ is the real argument,
 - \f$u \in [x, \infty)\f$ is the real integration variable.
 
-Laplace computes the natural logarithm of the distribution function, \f$\log \Phi(x)\f$, and its derivatives with respect to the argument \f$t\f$ of order \f$k \in \{1, 2, 3, 4, 5\}\f$:
+Laplace computes the natural logarithm of the distribution function, \f$\log \Phi(x)\f$, and its derivatives with respect to the argument \f$t\f$ of order \f$k \in \{1, 2, 3, 4, 5, 6\}\f$:
 \f[
 g_k(t) = \frac{\mathrm{d}^k}{\mathrm{d}t^k} \log \Phi(t)
 \f]
@@ -71,7 +71,7 @@ where:
   - \f$\operatorname{erfc}(x)\f$: defined for \f$x \in \mathbb{R}\f$; returns \f$0.0\f$ for \f$x > 27.3\f$ (including \f$+\infty\f$) and \f$2.0\f$ for \f$x < -27.3\f$ (including \f$-\infty\f$).
   - \f$\Phi(x)\f$: defined for \f$x \in \mathbb{R}\f$; at \f$x = 0.0\f$ returns \f$0.5\f$; underflows to \f$0.0\f$ below \f$x = -38.5\f$, returning \f$0.0\f$ for \f$x < -40.0\f$ and \f$1.0\f$ for \f$x > 40.0\f$ (including the infinities).
   - \f$\log \Phi(x)\f$: defined for \f$x \in \mathbb{R}\f$; returns \f$-\log 2\f$ at \f$x = 0.0\f$; finite down to \f$x = -1.8961 \times 10^{154}\f$ (`-sqrt(2 DBL_MAX)`), returns \f$-\infty\f$ below it and at \f$-\infty\f$, and returns \f$-0.0\f$ for \f$x > 40.0\f$.
-  - \f$\frac{\mathrm{d}^k}{\mathrm{d}t^k}\log \Phi(t)\f$ (\f$k = 1, \dots, 5\f$): defined for \f$t \in \mathbb{R}\f$; for order 1, \f$R(t) \to +\infty\f$ as \f$t \to -\infty\f$; for order 2, \f$g_2(t) \to -1.0\f$ as \f$t \to -\infty\f$; for orders \f$k \ge 3\f$, \f$g_k(t) \to 0.0\f$ as \f$t \to -\infty\f$; for all orders \f$k \ge 1\f$, \f$g_k(t) \to 0.0\f$ as \f$t \to +\infty\f$ (subnormal for \f$t \ge 38\f$).
+  - \f$\frac{\mathrm{d}^k}{\mathrm{d}t^k}\log \Phi(t)\f$ (\f$k = 1, \dots, 6\f$): defined for \f$t \in \mathbb{R}\f$; for order 1, \f$R(t) \to +\infty\f$ as \f$t \to -\infty\f$; for order 2, \f$g_2(t) \to -1.0\f$ as \f$t \to -\infty\f$; for orders \f$k \ge 3\f$, \f$g_k(t) \to 0.0\f$ as \f$t \to -\infty\f$; for all orders \f$k \ge 1\f$, \f$g_k(t) \to 0.0\f$ as \f$t \to +\infty\f$ (subnormal for \f$t \ge 38\f$).
   - \f$\Phi^{-1}(p)\f$: defined for \f$p \in (0, 1)\f$; returns \f$0.0\f$ at \f$p = 0.5\f$; returns \f$-\infty\f$ at \f$p = 0.0\f$; returns \f$+\infty\f$ at \f$p = 1.0\f$.
   - \f$\Phi^{-1}(e^l)\f$: defined for \f$l \in (-\infty, 0]\f$; returns \f$+\infty\f$ at \f$l = 0.0\f$; returns \f$-\infty\f$ at \f$l = -\infty\f$.
 - **Special values and boundaries:**
@@ -126,14 +126,14 @@ The value \f$\operatorname{erfcx}(x)\f$ is computed across two regimes:
 
 ### Derivatives of the log distribution function
 
-The derivatives \f$g_k(t) = \frac{\mathrm{d}^k}{\mathrm{d}t^k}\log \Phi(t)\f$ for \f$k \in \{1, 2, 3, 4, 5\}\f$ are evaluated across three regimes:
+The derivatives \f$g_k(t) = \frac{\mathrm{d}^k}{\mathrm{d}t^k}\log \Phi(t)\f$ for \f$k \in \{1, 2, 3, 4, 5, 6\}\f$ are evaluated across three regimes:
 
 1. **Piecewise Chebyshev expansions** (\f$t \in [-1, 4)\f$):
    Five pieces of unit length covering \f$[-1, 0), [0, 1), [1, 2), [2, 3), [3, 4)\f$. On piece \f$p \in \{0, 1, 2, 3, 4\}\f$ on \f$[a, a + 1)\f$ with \f$a = -1 + p\f$:
    \f[
    x = 2 (t - a) - 1 \in [-1, 1], \quad g_k(t) = c_0 + \sum_{n=1}^{N_k} c_n T_n(x)
    \f]
-   evaluated by Clenshaw's recurrence from stored coefficients rounded to double precision. The polynomial degrees \f$N_k\f$ for orders \f$k = 1, \dots, 5\f$ are \f$17, 17, 18, 19, 20\f$.
+   evaluated by Clenshaw's recurrence from stored coefficients rounded to double precision. The polynomial degrees \f$N_k\f$ for orders \f$k = 1, \dots, 6\f$ are \f$17, 17, 18, 19, 20, 20\f$.
 2. **Downward cumulant recurrence** (\f$t < -1\f$):
    With \f$x = -t > 1\f$:
    \f$\log \Phi(t) = -x^2/2 - \frac{1}{2}\log(2\pi) + \log M_0(x)\f$, where
@@ -163,6 +163,7 @@ The derivatives \f$g_k(t) = \frac{\mathrm{d}^k}{\mathrm{d}t^k}\log \Phi(t)\f$ fo
    - order 3: \f$g_3 = -g_2(t + 2R) - R\f$
    - order 4: \f$g_4 = -g_3(t + 2R) - 2 g_2(1 + g_2)\f$
    - order 5: \f$g_5 = -g_4(t + 2R) - 3 g_3(1 + 2 g_2)\f$
+   - order 6: \f$g_6 = -g_5(t + 2R) - 4 g_4(1 + 2 g_2) - 6 g_3^2\f$
 
 ### Normal quantiles
 
@@ -183,7 +184,7 @@ The derivatives \f$g_k(t) = \frac{\mathrm{d}^k}{\mathrm{d}t^k}\log \Phi(t)\f$ fo
 
 See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
 
-Reference values are computed with mpmath at 200 bits of precision (`tools/reference/normal.py`). For the derivative functions, reference points cover \f$t\f$ from \f$-2^{60}\f$ to \f$38\f$ in the main files (`log_Phi_d1.csv` through `log_Phi_d5.csv`), and a dense set on \f$[-1, 10]\f$ (20011 rows each in the "mid" files `log_Phi_d1_mid.csv` through `log_Phi_d5_mid.csv`) for the piecewise Chebyshev expansions and the tail and centre test bounds. For derivatives below \f$t = -1\f$, the working precision is raised by 12 bits per binary order of \f$|t|\f$ above 200 bits, and verified against an independent evaluation at 80 additional bits (requiring agreement to \f$2^{-120}\f$ relative). Quantile references come from `tests/data/reference/qnorm.csv` and `tests/data/reference/Phi_inv_logp.csv` (with \f$-l\f$ log-uniform in \f$[2^{-60}, 2^{1000}]\f$).
+Reference values are computed with mpmath at 200 bits of precision (`tools/reference/normal.py`). For the derivative functions, reference points cover \f$t\f$ from \f$-2^{60}\f$ to \f$38\f$ in the main files (`log_Phi_d1.csv` through `log_Phi_d6.csv`), and a dense set on \f$[-1, 10]\f$ (20011 rows each in the "mid" files `log_Phi_d1_mid.csv` through `log_Phi_d6_mid.csv`) for the piecewise Chebyshev expansions and the tail and centre test bounds. For derivatives below \f$t = -1\f$, the working precision is raised by 12 bits per binary order of \f$|t|\f$ above 200 bits, and verified against an independent evaluation at 80 additional bits (requiring agreement to \f$2^{-120}\f$ relative). Quantile references come from `tests/data/reference/qnorm.csv` and `tests/data/reference/Phi_inv_logp.csv` (with \f$-l\f$ log-uniform in \f$[2^{-60}, 2^{1000}]\f$).
 
 ### Function value and quantile accuracy
 
@@ -212,6 +213,9 @@ For derivative functions, error is measured in \ref accuracy_ulp "ulp" below \f$
 | \ref laplace::math::own::log_Phi_d3 "log_Phi_d3()" | 3 | 0.34 | 0.75 | 22.0 | 1.2 |
 | \ref laplace::math::own::log_Phi_d4 "log_Phi_d4()" | 4 | 0.18 | 1.19 | 50.0 | 2.0 |
 | \ref laplace::math::own::log_Phi_d5 "log_Phi_d5()" | 5 | 0.23 | 1.85 | 120.0 | 3.0 |
+| \ref laplace::math::own::log_Phi_d6 "log_Phi_d6()" | 6 | 0.43 | — | 1150.0 | 1.0 |
+
+Order 6 was measured by region: below \f$t = -1\f$, 767 ulp on gcc and 478 ulp on CUDA, all of it between \f$t = -3\f$ and \f$t = -1\f$, where \f$g_6\f$ is small (0.0134 at \f$t = -1.1\f$) and the cumulant recursion converges slowly (at most 6.0 ulp1); below \f$t = -5\f$ within 20 ulp. For \f$t \ge -1\f$, 0.43 ulp1 on gcc and 0.34 ulp1 on CUDA.
 
 Across sub-intervals on \f$[-1, 4)\f$ (piecewise Chebyshev expansions, measured on gcc):
 - \f$[-1, 0)\f$: d1 1.19, d2 0.64, d3 0.16, d4 0.082, d5 0.070 ulp1.
@@ -278,6 +282,7 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::log_Phi_d3 "log_Phi_d3()" — Third derivative of \f$\log \Phi(t)\f$
 - \ref laplace::math::own::log_Phi_d4 "log_Phi_d4()" — Fourth derivative of \f$\log \Phi(t)\f$
 - \ref laplace::math::own::log_Phi_d5 "log_Phi_d5()" — Fifth derivative of \f$\log \Phi(t)\f$
+- \ref laplace::math::own::log_Phi_d6 "log_Phi_d6()" — Sixth derivative of \f$\log \Phi(t)\f$
 - \ref laplace::math::own::Phi_inv "Phi_inv()" — Standard normal quantile function \f$\Phi^{-1}(p)\f$ from probability \f$p \in (0, 1)\f$
 - \ref laplace::math::own::Phi_inv_logp "Phi_inv_logp()" — Standard normal quantile function \f$\Phi^{-1}(e^l)\f$ from log-probability \f$l \le 0\f$
 */

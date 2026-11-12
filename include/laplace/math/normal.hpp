@@ -332,7 +332,7 @@ constexpr double cheb_lo = -0x1.0000000000000p+0;  // the expansions cover [cheb
 constexpr double cheb_hi = 0x1.0000000000000p+2;
 constexpr double cheb_width = 0x1.0000000000000p+0;  // pieces of this length
 constexpr int cheb_pieces = 5;
-constexpr int cheb_size = 480;
+constexpr int cheb_size = 585;
 
 // clang-format off
 #define LAPLACE_LOG_PHI_CHEB \
@@ -495,7 +495,42 @@ constexpr int cheb_size = 480;
   0x1.bc649d3b5ef83p-27, -0x1.15f5cf63ee98dp-29, 0x1.af35830901bbap-35, \
   0x1.26d33d517dcc7p-36, -0x1.22749391135d7p-39, 0x1.1a0f245004f21p-45, \
   0x1.274bd7962a53cp-46, -0x1.0659bd0dfbc20p-49, 0x1.973467e682604p-56, \
-  0x1.05c0c32326cf5p-56, -0x1.bc6a765a33eb6p-60, 0x1.0a4b5c68ffcb8p-66
+  0x1.05c0c32326cf5p-56, -0x1.bc6a765a33eb6p-60, 0x1.0a4b5c68ffcb8p-66, \
+  -0x1.db23a1506c90bp-5, -0x1.4a16075b60f66p-4, -0x1.d8a30a4fb2118p-7, \
+  -0x1.4558ef20d9e87p-14, 0x1.7c2fe359fe84ap-12, 0x1.0cec25c2f5ae0p-14, \
+  0x1.1d4d6867b3aaep-18, -0x1.228dc0801c4eap-22, -0x1.88f0e0d9c0f26p-24, \
+  -0x1.3f8b68d51ef6ep-27, -0x1.139cbd0d3191ep-32, 0x1.07d83dd329d36p-34, \
+  0x1.56f48c9977d57p-37, 0x1.6a970ec7f768bp-41, -0x1.e51aac1151fe6p-48, \
+  -0x1.b4f6a118a2859p-48, -0x1.717bdc059cc90p-51, -0x1.d9bbe785643e0p-56, \
+  0x1.1e76fd50e3d60p-59, 0x1.da5f2a85be448p-62, 0x1.1aa31972b4301p-65, \
+  -0x1.ac37772e87e20p-3, -0x1.de589fc8c394dp-7, 0x1.ad17c7b93a4b9p-5, \
+  0x1.59612dafde97bp-7, -0x1.40d89a0fee6c9p-12, -0x1.62793676311eep-12, \
+  -0x1.308405c153e22p-15, 0x1.32739f300ca9fp-19, 0x1.df937612eeb2fp-21, \
+  0x1.0864c96c7f92ep-24, -0x1.c1f9b454df926p-28, -0x1.9f410c8390935p-30, \
+  -0x1.235d9e4ac8776p-34, 0x1.a8cff108a2037p-37, 0x1.0fe0b0d4d2c56p-39, \
+  0x1.92ef68830bce0p-45, -0x1.3229deb5435a1p-46, -0x1.237ba006dead1p-49, \
+  -0x1.ce0f29575d912p-58, 0x1.6dee59a0e0582p-56, 0x1.0a8adfd1a9e53p-59, \
+  0x1.7a9b4271aab03p-3, 0x1.4ff76a6b77551p-2, -0x1.72182d9fbe4b9p-5, \
+  -0x1.bcc31844c759bp-6, 0x1.8e363345b8007p-11, 0x1.040b995be4353p-10, \
+  0x1.7d4506760006dp-16, -0x1.84966b2c2fc33p-16, -0x1.809979f54ea62p-20, \
+  0x1.a69411688ec0ap-22, 0x1.5c5338514a30ap-25, -0x1.5ca5b0bbd2862p-28, \
+  -0x1.c2b721d741b5cp-31, 0x1.9f3fa28c45860p-35, 0x1.d5fde98ef8659p-37, \
+  -0x1.c5701e706ed11p-43, -0x1.9fbdeca78b3b9p-43, -0x1.ebec129aa4254p-49, \
+  0x1.3ef92d7e4d558p-49, 0x1.02cfcbe2d8c59p-53, -0x1.a9544505d10bcp-56, \
+  0x1.5b97d4404132cp-3, -0x1.33fa3ab23850bp-2, -0x1.6354817b75028p-9, \
+  0x1.8aa007ea82eedp-6, -0x1.135e59826651ap-9, -0x1.72b5f7bdc93bdp-11, \
+  0x1.c0ee47d9a3ef2p-14, 0x1.6a30ead9b314cp-17, -0x1.81f255e3692d4p-19, \
+  -0x1.d5ee48ca96350p-25, 0x1.c8c344d8dcdb8p-25, -0x1.dcde4700db8dfp-30, \
+  -0x1.92ff4388dc466p-31, 0x1.0884903295772p-34, 0x1.05ca337f45aa9p-37, \
+  -0x1.4489171d86083p-40, -0x1.91607430b699fp-45, 0x1.2ae7c32f877e3p-46, \
+  -0x1.ad2ef0bdc758dp-53, -0x1.b9bb5f1cb9840p-53, 0x1.832c6f4ece03ap-57, \
+  -0x1.c28caa026903fp-4, 0x1.1d8c06d618f74p-5, 0x1.7f55a9297987bp-6, \
+  -0x1.19fe39b9dfbb7p-7, 0x1.6bf39c324495cp-11, 0x1.4750989ab4ba7p-13, \
+  -0x1.49258d93ce190p-15, 0x1.ec94a719f2beep-20, 0x1.f624dfeec0466p-22, \
+  -0x1.57fcfc6bfcb4fp-24, 0x1.19d785fab792fp-29, 0x1.bb236876c50ebp-31, \
+  -0x1.d3a8836f33c1ep-34, 0x1.cd18f910b8107p-40, 0x1.153b1722ed7f1p-40, \
+  -0x1.040c33da84b97p-43, 0x1.8ff41897424bfp-50, 0x1.26c499bb8447fp-50, \
+  -0x1.059cae6d41d28p-53, 0x1.2ef8cfe27aaa8p-60, 0x1.2143ec26809c9p-60
 // clang-format on
 #if defined(__CUDACC__)
 static __constant__ double log_phi_cheb_dev[cheb_size] = {LAPLACE_LOG_PHI_CHEB};
@@ -506,13 +541,13 @@ LAPLACE_HD_FORCEINLINE double cheb_coef(int i) {
   KOKKOS_IF_ON_DEVICE((return log_phi_cheb_dev[i];))
   KOKKOS_IF_ON_HOST((return log_phi_cheb_host[i];))
 }
-// the degree of the expansion of g_k, and the index of its first coefficient, k = 1..5
+// the degree of the expansion of g_k, and the index of its first coefficient, k = 1..6
 LAPLACE_HD_FORCEINLINE int cheb_degree(int k) {
-  constexpr int d[5] = {17, 17, 18, 19, 20};
+  constexpr int d[6] = {17, 17, 18, 19, 20, 20};
   return d[k - 1];
 }
 LAPLACE_HD_FORCEINLINE int cheb_offset(int k) {
-  constexpr int o[5] = {0, 90, 180, 275, 375};
+  constexpr int o[6] = {0, 90, 180, 275, 375, 480};
   return o[k - 1];
 }
 
@@ -521,12 +556,13 @@ LAPLACE_HD_FORCEINLINE int cheb_offset(int k) {
 
 namespace detail_normal {
 
-// d^k log Phi / dt^k at t, k = 1..5; the work is shared by the five public
+// d^k log Phi / dt^k at t, k = 1..6; the work is shared by the six public
 // functions below, each of which asks for its own order only.
 //
 // For t >= t_switch: from R and the recursion R' = -R (t + R):
 //   g1 = R, g2 = -R (t + R), g3 = -g2 (t + 2R) - R,
-//   g4 = -g3 (t + 2R) - 2 g2 (1 + g2), g5 = -g4 (t + 2R) - 3 g3 (1 + 2 g2).
+//   g4 = -g3 (t + 2R) - 2 g2 (1 + g2), g5 = -g4 (t + 2R) - 3 g3 (1 + 2 g2),
+//   g6 = -g5 (t + 2R) - 4 g4 (1 + 2 g2) - 6 g3^2.
 // Below, t + R cancels (both terms are of size |t|, their sum of size 1/|t|).
 // There, with x = -t, log Phi(t) = -x^2/2 - log(2 pi)/2 + log M_0(x), where
 // M_j(x) = int_0^inf s^j exp(-x s - s^2/2) ds, and the derivatives of
@@ -542,12 +578,12 @@ namespace detail_normal {
 // damps the error of the start by about j w / (1 + w rho)^2, which is small
 // for large x (m0 steps suffice) and close to 1 for x near 1, where the error
 // falls like exp(-2 x sqrt K).
-// kappa_k from the raw moments mu_0 = 1, mu_1, .., mu_k (k = 1..5), by the
+// kappa_k from the raw moments mu_0 = 1, mu_1, .., mu_k (k = 1..6), by the
 // recursion kappa_n = mu_n - sum_(i=1)^(n-1) C(n-1, i-1) kappa_i mu_(n-i)
 // (statmodels7, enet_cumulants in pt_enet_logz.h); measured more accurate here
 // than the closed forms in powers of mu_1
 LAPLACE_HD_FORCEINLINE double cumulant(int k, const double* mu) {
-  double kap[6];
+  double kap[7];
   for (int n = 1; n <= k; ++n) {
     double s = mu[n], binom = 1.0;  // C(n - 1, i - 1)
     for (int i = 1; i < n; ++i) {
@@ -577,16 +613,18 @@ LAPLACE_HD double log_Phi_dk(int k, double t, double t_switch, double c2, int m0
     if (k == 3) return g3;
     const double g4 = -g3 * (t + 2.0 * R) - 2.0 * g2 * (1.0 + g2);
     if (k == 4) return g4;
-    return -g4 * (t + 2.0 * R) - 3.0 * g3 * (1.0 + 2.0 * g2);
+    const double g5 = -g4 * (t + 2.0 * R) - 3.0 * g3 * (1.0 + 2.0 * g2);
+    if (k == 5) return g5;
+    return -g5 * (t + 2.0 * R) - 4.0 * g4 * (1.0 + 2.0 * g2) - 6.0 * g3 * g3;
   }
   const double x = -t;
-  double mu[6] = {1.0, 0, 0, 0, 0, 0};
+  double mu[7] = {1.0, 0, 0, 0, 0, 0, 0};
   const double ix = 1.0 / x, w = ix * ix;
   const double kk = c2 * w;
   const int K = k + m0 + (kk < 20000.0 ? static_cast<int>(Kokkos::ceil(kk)) : 20000);
   const double K1 = K + 1.0;
   double rho = 2.0 * K1 / (1.0 + Kokkos::sqrt(1.0 + 4.0 * K1 * w));
-  double r[6] = {0, 0, 0, 0, 0, 0};
+  double r[7] = {0, 0, 0, 0, 0, 0, 0};
   for (int j = K; j >= 1; --j) {
     rho = j / (1.0 + w * rho);
     if (j <= k) r[j] = rho;
@@ -796,6 +834,38 @@ LAPLACE_HD double log_Phi_d5(double t) {
   return detail_normal::log_Phi_dk_outside(5, t);
 }
 
+/**
+ * \ingroup normal
+ * \brief Sixth derivative of \f$\log \Phi(t)\f$.
+ *
+ * Computes the sixth derivative:
+ * \f[
+ * \frac{\mathrm{d}^6}{\mathrm{d}t^6} \log \Phi(t) = g_6(t) = -g_5(t)(t + 2R(t)) - 4 g_4(t)(1 + 2 g_2(t)) - 6 g_3(t)^2
+ * \f]
+ * where \f$R(t)\f$, \f$g_2(t)\f$, \f$g_3(t)\f$, \f$g_4(t)\f$, and \f$g_5(t)\f$ are the lower-order derivatives (`log_Phi_d1()` through `log_Phi_d5()`).
+ *
+ * Evaluated via piecewise Chebyshev expansions on \f$[-1, 4)\f$; downward cumulant recurrence
+ * \f$g_6 = \kappa_6\f$ for \f$t < -1\f$; and the recurrence from \f$R\f$ for \f$t \ge 4\f$.
+ *
+ * \param t Real argument \f$t \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}^6}{\mathrm{d}t^6}\log \Phi(t)\f$.
+ *
+ * \par Domain and special values
+ * - \f$t \in \mathbb{R}\f$: standard domain.
+ * - As \f$t \to -\infty\f$: \f$g_6(t) \to 0.0\f$.
+ * - As \f$t \to +\infty\f$: \f$g_6(t) \to 0.0\f$.
+ * - If \f$t\f$ is NaN: returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error on gcc: 767 ulp below \f$t = -1\f$, 0.43 ulp1 above (CUDA: 478 ulp and 0.34 ulp1); test bounds: tail 1150.0 ulp, centre 1.0 ulp1.
+ *
+ * \see normal, log_Phi(), log_Phi_d5()
+ */
+LAPLACE_HD double log_Phi_d6(double t) {
+  if (t >= -1.0 && t < detail_normal::cheb_hi) return detail_normal::log_Phi_dk_cheb<6>(t);
+  return detail_normal::log_Phi_dk_outside(6, t);
+}
+
 // Phi^-1(p)
 /**
  * \ingroup normal
@@ -908,6 +978,7 @@ LAPLACE_HD_FORCEINLINE double log_Phi_d2(double t) { return own::log_Phi_d2(t); 
 LAPLACE_HD_FORCEINLINE double log_Phi_d3(double t) { return own::log_Phi_d3(t); }
 LAPLACE_HD_FORCEINLINE double log_Phi_d4(double t) { return own::log_Phi_d4(t); }
 LAPLACE_HD_FORCEINLINE double log_Phi_d5(double t) { return own::log_Phi_d5(t); }
+LAPLACE_HD_FORCEINLINE double log_Phi_d6(double t) { return own::log_Phi_d6(t); }
 LAPLACE_HD_FORCEINLINE double Phi_inv(double p) { return own::Phi_inv(p); }
 LAPLACE_HD_FORCEINLINE double Phi_inv_logp(double l) { return own::Phi_inv_logp(l); }
 

@@ -1,4 +1,4 @@
-"""Piecewise Chebyshev expansions of g_k(t) = d^k log Phi(t) / dt^k, k = 1..5.
+"""Piecewise Chebyshev expansions of g_k(t) = d^k log Phi(t) / dt^k, k = 1..6.
 
 Usage (from the repository root):
     python -I tools/reference/log_phi_cheb.py [--lo -1] [--hi 5] [--width 1] [--update]
@@ -92,7 +92,7 @@ def clenshaw_float(c, x):
 def fit(lo, width, pieces_per_order):
     """For each order k and piece p: the coefficients and the degree."""
     edges = [lo + p * width for p in range(pieces_per_order)]
-    results = {k: [] for k in range(1, 6)}
+    results = {k: [] for k in range(1, 7)}
     for p, a in enumerate(edges):
         b = a + width
         c_mid = (a + b) / 2
@@ -100,8 +100,8 @@ def fit(lo, width, pieces_per_order):
         with mpmath.workprec(PREC):
             xs = [mpmath.cos(mpmath.pi * (j + mpmath.mpf(1) / 2) / M_NODES) for j in range(M_NODES)]
             ts = [mpmath.mpf(c_mid) + half * x for x in xs]
-        vals = [g_values(mpmath.nstr(t, 80), 5) for t in ts]
-        for k in range(1, 6):
+        vals = [g_values(mpmath.nstr(t, 80), 6) for t in ts]
+        for k in range(1, 7):
             samples = [v[k - 1] for v in vals]
             c = chebyshev_coefficients(samples)
             # max |g_k| on the piece, from the interpolant on a fine grid
@@ -122,7 +122,7 @@ def fit(lo, width, pieces_per_order):
 def check(results, lo, width, degs):
     """Errors of the rounded table at random points, against 300-bit values."""
     rng = random.Random(SEED)
-    for k in range(1, 6):
+    for k in range(1, 7):
         worst_round = worst_trunc = 0.0
         worst_t = None
         for piece in results[k]:
@@ -171,15 +171,15 @@ def render(results, lo, hi, width, degs):
     offsets = {}
     total = 0
     data = []
-    for k in range(1, 6):
+    for k in range(1, 7):
         offsets[k] = total
         for piece in results[k]:
             for n in range(degs[k] + 1):
                 data.append(piece["c"][n])
         total += pieces * (degs[k] + 1)
     assert len(data) == total
-    deg_list = ", ".join(str(degs[k]) for k in range(1, 6))
-    off_list = ", ".join(str(offsets[k]) for k in range(1, 6))
+    deg_list = ", ".join(str(degs[k]) for k in range(1, 7))
+    off_list = ", ".join(str(offsets[k]) for k in range(1, 7))
     out = []
     out.append(BEGIN)
     out.append("// d^k log Phi / dt^k on [cheb_lo, cheb_hi): piecewise Chebyshev expansions of width")
@@ -206,13 +206,13 @@ def render(results, lo, hi, width, degs):
     out.append("  KOKKOS_IF_ON_DEVICE((return log_phi_cheb_dev[i];))")
     out.append("  KOKKOS_IF_ON_HOST((return log_phi_cheb_host[i];))")
     out.append("}")
-    out.append("// the degree of the expansion of g_k, and the index of its first coefficient, k = 1..5")
+    out.append("// the degree of the expansion of g_k, and the index of its first coefficient, k = 1..6")
     out.append("LAPLACE_HD_FORCEINLINE int cheb_degree(int k) {")
-    out.append(f"  constexpr int d[5] = {{{deg_list}}};")
+    out.append(f"  constexpr int d[6] = {{{deg_list}}};")
     out.append("  return d[k - 1];")
     out.append("}")
     out.append("LAPLACE_HD_FORCEINLINE int cheb_offset(int k) {")
-    out.append(f"  constexpr int o[5] = {{{off_list}}};")
+    out.append(f"  constexpr int o[6] = {{{off_list}}};")
     out.append("  return o[k - 1];")
     out.append("}")
     out.append("")
@@ -242,7 +242,7 @@ def main():
     pieces = int(round((args.hi - args.lo) / args.width))
     results = fit(args.lo, args.width, pieces)
     degs = {}
-    for k in range(1, 6):
+    for k in range(1, 7):
         degs[k] = max(p["deg"] for p in results[k])
         for p in results[k]:
             print(f"k={k} [{p['a']:+.3f}, {p['b']:+.3f}) max|g|={p['gmax']:.6g} "

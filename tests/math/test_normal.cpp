@@ -38,7 +38,8 @@ struct LogPhiD {
       case 2: return laplace::math::log_Phi_d2(t);
       case 3: return laplace::math::log_Phi_d3(t);
       case 4: return laplace::math::log_Phi_d4(t);
-      default: return laplace::math::log_Phi_d5(t);
+      case 5: return laplace::math::log_Phi_d5(t);
+      default: return laplace::math::log_Phi_d6(t);
     }
   }
 };
@@ -135,6 +136,7 @@ TEST_CASE("derivatives of log Phi against mpmath") {
   check_deriv(3, 22.0, 1.2);
   check_deriv(4, 50.0, 2.0);
   check_deriv(5, 120.0, 3.0);
+  check_deriv(6, 1150.0, 1.0);
 }
 
 TEST_CASE("normal quantile from p and from log p against mpmath") {

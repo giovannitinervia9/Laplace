@@ -1497,3 +1497,112 @@ errors are in the derivatives of order 5-6 near their zeros.
 **Chosen.** This version. Tested in `tests/bijector/test_scalar.cpp` on both
 builds, with bounds of half again the measured errors per map, and exactly
 for the constant derivatives, the identity, inversion and the domain.
+
+## The derivative of order 6 of log Phi
+
+**What.** `log_Phi_d6(t)` = d^6 log Phi(t) / dt^6, for the truncation term
+-log Phi(t) of the Box-Cox bijector at order 6 (decision 5 of
+`note/bijectors.md`). The other orders are unchanged.
+
+**How.** The same three routes as orders 1-5: the piecewise Chebyshev
+expansion on [-1, 4) (`tools/reference/log_phi_cheb.py`, now generating
+orders 1-6; g6 has degree 20 and a table error of 0.072 ulp1; the
+coefficients of orders 1-5 are bit for bit the earlier ones); above 4 the
+recursion from R = phi/Phi, one more step
+g6 = -g5 (t + 2R) - 4 g4 (1 + 2 g2) - 6 g3^2; below -1 the cumulants of
+exp(-x s - s^2/2) on s > 0 (x = -t), kappa_6 from the raw moments.
+References `log_Phi_d6.csv` and `log_Phi_d6_mid.csv`
+(`tools/reference/normal.py`; the extra working precision in the left tail is
+16 log2|t| bits for order 6 instead of 12, since the cancellation grows with
+the order: 12 failed the two-precision check at t = -4.2e15).
+
+**Measurement.** Errors as for the other orders: relative below t = -1 (no
+zeros there), in units of ulp(max(|g|, 1)) above.
+
+| | t < -1 (ulp) | t >= -1 (ulp1) |
+|---|---|---|
+| gcc | 767 (at t = -1.10) | 0.43 |
+| CUDA | 478 (at t = -1.01) | 0.34 |
+
+By band on gcc: below -5 within 20 ulp (as order 5: 18); between -3 and -1,
+where the cumulant recursion converges slowly (x near 1), 72-767 ulp, that is
+1.1-6.0 ulp1, against 40-81 ulp (0.6-2.5 ulp1) for order 5. The relative
+figure is inflated because g6 is small there (0.0134 at t = -1.1, on its way to
+a zero just above -1).
+
+**Chosen.** This version. Tested in `tests/math/test_normal.cpp` with bounds
+1150 ulp (t < -1) and 1.0 ulp1 (t >= -1), on both builds.
+
+**Open.** Extending the Chebyshev range from [-1, 4) down to -3 would remove
+the slow band for every order (orders 4-6); not done, it changes orders 1-5.
+
+## exprel and log1prel with their derivatives to order 6
+
+**What.** `include/laplace/math/exprel.hpp`: phi(x) = (e^x - 1)/x, phi(0) = 1
+(`exprel`, the name of GSL and SciPy), and its derivatives
+phi^(k)(x) = int_0^1 t^k e^(x t) dt, k = 1..6 (`exprel_d1` ... `exprel_d6`).
+`include/laplace/math/log1prel.hpp`: psi(x) = log(1 + x)/x for x > -1,
+psi(0) = 1 (`log1prel`), and psi^(k)(x) = (-1)^k k! int_0^1 t^k (1 + x t)^(-(k+1)) dt
+(`log1prel_d1` ... `log1prel_d6`). Both integrands keep one sign, so phi^(k)
+is positive and psi^(k) has the sign (-1)^k everywhere: no zeros, and the
+plain relative ulp is the measure. Written by two agents (Haiku) from a brief,
+reviewed and optimized in this session.
+
+**How, exprel.** The value as expm1(x)/x. The derivatives of order K:
+- 0 < x < T+_K: the power series sum_n x^n/(n! (n + K + 1));
+- -T-_K < x < 0: Kummer's form e^x sum_n (-x)^n K!/(n + K + 1)!, the same
+  integral after t -> 1 - t, whose terms are all positive (the power series
+  cancels there: 35-143 ulp at |x| in [2, 4) and 3e3-5e4 ulp in [4, 8) for
+  orders 1, 3, 6);
+- elsewhere the forward recursion phi^(K) = (e^x - K phi^(K-1))/x, from phi;
+  for x >= 700 on the quantities scaled by e^-700, so that every result whose
+  exact value is a finite double is finite (+inf above 740).
+Measured thresholds (T+_K, T-_K): K = 1 (1, 2), 2 (2, 2), 3 (2, 4), 4 (4, 4),
+5 (4, 8), 6 (4, 8).
+
+**How, log1prel.** The value as log1p(x)/x. The derivatives, by region:
+- |x| < 1/4: the power series of psi differentiated K times;
+- -4/5 < x <= 6: the 32-point Gauss-Legendre rule on the integral (terms of
+  one sign; the integrand has its pole at t = -1/x, outside [0, 1]);
+- 6 < x <= 20: the same rule on each of [0, 1/4] and [1/4, 1], 64 nodes;
+- x <= -4/5 and x > 20: the forward recursion
+  psi^(K) = ((-1)^(K-1) (K-1)!/(1 + x)^K - K psi^(K-1))/x, from psi.
+The recursion alone cancels in the middle range (order 6: 202 ulp on
+[-0.5, -0.3), 1.6e4 on [0.3, 0.5), 547 on [1, 1.5)), and the series converges
+only for |x| < 1. Between 6 and 20 the recursion lost up to 17.2 ulp at
+order 6 near x = 8; one rule on [0, 1] does not resolve the peak of the
+integrand near t = K/x, two do. A third candidate, the rule after
+s = log(1 + x t), psi^(K) = (-1)^K K! x^-(K+1) int_0^log1p(x) (1 - e^-s)^K ds,
+was within 7.7 ulp but cost 800-1000 ns per call (32 calls of expm1), and it
+fails above 1e5: discarded.
+
+**Measurement.** References `exprel*.csv` (`tools/reference/exprel.py`:
+mpmath.quad of the integral) and `log1prel*.csv` (`tools/reference/log1prel.py`:
+a closed form of the integral at raised precision, checked against
+mpmath.quad to 1.7e-60), each row at 200 and 300 bits, kept if the two agree
+to 2^-100. 1721 rows per order for exprel (|x| log-uniform from 2^-60, up to
+745 on both sides, around every threshold), 1792-2132 for log1prel (1 + x
+down to 2^-53, x up to 1e300). Maximum ulp, gcc / CUDA:
+
+| order | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| exprel | 1.81 / 1.52 | 2.71 / 2.64 | 4.11 / 4.11 | 5.90 / 5.90 | 4.25 / 4.25 | 5.85 / 5.85 | 5.92 / 6.57 |
+| log1prel | 1.28 / 1.28 | 3.94 / 3.94 | 5.03 / 5.03 | 6.39 / 6.39 | 7.06 / 7.06 | 8.27 / 8.27 | 9.60 / 9.60 |
+
+ns per call on one gcc thread (`benchmarks/math_rel.cpp`, the other session
+building CUDA at the same time): exprel 16-44 (the value 16-31, the
+derivatives 30-44); log1prel 20-60 in the series region, 20-37 with one rule,
+59-68 with two, 22-50 with the recursion. On CUDA (RTX 4070 SUPER, FP64 at
+1/64 of FP32): exprel 0.44 for the value, 0.5-3.3 for the derivatives;
+log1prel 0.46-0.63 for the value, 2.8-3.7 for the derivatives with the series
+or one rule, 6.1-7.6 with two rules, 0.54-0.79 with the recursion. The two-rule
+quadrature costs about 2.5 times the recursion on one gcc thread and about 10
+times on this GPU.
+
+**What this says.** Both functions are within 10 ulp at every order on both
+builds, at a few tens of ns per call.
+
+**Chosen.** This version. Tested in `tests/math/test_exprel.cpp` and
+`tests/math/test_log1prel.cpp` on both builds, with bounds of half again the
+measured errors and exact checks at 0 (phi^(k)(0) = 1/(k + 1),
+psi^(k)(0) = (-1)^k k!/(k + 1)), at the limits and outside the domain.
