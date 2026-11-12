@@ -1,0 +1,301 @@
+/**
+\defgroup distrib_generic Generic routes
+\ingroup distrib
+\brief Generic numerical routes for probability distributions: quantiles, discrete cumulative distribution functions, expectations, moments, expected information, and random number generation.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Overview and dispatch
+
+A generic route computes a property or operation of a distribution from fundamental primitives that the distribution already implements: its log-density or log-mass and their parameter derivatives, its support bounds, location and spread hints (`center()` and `scale()`), and non-smooth points (`y_kinks()`) when present.
+
+The distribution dispatch functions:
+- \ref laplace::distrib::distrib_cdf "distrib_cdf()"
+- \ref laplace::distrib::distrib_ccdf "distrib_ccdf()"
+- \ref laplace::distrib::distrib_log_cdf "distrib_log_cdf()"
+- \ref laplace::distrib::distrib_log_ccdf "distrib_log_ccdf()"
+- \ref laplace::distrib::distrib_quantile "distrib_quantile()"
+- \ref laplace::distrib::distrib_quantile_from_log "distrib_quantile_from_log()"
+- \ref laplace::distrib::distrib_quantile_from_log_upper "distrib_quantile_from_log_upper()"
+- \ref laplace::distrib::distrib_expected_info "distrib_expected_info()"
+
+select at compile time (using C++20 `requires` clauses) the distribution's specialized member function when provided, and fall back to the corresponding generic numerical route otherwise, incurring zero run-time overhead. The generic routes may also be invoked directly by name (\ref laplace::distrib::quantile_by_root "quantile_by_root()", \ref laplace::distrib::quantile_by_search "quantile_by_search()", \ref laplace::distrib::log_cdf_by_sum "log_cdf_by_sum()", \ref laplace::distrib::expected_info_by_integral "expected_info_by_integral()", and related functions).
+
+For the structure of distributions, parameter descriptors \ref laplace::distrib::distrib_param_info, regularity orders, and symmetric tensor packing, see \ref distrib_core. Specialized distribution implementations are documented in \ref distrib_gaussian1, \ref distrib_laplace, \ref distrib_poisson, and \ref distrib_gamma1.
+
+## Quantiles
+
+Quantiles are computed on a logarithmic scale in the tail holding the target probability, ensuring that quantiles located deep in either tail remain accurate to the precision of the tail log-cdf. With target probability \f$p \in (0, 1)\f$, the algorithm solves \f$\log F(y) = \log p\f$ when \f$p \le 1/2\f$, and solves \f$\log(1 - F(y)) = \log(1 - p)\f$ when \f$p > 1/2\f$.
+
+### Continuous distributions
+
+Continuous quantiles (\ref laplace::distrib::quantile_by_root "quantile_by_root()", \ref laplace::distrib::quantile_by_root_from_log "quantile_by_root_from_log()", \ref laplace::distrib::quantile_by_root_from_log_upper "quantile_by_root_from_log_upper()") solve for the root of
+\f[
+g(y) = \begin{cases} \log F(y) - t, & \text{lower tail, } t = \log p \le -\log 2, \\ t - \log(1 - F(y)), & \text{upper tail, } t = \log(1 - p), \end{cases}
+\f]
+where \f$g(y)\f$ is strictly increasing in \f$y\f$.
+
+Root finding proceeds in three phases:
+1. **Bracketing.** Starting from \f$x = \mathrm{center}()\f$, steps double towards an infinite boundary with step size \f$s = \mathrm{scale}()\f$. Towards a finite boundary \f$e\f$, steps approach \f$e\f$ at geometric distances \f$(e - x) 2^{-m}\f$ with \f$m = 1, 2, 4, 8, \dots\f$, bounding the root in at most 64 steps.
+2. **Guarded Newton iteration with bisection fallback.** With derivative \f$g'(y) = f(y)/F(y)\f$ (or \f$f(y)/(1 - F(y))\f$), Newton's step is taken whenever it falls strictly within the bracket. Otherwise, the bracket is bisected; if distances to a finite boundary differ by more than a factor of 4, bisection is placed at their geometric mean, allowing roots within \f$10^{-300}\f$ of a boundary to converge in tens of steps. The iteration terminates when Newton's step or bracket width falls below \f$4 \varepsilon |y|\f$ or when the bracket closes, with an iteration cap of 200 steps.
+3. **Natural scale Newton step.** A single final Newton step on \f$F(y) = p\f$ (or \f$1 - F(y) = 1 - p\f$) is performed on the linear scale; it removes the error that the logarithmic scale adds in a far tail, where the log cdf has an absolute error of a few ulps of \f$|\log F|\f$.
+
+The error of a continuous quantile is measured in units of the change of the quantile caused by one ulp of \f$y\f$ or of \f$p\f$. With \f$y\f$ the exact quantile (the distribution's closed form), \f$q\f$ the computed one, \f$f\f$ the density and \f$\varepsilon = 2^{-52}\f$, the measure is
+\f[
+\frac{|q - y|}{\max\left(|y|\varepsilon, \, \frac{\min(p, 1 - p)\varepsilon}{f(y)}\right)}.
+\f]
+
+### Discrete distributions
+
+Discrete quantiles (\ref laplace::distrib::quantile_by_search "quantile_by_search()", \ref laplace::distrib::quantile_by_search_from_log "quantile_by_search_from_log()", \ref laplace::distrib::quantile_by_search_from_log_upper "quantile_by_search_from_log_upper()") find the smallest integer \f$k\f$ in the distribution support satisfying \f$F(k) \ge p\f$.
+
+Monotonicity of \f$\log F(k) \ge \log p\f$ (or \f$\log(1 - F(k)) \le \log(1 - p)\f$) allows an initial bracket to be determined from \f$\lfloor \mathrm{center}() \rfloor\f$ by doubling steps of size \f$\lceil \mathrm{scale}() \rceil\f$, followed by integer bisection until the bracket width reduces to 1. In the tests, the discrete search returned the exact smallest integer in every case tested.
+
+## Discrete cumulative distribution functions
+
+For discrete distributions, the cumulative distribution function and complementary cumulative distribution function (\ref laplace::distrib::cdf_by_sum "cdf_by_sum()", \ref laplace::distrib::ccdf_by_sum "ccdf_by_sum()", \ref laplace::distrib::log_cdf_by_sum "log_cdf_by_sum()", \ref laplace::distrib::log_ccdf_by_sum "log_ccdf_by_sum()") evaluate probabilities at \f$k = \lfloor y \rfloor\f$ by summing the probability mass function:
+- For \f$k < \mathrm{center}()\f$, the lower tail \f$F(k) = \sum_{i \le k} p(i)\f$ is summed downwards from \f$k\f$, and \f$1 - F(k)\f$ is obtained from the complement \f$\log(1 - F(k)) = \log(1 - e^{\log F(k)})\f$.
+- For \f$k \ge \mathrm{center}()\f$, the upper tail \f$1 - F(k) = \sum_{i > k} p(i)\f$ is summed upwards from \f$k + 1\f$, and \f$F(k)\f$ is obtained from the complement \f$\log F(k) = \log(1 - e^{\log(1 - F(k))})\f$.
+
+Each summation starts at its largest term (\f$i_{\mathrm{start}} = k\f$ or \f$k + 1\f$) and accumulates scaled terms \f$e^{l(i) - l(i_{\mathrm{start}})}\f$, where \f$l(i) = \log p(i)\f$. The tail logarithm is formed as \f$l(i_{\mathrm{start}}) + \log\left(\sum e^{l(i) - l(i_{\mathrm{start}})}\right)\f$, preventing numerical underflow even when individual tail probabilities lie below the smallest normalized double-precision floating-point number.
+
+Summation stops when reaching a support boundary, or when the geometric tail bound \f$t r / (1 - r)\f$ (where \f$r < 1\f$ is the ratio of consecutive terms and \f$t\f$ is the current term) drops below \f$2^{-60}\f$ of the partial sum. This bound holds for distributions with log-concave probability masses. Summation terminates after at most \f$2^{26}\f$ terms per direction if convergence is not attained.
+
+## Expectations and moments
+
+The general expectation \ref laplace::distrib::expectation_by_integral "expectation_by_integral()" computes \f$\mathbb{E}[h(Y)]\f$ for an arbitrary integrand functor \f$h\f$:
+- **Continuous distributions.** The integral \f$\int h(y) e^{\log f(y)} \, \mathrm{d}y\f$ is evaluated using \ref laplace::math::quad::panels_quad "panels_quad()" over the support, from `support_lower()` to `support_upper()`. The interval is cut at `center()` and at the non-smooth points returned by `y_kinks()`, with panel widths starting at `scale()`.
+- **Discrete distributions.** The expectation is summed from \f$y_0 = \lfloor \mathrm{center}() \rfloor\f$ upwards and downwards. Once the sweep is more than \f$2\,\mathrm{scale}() + 2\f$ away from the centre and the mass decreases (\f$r = p(y)/p(y-1) < 1\f$), summation stops when the geometric bound on remaining terms
+  \f[
+  \frac{|t_y| + |t_{y-1}|}{1 - r} \le 2^{-60} \sum |t|
+  \f]
+  is satisfied (incorporating two successive terms ensures that a zero of \f$h\f$ does not trigger premature termination). The sum terminates after at most \f$2^{26}\f$ terms per direction.
+
+The routine \ref laplace::distrib::moment_by_integral "moment_by_integral()" computes raw or central moments \f$\mathbb{E}[(Y - \mathrm{about})^k]\f$ for integer order \f$k \ge 0\f$ via \ref laplace::distrib::expectation_by_integral "expectation_by_integral()", returning quiet NaN when the integral fails to converge.
+
+## Expected information
+
+The expected Fisher information matrix \f$I_{ab}(\theta)\f$ and its parameter derivatives to total order 6 are computed by \ref laplace::distrib::expected_info_by_integral "expected_info_by_integral()" or \ref laplace::distrib::distrib_expected_info "distrib_expected_info()".
+
+With log-density \f$l(y; \theta) = \log f(y; \theta)\f$, the information matrix is defined by:
+- **Hessian form.** \f$I_{ab} = -\mathbb{E}[l_{ab}]\f$,
+- **Score form.** \f$I_{ab} = \mathbb{E}[l_a l_b]\f$.
+
+Differentiating with respect to parameter indices \f$C = (c_1, \dots, c_K)\f$ (a sorted multiset of length \f$K \in \{1, \dots, 4\}\f$) accounts for differentiation of the moving underlying probability measure \f$f(y; \theta)\,\mathrm{d}y\f$:
+- **Hessian form.**
+  \f[
+  \frac{\partial^K}{\partial \theta_C} I_{ab} = -\mathbb{E}\left[ \sum_{T \subseteq C} l_{ab + (C \setminus T)} B_T \right]
+  \f]
+  requiring observed derivatives of \f$l\f$ to order \f$K + 2\f$.
+- **Score form.**
+  \f[
+  \frac{\partial^K}{\partial \theta_C} I_{ab} = \mathbb{E}\left[ \sum_{T \subseteq C} S_{C \setminus T} B_T \right], \quad S_U = \sum_{V \subseteq U} l_{a + V} l_{b + (U \setminus V)}
+  \f]
+  where \f$S_U\f$ denotes the derivatives of the product \f$l_a l_b\f$ over index multiset \f$U\f$, requiring observed derivatives of \f$l\f$ to order \f$K + 1\f$.
+
+In both formulations, \f$T\f$ ranges over all sub-multisets of \f$C\f$, and \f$B_T = e^{-l} \partial_T e^l\f$ (with \f$\partial_T\f$ the derivative in the parameters of \f$T\f$, and \f$B_\emptyset = 1\f$) is the complete Bell polynomial of the derivatives of \f$l\f$ over \f$T\f$: the sum over the set partitions of \f$T\f$ of the product of the derivatives of \f$l\f$ over the blocks. Here \f$l_U\f$ is the derivative of \f$l\f$ over the multiset \f$U\f$, and \f$ab + U\f$ is the multiset \f$\{a, b\} \cup U\f$. \f$B_T\f$ is computed recursively by partitioning on the block containing the lowest index (at most \f$2^4\f$ subsets).
+
+### Choice of default representation
+
+The default representation returned by \ref laplace::distrib::generic_info_form "generic_info_form()" is `info_form::score` for every distribution. The reasons:
+1. It is the only representation valid when a parameter has finite regularity.
+2. Across smooth test distributions, it is as accurate as the hessian form.
+3. \f$-\mathbb{E}[l_{aa}]\f$ can lose digits to cancellation between terms of opposite sign, where \f$\mathbb{E}[l_a^2]\f$, a mean of squares, does not.
+
+### Validity rule at non-smooth points
+
+When a parameter \f$\theta_j\f$ has finite regularity \f$r_j\f$ (\ref laplace::distrib::distrib_param_info::regularity), \f$l(y; \theta)\f$ exhibits a kink in \f$y\f$ that shifts with \f$\theta_j\f$. Almost-everywhere differentiation of \f$l\f$ of order exceeding \f$r_j + 1\f$ with respect to \f$\theta_j\f$ omits a Dirac point mass, and differentiating an integrand that jumps across the kink omits boundary terms.
+
+Let \f$n_a, n_b, n_C\f$ denote the counts of parameter index \f$j\f$ appearing in \f$a, b\f$, and \f$C\f$. A component is valid if and only if:
+- **Hessian form.** \f$n_a + n_b + n_C \le r_j + 1\f$.
+- **Score form.** \f$n_C = 0\f$, or \f$\max(n_a, n_b) + n_C \le r_j + 1\f$.
+
+A component that breaks this rule for some \f$j\f$ is not computed and is quiet NaN; so is a component whose quadrature or sum did not converge. For example, for the Laplace distribution with location parameter \f$\mu\f$ (\f$r_\mu = 0\f$):
+- In the score form, the information matrix \f$I\f$ itself is valid (\f$n_C = 0\f$). For derivative orders \f$K \ge 1\f$, components with at most one \f$\mu\f$ in \f$C\f$ and none in \f$(a, b)\f$ are valid; components with two indices \f$\mu\f$ in \f$C\f$ or with \f$\mu\f$ simultaneously in \f$C\f$ and in \f$(a, b)\f$ evaluate to quiet NaN.
+- In the hessian form, \f$I_{\mu\mu}\f$ evaluates to quiet NaN, whereas \f$I_{\mu\sigma}\f$ and \f$I_{\sigma\sigma}\f$ are valid.
+
+### Simultaneous evaluation in one pass
+
+All components of the expected information matrix and its derivatives are computed in a single pass: every component is evaluated on identical quadrature nodes (or identical discrete summation terms). Refinement levels are updated until every component satisfies its individual convergence tolerance. At each node, the derivatives of \f$l\f$ are evaluated once for all the components, and the polynomials \f$B_T\f$ and the derivatives \f$l_{a+V}\f$ once per multiset \f$C\f$ for all the pairs \f$(a, b)\f$.
+
+## Random number generation
+
+Random variates are drawn by inversion of the cumulative distribution function (\ref laplace::distrib::rng_by_inversion "rng_by_inversion()"):
+\f[
+Y = F^{-1}(u)
+\f]
+where \f$u \in (0, 1)\f$ is generated by \ref laplace::distrib::open_unit_uniform "open_unit_uniform()".
+
+Using the highest 53 bits \f$n\f$ of a 64-bit unsigned pseudorandom integer from `gen.urand64()`, \ref laplace::distrib::open_unit_uniform "open_unit_uniform()" forms
+\f[
+u = \left(n + \frac{1}{2}\right) 2^{-53}.
+\f]
+The variate \f$u\f$ lies strictly within \f$[2^{-54}, 1 - 2^{-54}]\f$ and is symmetric around \f$1/2\f$. This ensures that the quantile inversion is never evaluated at the singular endpoints \f$p = 0\f$ or \f$p = 1\f$. For \f$u > 1/2\f$, quantile routines operate directly on the exact upper tail probability \f$1 - u\f$.
+
+### Uniform source
+
+The default uniform source is \ref laplace::distrib::counter_uniform_source "counter_uniform_source", which implements SplitMix64 (Steele, Lea and Flood, 2014) at counter state
+\f[
+z = \mathrm{seed} + \left((\mathrm{index} \cdot 2^{32}) + i\right) \gamma
+\f]
+with \f$\gamma = \mathtt{0x9e3779b97f4a7c15}\f$. The \f$i\f$-th uniform number of observation `index` depends only on `seed`, `index` and \f$i\f$, not on the thread or the backend that computes it.
+
+Alternatively, any generator exposing `urand64()` may be supplied to \ref laplace::distrib::rng_by_inversion "rng_by_inversion()", such as state handles obtained from `Kokkos::Random_XorShift64_Pool` or `Kokkos::Random_XorShift1024_Pool`.
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for error measures (ulp, eps) and reference generation protocols.
+
+### Quantile accuracy
+
+Across continuous distributions (gaussian1, laplace, gamma1) evaluated on 13 probabilities from \f$10^{-300}\f$ to \f$1 - 10^{-15}\f$, the largest observed error in units of the conditioning scale was 31.9 (gcc) on gamma1(\f$2, 0.3\f$) at \f$p = 10^{-300}\f$. For discrete Poisson quantiles, search by bisection returned the exact smallest integer \f$k\f$ with \f$F(k) \ge p\f$ across all tested parameters (\f$\mu \in [0.05, 10^4]\f$) and probabilities.
+
+### Discrete cumulative distribution function accuracy
+
+Measured on the Poisson distribution across \f$k = \lfloor \mu + z \sqrt{\mu} \rfloor\f$ with \f$z \in [-30, 100]\f$, showing the maximum error of \f$\log F\f$ and \f$\log(1 - F)\f$ in ulp of \f$\max(|\log|, 1)\f$:
+
+| Parameter \f$\mu\f$ | Maximum error (ulp) |
+|---|---|
+| \f$\mu = 0.05\f$ | 0.60 |
+| \f$\mu = 3.5\f$ | 2.64 |
+| \f$\mu = 40\f$ | 0.82 |
+| \f$\mu = 1000\f$ | 5.91 |
+
+### Expected information accuracy
+
+Maximum error in eps of the largest component of each derivative order \f$K \in \{0, \dots, 4\}\f$ on gcc:
+
+| Distribution | Form | \f$K = 0\f$ | \f$K = 1\f$ | \f$K = 2\f$ | \f$K = 3\f$ | \f$K = 4\f$ |
+|---|---|---|---|---|---|---|
+| gaussian1(0.4, 1.3) | hessian | 0.3 | 1.1 | 1.9 | 0.7 | 3.9 |
+| | score | 0.8 | 1.6 | 1.4 | 0.9 | 3.2 |
+| gamma1(2, 0.02) | hessian | 0.0 | 1.6 | 0.9 | 1.1 | 0.6 |
+| | score | 1.6 | 1.0 | 0.9 | 1.7 | 1.2 |
+| gamma1(2, 0.3) | hessian | 0.7 | 2.5 | 4.0 | 0.8 | 2.3 |
+| | score | 1.3 | 0.8 | 1.3 | 3.2 | 3.1 |
+| gamma1(2, 4) | hessian | 0.5 | 2.5 | 0.7 | 0.2 | 2.7 |
+| | score | 1.0 | 1.0 | 1.3 | 1.3 | 0.7 |
+| poisson(0.05) | hessian | 1.6 | 0.6 | 1.0 | 1.6 | 0.0 |
+| | score | 0.0 | 1.3 | 0.5 | 1.1 | 0.0 |
+| poisson(3.5) | hessian | 0.0 | 2.3 | 3.3 | 4.7 | 0.0 |
+| | score | 1.8 | 1.5 | 3.3 | 4.7 | 10.9 |
+| poisson(40) | hessian | 1.2 | 3.9 | 19.5 | 54.5 | 247 |
+| | score | 0.6 | 4.7 | 13.7 | 116 | 72.2 |
+
+For laplace(\f$0.4, 1.3\f$), the score form evaluates \f$I\f$ and its non-NaN derivatives within 64 eps (\f$K = 0, 1\f$), 256 eps (\f$K = 2\f$), and 1024 eps (\f$K = 4\f$).
+
+### Moments accuracy
+
+Maximum error of raw and central moments (mean, variance, third and fourth central moments) against analytical closed forms, expressed in eps of the scale:
+- gaussian1 and laplace: 1.8 eps,
+- gamma1: 3.0 eps,
+- Poisson: 0.6 eps (\f$\mu = 0.05\f$), 3.1 eps (\f$\mu = 3.5\f$), 2.4 eps (\f$\mu = 40\f$), 6.7 eps (\f$\mu = 1000\f$).
+
+## Timings
+
+Timings in nanoseconds per call measured on one gcc thread and with OpenMP (8 threads):
+
+| Quantity | Member | Generic (hessian form for the information) | Generic (score form for the information) |
+|---|---|---|---|
+| Quantile gaussian1 | 29 / 13 | 514 / 80 | — |
+| Quantile laplace | 7.7 / 9.5 | 120 / 28 | — |
+| Quantile gamma1(2, 0.3) | 604 / 96 | 3619 / 496 | — |
+| Quantile poisson(3.5), member cdf | — | 2272 / 327 | — |
+| Log cdf poisson(3.5), \f$\|z\| < 3\f$ | 199 / 53 | 648 / 96 | — |
+| Log cdf poisson(40) | 193 / 48 | 2044 / 270 | — |
+| Log cdf poisson(1000) | 99 / 31 | 10816 / 1439 | — |
+| \f$I\f$ gaussian1 | 1.6 | 9.0e4 / 1.3e4 | 9.2e4 / 1.2e4 |
+| \f$\partial^4 I\f$ gaussian1 | 6.6 | 4.0e6 / 5.8e5 | 3.2e6 / 5.0e5 |
+| \f$I\f$ gamma1(2, 0.3) | 109 | 5.7e5 / 8.5e4 | 3.5e5 / 4.5e4 |
+| \f$\partial^4 I\f$ gamma1(2, 0.3) | 729 | 6.0e6 / 8.4e5 | 4.5e6 / 6.5e5 |
+| \f$I\f$ poisson(3.5) | 3.5 | 1788 / 434 | 1847 / 448 |
+| \f$\partial^4 I\f$ poisson(3.5) | 4.3 | 8686 / 1462 | 1.1e4 / 1705 |
+| \f$I\f$ laplace | 1.6 | — | 8.7e4 / 1.2e4 |
+| Variance gamma1(2, 0.3) | — | 1.6e5 / 2.2e4 | — |
+| Uniform draw (counter) | — | 1.2 / 0.25 | — |
+| Uniform draw (XorShift64 pool) | — | — / 1.31 | — |
+| Uniform draw (XorShift1024 pool) | — | — / 2.09 | — |
+| Random draw gamma1(2, 0.3), counter | — | 603 / 81 | — |
+
+On CUDA (RTX 4070 SUPER; one MSVC host thread / the GPU, in ns per call):
+- Continuous quantiles by root: gaussian1 479 / 139 ns (member 22 / 14 ns); laplace 101 / 22 ns (member 9 / 5 ns); gamma1(\f$2, 0.3\f$) 2964 / 2762 ns (member 460 / 141 ns); gamma1(\f$2, 4\f$) 1941 / 604 ns (member 318 / 102 ns).
+- Discrete quantiles by search: poisson(\f$3.5\f$) 2682 / 563 ns.
+- Discrete log cdf by summation: poisson(\f$3.5\f$) 780 / 118 ns (member 99 / 33 ns); poisson(\f$40\f$) 2578 / 395 ns (member 160 / 47 ns); poisson(\f$1000\f$) 12761 / 1612 ns (member 91 / 13 ns).
+- Expected information in one pass: \f$I\f$ gaussian1 1.5e5 / 1.1e5 ns (hessian), 1.3e5 / 1.1e5 ns (score); \f$\partial^4 I\f$ gaussian1 6.6e6 / 2.7e6 ns (hessian), 4.6e6 / 1.7e6 ns (score); \f$\partial^4 I\f$ gamma1(\f$2, 0.3\f$) 8.0e6 / 6.4e6 ns (hessian), 5.6e6 / 4.3e6 ns (score); \f$\partial^4 I\f$ poisson(\f$3.5\f$) 1.4e4 / 6906 ns (hessian), 1.5e4 / 7578 ns (score). The expected information on CUDA was timed on batches of 256 calls, which leave the GPU almost idle: a single call takes 256 times the figure (28 ms for \f$I\f$ of gaussian1 in the score form).
+- Uniform draws: 0.03 ns per call for counter and XorShift64 pool; 0.13 ns per call for XorShift1024 pool.
+- Random draws by inversion: gamma1(\f$2, 0.3\f$) 446 / 62 ns.
+
+## Example
+
+The following example generates pseudorandom draws and evaluates the expected Fisher information matrix inside a Kokkos parallel kernel:
+
+\code{.cpp}
+#include <laplace/distrib/gamma1.hpp>
+#include <laplace/distrib/generic_info.hpp>
+#include <laplace/distrib/generic_rng.hpp>
+#include <Kokkos_Core.hpp>
+
+void sample_and_info(Kokkos::View<double*>& draws,
+                     Kokkos::View<double[3]>& info,
+                     int n,
+                     std::uint64_t seed) {
+  const laplace::distrib::gamma1_distrib d{2.0, 0.3};
+
+  Kokkos::parallel_for("draw_samples", n, KOKKOS_LAMBDA(const int i) {
+    draws(i) = laplace::distrib::rng_by_inversion(d, seed, static_cast<std::uint64_t>(i));
+  });
+
+  Kokkos::parallel_for("compute_info", 1, KOKKOS_LAMBDA(const int) {
+    const auto I = laplace::distrib::distrib_expected_info<0>(d);
+    info(0) = I[0];
+    info(1) = I[1];
+    info(2) = I[2];
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::distrib::NAME`.
+
+### Expectations and moments
+- \ref laplace::distrib::expectation_by_integral "expectation_by_integral()" — expectation \f$\mathbb{E}[h(Y)]\f$ by numerical quadrature or summation
+- \ref laplace::distrib::moment_by_integral "moment_by_integral()" — raw or central moment \f$\mathbb{E}[(Y - \mathrm{about})^k]\f$
+
+### Expected information
+- \ref laplace::distrib::info_form "info_form" — representation format (hessian or score)
+- \ref laplace::distrib::expected_info_result "expected_info_result" — return type for information matrix and derivative tensors
+- \ref laplace::distrib::expected_info_by_integral "expected_info_by_integral()" — expected information and derivatives by numerical quadrature or summation
+- \ref laplace::distrib::generic_info_form "generic_info_form()" — default representation (`info_form::score`)
+- \ref laplace::distrib::distrib_expected_info "distrib_expected_info()" — expected information dispatching to member or generic route
+
+### Discrete cumulative distribution functions
+- \ref laplace::distrib::log_cdf_by_sum "log_cdf_by_sum()" — natural logarithm of cumulative distribution function by summation
+- \ref laplace::distrib::log_ccdf_by_sum "log_ccdf_by_sum()" — natural logarithm of complementary cumulative distribution function by summation
+- \ref laplace::distrib::cdf_by_sum "cdf_by_sum()" — cumulative distribution function by summation
+- \ref laplace::distrib::ccdf_by_sum "ccdf_by_sum()" — complementary cumulative distribution function by summation
+- \ref laplace::distrib::distrib_cdf "distrib_cdf()" — cumulative distribution function dispatching to member or generic summation
+- \ref laplace::distrib::distrib_ccdf "distrib_ccdf()" — complementary cumulative distribution function dispatching to member or generic summation
+- \ref laplace::distrib::distrib_log_cdf "distrib_log_cdf()" — natural logarithm of cumulative distribution function dispatching to member or generic summation
+- \ref laplace::distrib::distrib_log_ccdf "distrib_log_ccdf()" — natural logarithm of complementary cumulative distribution function dispatching to member or generic summation
+
+### Quantiles
+- \ref laplace::distrib::quantile_by_root "quantile_by_root()" — continuous quantile \f$F^{-1}(p)\f$ by root finding
+- \ref laplace::distrib::quantile_by_root_from_log "quantile_by_root_from_log()" — continuous quantile from log-probability \f$\log p\f$
+- \ref laplace::distrib::quantile_by_root_from_log_upper "quantile_by_root_from_log_upper()" — continuous upper quantile from complementary log-probability \f$\log(1 - p)\f$
+- \ref laplace::distrib::quantile_by_search "quantile_by_search()" — discrete quantile by integer search
+- \ref laplace::distrib::quantile_by_search_from_log "quantile_by_search_from_log()" — discrete quantile from log-probability \f$\log p\f$
+- \ref laplace::distrib::quantile_by_search_from_log_upper "quantile_by_search_from_log_upper()" — discrete upper quantile from complementary log-probability \f$\log(1 - p)\f$
+- \ref laplace::distrib::distrib_quantile "distrib_quantile()" — quantile dispatching to member or generic route
+- \ref laplace::distrib::distrib_quantile_from_log "distrib_quantile_from_log()" — quantile from \f$\log p\f$ dispatching to member or generic route
+- \ref laplace::distrib::distrib_quantile_from_log_upper "distrib_quantile_from_log_upper()" — upper quantile from \f$\log(1 - p)\f$ dispatching to member or generic route
+
+### Random number generation
+- \ref laplace::distrib::counter_uniform_source "counter_uniform_source" — SplitMix64 counter-based uniform generator keyed by seed and index
+- \ref laplace::distrib::open_unit_uniform "open_unit_uniform()" — open unit interval uniform draw in \f$[2^{-54}, 1 - 2^{-54}]\f$
+- \ref laplace::distrib::rng_by_inversion "rng_by_inversion()" — random variate by quantile inversion
+
+## References
+
+- Steele, G. L., Lea, D., and Flood, C. H. (2014). Fast splittable pseudorandom number generators. *Proceedings of the 2014 ACM SIGPLAN International Conference on Object Oriented Programming Systems Languages & Applications* (OOPSLA '14), 453–472.
+*/

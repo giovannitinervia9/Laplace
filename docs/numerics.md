@@ -2168,6 +2168,216 @@ the CUDA build not yet run) with bounds of half again the measured maxima over
 all components: P 8, 12, 20, 50, 265, 980; Q 47, 61, 170, 1.23e4, 3.9e4,
 1.58e5; and the limits at x = 0 and x = infinity.
 
+## Generic routes of the distributions: quantile, discrete cdf, expected information, moments, rng
+
+**What.** `include/laplace/distrib/generic_*.hpp` (note/distrib.md sections
+4 and 5 C): algorithms that work on any distribution lacking a member,
+selected at compile time with C++20 `requires` by the dispatchers
+`distrib_quantile`, `distrib_quantile_from_log`, `distrib_quantile_from_log_upper`,
+`distrib_cdf`, `distrib_ccdf`, `distrib_log_cdf`, `distrib_log_ccdf` and
+`distrib_expected_info<K>`, which take the distribution's own member when it
+has one.
+- `generic_expectation.hpp`: `expectation_by_integral(d, h)` = E[h(Y)], by
+  `panels_quad` over the support cut at `center()` and at `y_kinks()`, panels of
+  width `scale()` (continuous), or by a sum from floor(center()) outwards
+  (discrete) that stops, once more than 2 scale() from the centre and with the
+  mass ratio r < 1, when (|t_y| + |t_(y-1)|)/(1 - r) falls below 2^-60 of the
+  sum of |t| (valid for log-concave masses); `moment_by_integral(d, k, about)`.
+- `generic_cdf.hpp`: `cdf_by_sum`, `ccdf_by_sum`, `log_cdf_by_sum`,
+  `log_ccdf_by_sum` for discrete distributions: below the centre the lower tail
+  is summed downwards from k, from the centre up the upper tail upwards from
+  k + 1, the other one as the complement; each sum adds e^(l(i) - l(start)) and
+  returns l(start) + log(sum), so that tails below the double range keep their
+  logarithm.
+- `generic_quantile.hpp`: `quantile_by_root` (continuous) and
+  `quantile_by_search` (discrete), each from p, log p and log(1 - p). Both work
+  on the tail that holds the target and on the log scale (log F(y) = log p, or
+  log(1 - F(y)) = log(1 - p) above 1/2). Root: a bracket from `center()` by
+  doubling steps of `scale()` towards an infinite end, by distances
+  (e - y) 2^-m, m = 1, 2, 4, 8, ..., towards a finite end e; Newton's step when
+  it stays in the bracket, bisection otherwise (at the geometric mean of the
+  distances to a finite end when they differ by more than 4); then one Newton
+  step on F(y) = p itself. Search: a bracket from floor(center()) by doubling
+  steps, then integer bisection.
+- `generic_info.hpp`: `expected_info_by_integral<K, form>(d)`, K = 0..4 (total
+  order 6), in two forms. With C the sorted derivative indices and B_T the
+  complete Bell polynomial of l over T (computed by the recursion over the
+  block that holds the lowest element, at most 2^4 subsets):
+  hessian form d_C I_ab = -E[sum_(T in C) l_(ab + C-T) B_T] (reads l to order
+  K + 2); score form d_C I_ab = E[sum_(T in C) S_(C-T) B_T], S_U = sum_(V in U)
+  l_(a+V) l_(b+U-V) (reads l to order K + 1). A component is NaN when the form
+  cannot give it: for a parameter j of finite regularity r_j, hessian form when
+  n_a + n_b + n_C > r_j + 1, score form when n_C > 0 and max(n_a, n_b) + n_C >
+  r_j + 1 (n the multiplicities of j); beyond that the a.e. derivatives miss a
+  point mass or the boundary term of an integrand that jumps at the moving kink.
+  On the Laplace this leaves NaN every derivative with two indices mu in C, or
+  with mu in C and in (a, b); statmodels7 had left the same components wrong
+  (derivate.md, 2026-10-05).
+- `generic_rng.hpp`: `rng_by_inversion(d, gen)` = `distrib_quantile(d, u)` with
+  u = (n + 1/2) 2^-53 from the top 53 bits of `gen.urand64()`, in
+  [2^-54, 1 - 2^-54]; gen is a Kokkos pool state (XorShift64, XorShift1024) or
+  `counter_uniform_source{seed, index}`, SplitMix64 (Steele, Lea and Flood,
+  2014) at the counter seed + (index 2^32 + i) gamma, whose draws depend only on
+  (seed, index, i).
+
+**Measurement.** `tests/distrib/test_generic.cpp` (the twin test: the four
+pilot distributions behind `tests/distrib/generic_hidden.hpp`, which hides
+their quantile, expected information and, for the Poisson, the cdf family) and
+`benchmarks/distrib_generic.cpp`. Errors against the hidden closed forms.
+
+Quantile by root, 13 values of p from 1e-300 to 1 - 1e-15 and the three
+inputs, on gaussian1(0.4, 1.3), gaussian1(-20, 1e-3), laplace(0.4, 1.3),
+gamma1(2, 0.3), gamma1(1.5, 4), gamma1(1.5, 0.02): worst 31.9 (gcc) in units
+of the change of y caused by one ulp of y or of p, at p = 1e-300 on
+gamma1(2, 0.3) (y = 1.2e-90); without the last Newton step on F(y) = p it was
+67, the log cdf of a far tail having an absolute error of a few ulps of
+|log F|. Quantile by search on the Poisson (mu = 0.05 to 1e4, p from 1e-300 to
+1 - 1e-15): the smallest k with F(k) >= p in every case, from each input.
+
+Discrete cdf by summing the Poisson mass, k = mu + z sqrt(mu), z in
+[-30, 100], worst error of log F and log(1 - F) in ulps of max(|log|, 1):
+
+| mu | 0.05 | 3.5 | 40 | 1000 |
+|---|---|---|---|---|
+| logpmf y log mu - mu - log y! | 0.03 | 4.4 | 17.0 | 1243 |
+| logpmf -mu D(y/mu) - log sqrt(2 pi y) - delta(y) | 0.60 | 2.64 | 0.82 | 5.91 |
+
+The first row was measured with the pilot's first logpmf, whose terms near
+7000 cancel to about -4 at mu = 1000: an absolute error of 1e-12, a relative
+error of every mass that no sum can remove. The log F session then wrote the
+logpmf in the saddle-point form (D(z) = z log z - z + 1, delta Stirling's
+error), which has no cancellation: second row, the same on gcc and on the
+host side of the CUDA build.
+
+Expected information and its derivatives (K = 0..4), worst error in eps of the
+largest closed-form component of each order, gcc:
+
+| distribution | form | K = 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|---|
+| gaussian1(0.4, 1.3) | hessian | 0.3 | 1.1 | 1.9 | 0.7 | 3.9 |
+| | score | 0.8 | 1.6 | 1.4 | 0.9 | 3.2 |
+| gamma1(2, 0.02) | hessian | 0.0 | 1.6 | 0.9 | 1.1 | 0.6 |
+| | score | 1.6 | 1.0 | 0.9 | 1.7 | 1.2 |
+| gamma1(2, 0.3) | hessian | 0.7 | 2.5 | 4.0 | 0.8 | 2.3 |
+| | score | 1.3 | 0.8 | 1.3 | 3.2 | 3.1 |
+| gamma1(2, 4) | hessian | 0.5 | 2.5 | 0.7 | 0.2 | 2.7 |
+| | score | 1.0 | 1.0 | 1.3 | 1.3 | 0.7 |
+| poisson(0.05) | hessian | 1.6 | 0.6 | 1.0 | 1.6 | 0.0 |
+| | score | 0.0 | 1.3 | 0.5 | 1.1 | 0.0 |
+| poisson(3.5) | hessian | 0.0 | 2.3 | 3.3 | 4.7 | 0.0 |
+| | score | 1.8 | 1.5 | 3.3 | 4.7 | 10.9 |
+| poisson(40) | hessian | 1.2 | 3.9 | 19.5 | 54.5 | 247 |
+| | score | 0.6 | 4.7 | 13.7 | 116 | 72.2 |
+
+(Poisson with the saddle-point logpmf; with the first one poisson(40) read
+427 and 1415 at K = 4.) The same numbers on the host side of the MSVC build.
+At mu = 40, d3 I = -6/mu^4 and d4 I = 24/mu^5 are 1e-5 and 2e-7 of the
+terms summed, which is where the 50-250 eps come from.
+
+Laplace(0.4, 1.3): the score form gives I and the derivatives that are not NaN
+within 64 eps (K = 0, 1), 256 (K = 2), 1024 (K = 4, the bound tested); the
+hessian form gives I_musigma and I_sigmasigma, NaN for I_mumu (0 where the
+true value is 1/sigma^2).
+
+Moments (mean, variance, third and fourth central moments) against their
+closed forms, in eps of the scale: gaussian1 and laplace 1.8, gamma1 3.0,
+Poisson 0.6 / 3.1 / 2.4 / 6.7 at mu = 0.05 / 3.5 / 40 / 1000 (1343 at 1000
+with the first logpmf).
+
+Evaluations of l per component (one quadrature or sum): gaussian1 1472,
+laplace 1460, gamma1 816 and 812 (phi = 0.3, 4), Poisson 33 (mu = 3.5) and
+111 (mu = 40).
+
+ns per call, one gcc thread / OpenMP 8 threads (`distrib_generic`):
+
+| quantity | member | generic (hessian) | generic (score) |
+|---|---|---|---|
+| quantile gaussian1 | 29 / 13 | 514 / 80 | |
+| quantile laplace | 7.7 / 9.5 | 120 / 28 | |
+| quantile gamma1(2, 0.3) | 604 / 96 | 3619 / 496 | |
+| quantile poisson(3.5), member cdf | | 2272 / 327 | |
+| log cdf poisson(3.5), \|z\| < 3 | 199 / 53 | 648 / 96 | |
+| log cdf poisson(40) | 193 / 48 | 2044 / 270 | |
+| log cdf poisson(1000) | 99 / 31 | 10816 / 1439 | |
+| I gaussian1 | 1.6 | 9.0e4 / 1.3e4 | 9.2e4 / 1.2e4 |
+| d4 I gaussian1 | 6.6 | 4.0e6 / 5.8e5 | 3.2e6 / 5.0e5 |
+| I gamma1(2, 0.3) | 109 | 5.7e5 / 8.5e4 | 3.5e5 / 4.5e4 |
+| d4 I gamma1(2, 0.3) | 729 | 6.0e6 / 8.4e5 | 4.5e6 / 6.5e5 |
+| I poisson(3.5) | 3.5 | 1788 / 434 | 1847 / 448 |
+| d4 I poisson(3.5) | 4.3 | 8686 / 1462 | 1.1e4 / 1705 |
+| I laplace | 1.6 | | 8.7e4 / 1.2e4 |
+
+The expected information is computed in one pass: every component on the same
+nodes of panels_quad (or the same terms of the sum), a level refined until every
+component passes its own stopping test, and at each node the Bell polynomials B_T
+and the derivatives of l over a + V looked up once per C for all the pairs
+(`detail_generic::expectation_vec_by_integral`). With one quadrature per
+component the same rows were, one gcc thread, hessian / score: I gaussian1 2.0e5 /
+2.0e5, d4 I gaussian1 7.1e6 / 2.2e7, I gamma1 1.4e6 / 8.6e5, d4 I gamma1 4.7e7 /
+4.6e7, I poisson 1751 / 1822, d4 I poisson 1.1e4 / 3.2e4: the one pass divides
+the cost by 2.2-2.5 for I and by 1.3-10 for d4 I (7 and 10 in the score form).
+The errors are those of the table above; one quadrature per component gave
+the same except gaussian1 hessian K = 1 0.5, gamma1(2, 0.3) hessian K = 2 2.7,
+gamma1(2, 4) score K = 1-3 2.0, 0.8, 0.7 (the stopping level now depends on
+all the components).
+| variance gamma1(2, 0.3) | | 1.6e5 / 2.2e4 | |
+| uniform draw: counter / XorShift64 pool / XorShift1024 pool | | 1.2 / -; 0.25 / 1.31 / 2.09 (OpenMP) | |
+| rng gamma1(2, 0.3), counter | | 603 / 81 | |
+
+On the CUDA build (RTX 4070 SUPER; first column one MSVC host thread, second
+the GPU, ns per call): quantile gaussian1 479 / 139 (member 22 / 14), laplace
+101 / 22 (9 / 5), gamma1(2, 0.3) 2964 / 2762 (460 / 141), gamma1(2, 4) 1941 /
+604 (318 / 102); quantile poisson(3.5) by search 2682 / 563; log cdf by sum
+poisson(3.5) 780 / 118, (40) 2578 / 395, (1000) 12761 / 1612 (member 99 / 33,
+160 / 47, 91 / 13); I gaussian1 3.1e5 / 2.4e5 hessian, 2.9e5 / 2.2e5 score;
+d4 I gaussian1 1.5e7 / 3.8e6 hessian, 2.9e7 / 9.7e6 score; d4 I gamma1 4.9e7 /
+4.5e7 hessian, 4.7e7 / 3.6e7 score; d4 I poisson(3.5) 1.6e4 / 4368 hessian,
+4.5e4 / 1.0e4 score (one quadrature per component; in one pass: I gaussian1
+1.5e5 / 1.1e5 hessian, 1.3e5 / 1.1e5 score; d4 I gaussian1 6.6e6 / 2.7e6, 4.6e6 /
+1.7e6; d4 I gamma1 8.0e6 / 6.4e6, 5.6e6 / 4.3e6; d4 I poisson 1.4e4 / 6906,
+1.5e4 / 7578); uniform draw 0.03 (counter and XorShift64 pool), 0.13
+(XorShift1024 pool); rng gamma1 by inversion 446 / 62. The expected
+information was timed on 256 calls, which leave the GPU almost idle: one call
+takes 256 times the figure, 60 ms for I of gaussian1 with one quadrature per
+component, 28 ms in one pass. The generic test cases
+pass on CUDA with the same errors as on the host, and a kernel of 16 threads
+gives the host values to 1e-11 for every route (d4 I gamma1, score form: 3.8 s
+for the 16 threads on the GPU with one quadrature per component, 0.47 s in one
+pass; 0.12 s on OpenMP).
+
+**What this says.** The routes give the closed forms of the pilot to a few eps
+wherever the input functions are accurate; where they are not (the Poisson
+logpmf at large mu) the error of the input passes through, amplified by the
+derivatives of order 3-4 more in the score form than in the hessian form. On
+the smooth pilot distributions the two forms are equally accurate except on
+poisson(40), where the hessian form is better by 3-50 times at K >= 2. In one
+pass the score form is the cheaper at K = 4 on gaussian1 and gamma1 (1.3 times)
+and the dearer on poisson (1.3 times); with one quadrature per component the
+hessian form was 3 times cheaper at K = 4 on gaussian1 and poisson. Against this stands statmodels7's pig2 (derivate.md), where -E[l_aa]
+cancels and E[l_a^2] does not. The expected information by quadrature costs
+0.09-6 ms a call on one thread, 10^3-10^6 times the closed forms: each node
+evaluates every derivative order of l, and at K = 4 the Bell polynomials and
+the products of sums dominate.
+
+**Chosen.** The score form is the default for every distribution (Giovanni, 2026-11-12):
+it is the only one valid at a kink, ties the hessian form on the smooth pilot, and
+does not cancel where -E[l_aa] does (pig2).
+
+The counter source is the default uniform source (Giovanni, 2026-11-12):
+`rng_by_inversion(d, seed, index)` draws from `counter_uniform_source{seed, index}`;
+a generator object, the Kokkos pools included, can still be passed.
+
+**Open.** (2, settled) The
+uniform source (Giovanni): the counter source is the fastest and the only one
+whose draws do not depend on the thread or the backend. (3, done) The
+vector-valued rule, every component on the same nodes (above). (4) The
+derivatives of I in a parameter with a kink need the jumps of the derivatives
+of l at the kink, which no distribution declares yet. (5) On CUDA,
+`binomial_coef` in core.hpp was constexpr host-only, and sym_tensor_position
+and the generic lookup gave wrong positions at run time on the device (the
+expected information came out 0 and a sum ran for minutes); found by this
+test, fixed by the log F session (LAPLACE_HD).
+
 ## Partial derivatives of log P(a, a c) and log Q(a, a c) at fixed ratio, and the Poisson cdf
 
 2026-11-12 (evening). `include/laplace/math/incomplete_gamma_ratio.hpp`: for

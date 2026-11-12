@@ -33,6 +33,7 @@ set(LAPLACE_TEST_SOURCES
   math/test_log1prel.cpp
   math/test_stirling.cpp
   distrib/test_pilot.cpp
+  distrib/test_generic.cpp
   pdmat/test_pilot.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
