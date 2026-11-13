@@ -29,6 +29,7 @@ set(LAPLACE_TEST_SOURCES
   bijector/test_power_softplus.cpp
   bijector/test_box_cox.cpp
   bijector/test_yeo_johnson.cpp
+  bijector/param_common.cpp
   bijector/test_coupled.cpp
   math/test_exprel.cpp
   math/test_log1prel.cpp
@@ -43,5 +44,18 @@ target_link_libraries(laplace_tests PRIVATE Laplace::laplace laplace_doctest)
 # reference values (tests/data/reference) and the shared measurement helpers (benchmarks/)
 target_compile_definitions(laplace_tests PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
 target_include_directories(laplace_tests PRIVATE ${PROJECT_SOURCE_DIR}/benchmarks)
+
+# The kernel of the scalar-bijector check, one translation unit per total order
+# K = 0..6 (bijector/param_order.cpp compiled seven times), so that nvcc
+# compiles the seven parts in parallel: in one unit ptxas took 700 s.
+laplace_kokkos_sources(bijector/param_order.cpp)
+foreach(k RANGE 0 6)
+  add_library(laplace_param_order_${k} OBJECT bijector/param_order.cpp)
+  target_link_libraries(laplace_param_order_${k} PRIVATE Laplace::laplace laplace_doctest)
+  target_compile_definitions(laplace_param_order_${k} PRIVATE LAPLACE_PARAM_ORDER=${k}
+    LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
+  target_include_directories(laplace_param_order_${k} PRIVATE ${PROJECT_SOURCE_DIR}/benchmarks)
+  target_link_libraries(laplace_tests PRIVATE laplace_param_order_${k})
+endforeach()
 
 add_test(NAME laplace_tests COMMAND laplace_tests)
