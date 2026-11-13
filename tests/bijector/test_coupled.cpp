@@ -60,8 +60,7 @@ static_assert(sizeof(lb::matrix_log_bijector) == sizeof(int));
 template <class B>
 constexpr bool has_cholesky = std::is_base_of_v<lb::cholesky_bijector_orders<B>, B>;
 constexpr int max_out = 16;      // the largest value size: p = 4 or 5 packed
-constexpr int max_scratch = 24576;  // >= scratch_size() of every map tested (matrix_log p = 4: 23360)
-constexpr int chunk = 512;           // groups per kernel launch (scratch memory: 100 MB)
+constexpr long scratch_doubles = 160000000;  // scratch per launch: at most 1.28 GB
 
 // one quantity of order K along idx: false if structurally zero (out zeroed)
 template <int K, class B>
@@ -133,6 +132,68 @@ std::vector<std::string> split(const std::string& line) {
   return f;
 }
 
+// The four evaluations of one group: part 0 the derivative of order K at x
+// (y, and whether it is structurally zero), part 1 order K - 1 at x (lower),
+// parts 2 and 3 order K - 1 at x + h and x - h along the last variable of the
+// tuple (fp, fm; step in hs).
+struct group_eval {
+  Kokkos::View<int* [11]> meta;
+  Kokkos::View<double* [max_out]> x, y, lower, fp, fm;
+  Kokkos::View<double*> hs;
+  Kokkos::View<int*> nonzero;
+
+  KOKKOS_INLINE_FUNCTION void operator()(int g, int part, double* w) const {
+    const int mp = meta(g, 0), dim = meta(g, 1), d = meta(g, 2), q = meta(g, 3), K = meta(g, 4);
+    if (K == 0 && part > 0) return;
+    int t[6];
+    for (int k = 0; k < 6; ++k) t[k] = meta(g, 5 + k);
+    double xx[max_out], a[max_out];
+    for (int k = 0; k < max_out; ++k) xx[k] = x(g, k), a[k] = 0.0;
+    if (part == 0) {
+      nonzero(g) = eval_any(mp, dim, d, q, K, t, xx, a, w) ? 1 : 0;
+      for (int k = 0; k < max_out; ++k) y(g, k) = a[k];
+      return;
+    }
+    if (part == 1) {
+      eval_any(mp, dim, d, q, K - 1, t, xx, a, w);
+      for (int k = 0; k < max_out; ++k) lower(g, k) = a[k];
+      return;
+    }
+    // shift along the last variable of the tuple; alr forward moves pi_K the other way
+    const int j = d == 1 ? value_pos(mp, t[K - 1]) : t[K - 1];
+    const bool last = mp == 0 && d == 1;
+    const double xj = xx[j], ax = xj < 0 ? -xj : xj;
+    double h = 1e-6 * (ax < 1.0 ? 1.0 : ax);
+    // the matrix maps forward: a step below the smallest L_ii^2, so that the
+    // matrix stays positive definite and the truncation stays small
+    if (d == 1 && (mp == 1 || mp == 2)) {
+      eval_any(mp, dim, 1, 0, 0, t, xx, a, w);
+      double lam = 1.0;
+      for (int i = 0; i < dim; ++i) {
+        double l2;
+        if (mp == 1) l2 = Kokkos::exp(2.0 * a[lb::detail_coupled::packed(i, i)]);
+        else {
+          l2 = 1.0;
+          for (int c = 0; c < i; ++c) {
+            const double ch = Kokkos::cosh(a[lb::detail_coupled::strict(i, c)]);
+            l2 /= ch * ch;
+          }
+        }
+        lam = l2 < lam ? l2 : lam;
+      }
+      h *= lam;
+    }
+    const double s = part == 2 ? 1.0 : -1.0;
+    xx[j] = xj + s * h;
+    if (last) xx[dim - 1] -= s * h;
+    for (int k = 0; k < max_out; ++k) a[k] = 0.0;
+    eval_any(mp, dim, d, q, K - 1, t, xx, a, w);
+    const auto& out = part == 2 ? fp : fm;
+    for (int k = 0; k < max_out; ++k) out(g, k) = a[k];
+    if (part == 2) hs(g) = h;
+  }
+};
+
 const std::string mname[] = {"alr", "log_cholesky", "partial_corr", "matrix_log"};
 const std::string qname[] = {"map", "log_jacobian", "cholesky"};
 const std::string dname[] = {"inverse", "forward"};
@@ -199,68 +260,55 @@ TEST_CASE("coupled bijectors: alr, log_cholesky, partial_corr against mpmath and
   Kokkos::deep_copy(meta, hm);
   Kokkos::deep_copy(x, hx);
 
-  // y: the value and whether it is structurally zero; fd: the difference of
-  // order K - 1; lower: order K - 1 at x
-  Kokkos::View<double* [max_out]> y("y", ng), fd("fd", ng), lower("lower", ng);
-  Kokkos::View<int*> nonzero("nonzero", ng);
-  // LayoutRight: each kernel thread takes a contiguous row as its scratch buffer
-  Kokkos::View<double**, Kokkos::LayoutRight> scratch("scratch", chunk, max_scratch);
-  for (int g0 = 0; g0 < ng; g0 += chunk) {
-    const int g1 = std::min(ng, g0 + chunk);
-    Kokkos::parallel_for(
-        "bijector_coupled", Kokkos::RangePolicy<>(g0, g1), KOKKOS_LAMBDA(int g) {
-          const int mp = meta(g, 0), dim = meta(g, 1), d = meta(g, 2), q = meta(g, 3), K = meta(g, 4);
-          int t[6];
-          for (int k = 0; k < 6; ++k) t[k] = meta(g, 5 + k);
-          double* w = &scratch(g - g0, 0);
-          double xx[max_out], a[max_out], b[max_out];
-          for (int k = 0; k < max_out; ++k) xx[k] = x(g, k), a[k] = 0.0, b[k] = 0.0;
-          nonzero(g) = eval_any(mp, dim, d, q, K, t, xx, a, w) ? 1 : 0;
-          for (int k = 0; k < max_out; ++k) y(g, k) = a[k];
-          if (K == 0) return;
-          for (int k = 0; k < max_out; ++k) a[k] = 0.0;
-          eval_any(mp, dim, d, q, K - 1, t, xx, a, w);
-          for (int k = 0; k < max_out; ++k) lower(g, k) = a[k];
-          // shift along the last variable of the tuple; alr forward moves pi_K the other way
-          const int j = d == 1 ? value_pos(mp, t[K - 1]) : t[K - 1];
-          const bool last = mp == 0 && d == 1;
-          const double xj = xx[j], ax = xj < 0 ? -xj : xj;
-          double h = 1e-6 * (ax < 1.0 ? 1.0 : ax);
-          // the matrix maps forward: a step below the smallest L_ii^2, so that the
-          // matrix stays positive definite and the truncation stays small
-          if (d == 1 && (mp == 1 || mp == 2)) {
-            eval_any(mp, dim, 1, 0, 0, t, xx, a, w);
-            double lam = 1.0;
-            for (int i = 0; i < dim; ++i) {
-              double l2;
-              if (mp == 1) l2 = Kokkos::exp(2.0 * a[lb::detail_coupled::packed(i, i)]);
-              else {
-                l2 = 1.0;
-                for (int c = 0; c < i; ++c) {
-                  const double ch = Kokkos::cosh(a[lb::detail_coupled::strict(i, c)]);
-                  l2 /= ch * ch;
-                }
-              }
-              lam = l2 < lam ? l2 : lam;
-            }
-            h *= lam;
-          }
-          xx[j] = xj + h;
-          if (last) xx[dim - 1] -= h;
-          for (int k = 0; k < max_out; ++k) a[k] = 0.0;
-          eval_any(mp, dim, d, q, K - 1, t, xx, a, w);
-          xx[j] = xj - h;
-          if (last) xx[dim - 1] += 2.0 * h;
-          for (int k = 0; k < max_out; ++k) b[k] = 0.0;
-          eval_any(mp, dim, d, q, K - 1, t, xx, b, w);
-          for (int k = 0; k < max_out; ++k) fd(g, k) = (a[k] - b[k]) / (2.0 * h);
-        });
-    Kokkos::fence();
+  // the four evaluations of each group, in one thread (group_eval)
+  const group_eval ev{meta, x, Kokkos::View<double* [max_out]>("y", ng), Kokkos::View<double* [max_out]>("lower", ng),
+                      Kokkos::View<double* [max_out]>("fp", ng), Kokkos::View<double* [max_out]>("fm", ng),
+                      Kokkos::View<double*>("hs", ng), Kokkos::View<int*>("nonzero", ng)};
+  // The groups come in runs of one map; each run gets the scratch of its largest
+  // dimension (matrix_log p = 4: 23412 doubles per thread, the other maps at most
+  // 896) and as many threads per launch as scratch_doubles allows, at most 64 per
+  // unit of concurrency (a few launches on the CPU). On CUDA all 6520 matrix_log
+  // groups run in one launch: the time is that of the slowest thread, the order-6
+  // tuples of p = 4. With 512 groups per launch, as before 2026-11-13, the test
+  // took 44 s on CUDA (RTX 4070 SUPER); now 8 s.
+  const int max_chunk = 64 * Kokkos::DefaultExecutionSpace().concurrency();
+  const bool print_time = std::getenv("LAPLACE_PRINT_ERRORS") != nullptr;
+  int r0 = 0;
+  while (r0 < ng) {
+    const int mp0 = groups[r0].map;
+    int r1 = r0, ws = 0;
+    for (; r1 < ng && groups[r1].map == mp0; ++r1) {
+      const int dm = groups[r1].dim;
+      ws = std::max(ws, mp0 == 0   ? lb::alr_bijector(dm).scratch_size()
+                        : mp0 == 1 ? lb::log_cholesky_bijector(dm).scratch_size()
+                        : mp0 == 2 ? lb::partial_corr_bijector(dm).scratch_size()
+                                   : lb::matrix_log_bijector(dm).scratch_size());
+    }
+    const int chunk = std::max(1, std::min({r1 - r0, max_chunk, int(scratch_doubles / ws)}));
+    // LayoutRight: each kernel thread takes a contiguous row as its scratch buffer
+    Kokkos::View<double**, Kokkos::LayoutRight> scratch("scratch", chunk, ws);
+    Kokkos::Timer timer;
+    for (int g0 = r0; g0 < r1; g0 += chunk) {
+      const int g1 = std::min(r1, g0 + chunk);
+      Kokkos::parallel_for(
+          "bijector_coupled", Kokkos::RangePolicy<>(g0, g1), KOKKOS_LAMBDA(int g) {
+            for (int part = 0; part < 4; ++part) ev(g, part, &scratch(g - g0, 0));
+          });
+      Kokkos::fence();
+    }
+    if (print_time)
+      std::printf("%-13s %6d groups, chunk %6d, scratch %5d: %.2f s\n", mname[mp0].c_str(), r1 - r0, chunk, ws,
+                  timer.seconds());
+    r0 = r1;
   }
-  auto hy = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), y);
-  auto hfd = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), fd);
-  auto hlo = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), lower);
-  auto hnz = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), nonzero);
+  auto hy = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), ev.y);
+  auto hlo = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), ev.lower);
+  auto hfp = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), ev.fp);
+  auto hfm = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), ev.fm);
+  auto hh = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), ev.hs);
+  auto hnz = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), ev.nonzero);
+  // the central difference of order K - 1
+  auto hfd = [&](int g, int k) { return (hfp(g, k) - hfm(g, k)) / (2.0 * hh(g)); };
 
   // the pure derivatives of each order, per variable and output, for the scale of the mixed ones
   std::map<std::vector<int>, std::vector<double>> pure;
