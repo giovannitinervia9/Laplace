@@ -70,8 +70,8 @@ constexpr double eps = 2.220446049250313e-16;  // 2^-52, the spacing of doubles 
 
 // clang-format off
 #if defined(__CUDACC__)
-static __constant__ double gl_t_dev[32] = {LAPLACE_LOG1PREL_GL_T};
-static __constant__ double gl_w_dev[32] = {LAPLACE_LOG1PREL_GL_W};
+inline __constant__ double gl_t_dev[32] = {LAPLACE_LOG1PREL_GL_T};
+inline __constant__ double gl_w_dev[32] = {LAPLACE_LOG1PREL_GL_W};
 #endif
 inline constexpr double gl_t_host[32] = {LAPLACE_LOG1PREL_GL_T};
 inline constexpr double gl_w_host[32] = {LAPLACE_LOG1PREL_GL_W};

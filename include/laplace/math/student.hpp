@@ -425,7 +425,7 @@ struct par {
   0.1911188674736163, 0.1258374563468283, 0.06405689286260563, 0.12793819534675216
 // clang-format on
 #if defined(__CUDACC__)
-static __constant__ double gleg_dev[80] = {LAPLACE_ST_GLEG_DATA};
+inline __constant__ double gleg_dev[80] = {LAPLACE_ST_GLEG_DATA};
 #endif
 inline constexpr double gleg_host[80] = {LAPLACE_ST_GLEG_DATA};
 LAPLACE_HD_FORCEINLINE double gleg(int i) {
@@ -483,7 +483,7 @@ LAPLACE_HD_FORCEINLINE int gleg_offset(int n) { return n == 8 ? 0 : n == 12 ? 4 
 // clang-format on
 constexpr int tm_n = 81;
 #if defined(__CUDACC__)
-static __constant__ double tm_dev[2 * tm_n] = {LAPLACE_ST_TM_DATA};
+inline __constant__ double tm_dev[2 * tm_n] = {LAPLACE_ST_TM_DATA};
 #endif
 inline constexpr double tm_host[2 * tm_n] = {LAPLACE_ST_TM_DATA};
 LAPLACE_HD_FORCEINLINE double tm_tab(int i) {

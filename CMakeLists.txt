@@ -20,6 +20,15 @@ if(Kokkos_ENABLE_CUDA)
   if(NOT LAPLACE_CUDA_FMAD)
     add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--fmad=false>)
   endif()
+  # Kokkos built with relocatable device code: every unit is compiled with
+  # -rdc and joined by a device link. nvcc then compiles in about half the time
+  # (the kernels measured 1.01 to 1.07 times slower). In one device program the
+  # constants that ptxas generates for some kernels exceed the 64 KB bank, so
+  # it does not generate them.
+  if(Kokkos_ENABLE_CUDA_RELOCATABLE_DEVICE_CODE)
+    set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+    add_compile_options("$<$<COMPILE_LANGUAGE:CUDA>:SHELL:-Xptxas --disable-optimizer-constants>")
+  endif()
 endif()
 function(laplace_kokkos_sources)
   if(Kokkos_ENABLE_CUDA)

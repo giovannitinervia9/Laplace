@@ -270,7 +270,7 @@ constexpr double inv_sqrt_2pi = 0.39894228040143267794;
 // clang-format on
 constexpr int n_rule_pairs = 148;
 #if defined(__CUDACC__)
-static __constant__ double rule_dev[2 * n_rule_pairs] = {LAPLACE_OWEN_RULE_DATA};
+inline __constant__ double rule_dev[2 * n_rule_pairs] = {LAPLACE_OWEN_RULE_DATA};
 #endif
 inline constexpr double rule_host[2 * n_rule_pairs] = {LAPLACE_OWEN_RULE_DATA};
 LAPLACE_HD_FORCEINLINE double rule(int i) {

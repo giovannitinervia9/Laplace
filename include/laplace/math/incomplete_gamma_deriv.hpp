@@ -340,14 +340,14 @@ inline constexpr double ts_near[29] = LAPLACE_GD_TS_NEAR;
 #define LAPLACE_GD_TS_W {0x1.921fb54442d18p-4, 0x1.85f5ebfa10b92p-4, 0x1.63bdcaf901815p-4, 0x1.3186caf901e08p-4, 0x1.ee947b728e394p-5, 0x1.799174231745ep-5, 0x1.0fe97de128bdbp-5, 0x1.711ccc4f2eb22p-6, 0x1.d715fb2e4f1bcp-7, 0x1.1970c313b0d53p-7, 0x1.38e041e84722ap-8, 0x1.40ebf0ed4ce33p-9, 0x1.2c88d194ea674p-10, 0x1.fb6b4a3163556p-12, 0x1.7c70559b49937p-13, 0x1.f20bb3a8a0696p-15, 0x1.1721a8030e921p-16, 0x1.0612231ac7148p-18, 0x1.921b35fc363d2p-21, 0x1.ea40955e09cf9p-24, 0x1.cc3b4b048a3b1p-27, 0x1.410b895d92343p-30, 0x1.3fb70d9c5c84bp-34, 0x1.b256959c5ec40p-39, 0x1.7e4b11db90a01p-44, 0x1.9b5b831ff30b3p-50, 0x1.fa9caab4cca6dp-57, 0x1.4b60d436e990cp-64, 0x1.a72bf17fb33bep-73}
 inline constexpr double ts_w[29] = LAPLACE_GD_TS_W;
 #if defined(__CUDACC__)
-// the same tables in the device's constant memory (one copy per translation
-// unit; every thread of a warp reads the same node at the same time)
-static __constant__ double d_ee1_xi[97] = LAPLACE_GD_EE1_XI;
-static __constant__ double d_ee1_w[97] = LAPLACE_GD_EE1_W;
-static __constant__ double d_ee2_xi[161] = LAPLACE_GD_EE2_XI;
-static __constant__ double d_ee2_w[161] = LAPLACE_GD_EE2_W;
-static __constant__ double d_ts_near[29] = LAPLACE_GD_TS_NEAR;
-static __constant__ double d_ts_w[29] = LAPLACE_GD_TS_W;
+// the same tables in the device's constant memory (one copy per program;
+// every thread of a warp reads the same node at the same time)
+inline __constant__ double d_ee1_xi[97] = LAPLACE_GD_EE1_XI;
+inline __constant__ double d_ee1_w[97] = LAPLACE_GD_EE1_W;
+inline __constant__ double d_ee2_xi[161] = LAPLACE_GD_EE2_XI;
+inline __constant__ double d_ee2_w[161] = LAPLACE_GD_EE2_W;
+inline __constant__ double d_ts_near[29] = LAPLACE_GD_TS_NEAR;
+inline __constant__ double d_ts_w[29] = LAPLACE_GD_TS_W;
 #endif
 }  // namespace tab
 
@@ -768,7 +768,7 @@ namespace tab {
 #define LAPLACE_GD_LGAM_C {-0x1.2788cfc6fb619p-1, 0x1.a51a6625307d3p-1, -0x1.9a4d55beab2d7p-2, 0x1.151322ac7d848p-2, -0x1.a8b9c17aa6149p-3, 0x1.5b40cb100c306p-3, -0x1.2703a1dcea3aep-3, 0x1.010b36af86397p-3, -0x1.c806706d57db4p-4, 0x1.9a01e385d5f8fp-4, -0x1.748c33114c6d6p-4, 0x1.556ad63243bc4p-4, -0x1.3b1d971fc5985p-4, 0x1.2496df8320c5fp-4, -0x1.11133476e7fe0p-4, 0x1.00010064cdeb2p-4, -0x1.e1e2d311e8abdp-5, 0x1.c71ce3a20b419p-5, -0x1.af28a1b5688a0p-5, 0x1.9999b3352d5bap-5, -0x1.86186db77bfbfp-5, 0x1.745d1d1778df9p-5, -0x1.642c88591b66dp-5, 0x1.555556aaafdcdp-5, -0x1.47ae151eb9fb7p-5, 0x1.3b13b189d925ep-5, -0x1.2f684c00002bcp-5, 0x1.24924936db7bcp-5, -0x1.1a7b961a7b9aap-5, 0x1.111111155556dp-5, -0x1.08421086318cep-5, 0x1.0000000100002p-5, -0x1.f07c1f08ba2eap-6, 0x1.e1e1e1e25a5a6p-6, -0x1.d41d41d457c58p-6, 0x1.c71c71c738e39p-6, -0x1.bacf914c29837p-6, 0x1.af286bca21af3p-6, -0x1.a41a41a41d89ep-6, 0x1.999999999b333p-6, -0x1.8f9c18f9c2577p-6, 0x1.8618618618c31p-6, -0x1.7d05f417d08eep-6, 0x1.745d1745d18bap-6, -0x1.6c16c16c16ccdp-6, 0x1.642c8590b21bdp-6, -0x1.5c9882b931083p-6, 0x1.555555555556bp-6, -0x1.4e5e0a72f0544p-6, 0x1.47ae147ae1480p-6, -0x1.4141414141417p-6, 0x1.3b13b13b13b15p-6, -0x1.3521cfb2b78c2p-6, 0x1.2f684bda12f69p-6, -0x1.29e4129e4129ep-6, 0x1.2492492492492p-6, -0x1.1f7047dc11f70p-6, 0x1.1a7b9611a7b96p-6, -0x1.15b1e5f75270dp-6, 0x1.1111111111111p-6, -0x1.0c9714fbcda3bp-6, 0x1.0842108421084p-6, -0x1.0410410410410p-6, 0x1.0000000000000p-6, -0x1.f81f81f81f820p-7, 0x1.f07c1f07c1f08p-7, -0x1.e9131abf0b767p-7, 0x1.e1e1e1e1e1e1ep-7, -0x1.dae6076b981dbp-7, 0x1.d41d41d41d41dp-7, -0x1.cd85689039b0bp-7, 0x1.c71c71c71c71cp-7, -0x1.c0e070381c0e0p-7, 0x1.bacf914c1bad0p-7, -0x1.b4e81b4e81b4fp-7, 0x1.af286bca1af28p-7, -0x1.a98ef606a63bep-7, 0x1.a41a41a41a41ap-7, -0x1.9ec8e951033d9p-7, 0x1.999999999999ap-7, -0x1.948b0fcd6e9e0p-7, 0x1.8f9c18f9c18fap-7, -0x1.8acb90f6bf3aap-7, 0x1.8618618618618p-7, -0x1.8181818181818p-7, 0x1.7d05f417d05f4p-7, -0x1.78a4c8178a4c8p-7, 0x1.745d1745d1746p-7, -0x1.702e05c0b8170p-7, 0x1.6c16c16c16c17p-7, -0x1.6816816816817p-7}
 inline constexpr double lgam_c[91] = LAPLACE_GD_LGAM_C;
 #if defined(__CUDACC__)
-static __constant__ double d_lgam_c[91] = LAPLACE_GD_LGAM_C;
+inline __constant__ double d_lgam_c[91] = LAPLACE_GD_LGAM_C;
 #endif
 }  // namespace tab
 
@@ -945,8 +945,8 @@ namespace tab {
 inline constexpr double eta_d[91] = LAPLACE_GD_ETA_SERIES;
 inline constexpr double temme_c[80] = LAPLACE_GD_TEMME_C;
 #if defined(__CUDACC__)
-static __constant__ double d_eta_d[91] = LAPLACE_GD_ETA_SERIES;
-static __constant__ double d_temme_c[80] = LAPLACE_GD_TEMME_C;
+inline __constant__ double d_eta_d[91] = LAPLACE_GD_ETA_SERIES;
+inline __constant__ double d_temme_c[80] = LAPLACE_GD_TEMME_C;
 #endif
 }  // namespace tab
 

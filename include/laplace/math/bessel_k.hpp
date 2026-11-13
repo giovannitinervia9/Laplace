@@ -110,7 +110,7 @@ constexpr double log_half_pi = 0.45158270528945486473;  // log(pi/2)
     0x1.ed06d883c7d6cp+46
 // clang-format on
 #if defined(__CUDACC__)
-static __constant__ double debye_dev[153] = {LAPLACE_BESSEL_K_DEBYE};
+inline __constant__ double debye_dev[153] = {LAPLACE_BESSEL_K_DEBYE};
 #endif
 inline constexpr double debye_host[153] = {LAPLACE_BESSEL_K_DEBYE};
 // c_(k,i), u_k(t) = t^k sum_i c_(k,i) t^(2i), k = 0..16
