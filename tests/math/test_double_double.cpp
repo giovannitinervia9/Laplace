@@ -41,9 +41,15 @@ struct DdExpLog {
   KOKKOS_INLINE_FUNCTION dd operator()(double h, double l) const { return ddm::exp(ddm::log(dd(h, l))); }
 };
 
+}  // namespace
+
+// The kernel below sits in a function with external linkage, outside the anonymous
+// namespace: an extended device lambda takes the address of its enclosing function as a
+// tag, and a function with internal linkage can give the same tag in two translation
+// units (note/brief_agenti.md, found on 2026-11-13).
 // the double-double result of f on every argument, from a Kokkos kernel
 template <class F>
-std::vector<dd> eval_dd(const std::vector<bench::Args>& x, F f) {
+std::vector<dd> eval_dd_in_kernel(const std::vector<bench::Args>& x, F f) {
   const std::size_t n = x.size();
   Kokkos::View<double* [2], Kokkos::LayoutRight, bench::Exec::memory_space> dx("x", n), dy("y", n);
   auto hx = Kokkos::create_mirror_view(dx);
@@ -108,11 +114,9 @@ Errors measure(const bench::Ref& r, const std::vector<dd>& y) {
   return e;
 }
 
-}  // namespace
-
 TEST_CASE("double-double sqrt against mpmath") {
   const auto r = bench::read_ref(refdir + "/dd_sqrt.csv");
-  const auto e = measure(r, eval_dd(r.x, DdSqrt{}));
+  const auto e = measure(r, eval_dd_in_kernel(r.x, DdSqrt{}));
   INFO("sqrt: max ", e.max_rel, " ddulp, worst x_hi ", bench::show(e.worst, 2));
   CHECK(e.n_bad == 0);
   CHECK(e.max_rel <= 2.0);
@@ -121,7 +125,7 @@ TEST_CASE("double-double sqrt against mpmath") {
 
 TEST_CASE("double-double exp against mpmath") {
   const auto r = bench::read_ref(refdir + "/dd_exp.csv");
-  const auto e = measure(r, eval_dd(r.x, DdExp{}));
+  const auto e = measure(r, eval_dd_in_kernel(r.x, DdExp{}));
   INFO("exp: max ", e.max_rel, " ddulp, worst x_hi ", bench::show(e.worst, 2));
   CHECK(e.n_bad == 0);
   CHECK(e.max_rel <= 1.0);
@@ -130,7 +134,7 @@ TEST_CASE("double-double exp against mpmath") {
 
 TEST_CASE("double-double log against mpmath") {
   const auto r = bench::read_ref(refdir + "/dd_log.csv");
-  const auto e = measure(r, eval_dd(r.x, DdLog{}));
+  const auto e = measure(r, eval_dd_in_kernel(r.x, DdLog{}));
   INFO("log: max ", e.max_rel, " ddulp, worst x_hi ", bench::show(e.worst, 2), "; max ", e.max_rel1,
        " ddulp1, worst x_hi ", bench::show(e.worst1, 2));
   CHECK(e.n_bad == 0);
@@ -144,7 +148,7 @@ struct DdExpm1 {
 
 TEST_CASE("double-double expm1 against mpmath") {
   const auto r = bench::read_ref(refdir + "/dd_expm1.csv");
-  const auto e = measure(r, eval_dd(r.x, DdExpm1{}));
+  const auto e = measure(r, eval_dd_in_kernel(r.x, DdExpm1{}));
   INFO("expm1: max ", e.max_rel, " ddulp, worst x_hi ", bench::show(e.worst, 2));
   CHECK(e.n_bad == 0);
   CHECK(e.max_rel <= 3.5);
@@ -194,7 +198,7 @@ TEST_CASE("log_split: absolute error of log x split by the exponent") {
   // in units of 2^-53, absolute, on the arguments of the log table (normal and
   // subnormal, rounded to doubles)
   const auto r = bench::read_ref(refdir + "/dd_log.csv");
-  const auto y = eval_dd(r.x, LogSplitDiff{});
+  const auto y = eval_dd_in_kernel(r.x, LogSplitDiff{});
   double worst = 0;
   bench::Args at{0, 0, 0};
   for (std::size_t i = 0; i < y.size(); ++i) {
@@ -215,7 +219,7 @@ TEST_CASE("double-double exp(log(x)) returns x") {
   const auto r = bench::read_ref(refdir + "/dd_log.csv");
   std::vector<bench::Args> x;
   for (std::size_t i = 0; i < r.x.size(); i += 7) x.push_back(r.x[i]);  // arguments of the log table
-  const auto y = eval_dd(x, DdExpLog{});
+  const auto y = eval_dd_in_kernel(x, DdExpLog{});
   double worst = 0;
   for (std::size_t i = 0; i < x.size(); ++i) {
     const dd ref(x[i][0], x[i][1]);

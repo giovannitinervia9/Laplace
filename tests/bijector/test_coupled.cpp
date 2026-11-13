@@ -200,7 +200,11 @@ const std::string dname[] = {"inverse", "forward"};
 
 }  // namespace
 
-TEST_CASE("coupled bijectors: alr, log_cholesky, partial_corr against mpmath and differences") {
+// The body sits in a named function with external linkage, never in the body of a
+// TEST_CASE: doctest's case function has internal linkage, and the extended device lambda
+// below takes the address of its enclosing function as a tag, which collides between
+// translation units (note/brief_agenti.md, found on 2026-11-13).
+void coupled_mpmath_case() {
   const std::string dir = LAPLACE_REFERENCE_DIR;
   // points: (map, dim, point, side) -> values
   std::map<std::array<int, 4>, std::vector<double>> pts;
@@ -435,6 +439,8 @@ TEST_CASE("coupled bijectors: alr, log_cholesky, partial_corr against mpmath and
       std::printf("forward %-13s dim %d point %d order %d: %.2f\n", mname[k[0]].c_str(), k[1], k[2], k[3], v);
   }
 }
+
+TEST_CASE("coupled bijectors: alr, log_cholesky, partial_corr against mpmath and differences") { coupled_mpmath_case(); }
 
 // the nonzero tuples at order 6 against the SymPy count of 2026-11-12
 // (log_cholesky p = 4: 10 of 5005; partial_corr p = 4: 251 of 462; alr dense)

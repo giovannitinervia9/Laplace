@@ -45,8 +45,14 @@ struct Deriv {
   }
 };
 
+}  // namespace
+
+// The kernel below sits in a function with external linkage, outside the anonymous
+// namespace: an extended device lambda takes the address of its enclosing function as a
+// tag, and a function with internal linkage can give the same tag in two translation
+// units (note/brief_agenti.md, found on 2026-11-13).
 template <int K>
-void check(double max_ulpN, double max_ulp1, double max_ulpL) {
+void check_student_cdf_deriv(double max_ulpN, double max_ulp1, double max_ulpL) {
   bench::Ref ref[K + 1];
   for (int j = 0; j <= K; ++j)
     ref[j] = bench::read_ref(refdir + "/log_student_cdf_d" + std::to_string(K - j) + std::to_string(j) + ".csv");
@@ -101,8 +107,6 @@ struct Value {
   KOKKOS_INLINE_FUNCTION double operator()(double z, double nu) const { return lo::log_student_cdf(z, nu); }
 };
 
-}  // namespace
-
 TEST_CASE("log T_nu(z) against mpmath") {
   const auto r = bench::read_ref(refdir + "/log_student_cdf.csv");
   const auto y = bench::eval_kernel(r.x, Value{});
@@ -114,9 +118,9 @@ TEST_CASE("log T_nu(z) against mpmath") {
 }
 
 TEST_CASE("derivatives of log T_nu(z) in (z, nu) against mpmath") {
-  check<1>(650.0, 1.0, 12.0);
-  check<2>(800.0, 1.0, 35.0);
-  check<3>(510.0, 18.0, 50.0);
-  check<4>(2200.0, 1.0, 420.0);
-  check<5>(710.0, 145.0, 145.0);
+  check_student_cdf_deriv<1>(650.0, 1.0, 12.0);
+  check_student_cdf_deriv<2>(800.0, 1.0, 35.0);
+  check_student_cdf_deriv<3>(510.0, 18.0, 50.0);
+  check_student_cdf_deriv<4>(2200.0, 1.0, 420.0);
+  check_student_cdf_deriv<5>(710.0, 145.0, 145.0);
 }

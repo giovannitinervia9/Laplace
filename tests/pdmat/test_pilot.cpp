@@ -120,7 +120,11 @@ const char* qname[] = {"matrix", "inverse", "cholesky", "log_det"};
 
 }  // namespace
 
-TEST_CASE("pdmat pilot: diagonal, compound symmetry, AR(1) against mpmath and differences") {
+// The body sits in a named function with external linkage, never in the body of a
+// TEST_CASE: doctest's case function has internal linkage, and the extended device lambda
+// below takes the address of its enclosing function as a tag, which collides between
+// translation units (note/brief_agenti.md, found on 2026-11-13).
+void pdmat_mpmath_case() {
   const auto groups = read_groups(std::string(LAPLACE_REFERENCE_DIR) + "/pdmat_pilot.csv");
   const int ng = int(groups.size());
   REQUIRE(ng > 0);
@@ -219,6 +223,8 @@ TEST_CASE("pdmat pilot: diagonal, compound symmetry, AR(1) against mpmath and di
       }
   if (print) std::printf("worst difference check: %.3g of its tolerance\n", worst_fd);
 }
+
+TEST_CASE("pdmat pilot: diagonal, compound symmetry, AR(1) against mpmath and differences") { pdmat_mpmath_case(); }
 
 TEST_CASE("pdmat pilot: structural zeros of diagonal_pdmat") {
   const lp::diagonal_pdmat d(3);

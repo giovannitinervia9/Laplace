@@ -68,8 +68,14 @@ struct Deriv {
   }
 };
 
+}  // namespace
+
+// The kernel below sits in a function with external linkage, outside the anonymous
+// namespace: an extended device lambda takes the address of its enclosing function as a
+// tag, and a function with internal linkage can give the same tag in two translation
+// units (note/brief_agenti.md, found on 2026-11-13).
 template <int K>
-void check_deriv(double max_ulpN, double max_ulpL) {
+void check_skew_normal_cdf_deriv(double max_ulpN, double max_ulpL) {
   bench::Ref ref[K + 1];
   for (int j = 0; j <= K; ++j)
     ref[j] = bench::read_ref(refdir + "/log_sn_cdf_d" + std::to_string(K - j) + std::to_string(j) + ".csv");
@@ -113,17 +119,15 @@ void check_deriv(double max_ulpN, double max_ulpL) {
   CHECK(eL <= max_ulpL);
 }
 
-}  // namespace
-
 TEST_CASE("Owen's T and log F of the skew normal against mpmath") {
   check_value("owens_t", OwensT{}, 6.7, 3.4);
   check_value("log_sn_cdf", LogSnCdf{}, 7.5, 5.5);
 }
 
 TEST_CASE("derivatives of log F of the skew normal in (z, alpha) against mpmath") {
-  check_deriv<1>(7.7, 6.5);
-  check_deriv<2>(310.0, 37.0);
-  check_deriv<3>(3400.0, 760.0);
-  check_deriv<4>(2300.0, 1200.0);
-  check_deriv<5>(1.8e5, 4.2e4);
+  check_skew_normal_cdf_deriv<1>(7.7, 6.5);
+  check_skew_normal_cdf_deriv<2>(310.0, 37.0);
+  check_skew_normal_cdf_deriv<3>(3400.0, 760.0);
+  check_skew_normal_cdf_deriv<4>(2300.0, 1200.0);
+  check_skew_normal_cdf_deriv<5>(1.8e5, 4.2e4);
 }

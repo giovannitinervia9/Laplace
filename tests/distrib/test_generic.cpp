@@ -14,7 +14,7 @@
 #include <laplace/distrib/generic_info.hpp>
 #include <laplace/distrib/generic_quantile.hpp>
 #include <laplace/distrib/generic_rng.hpp>
-#include <laplace/distrib/laplace.hpp>
+#include <laplace/distrib/laplace1.hpp>
 #include <laplace/distrib/poisson.hpp>
 
 #include <Kokkos_Core.hpp>
@@ -142,7 +142,7 @@ TEST_CASE("distrib generic: quantile by root against the closed forms") {
   double w = 0.0;
   w = std::fmax(w, check_quantile(ld::gaussian1_distrib{0.4, 1.3}, 8.0));
   w = std::fmax(w, check_quantile(ld::gaussian1_distrib{-20.0, 1e-3}, 8.0));
-  w = std::fmax(w, check_quantile(ld::laplace_distrib{0.4, 1.3}, 8.0));
+  w = std::fmax(w, check_quantile(ld::laplace1_distrib{0.4, 1.3}, 8.0));
   w = std::fmax(w, check_quantile(ld::gamma1_distrib{2.0, 0.3}, 64.0));
   w = std::fmax(w, check_quantile(ld::gamma1_distrib{1.5, 4.0}, 64.0));
   w = std::fmax(w, check_quantile(ld::gamma1_distrib{1.5, 0.02}, 64.0));
@@ -229,7 +229,7 @@ TEST_CASE("distrib generic: expected information and its derivatives, both forms
 }
 
 TEST_CASE("distrib generic: expected information of the Laplace (finite regularity)") {
-  const ld::laplace_distrib d{0.4, 1.3};
+  const ld::laplace1_distrib d{0.4, 1.3};
   const auto h = hide(d);
   // I itself: the score form gives it, the hessian form only the (sigma, sigma) component
   const auto is = ld::expected_info_by_integral<0, ld::info_form::score>(h);
@@ -271,7 +271,7 @@ TEST_CASE("distrib generic: moments by quadrature and sums") {
     w = std::fmax(w, rel(ld::moment_by_integral(h, 4, 0.4), 3 * s2 * s2, 3 * s2 * s2));
   }
   {
-    const auto h = hide(ld::laplace_distrib{0.4, 1.3});
+    const auto h = hide(ld::laplace1_distrib{0.4, 1.3});
     w = std::fmax(w, rel(ld::moment_by_integral(h, 1), 0.4, 0.4));
     w = std::fmax(w, rel(ld::moment_by_integral(h, 2, 0.4), 2 * 1.69, 2 * 1.69));
   }
@@ -298,7 +298,11 @@ TEST_CASE("distrib generic: moments by quadrature and sums") {
   CHECK(w <= 64.0);
 }
 
-TEST_CASE("distrib generic: rng by inversion, counter source reproducible on the device") {
+// The bodies that define device lambdas sit in named functions with external linkage,
+// never in a TEST_CASE body: doctest's case function has internal linkage, and an extended
+// device lambda takes the address of its enclosing function as a tag, which collides
+// between translation units (note/brief_agenti.md, found on 2026-11-13).
+void generic_rng_kernel_case() {
   const int n = 1 << 16;
   Kokkos::View<double*> out("draws", n);
   const ld::gamma1_distrib ga{2.0, 0.3};
@@ -332,18 +336,20 @@ TEST_CASE("distrib generic: rng by inversion, counter source reproducible on the
       "generic_rng_pool", n,
       KOKKOS_LAMBDA(const int, double& acc) {
         auto g = pool.get_state();
-        acc += ld::rng_by_inversion(ld::laplace_distrib{0.4, 1.3}, g);
+        acc += ld::rng_by_inversion(ld::laplace1_distrib{0.4, 1.3}, g);
         pool.free_state(g);
       },
       sum);
   CHECK(std::fabs(sum / n - 0.4) <= 5.0 * 1.3 * std::sqrt(2.0 / n));
 }
 
-TEST_CASE("distrib generic: every route inside a kernel") {
+TEST_CASE("distrib generic: rng by inversion, counter source reproducible on the device") { generic_rng_kernel_case(); }
+
+void generic_routes_kernel_case() {
   const int n = 16;
   Kokkos::View<double*> out("out", n);
   const ld::gaussian1_distrib g{0.4, 1.3};
-  const ld::laplace_distrib l{0.4, 1.3};
+  const ld::laplace1_distrib l{0.4, 1.3};
   const ld::gamma1_distrib ga{2.0, 0.3};
   const ld::poisson_distrib p{3.5};
   run_kernel(out, "quantile_by_root gamma1", KOKKOS_LAMBDA(int i) { return ld::quantile_by_root(hide(ga), (i + 0.5) / n); });
@@ -364,3 +370,5 @@ TEST_CASE("distrib generic: every route inside a kernel") {
     return ld::expected_info_by_integral<4, ld::info_form::score>(hide(ga)).pair[2][4];
   });
 }
+
+TEST_CASE("distrib generic: every route inside a kernel") { generic_routes_kernel_case(); }

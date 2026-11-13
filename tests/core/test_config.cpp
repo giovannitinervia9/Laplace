@@ -16,7 +16,11 @@ LAPLACE_HD T twice_plus_one(T x) {
 
 }  // namespace
 
-TEST_CASE("a LAPLACE_HD function gives the same sum in a kernel and on the host") {
+// The kernel lives in a named function with external linkage, never in the body of a
+// TEST_CASE: doctest's case function has internal linkage, and an extended device lambda
+// defined inside one takes its address as a tag, which collides between translation units
+// (note/brief_agenti.md, found on 2026-11-13).
+void config_sum_kernel_case() {
   const long n = 1L << 20;
   laplace::real kernel_sum = 0;
   Kokkos::parallel_reduce(
@@ -31,3 +35,5 @@ TEST_CASE("a LAPLACE_HD function gives the same sum in a kernel and on the host"
   CHECK(kernel_sum == expected);
   CHECK(host_sum == expected);
 }
+
+TEST_CASE("a LAPLACE_HD function gives the same sum in a kernel and on the host") { config_sum_kernel_case(); }

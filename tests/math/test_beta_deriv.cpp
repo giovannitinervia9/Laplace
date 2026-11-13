@@ -39,8 +39,14 @@ struct Deriv {
   }
 };
 
+}  // namespace
+
+// The kernel below sits in a function with external linkage, outside the anonymous
+// namespace: an extended device lambda takes the address of its enclosing function as a
+// tag, and a function with internal linkage can give the same tag in two translation
+// units (note/brief_agenti.md, found on 2026-11-13).
 template <int K>
-void check(bool upper, double max_ulpN, double max_ulpL) {
+void check_beta_shape_deriv(bool upper, double max_ulpN, double max_ulpL) {
   const std::string base = std::string(upper ? "log_ibetac_d" : "log_ibeta_d");
   bench::Ref ref[K + 1];
   for (int j = 0; j <= K; ++j) ref[j] = bench::read_ref(refdir + "/" + base + std::to_string(K - j) + std::to_string(j) + ".csv");
@@ -85,20 +91,18 @@ void check(bool upper, double max_ulpN, double max_ulpL) {
   CHECK(eL <= max_ulpL);
 }
 
-}  // namespace
-
 TEST_CASE("derivatives of log I_x(a, b) in the shapes against mpmath") {
-  check<1>(false, 1600.0, 55.0);
-  check<2>(false, 1800.0, 245.0);
-  check<3>(false, 3100.0, 315.0);
-  check<4>(false, 1800.0, 115.0);
-  check<5>(false, 3300.0, 420.0);
+  check_beta_shape_deriv<1>(false, 1600.0, 55.0);
+  check_beta_shape_deriv<2>(false, 1800.0, 245.0);
+  check_beta_shape_deriv<3>(false, 3100.0, 315.0);
+  check_beta_shape_deriv<4>(false, 1800.0, 115.0);
+  check_beta_shape_deriv<5>(false, 3300.0, 420.0);
 }
 
 TEST_CASE("derivatives of log(1 - I_x(a, b)) in the shapes against mpmath") {
-  check<1>(true, 2400.0, 180.0);
-  check<2>(true, 2050.0, 155.0);
-  check<3>(true, 2450.0, 80.0);
-  check<4>(true, 2950.0, 75.0);
-  check<5>(true, 2950.0, 690.0);
+  check_beta_shape_deriv<1>(true, 2400.0, 180.0);
+  check_beta_shape_deriv<2>(true, 2050.0, 155.0);
+  check_beta_shape_deriv<3>(true, 2450.0, 80.0);
+  check_beta_shape_deriv<4>(true, 2950.0, 75.0);
+  check_beta_shape_deriv<5>(true, 2950.0, 690.0);
 }
