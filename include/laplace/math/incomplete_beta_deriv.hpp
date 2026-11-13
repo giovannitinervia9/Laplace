@@ -900,7 +900,7 @@ LAPLACE_HD_FORCEINLINE double node_log1p(double q, bool own) {
 // clang-format on
 constexpr int map_n_g = 185, map_n_e = 129;
 #if defined(__CUDACC__)
-inline __constant__ double map_dev[2 * (map_n_g + map_n_e)] = {LAPLACE_IBD_MAP_DATA};
+LAPLACE_DEVICE_TABLE double map_dev[2 * (map_n_g + map_n_e)] = {LAPLACE_IBD_MAP_DATA};
 #endif
 inline constexpr double map_host[2 * (map_n_g + map_n_e)] = {LAPLACE_IBD_MAP_DATA};
 LAPLACE_HD_FORCEINLINE double map_tab(int i) {
@@ -1019,7 +1019,7 @@ LAPLACE_HD_FORCEINLINE double map_tab(int i) {
   111.7513980979377, 15.390180415260643
 // clang-format on
 #if defined(__CUDACC__)
-inline __constant__ double gl_dev[208] = {LAPLACE_IBD_GL_DATA};
+LAPLACE_DEVICE_TABLE double gl_dev[208] = {LAPLACE_IBD_GL_DATA};
 #endif
 inline constexpr double gl_host[208] = {LAPLACE_IBD_GL_DATA};
 LAPLACE_HD_FORCEINLINE double gl_tab(int i) {

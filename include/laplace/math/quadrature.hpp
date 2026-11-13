@@ -359,14 +359,14 @@ struct sinh_sinh_node {
 // clang-format on
 
 #if defined(__CUDACC__)
-inline __constant__ double gk15_x_dev[8] = {LAPLACE_QUAD_GK15_X};
-inline __constant__ double gk15_w_dev[8] = {LAPLACE_QUAD_GK15_W};
-inline __constant__ double g7_w_dev[4] = {LAPLACE_QUAD_G7_W};
-inline __constant__ double legendre16_dev[32] = {LAPLACE_QUAD_LEGENDRE16};
-inline __constant__ double legendre32_dev[64] = {LAPLACE_QUAD_LEGENDRE32};
-inline __constant__ double legendre64_dev[128] = {LAPLACE_QUAD_LEGENDRE64};
-inline __constant__ double hermite32_dev[64] = {LAPLACE_QUAD_HERMITE32};
-inline __constant__ double laguerre32_dev[64] = {LAPLACE_QUAD_LAGUERRE32};
+LAPLACE_DEVICE_TABLE double gk15_x_dev[8] = {LAPLACE_QUAD_GK15_X};
+LAPLACE_DEVICE_TABLE double gk15_w_dev[8] = {LAPLACE_QUAD_GK15_W};
+LAPLACE_DEVICE_TABLE double g7_w_dev[4] = {LAPLACE_QUAD_G7_W};
+LAPLACE_DEVICE_TABLE double legendre16_dev[32] = {LAPLACE_QUAD_LEGENDRE16};
+LAPLACE_DEVICE_TABLE double legendre32_dev[64] = {LAPLACE_QUAD_LEGENDRE32};
+LAPLACE_DEVICE_TABLE double legendre64_dev[128] = {LAPLACE_QUAD_LEGENDRE64};
+LAPLACE_DEVICE_TABLE double hermite32_dev[64] = {LAPLACE_QUAD_HERMITE32};
+LAPLACE_DEVICE_TABLE double laguerre32_dev[64] = {LAPLACE_QUAD_LAGUERRE32};
 #endif
 inline constexpr double gk15_x_host[8] = {LAPLACE_QUAD_GK15_X};
 inline constexpr double gk15_w_host[8] = {LAPLACE_QUAD_GK15_W};

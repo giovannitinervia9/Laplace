@@ -112,7 +112,7 @@ constexpr double log_2pi = 1.8378770664093454836;   // log(2 pi)
     0x1.a0d9d4d55d938p-63,  -0x1.2051b7d4045c0p-65
 // clang-format on
 #if defined(__CUDACC__)
-inline __constant__ double ratio_series_dev[26] = {LAPLACE_BESSEL_RATIO_SERIES};
+LAPLACE_DEVICE_TABLE double ratio_series_dev[26] = {LAPLACE_BESSEL_RATIO_SERIES};
 #endif
 inline constexpr double ratio_series_host[26] = {LAPLACE_BESSEL_RATIO_SERIES};
 LAPLACE_HD_FORCEINLINE double ratio_series(int i) {
@@ -140,7 +140,7 @@ LAPLACE_HD_FORCEINLINE double ratio_series(int i) {
     -0x1.22147fe20c82ep+186, -0x1.fbb9cc68f3965p+190, -0x1.c4444eb1d1c06p+195, -0x1.99ee5f1b8bd5bp+200
 // clang-format on
 #if defined(__CUDACC__)
-inline __constant__ double ratio_asymptotic_dev[60] = {LAPLACE_BESSEL_RATIO_ASYMPTOTIC};
+LAPLACE_DEVICE_TABLE double ratio_asymptotic_dev[60] = {LAPLACE_BESSEL_RATIO_ASYMPTOTIC};
 #endif
 inline constexpr double ratio_asymptotic_host[60] = {LAPLACE_BESSEL_RATIO_ASYMPTOTIC};
 LAPLACE_HD_FORCEINLINE double ratio_asymptotic(int i) {
@@ -159,7 +159,7 @@ LAPLACE_HD_FORCEINLINE double ratio_asymptotic(int i) {
     -0x1.c000000000000p+0, 0x0.0p+0, -0x1.1800000000000p-1, -0x1.9600000000000p+0, -0x1.4580000000000p+2, -0x1.2788000000000p+4, -0x1.fb16400000000p+5, 0x0.0p+0, 0x1.2401b4e800000p+12, 0x1.6125868800000p+16, 0x1.4f53488c43800p+20, 0x1.25b708530c000p+24, 0x1.f2f07542dc11cp+27, 0x1.a45aa122f7a10p+31, 0x1.63ae3f19ad158p+35, 0x1.308e450ca5bf8p+39, 0x1.092ed13ec10a0p+43, 0x1.d71bb8f039b1ap+46, 0x1.abd1ffb5df9cap+50, 0x1.8dc0140dbdf36p+54, 0x1.7aee8562ade15p+58, 0x1.722017305df9ap+62, 0x1.72c381ab61991p+66, 0x1.7cee75396fde4p+70, 0x1.9166a43bc8b7ep+74, 0x1.b1bd20f96def8p+78, 0x1.e0820f3595830p+82, 0x1.10cd1ec897223p+87, 0x1.3d6318445b6c2p+91, 0x1.7a39dfcbb9c9cp+95, 0x1.cd8173cc3e158p+99, 0x1.202ff790c81aep+104, 0x1.703fa7fdaf962p+108, 0x1.e142c535c4edfp+112, 0x1.418330147ab3ap+117, 0x1.b7064fd5e3959p+121, 0x1.3237f3db0af62p+126, 0x1.b43d78b5bce61p+130, 0x1.3d37153e7605fp+135, 0x1.d6c8e11a16c63p+139, 0x1.6462a53de52e0p+144, 0x1.131fcfe8cb1afp+149, 0x1.b10c26238f5b7p+153, 0x1.5b53d30e633e8p+158, 0x1.1bd032fb79f0dp+163
 // clang-format on
 #if defined(__CUDACC__)
-inline __constant__ double inverse_asymptotic_dev[270] = {LAPLACE_BESSEL_INVERSE_ASYMPTOTIC};
+LAPLACE_DEVICE_TABLE double inverse_asymptotic_dev[270] = {LAPLACE_BESSEL_INVERSE_ASYMPTOTIC};
 #endif
 inline constexpr double inverse_asymptotic_host[270] = {LAPLACE_BESSEL_INVERSE_ASYMPTOTIC};
 LAPLACE_HD_FORCEINLINE double inverse_asymptotic(int n, int m) {
@@ -178,7 +178,7 @@ LAPLACE_HD_FORCEINLINE double inverse_asymptotic(int n, int m) {
     0x1.f2c0000000000p+10, 0x1.67ca000000000p+12, 0x1.89ea000000000p+12, 0x1.c0f29a4924925p+11, 0x1.216371638e38ep+10, 0x1.87e6d08c02874p+7, 0x1.d297449732b1cp+2, -0x1.8d29845644a07p+1, -0x1.840c98bf56564p-2, 0x1.1f777ac37d1d7p-5, 0x1.f80622eaa2fb9p-8, -0x1.6afeabf7708f0p-12, -0x1.dc5c74a6df074p-14, 0x1.12a6b2cad6f8ep-18, 0x1.72bdc02d17d92p-20, -0x1.05e5d60418b6fp-24, -0x1.e52f2b35df2cap-27, 0x1.f12c7c9c0dcf1p-31, 0x1.03274a6fbc33ap-33, -0x1.9641d0233a1c9p-37, -0x1.9a86b4ad947f5p-41, 0x1.12887fc658685p-43, 0x1.310f8c98d43a1p-49, 0x1.7fbc921b3372bp-27
 // clang-format on
 #if defined(__CUDACC__)
-inline __constant__ double inverse_series_dev[144] = {LAPLACE_BESSEL_INVERSE_SERIES};
+LAPLACE_DEVICE_TABLE double inverse_series_dev[144] = {LAPLACE_BESSEL_INVERSE_SERIES};
 #endif
 inline constexpr double inverse_series_host[144] = {LAPLACE_BESSEL_INVERSE_SERIES};
 LAPLACE_HD_FORCEINLINE double inverse_series(int n, int m) {

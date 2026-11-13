@@ -533,7 +533,7 @@ constexpr int cheb_size = 585;
   -0x1.059cae6d41d28p-53, 0x1.2ef8cfe27aaa8p-60, 0x1.2143ec26809c9p-60
 // clang-format on
 #if defined(__CUDACC__)
-inline __constant__ double log_phi_cheb_dev[cheb_size] = {LAPLACE_LOG_PHI_CHEB};
+LAPLACE_DEVICE_TABLE double log_phi_cheb_dev[cheb_size] = {LAPLACE_LOG_PHI_CHEB};
 #endif
 inline constexpr double log_phi_cheb_host[cheb_size] = {LAPLACE_LOG_PHI_CHEB};
 // the coefficient i of the table

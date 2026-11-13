@@ -168,7 +168,7 @@ LAPLACE_HD math::detail::ddm::dd log_prefactor_dd(double a, double x) {
       -0.00059676129019274625
 // clang-format on
 #if defined(__CUDACC__)
-inline __constant__ double temme_dev[80] = {LAPLACE_TEMME_COEF};
+LAPLACE_DEVICE_TABLE double temme_dev[80] = {LAPLACE_TEMME_COEF};
 #endif
 inline constexpr double temme_host[80] = {LAPLACE_TEMME_COEF};
 
