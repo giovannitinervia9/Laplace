@@ -1,0 +1,387 @@
+/**
+\defgroup bijector_coupled Coupled bijectors
+\ingroup bijector
+\brief Coupled bijections between constrained vectors or matrices and Euclidean space, their inverses, log-Jacobians, and derivatives to order 6.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+Unlike some scalar bijectors, these maps have no parameters, so there are no partial derivatives with respect to parameters.
+
+## Overview
+
+A coupled bijector maps a constrained set of vectors or matrices whose components are tied together (the probability simplex of \f$K\f$ categories; the symmetric positive definite \f$p \times p\f$ matrices; the \f$p \times p\f$ correlation matrices) one to one onto \f$\mathbb{R}^n\f$.
+
+Two maps reach the positive definite matrices: \ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector" (through the Cholesky factor) and \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector" (through the matrix logarithm \f$S = \log\Sigma\f$, a symmetric matrix).
+
+The direction convention is that of the scalar bijectors (\ref bijector_scalar):
+- Forward map \f$g(v)\f$ maps a constrained value \f$v\f$ to an unconstrained free vector \f$u = g(v) \in \mathbb{R}^n\f$.
+- Inverse map \f$h(u) = g^{-1}(u)\f$ maps a free vector \f$u \in \mathbb{R}^n\f$ back to the constrained value \f$v = h(u)\f$.
+
+Each bijector is a lightweight struct designed to be copied by value into Kokkos parallel kernels, with runtime dimension \f$\mathrm{dim}\f$ (\f$K\f$ categories for \ref laplace::bijector::alr_bijector "alr_bijector", matrix dimension \f$p\f$ for the matrix bijectors). Each struct provides a constructor from its dimension:
+- `alr_bijector(K)`
+- `log_cholesky_bijector(p)`
+- `partial_corr_bijector(p)`
+- `matrix_log_bijector(p)`
+
+## Reference coordinates and storage
+
+The constrained sets are not open in the space where they are stored: a probability vector has \f$K\f$ entries with \f$K - 1\f$ free degrees of freedom; a correlation matrix has a fixed unit diagonal.
+
+The forward derivatives and the log-Jacobians are evaluated in reference coordinates in which the constrained set is open:
+- For \ref laplace::bijector::alr_bijector "alr_bijector": the first \f$K - 1\f$ probabilities \f$\pi_1, \dots, \pi_{K-1}\f$, with \f$\pi_K = 1 - \sum_{b<K} \pi_b\f$.
+- For \ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector" and \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector": the lower triangle of \f$\Sigma\f$ including its diagonal. Moving coordinate \f$(i, j)\f$, \f$i > j\f$, moves \f$\Sigma_{ij}\f$ and \f$\Sigma_{ji}\f$ together.
+- For \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector": the strict lower triangle of \f$R\f$. Moving coordinate \f$(a, b)\f$, \f$a > b\f$, moves \f$R_{ab}\f$ and \f$R_{ba}\f$ together.
+
+The log-Jacobians are the logarithmic determinants of the Jacobian matrices in these reference coordinates:
+\f$\log\lvert\det J_g(v)\rvert\f$ for the forward map, and \f$\log\lvert\det J_h(u)\rvert\f$ for the inverse map.
+
+Storage conventions are as follows:
+- \ref laplace::bijector::alr_bijector "alr_bijector" takes and returns the full vector \f$\pi \in \mathbb{R}^K\f$ (\f$K = \mathrm{dim}\f$); its forward evaluation uses \f$\pi_K\f$ as given, and its forward derivatives treat \f$\pi_K\f$ as \f$1 - \sum_{b<K} \pi_b\f$.
+- Symmetric matrices (\f$\Sigma\f$ and \f$R\f$) and lower-triangular Cholesky factors \f$L\f$ are stored as flat arrays using packed lower-triangular storage by rows (see \ref pdmat), where entry \f$(i, j)\f$, \f$0 \le j \le i < p\f$, is at index \f$i(i + 1)/2 + j\f$.
+- The free vector \f$u\f$ of \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector" is stored as a strict lower triangle by rows, where entry \f$(a, b)\f$, \f$0 \le b < a < p\f$, is at index \f$a(a - 1)/2 + b\f$.
+- All indices are 0-based.
+
+## Interface and derivatives along sorted tuples
+
+Each coupled bijector struct provides:
+- **Dimensions.** `free_size()` returns the unconstrained dimension \f$n\f$; `value_size()` returns the stored size \f$m\f$ of \f$v\f$.
+- **Scratch requirements.** `scratch_size()` returns the minimum number of doubles required in the caller-provided scratch buffer. Every function takes a scratch pointer \c w; the functions allocate no dynamic memory. Inside Kokkos kernels, scratch memory for each thread is provided by a row of a 2D View with right layout (`Kokkos::LayoutRight`). The scratch buffer of \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector" grows like \f$p^4\f$ (23360 doubles at \f$p = 4\f$), which is substantially larger than that of the other maps.
+- **Maps and log-Jacobians.** Forward map `forward(v, u, w)`, inverse map `inverse(u, v, w)`, forward log-Jacobian `forward_log_jacobian(v, w)`, and inverse log-Jacobian `inverse_log_jacobian(u, w)`.
+- **Cholesky factor.** For \ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector" and \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector", `inverse_cholesky(u, l, w)` evaluates the lower Cholesky factor \f$L(u)\f$ with positive diagonal entries, satisfying \f$M = L L^\top\f$.
+- **Derivatives along a sorted tuple.** For total derivative order \f$K \in \{1, \dots, 6\}\f$ and a sorted tuple of indices \f$i_1 \le \dots \le i_K\f$ (indices into \f$u\f$ for inverse derivatives, or into reference coordinates for forward derivatives):
+  - `inverse_dK(u, idx, out, w)` writes all `value_size()` outputs of the partial derivative of \f$h(u)\f$.
+  - `forward_dK(v, idx, out, w)` writes all `free_size()` outputs of the partial derivative of \f$g(v)\f$.
+  - `inverse_cholesky_dK(u, idx, l, w)` writes all `value_size()` outputs of the partial derivative of \f$L(u)\f$.
+  - Both `forward_dK` and `inverse_dK` return `bool`: they return `true` when computed, and `false` when the derivative is identically zero for that index tuple by the structure of the map (leaving the output buffer untouched).
+  - `forward_log_jacobian_dK(v, idx, w)` and `inverse_log_jacobian_dK(u, idx, w)` return `double`, returning \f$0.0\f$ when identically zero.
+
+Structural zeros have the following properties:
+- \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector" is dense in both directions and never returns `false`.
+- Forward derivatives of \ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector" and \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector" are never structurally zero, because the last diagonal entry of the Cholesky factor depends on every matrix coordinate.
+- At order 6, the number of structurally nonzero tuples for dimension \f$p = 4\f$ is 10 of 5005 for `log_cholesky_bijector` inverse (16 nonzero components of 50050), 251 of 462 for `partial_corr_bijector` inverse, and 28 of 28 for `alr_bijector` with \f$K = 4\f$ categories (dense).
+
+The named derivative member functions are exposed through the CRTP base templates \ref laplace::bijector::coupled_bijector_orders "coupled_bijector_orders" and \ref laplace::bijector::cholesky_bijector_orders "cholesky_bijector_orders".
+
+## Summary of coupled maps
+
+The module defines four coupled bijector structs:
+
+| Map struct | Constrained set | Unconstrained dimension \f$n\f$ | Stored size \f$m\f$ | Forward map \f$g(v)\f$ | Inverse map \f$h(u)\f$ | Inverse log-Jacobian \f$\log\lvert\det J_h(u)\rvert\f$ |
+|---|---|---|---|---|---|---|
+| \ref laplace::bijector::alr_bijector "alr_bijector" | Simplex \f$\{\pi \in \mathbb{R}^K : \pi_a > 0, \sum_a \pi_a = 1\}\f$ | \f$K - 1\f$ | \f$K\f$ | \f$u_a = \log(\pi_a / \pi_K)\f$ | \f$\pi_a = \exp(u_a + l)\f$, \f$\pi_K = \exp(l)\f$, \f$l = -\log(1 + \sum_{b<K} e^{u_b})\f$ | \f$\sum_{a=1}^K \log \pi_a = \sum_{a=1}^{K-1} u_a + K l\f$ |
+| \ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector" | Positive definite \f$p \times p\f$ matrices \f$\Sigma\f$ | \f$p(p + 1)/2\f$ | \f$p(p + 1)/2\f$ | \f$u_{ii} = \log L_{ii}\f$, \f$u_{ij} = L_{ij}\f$ (\f$i > j\f$) | \f$L_{ii} = \exp(u_{ii})\f$, \f$L_{ij} = u_{ij}\f$, \f$\Sigma = L L^\top\f$ | \f$p \log 2 + \sum_{i=0}^{p-1} (p - i + 1) u_{ii}\f$ |
+| \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector" | Correlation \f$p \times p\f$ matrices \f$R\f$ (\f$R_{ii} = 1\f$) | \f$p(p - 1)/2\f$ | \f$p(p + 1)/2\f$ | \f$u_{ab} = \operatorname{asinh}(L_{ab}/Q_{ab})\f$ from \f$R = L L^\top\f$ | \f$L\f$ via \f$\tanh\f$ and \f$\operatorname{sech}\f$, \f$R = L L^\top\f$ | \f$-\sum_{a>b} (p - b) \log \cosh u_{ab}\f$ |
+| \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector" | Positive definite \f$p \times p\f$ matrices \f$\Sigma\f$ | \f$p(p + 1)/2\f$ | \f$p(p + 1)/2\f$ | \f$u\f$ the packed lower triangle of \f$S = \log \Sigma\f$ | \f$\Sigma = \exp(S)\f$, \f$S\f$ the symmetric matrix with lower triangle \f$u\f$ | \f$\sum_{i \le j} \log f[s_i, s_j]\f$, \f$s\f$ the eigenvalues of \f$S\f$ |
+
+## Additive log-ratio
+
+The additive log-ratio bijector \ref laplace::bijector::alr_bijector "alr_bijector" maps the open simplex of \f$K\f$ categories onto \f$\mathbb{R}^{K-1}\f$ (Aitchison 1986).
+
+Category indices below are 0-based, with \f$a \in \{0, \dots, K - 2\}\f$ for free coordinates and index \f$K - 1\f$ denoting the reference category \f$K\f$.
+
+### Direction formulas
+
+- **Forward map.** For \f$a = 0, \dots, K - 2\f$:
+  \f[
+  u_a = \log \pi_a - \log \pi_{K-1}
+  \f]
+  where \f$\pi_{K-1}\f$, when small, is evaluated as given rather than as \f$1 - \sum_{b<K-1} \pi_b\f$.
+- **Forward log-Jacobian.** Evaluated in reference coordinates \f$\pi_0, \dots, \pi_{K-2}\f$:
+  \f[
+  \log\lvert\det J_g(v)\rvert = -\sum_{a=0}^{K-1} \log \pi_a
+  \f]
+- **Inverse map.** With normalizer \f$l = \log \pi_{K-1} = -\log(1 + \sum_{b=0}^{K-2} e^{u_b})\f$:
+  \f[
+  \pi_a = \exp(u_a + l) \quad (a = 0, \dots, K - 2), \quad \pi_{K-1} = \exp(l)
+  \f]
+  The normalizer \f$l\f$ is computed by factoring out \f$u_{\max} = \max_b u_b\f$ to avoid overflow:
+  \f[
+  l = \begin{cases}
+  -\operatorname{log1p}\left(\sum_{b=0}^{K-2} e^{u_b}\right) & \text{if } u_{\max} \le 0, \\
+  -\left[u_{\max} + \operatorname{log1p}\left(e^{-u_{\max}} + \sum_{b \ne \max} e^{u_b - u_{\max}}\right)\right] & \text{if } u_{\max} > 0.
+  \end{cases}
+  \f]
+  The member function `inverse_log(u, lv, w)` writes \f$\log \pi\f$ directly without underflow.
+- **Inverse log-Jacobian.**
+  \f[
+  \log\lvert\det J_h(u)\rvert = \sum_{a=0}^{K-1} \log \pi_a = \sum_{a=0}^{K-2} u_a + K l
+  \f]
+
+### Formulation of derivatives
+
+- **Forward derivatives.** Closed forms along a sorted tuple \f$t = (t_1, \dots, t_k)\f$ of reference indices:
+  \f[
+  \frac{\partial^k u_a}{\partial\pi_{t_1}\cdots\partial\pi_{t_k}} = [t = (a, \dots, a)] (-1)^{k-1} \frac{(k-1)!}{\pi_a^k} + \frac{(k-1)!}{\pi_{K-1}^k}
+  \f]
+  where \f$[t = (a, \dots, a)]\f$ is 1 if all indices equal \f$a\f$ and 0 otherwise.
+  For the forward log-Jacobian:
+  \f[
+  \frac{\partial^k \log\lvert\det J_g(v)\rvert}{\partial\pi_{t_1}\cdots\partial\pi_{t_k}} = [t = (a, \dots, a)] (-1)^k \frac{(k-1)!}{\pi_a^k} + \frac{(k-1)!}{\pi_{K-1}^k}
+  \f]
+  Where the two terms carry opposing signs (even \f$k\f$ for \f$u_a\f$, odd \f$k\f$ for the log-Jacobian), the difference \f$1/\pi_{K-1}^k - 1/\pi_a^k\f$ is factored without cancellation:
+  \f[
+  \frac{1}{\pi_{K-1}^k} - \frac{1}{\pi_a^k} = \frac{\pi_a - \pi_{K-1}}{\pi_a \pi_{K-1}} \sum_{j=0}^{k-1} \left(\frac{1}{\pi_a}\right)^{k-1-j} \left(\frac{1}{\pi_{K-1}}\right)^j
+  \f]
+- **Inverse derivatives.** Evaluated via a recursion over the subsets \f$S \subseteq \{0, \dots, k - 1\}\f$ of the positions of a tuple of order \f$k\f$, \f$\partial_S\f$ denoting the derivative along the positions in \f$S\f$ and \f$\mathrm{cat}(j)\f$ the category of position \f$j\f$.
+  From \f$\log \pi_c = u_c + l\f$ and \f$\partial_b l = -\pi_b\f$, one has \f$\partial_b \pi_c = \pi_c (\delta_{bc} - \pi_b)\f$.
+  With \f$j\f$ the lowest bit of \f$S\f$ and \f$R = S \setminus \{j\}\f$:
+  \f[
+  \partial_S l = -\partial_R \pi_{\mathrm{cat}(j)}
+  \f]
+  \f[
+  \partial_S \pi_c = \sum_{T \subseteq R} \partial_T \pi_c \left(\partial_{S \setminus T} l + [S \setminus T = \{j\}, \mathrm{cat}(j) = c]\right)
+  \f]
+  where \f$1 - \pi_c\f$ at \f$S \setminus T = \{j\}\f$ is evaluated as the sum of all other probabilities \f$\sum_{a \ne c} \pi_a\f$, avoiding catastrophic cancellation when \f$\pi_c \approx 1\f$.
+  Any category \f$c\f$ outside the tuple satisfies \f$\partial_S \pi_c = \pi_c G_S\f$ with \f$G_S = \partial_S e^l / e^l\f$.
+- **Inverse log-Jacobian derivatives.** \f$1 - K \pi_b\f$ at order 1, and \f$K \partial_t l\f$ for orders \f$k \ge 2\f$.
+
+## Log-Cholesky
+
+The log-Cholesky bijector \ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector" maps symmetric positive definite \f$p \times p\f$ matrices \f$\Sigma\f$ onto \f$\mathbb{R}^{p(p+1)/2}\f$ via the Cholesky factor (Pinheiro and Bates 1996).
+
+### Direction formulas
+
+- **Forward map.** From Cholesky factorization \f$\Sigma = L L^\top\f$ with \f$L_{ii} > 0\f$:
+  \f[
+  u_{ii} = \log L_{ii}, \quad u_{ij} = L_{ij} \quad (i > j)
+  \f]
+- **Forward log-Jacobian.** Evaluated in reference coordinates (the lower triangle of \f$\Sigma\f$):
+  \f[
+  \log\lvert\det J_g(v)\rvert = -\left(p \log 2 + \sum_{i=0}^{p-1} (p - i + 1) \log L_{ii}\right)
+  \f]
+- **Inverse map.** \f$L_{ii} = \exp(u_{ii})\f$ on the diagonal, \f$L_{ij} = u_{ij}\f$ for \f$i > j\f$, and \f$\Sigma = L L^\top\f$:
+  \f[
+  \Sigma_{ij} = \sum_{l \le j} L_{il} L_{jl}
+  \f]
+- **Inverse log-Jacobian.**
+  \f[
+  \log\lvert\det J_h(u)\rvert = p \log 2 + \sum_{i=0}^{p-1} (p - i + 1) u_{ii}
+  \f]
+- **Cholesky factor.** Evaluated by `inverse_cholesky(u, l, w)`, writing \f$L(u)\f$ to packed storage.
+
+### Formulation of derivatives
+
+- **Inverse derivatives.** Because each term in \f$\Sigma_{ij} = \sum_{l \le j} L_{il} L_{jl}\f$ is a product of two functions of a single variable (\f$\exp\f$ on the diagonal, identity \f$x\f$ off-diagonal), partial derivatives are in closed form and vanish unless the tuple's variables belong to at most two positions in the same column \f$c\f$:
+  - A single variable \f$(r, c)\f$ of multiplicity \f$K\f$: reaches \f$\Sigma_{rr}\f$ and \f$\Sigma_{rq}\f$ for \f$q \ge c\f$. On the diagonal (\f$r = c\f$), \f$\partial^K \Sigma_{rr} / \partial u_{rr}^K = 2^K e^{2 u_{rr}}\f$, and \f$\partial^K \Sigma_{rq} / \partial u_{rr}^K = e^{u_{rr}} L_{qc}\f$. Off the diagonal (\f$r > c\f$), nonzero only for \f$K \le 2\f$ on \f$\Sigma_{rr}\f$ (\f$2 u_{rc}\f$ at \f$K = 1\f$, 2 at \f$K = 2\f$) and for \f$K = 1\f$ on \f$\Sigma_{rq}\f$ (\f$L_{qc}\f$).
+  - Two variables \f$(r_1, c)\f$ and \f$(r_2, c)\f$: each must have multiplicity 1 if off-diagonal; reaches only \f$\Sigma_{r_1, r_2}\f$ with value \f$f_1 f_2\f$ where \f$f_k = e^{u_{r_k c}}\f$ if \f$r_k = c\f$ and 1 otherwise.
+  - Any other tuple is structurally zero (returns `false`).
+- **Inverse log-Jacobian derivatives.** The inverse log-Jacobian is linear in \f$u\f$: at order 1, \f$\partial / \partial u_{ii} = p - i + 1\f$ on the diagonal and 0 off the diagonal. At orders \f$K \ge 2\f$, all derivatives vanish identically.
+- **Inverse Cholesky derivatives.** Nonzero only for pure tuples of a single variable \f$(i, j)\f$: for \f$i = j\f$, \f$e^{u_{ii}}\f$; for \f$i > j\f$, 1 at order 1 and 0 for \f$K \ge 2\f$.
+- **Forward derivatives.** The derivatives of the Cholesky factor of \f$X = \Sigma\f$ along the subsets \f$S \subseteq \{0, \dots, K - 1\}\f$ of the tuple's positions, written \f$L_{ij}[S]\f$, come from
+  \f[
+  L_{jj}^2 = X_{jj} - \sum_{l<j} L_{jl}^2, \quad L_{ij} L_{jj} = X_{ij} - \sum_{l<j} L_{il} L_{jl}
+  \f]
+  differentiated over the subsets by Leibniz's rule and solved for \f$L_{jj}[S]\f$ and \f$L_{ij}[S]\f$. The diagonal entries \f$u_{ii} = \log L_{ii}\f$ follow from \f$L_{ii}\,\partial u_{ii} = \partial L_{ii}\f$, differentiated over the subsets in the same way.
+- **Forward log-Jacobian derivatives.** From the derivatives \f$y_i[S]\f$ of \f$y_i = \log L_{ii}\f$ over the subsets:
+  \f[
+  \frac{\partial^K \log\lvert\det J_g(v)\rvert}{\partial v_{i_1}\cdots\partial v_{i_K}} = -\sum_{i=0}^{p-1} (p - i + 1) y_i[S_{\mathrm{full}}]
+  \f]
+  where \f$S_{\mathrm{full}}\f$ is the set of all the tuple's positions.
+
+## Partial correlations
+
+The partial correlation bijector \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector" maps \f$p \times p\f$ correlation matrices \f$R\f$ onto \f$\mathbb{R}^{p(p-1)/2}\f$ through canonical partial correlations \f$z_{ab} = \tanh u_{ab}\f$ via the onion construction (Lewandowski, Kurowicka and Joe 2009).
+
+### Direction formulas
+
+- **Inverse map.** From free coordinates \f$u_{ab}\f$ (\f$a > b\f$), the lower Cholesky factor \f$L\f$ is built via hyperbolic functions without forming \f$1 - z_{ab}^2\f$:
+  \f[
+  L_{ab} = \tanh(u_{ab}) \prod_{l<b} \operatorname{sech}(u_{al}) \quad (a > b), \quad L_{aa} = \prod_{l<a} \operatorname{sech}(u_{al})
+  \f]
+  The correlation matrix is \f$R = L L^\top\f$, with \f$R_{aa} = \sum_{l \le a} L_{al}^2 = 1\f$ algebraically.
+- **Inverse log-Jacobian.** Separable across coordinates (0-based \f$b\f$):
+  \f[
+  \log\lvert\det J_h(u)\rvert = -\sum_{a>b} (p - b) \log \cosh u_{ab}
+  \f]
+- **Forward map.** From the unit-diagonal Cholesky factor \f$R = L L^\top\f$, for \f$a = 1, \dots, p - 1\f$ and \f$b = a - 1, \dots, 0\f$:
+  \f[
+  Q_{ab}^2 = \sum_{l=b+1}^a L_{al}^2, \quad u_{ab} = \operatorname{asinh}\left(\frac{L_{ab}}{Q_{ab}}\right)
+  \f]
+  which analytically equals \f$\operatorname{atanh}(z_{ab})\f$ without forming \f$1 - z_{ab}^2\f$.
+- **Forward log-Jacobian.** Evaluated in strict lower-triangular reference coordinates:
+  \f[
+  \log\lvert\det J_g(v)\rvert = \sum_{a>b} (p - b) \log r_{ab}
+  \f]
+  where \f$r_{ab} = \sqrt{1 + (L_{ab}/Q_{ab})^2} = \cosh u_{ab}\f$, so that \f$\log r_{ab} = \frac{1}{2}\log\big(1 + (L_{ab}/Q_{ab})^2\big)\f$.
+
+### Formulation of derivatives
+
+- **Inverse derivatives.** Each entry \f$L_{ab}\f$ is a product of univariate functions of row \f$a\f$. Derivatives of row \f$a\f$ are products of \f$\tanh^{(k)}\f$ and \f$\operatorname{sech}^{(k)}\f$. Derivatives of \f$\operatorname{sech} u\f$ are written as \f$\operatorname{sech}(u) P_k(T)\f$ with \f$T = \tanh u\f$, evaluated in \f$T^2\f$ for \f$T^2 < 1/2\f$ and in \f$S = 1 - T^2 = \operatorname{sech}^2 u\f$ beyond, avoiding catastrophic cancellation (SymPy 1.14.0; Meurer et al. 2017):
+  - \f$P_1 = -T\f$
+  - \f$P_2 = 2T^2 - 1 = 1 - 2S\f$
+  - \f$P_3 = T(5 - 6T^2) = T(6S - 1)\f$
+  - \f$P_4 = 5 - 28T^2 + 24T^4 = 1 - 20S + 24S^2\f$
+  - \f$P_5 = T(-61 + 180T^2 - 120T^4) = T(-1 + 60S - 120S^2)\f$
+  - \f$P_6 = -61 + 662T^2 - 1320T^4 + 720T^6 = 1 - 182S + 840S^2 - 720S^3\f$
+  \f$R_{ij} = \sum_{l \le \min(i, j)} L_{il} L_{jl}\f$ is nonzero only for tuples on at most two distinct rows:
+  - On two rows \f$r_0 < r_1\f$, nonzero only on \f$R_{r_1, r_0}\f$, provided all columns of row \f$r_1\f$ in the tuple are \f$\le r_0\f$.
+  - On one row \f$a\f$, reaches \f$R_{a, j}\f$ for \f$j \ne a\f$.
+  - Any other tuple is structurally zero (returns `false`).
+- **Inverse Cholesky derivatives.** Nonzero only when all variables in the tuple belong to a single row \f$a\f$ (returns `false` if variables span two rows).
+- **Inverse log-Jacobian derivatives.** Separable: on a pure tuple of coordinate \f$(a, b)\f$, \f$-(p - b)\tanh^{(K-1)}(u_{ab})\f$; identically 0 on any mixed tuple.
+- **Forward derivatives.** The Cholesky factor of \f$R\f$ (unit diagonal) is differentiated over the subsets of the tuple's positions as for the log-Cholesky forward map. Then, for each \f$(a, b)\f$ and over the same subsets, by Leibniz's rule solved for the top term: \f$Q_{ab}^2 = \sum_{l=b+1}^a L_{al}^2\f$ and its square root \f$Q_{ab}\f$; \f$w_{ab} = L_{ab} / Q_{ab}\f$; \f$r_{ab} = \sqrt{1 + w_{ab}^2}\f$; and \f$u_{ab}\f$ from \f$r_{ab}\,\partial u_{ab} = \partial w_{ab}\f$, with value \f$\operatorname{asinh}(w_{ab})\f$.
+- **Forward log-Jacobian derivatives.** From the derivatives of \f$\log r_{ab}\f$ over the subsets:
+  \f[
+  \frac{\partial^K \log\lvert\det J_g(v)\rvert}{\partial v_{i_1}\cdots\partial v_{i_K}} = \sum_{a>b} (p - b) \log r_{ab}[S_{\mathrm{full}}]
+  \f]
+
+## Matrix logarithm
+
+The matrix logarithm bijector \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector" maps symmetric positive definite \f$p \times p\f$ matrices \f$\Sigma\f$ onto \f$\mathbb{R}^{p(p+1)/2}\f$ via the matrix logarithm \f$S = \log\Sigma\f$.
+
+### Direction formulas
+
+- **Forward map.** \f$S = \log\Sigma\f$, \f$u\f$ its packed lower triangle. Evaluated at order 0 by cyclic Jacobi eigendecomposition \f$\Sigma = V \operatorname{diag}(\sigma) V^\top\f$, with \f$S = V \operatorname{diag}(\log \sigma) V^\top\f$.
+- **Inverse map.** \f$\Sigma = \exp(S)\f$, \f$S\f$ the symmetric matrix with lower triangle \f$u\f$. Evaluated at order 0 by cyclic Jacobi eigendecomposition \f$S = V \operatorname{diag}(s) V^\top\f$, with \f$\Sigma = V \operatorname{diag}(\exp(s)) V^\top\f$.
+- **Forward and inverse log-Jacobians.**
+  \f[
+  \log\lvert\det J_h(u)\rvert = \sum_{i \le j} \log f[s_i, s_j], \quad \log\lvert\det J_g(v)\rvert = -\sum_{i \le j} \log f[\log \sigma_i, \log \sigma_j]
+  \f]
+  where \f$f[x, y] = (e^x - e^y)/(x - y)\f$ for \f$x \ne y\f$ and \f$f[x, x] = e^x\f$, evaluated as:
+  \f[
+  f[x, y] = e^{\max(x, y)} \operatorname{exprel}(-|x - y|), \quad \log f[x, y] = \max(x, y) + \log\operatorname{exprel}(-|x - y|)
+  \f]
+
+### The Daleckii-Krein sum and literature comparison
+
+In the eigenbasis of \f$S\f$, the order-\f$K\f$ derivative along \f$K\f$ directions can be expressed by the Daleckii-Krein formula as a sum over the \f$K!\f$ orderings of the directions and the \f$p^{K+1}\f$ index chains of divided differences of \f$\exp\f$. That sum is not used because of its computational cost and numerical instability: at \f$p = 4\f$, order 6, a prototype took 20 ms per tuple on one thread and lost up to 1554 ulpN against mpmath references due to divided differences of close eigenvalues. Higham and Relton (2014) evaluate Fréchet derivatives via a \f$2^K p\f$ block matrix of cost \f$O(8^K p^3)\f$.
+
+### Truncated Taylor arithmetic
+
+Derivatives are evaluated in a truncated Taylor arithmetic written specifically for this map:
+- Each distinct coordinate \f$v\f$ of the tuple with multiplicity \f$m_v\f$ receives a formal nilpotent symbol \f$\epsilon_v\f$ satisfying \f$\epsilon_v^{m_v + 1} = 0\f$.
+- An element represents a \f$p \times p\f$ matrix per monomial \f$\prod_v \epsilon_v^{t_v}\f$ with \f$t_v \le m_v\f$, indexed in mixed radix, with total size \f$\prod_v (m_v + 1)\f$.
+- Multiplication sums \f$A[U] B[T - U]\f$ over \f$U \le T\f$ componentwise, requiring \f$\prod_v (m_v + 1)(m_v + 2)/2\f$ matrix products (\f$3^K p^3\f$ for \f$K\f$ distinct variables, compared with \f$8^K\f$ for the block-matrix approach).
+- The derivative along the tuple is the top coefficient times \f$\prod_v m_v!\f$.
+- **Inverse derivatives.** Evaluated by \f$\exp(S + \sum_v \epsilon_v E_v)\f$, where \f$E_v\f$ is the symmetric unit direction of coordinate \f$v\f$. The constant part is scaled by powers of 2 until its 1-norm satisfies \f$\|X_0\|_1 \le 1/4\f$, followed by a Taylor polynomial of degree \f$12 + K\f$ and repeated squaring.
+- **Forward derivatives.** \f$X = \log(\Sigma + \sum_v \epsilon_v E_v)\f$ is computed by \f$K\f$ Newton steps:
+  \f[
+  X \mathrel{+}= \mathcal{L}^{-1}\left[\Sigma(\epsilon) - \exp(X)\right]
+  \f]
+  where \f$\mathcal{L}^{-1}\f$ is the inverse Fréchet derivative of \f$\exp\f$ at \f$X_0 = \log\Sigma\f$, which in the eigenbasis divides entry \f$(i, j)\f$ by \f$f[s_i, s_j]\f$. Each step renders one higher order exact.
+- **Log-Jacobian derivatives.** Evaluated as \f$\log\det J(S(\epsilon))\f$ where \f$J\f$ is the \f$n \times n\f$ Jacobian of \f$\exp\f$ on the symmetric matrices, each column obtained with one additional nilpotent symbol \f$d\f$ (\f$d^2 = 0\f$). The determinant does not depend on the basis, and \f$J\f$ is written in the eigenbasis \f$V\f$ of \f$S_0\f$ (columns along \f$V(e_a e_b^\top + e_b e_a^\top)V^\top\f$, rows read as entries of \f$V^\top \cdot V\f$), where \f$J(0)\f$ is diagonal (\f$f[s_a, s_b]\f$); it is factorized by LU decomposition with partial pivoting on constant parts in scalar Taylor arithmetic. The forward log-Jacobian derivative is minus this value at \f$X(\epsilon) = \log\Sigma(\epsilon)\f$.
+- **Density.** Every entry of \f$\exp(S)\f$ and \f$\log\Sigma\f$ depends on every entry of the input, so derivatives never return `false`.
+
+## Measured accuracy
+
+The general error framework is defined on the page \ref accuracy "How accuracy is measured". Error for coupled bijectors is measured normwise across outputs in ulpN (\ref accuracy_mixed):
+\f[
+\mathrm{ulpN} = \frac{\max_e |y_e - \mathrm{ref}_e|}{\mathrm{ulp}(\max_e |\mathrm{ref}_e|)}
+\f]
+with the scale for a log-Jacobian at order 0 taken as \f$\max(|\mathrm{ref}|, 1.0)\f$. For a mixed tuple with multiplicities \f$m_v\f$, output \f$e\f$ is scaled against the geometric mean of its pure derivatives \f$\prod_v |\mathrm{ref}_{(v,\dots,v), e}|^{m_v/K}\f$. A derivative that vanishes at a point is measured against the largest derivative of its order there, or of the nearest lower order when the whole order vanishes.
+
+Reference values were computed using `tools/reference/bijector_coupled.py`:
+- 98340 reference rows in `tests/data/reference/bijector_coupled.csv` (26680 of them for the matrix logarithm).
+- Exact SymPy derivatives evaluated by mpmath at 300 bits for the inverses of alr, log-Cholesky and partial correlations, and for the alr forward.
+- Mixed central differences at 1200 bits with steps \f$2^{-130}\f$ and \f$2^{-140}\f$ (agreeing to \f$7 \times 10^{-66}\f$) for the forward Cholesky maps and both directions of matrix logarithm.
+- Evaluation points:
+  - alr: \f$K \in \{2, 3, 5\}\f$ (three random, one spread to \f$-30 \dots 20\f$, one with \f$\pi_K = e^{-25}\f$).
+  - Log-Cholesky: \f$p \in \{1, 2, 3, 4\}\f$ (three random, one with \f$L_{ii} = e^{\pm 4}\f$).
+  - Partial correlations: \f$p \in \{2, 3, 4\}\f$ (three random, one with \f$|u| \in \{4, 2.5, 1.5\}\f$ for \f$p = 2, 3, 4\f$).
+  - Matrix logarithm: \f$p \in \{1, 2, 3, 4\}\f$ (three random, \f$S = 0\f$, and a spread \f$S\f$ with diagonal \f$\pm 2\f$).
+- Tuples: all tuples of orders 1–2, all pure tuples and up to 24 random mixed ones of orders 3–6 (12 for matrix logarithm).
+
+Maximum error over orders 0 to 6 on gcc/OpenMP and CUDA (RTX 4070 SUPER) (`docs/numerics.md`):
+
+| Map | Inverse | Inverse log-Jacobian | \f$L(u)\f$ | Forward | Forward log-Jacobian |
+|---|---|---|---|---|---|
+| alr | 90.5 / 55.2 | 90.5 / 93.9 | - | 3.8 / 3.8 | 3.4 / 3.4 |
+| log_cholesky | 1.03 / 0.95 | 0.90 / 0.90 (exact beyond order 0) | 0.44 / 0.44 | 1984 / 1982 | 1984 / 1982 |
+| partial_corr | 2839 (\f$K=5\f$) / 366 (\f$K=5\f$) | 2839 (\f$K=6\f$) / 1959 (\f$K=5\f$) | 6.2 / 4.0 | 7305 / 7304 | 7356 / 7361 |
+
+For \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector":
+
+| Quantity | gcc | CUDA |
+|---|---|---|
+| Inverse (exp) | 12.0 (\f$K=6\f$) | 12.0 (\f$K=3\f$) |
+| Forward (log) | 199 (\f$K=6\f$) | 210 (\f$K=6\f$) |
+| Inverse log-Jacobian | 102794 (\f$K=6\f$) | 291832 (\f$K=6\f$) |
+| Forward log-Jacobian | 3293 (\f$K=3\f$) | 2364 (\f$K=3\f$) |
+
+### Explanation of large entries
+
+The measurements in `docs/numerics.md` account for the larger error figures:
+1. **Inverse of partial correlations at orders 5–6.** The maximum error (2839 ulpN on gcc, 366 ulpN on CUDA) occurs in \f$\tanh^{(k)}\f$ near a root of its polynomial (\f$u = -1.57\f$, where \f$\operatorname{sech}^2 u = 0.155\f$, a root of \f$16 - 120S + 120S^2\f$), exactly as in the scalar atanh bijector.
+2. **Forward Cholesky derivatives.** The forward derivatives of order \f$K\f$ amplify the relative error of the smallest Cholesky pivot by a factor of \f$K\f$, reflecting the intrinsic mathematical conditioning of the matrix. For `partial_corr_bijector`, error at order \f$K\f$ is approximately \f$0.3 K \operatorname{cond}(R)\f$ ulp: a point with \f$\operatorname{cond}(R) = 2.4 \times 10^4\f$ exhibits 243 ulp at order 0 and 7300 ulp at order 6; a random point with \f$\operatorname{cond}(R) = 8.3 \times 10^3\f$ reaches 2390 ulp; points with \f$\operatorname{cond}(R) \le 64\f$ remain within 21 ulp.
+3. **Log-Cholesky forward accuracy.** For `log_cholesky_bijector` at spread points with condition numbers \f$\operatorname{cond}(\Sigma) = 8.9 \times 10^6\f$ and \f$3.4 \times 10^9\f$, error remains below 2000 ulp because the pivots of a graded matrix preserve their relative accuracy.
+4. **Matrix logarithm.** The exponential map is within 12 ulpN at every order. The logarithm loses approximately 30 ulpN per order across \f$K\f$ Newton steps from division by \f$f[s_i, s_j]\f$ at the spread point.
+5. **Matrix logarithm log-Jacobians.** Errors reach \f$1.0 \times 10^5\f$ ulpN on gcc and \f$2.9 \times 10^5\f$ ulpN on CUDA at order 6 on spread points of \f$p = 2\f$ where the exact derivative values (\f$7.7 \times 10^{-4}\f$ at order 5, \f$1.4 \times 10^{-3}\f$ at order 6) are \f$1/24\f$ to \f$1/70\f$ of the largest derivative of their order. Absolute error remains approximately \f$10^{-14}\f$, caused by cancellation among logarithms of the LU pivots.
+
+Automated regression test bounds in `tests/bijector/test_coupled.cpp` are set to 1.5 times the larger of the measured errors on gcc and CUDA, rounded up.
+
+## Execution times
+
+Timings measured in `benchmarks/bijector_coupled.cpp` for one call writing all outputs of the pure tuple \f$(0, \dots, 0)\f$ (inverse at \f$u_k = x + 0.1 k\f$, forward at a fixed interior point perturbed by \f$x/1000\f$, \f$x \sim \operatorname{Uniform}(-3, 3)\f$; scratch buffer in a View), on one gcc thread / 8 OpenMP threads / CUDA (RTX 4070 SUPER), in nanoseconds per call:
+
+| Map and dimension | Inverse, \f$K = 0\f$ | Inverse, \f$K = 6\f$ | Forward, \f$K = 0\f$ | Forward, \f$K = 6\f$ |
+|---|---|---|---|---|
+| alr, \f$K = 3\f$ | 72 / 14 / 2.0 | 616 / 104 / 31 | 19 / 5.0 / 1.4 | 6.9 / 3.5 / 1.1 |
+| alr, \f$K = 10\f$ | 137 / 20 / 3.9 | 704 / 108 / 33 | 47 / 10 / 2.7 | 11 / 4.3 / 1.3 |
+| log_cholesky, \f$p = 3\f$ | 38 / 8.9 / 1.4 | 18 / 5.1 / 1.1 | 114 / 25 / 1.9 | 3849 / 526 / 261 |
+| log_cholesky, \f$p = 6\f$ | 80 / 13 / 3.5 | 24 / 6.2 / 1.6 | 285 / 86 / 14 | 19282 / 2888 / 1523 |
+| partial_corr, \f$p = 3\f$ | 108 / 16 / 2.1 | 162 / 26 / 2.9 | 210 / 35 / 2.2 | 8454 / 1208 / 554 |
+| partial_corr, \f$p = 6\f$ | 487 / 68 / 7.4 | 525 / 75 / 7.9 | 789 / 126 / 17 | 48733 / 7128 / 3446 |
+
+For \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector" on tuple \f$(0, \dots, 0)\f$ (one gcc thread / 8 OpenMP threads / CUDA):
+
+| \f$p\f$ | Inverse, \f$K = 0\f$ | Inverse, \f$K = 6\f$ | Forward, \f$K = 0\f$ | Forward, \f$K = 6\f$ | Inverse log-Jacobian, \f$K = 6\f$ | Forward log-Jacobian, \f$K = 6\f$ |
+|---|---|---|---|---|---|---|
+| 3 | 406 / 90 / 52 | 8029 / 1684 / 1672 | 361 / 88 / 52 | 54075 / 7898 / 13864 | 134294 / 18708 / 28488 | 225681 / 34058 / 53396 |
+| 4 | 881 / 144 / 123 | 12781 / 1822 / 3576 | 886 / 176 / 128 | 92496 / 13632 / 32173 | 372422 / 55355 / 101556 | 612460 / 89873 / 187509 |
+
+Closed-form inverses cost approximately the same at order 6 as at order 0 (the alr inverse at order 6 takes 0.6–0.7 \f$\mu\mathrm{s}\f$ on one thread for the recursion over the 64 subsets of the tuple's positions). Forward Cholesky maps at order 6 cost 4–49 \f$\mu\mathrm{s}\f$ per tuple on one thread: every packed entry carries its derivatives along the 64 subsets and each Leibniz product visits all subsets of each subset (\f$3^6 = 729\f$ operations per entry and term). On CUDA, matrix logarithm arithmetic elements (up to 64 \f$p \times p\f$ matrices in global memory scratch) make device evaluation slower than 8 OpenMP threads beyond order 0. Prototype timings for other shapes of order 6 at \f$p = 4\f$ on one gcc thread range from 12–180 \f$\mu\mathrm{s}\f$ for exp, 0.11–1.8 ms for log, and 0.33–6.4 ms for the inverse log-Jacobian, progressing from pure tuples to six distinct coordinates.
+
+## Parallel evaluation in Kokkos
+
+A coupled bijector is constructed and evaluated inside a Kokkos parallel kernel. Each thread takes its scratch buffer from a row of a 2D View with right layout. All buffers are sized with `constexpr` expressions:
+
+```cpp
+constexpr int p = 3;
+constexpr int n = p * (p + 1) / 2;
+constexpr int num_items = 1000;
+const laplace::bijector::log_cholesky_bijector b(p);
+const int scratch_per_thread = b.scratch_size();
+
+Kokkos::View<double**, Kokkos::LayoutRight> scratch("scratch", num_items, scratch_per_thread);
+Kokkos::View<double**, Kokkos::LayoutRight> u("u", num_items, n);
+Kokkos::View<double**, Kokkos::LayoutRight> sigma("sigma", num_items, n);
+Kokkos::View<double**, Kokkos::LayoutRight> dsigma("dsigma", num_items, n);
+
+Kokkos::parallel_for(
+    "eval_log_cholesky", num_items, KOKKOS_LAMBDA(int i) {
+      const laplace::bijector::log_cholesky_bijector bij(p);
+      const double* u_i = &u(i, 0);
+      double* sigma_i = &sigma(i, 0);
+      double* dsigma_i = &dsigma(i, 0);
+      double* w = &scratch(i, 0);
+
+      // Evaluate inverse map: Sigma = h(u)
+      bij.inverse(u_i, sigma_i, w);
+
+      // Evaluate first derivative along index tuple (0)
+      const int idx[1] = {0};
+      if (bij.inverse_d1(u_i, idx, dsigma_i, w)) {
+        // dsigma_i holds the packed lower triangle of dSigma / du_0
+      }
+    });
+```
+
+## Public classes and bases
+
+- \ref laplace::bijector::alr_bijector "alr_bijector": Additive log-ratio bijector between the probability simplex and Euclidean space.
+- \ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector": Log-Cholesky bijector between symmetric positive definite matrices and Euclidean space.
+- \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector": Partial correlation bijector between correlation matrices and Euclidean space via canonical partial correlations.
+- \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector": Matrix logarithm bijector between symmetric positive definite matrices and Euclidean space.
+- \ref laplace::bijector::coupled_bijector_orders "coupled_bijector_orders": CRTP base template providing named derivative member functions of orders 1 to 6.
+- \ref laplace::bijector::cholesky_bijector_orders "cholesky_bijector_orders": CRTP base template providing named derivative member functions for the Cholesky factor.
+
+## References
+
+- J. Aitchison (1986), The Statistical Analysis of Compositional Data, Chapman and Hall.
+- J. C. Pinheiro and D. M. Bates (1996), Unconstrained parametrizations for variance-covariance matrices, Statistics and Computing 6:289-296.
+- D. Lewandowski, D. Kurowicka, and H. Joe (2009), Generating random correlation matrices based on vines and extended onion method, Journal of Multivariate Analysis 100:1989-2001.
+- N. J. Higham and S. D. Relton (2014), Higher order Fréchet derivatives of matrix functions and the level-2 condition number, SIAM Journal on Matrix Analysis and Applications 35:1019-1037.
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science 3:e103.
+- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/
+
+*/

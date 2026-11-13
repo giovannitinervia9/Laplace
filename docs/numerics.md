@@ -3014,3 +3014,217 @@ No mpmath reference: the forms are elementary and each is the exact
 derivative of a measured one.
 
 **Chosen.** This version. Tested in `tests/distrib/test_pilot.cpp`.
+
+## Coupled bijectors: alr, log_cholesky, partial_corr
+
+**What.** `include/laplace/bijector/` (2026-11-12, kind C of
+`note/bijectors.md`, decisions 17-19): `alr_bijector` (the simplex of K
+categories and R^(K-1)), `log_cholesky_bijector` (p x p positive definite
+matrices and R^(p(p+1)/2)), `partial_corr_bijector` (p x p correlation
+matrices and R^(p(p-1)/2), through the canonical partial correlations
+z = tanh u). Each gives forward g and inverse h, the two log-Jacobians in
+the reference coordinates (pi_1..pi_(K-1); the lower triangle of Sigma; the
+strict lower triangle of R), their derivatives to order 6 along a sorted
+tuple of indices, one function per order, returning false when the tuple is
+structurally zero, and for the matrices the Cholesky factor L(u) with its
+derivatives. Interface as the pdmat structures (`coupled.hpp`): runtime
+dimension, caller buffers and a caller scratch buffer, packed storage.
+
+**How.** Closed forms where they exist:
+- alr forward: d^k u_a/dpi_t = [t = (a..a)] (-1)^(k-1) (k-1)!/pi_a^k +
+  (k-1)!/pi_K^k, the forward log-Jacobian likewise; where the two terms have
+  opposite signs, 1/pi_K^k - 1/pi_a^k is written as
+  (pi_a - pi_K)/(pi_a pi_K) S_k(1/pi_a, 1/pi_K) (as the logit bijector),
+  which took the forward log-Jacobian from 110 to 3 ulp.
+- log_cholesky inverse: Sigma_ij = sum_(l<=j) L_il L_jl with L_ii = e^(u_ii),
+  L_ij = u_ij, so a tuple is nonzero only on at most two variables of one
+  column; its log-Jacobian p log 2 + sum_i (p - i + 1) u_ii is linear.
+- partial_corr inverse: L_ab = tanh(u_ab) prod_(l<b) sech(u_al),
+  L_aa = prod_(l<a) sech(u_al) (no 1 - z^2 is formed), so every derivative
+  is a product of tanh^(k) and sech^(k) = sech P_k(T) (P_k in T^2 below
+  T^2 = 1/2, in S = sech^2 beyond, from `tools/reference/bijector_coupled_forms.py`,
+  SymPy 1.14.0); log-Jacobian -sum_(a>b) (p - b) log cosh u_ab, separable
+  (checked against the symbolic Jacobian for p = 2, 3, 4).
+Without a closed form, an explicit recursion over the subsets of the
+tuple's positions (Leibniz's rule, solved for the top term):
+- alr inverse: l = log pi_K, d_b l = -pi_b, d_b log pi_c = delta_bc + d_b l;
+  1 - pi_c is taken as the sum of the other probabilities. Forming it as
+  1 + d_b l lost everything near pi_c = 1 (1.3e11 ulp at u = 25, K = 2;
+  27 ulp after).
+- log_cholesky and partial_corr forward: the derivatives of the Cholesky
+  factor from L_jj^2 = X_jj - sum L_jl^2 and L_ij L_jj = X_ij - sum L_il L_jl,
+  then log on the diagonal (log_cholesky) or u_ab = asinh(L_ab/Q_ab),
+  Q_ab^2 = sum_(l=b+1..a) L_al^2 (partial_corr; equal to atanh z_ab without
+  forming 1 - z^2).
+SymPy count of the structurally nonzero tuples at order 6 (checked by the
+test): log_cholesky p = 4, 10 of 5005 (16 nonzero components of 50050);
+partial_corr p = 4, 251 of 462; alr dense.
+
+**Measurement.** References `bijector_coupled.csv` (71660 rows,
+`tools/reference/bijector_coupled.py`): exact SymPy derivatives of the
+definitions evaluated by mpmath at 300 bits for every inverse and the alr
+forward (the partial correlations through the onion construction
+L_ab = z_ab sqrt(1 - sum_(l<b) L_al^2), not the sech product of the code);
+for the forward Cholesky maps, mixed central differences of the mpmath
+definitions at 1200 bits, steps 2^-130 and 2^-140, which agree to 7e-66.
+Points: alr K in {2, 3, 5} (three random, one spread to -30..20, one with
+pi_K = e^-25); log_cholesky p in {1, 2, 3, 4} (three random, one with
+L_ii = e^(+-4)); partial_corr p in {2, 3, 4} (three random, one with
+|u| = 4, 2.5, 1.5 for p = 2, 3, 4). Tuples: all of orders 1-2, all pure and
+24 random mixed ones of orders 3-6. Error: ulpN, the largest error over the
+outputs in ulps of the largest reference output, with the mixed tuples
+measured against the geometric mean of their pure derivatives (the manual's
+ulpN of mixed partials, weights m_v/K); log-Jacobians relative. Maximum over
+orders 0-6, gcc/OpenMP and CUDA (RTX 4070 SUPER):
+
+| map | inverse | inverse log-Jacobian | L(u) | forward | forward log-Jacobian |
+|---|---|---|---|---|---|
+| alr | 90.5 / 55.2 | 90.5 / 93.9 | - | 3.8 / 3.8 | 3.4 / 3.4 |
+| log_cholesky | 1.03 / 0.95 | 0.90 / 0.90 (exact beyond order 0) | 0.44 / 0.44 | 1984 / 1982 | 1984 / 1982 |
+| partial_corr | 2839 (K=5) / 366 (K=5) | 2839 (K=6) / 1959 (K=5) | 6.2 / 4.0 | 7305 / 7304 | 7356 / 7361 |
+
+**What this says.** The inverses, which are what a constraint evaluates,
+are within 100 ulp except partial_corr at orders 5-6, where the error is
+tanh^(k) near a root of its polynomial (u = -1.57: sech^2 u = 0.155, a root of
+16 - 120 S + 120 S^2), as in the scalar atanh bijector. The forward
+derivatives of order K carry K times the relative error of the smallest
+Cholesky pivot, which is the conditioning of the data: on the forward side
+of partial_corr the error at order K is about 0.3 K cond(R) ulp (cond(R) =
+2.4e4 gives 243 ulp at order 0 and 7300 at order 6; a random point of
+p = 4 with cond(R) = 8.3e3 reaches 2390; the random points with cond <= 64
+stay within 21 ulp), while log_cholesky at its spread points
+(cond(Sigma) = 8.9e6 and 3.4e9, graded) stays below 2000, the pivots of a
+graded matrix keeping their relative accuracy. Another algorithm in double
+cannot do better on R itself: its entries carry eps, which moves
+L_aa^2 = 1 - sum L_al^2 by eps.
+
+ns per call (`benchmarks/bijector_coupled.cpp`; one call writes every output
+of the tuple (0, ..., 0); inverse at u_k = x + 0.1 k, forward at a fixed
+interior point moved by x/1000, x uniform in [-3, 3]; scratch in a View of
+the space's memory), one gcc thread / 8 OpenMP threads / CUDA (RTX 4070
+SUPER):
+
+| map, dim | inverse, K = 0 | inverse, K = 6 | forward, K = 0 | forward, K = 6 |
+|---|---|---|---|---|
+| alr, 3 | 72 / 14 / 2.0 | 616 / 104 / 31 | 19 / 5.0 / 1.4 | 6.9 / 3.5 / 1.1 |
+| alr, 10 | 137 / 20 / 3.9 | 704 / 108 / 33 | 47 / 10 / 2.7 | 11 / 4.3 / 1.3 |
+| log_cholesky, 3 | 38 / 8.9 / 1.4 | 18 / 5.1 / 1.1 | 114 / 25 / 1.9 | 3849 / 526 / 261 |
+| log_cholesky, 6 | 80 / 13 / 3.5 | 24 / 6.2 / 1.6 | 285 / 86 / 14 | 19282 / 2888 / 1523 |
+| partial_corr, 3 | 108 / 16 / 2.1 | 162 / 26 / 2.9 | 210 / 35 / 2.2 | 8454 / 1208 / 554 |
+| partial_corr, 6 | 487 / 68 / 7.4 | 525 / 75 / 7.9 | 789 / 126 / 17 | 48733 / 7128 / 3446 |
+
+The inverses, closed or nearly so, cost about as much at order 6 as at
+order 0 (the alr inverse at order 6: 0.6-0.7 microseconds on one thread, the
+sub-tuple recursion over 64 subsets). The forward Cholesky maps at order 6
+cost 4-49 microseconds per tuple on one thread: every packed entry carries
+its 64 sub-tuple derivatives and each Leibniz sum visits the subsets of
+each subset (3^6 = 729 products per entry and term). The log-Jacobians cost as
+their map, except where they are closed (log_cholesky inverse: linear).
+
+A defect found by the bench on CUDA: log_cholesky_bijector and
+partial_corr_bijector first derived from two empty CRTP bases; MSVC places
+the second at a nonzero offset and the device compiler does not, so a
+bijector built on the host and copied into a kernel was read with a wrong
+dim (illegal address). They now derive from one chain
+(cholesky_bijector_orders : coupled_bijector_orders), and the test asserts
+that each map has the size of its int.
+
+**Open.** The forward Cholesky recursion visits all 2^K subsets of
+every entry even when a variable does not reach that entry.
+
+**Chosen.** This version; tested in `tests/bijector/test_coupled.cpp` on gcc
+and CUDA (references, differences of order K - 1 within 0.3 of their
+tolerance, the structural zero counts), bounds 1.5 times the larger measured
+error.
+
+## The matrix logarithm bijector
+
+**What.** `include/laplace/bijector/matrix_log.hpp` (2026-11-13,
+`note/bijectors.md` decision 20): `matrix_log_bijector` between the p x p
+symmetric positive definite matrices and R^(p(p+1)/2), forward S = log Sigma,
+inverse Sigma = exp(S), log |det J_h(u)| = sum_(i<=j) log f[s_i, s_j] with
+f[x, y] = (e^x - e^y)/(x - y), f[x, x] = e^x, s the eigenvalues of S; both
+directions and both log-Jacobians to order 6, interface and reference
+coordinates as log_cholesky_bijector.
+
+**Why not the Daleckii-Krein formula.** In the eigenbasis of S, the order-K
+derivative along K directions is a sum over the K! orderings of the
+directions and the p^(K+1) index chains of divided differences of exp. A
+scratch prototype (one gcc thread, order 6) took 3.0 ms at p = 3 and 20 ms at
+p = 4 per tuple, and lost up to 1554 ulpN against mpmath (divided
+differences of close eigenvalues). The best published method (Higham and
+Relton 2014, SIMAX 35:1019-1037) evaluates exp on a 2^K p block matrix,
+O(8^K p^3); no published method was found whose cost is polynomial in K
+(survey in the session notes). At S = 0 an entry of the order-K derivative
+along basis directions counts the orderings of the tuple's edges that form a
+walk, Eulerian trails, whose counting is #P-complete in general (Brightwell
+and Winkler 2005; the reduction is ours and was not checked further), so a
+method polynomial in both K and p is not expected.
+
+**How.** Values and order 0: a cyclic Jacobi eigendecomposition,
+f[x, y] = e^max(x, y) exprel(-|x - y|). Derivatives: a truncated Taylor
+arithmetic written for this map, one symbol per distinct coordinate of the
+tuple truncated at its multiplicity m_v, an element one p x p matrix per
+monomial (prod (m_v + 1) of them), a product sum_(U <= T) A[U] B[T - U]
+(prod (m_v + 1)(m_v + 2)/2 matrix products, 3^K for K distinct coordinates,
+against the 8^K of the block matrix). exp by scaling the constant part to
+norm <= 1/4, a Taylor polynomial of degree 12 + K and squaring; log by K
+Newton steps X += L^-1 [Sigma(e) - exp X], L^-1 the inverse derivative of exp
+at log Sigma (division of entry (i, j) by f[s_i, s_j] in the eigenbasis); the
+log-Jacobians as log det J(S(e)), the n x n Jacobian of exp with one more
+symbol per column, written in the eigenbasis of S_0, where J(0) is diagonal,
+and factorized by LU in the scalar arithmetic. Written in the packed
+coordinates, the LU mixed the columns and lost up to 3.8e5 ulpN at order 6;
+the eigenbasis brought it to 1.0e5 on gcc (2.9e5 on CUDA, the same tuple
+class).
+
+**Measurement.** References in `bijector_coupled.csv` (map 3, 26680 rows):
+mixed central differences of mp.expm, of the logarithm through mp.eigsy and
+of the eigenvalue form of the log-Jacobian (written as
+(x + y)/2 + log(sinh z / z), z = (x - y)/2, which does not cancel at repeated
+eigenvalues), 1200 bits, steps 2^-130 and 2^-140. Points: p in {1, 2, 3, 4},
+three random S (entries N(0, 0.25)), S = 0 (Sigma = I, every eigenvalue
+equal) and a spread S (diagonal +-2); all tuples of orders 1-2, the pure
+ones and 12 random mixed ones of orders 3-6. Error: ulpN as for the other
+coupled maps; a derivative that is zero at a point (the odd orders of the
+log-Jacobian at S = 0) is measured against the largest derivative of the
+nearest order that does not vanish there. Maximum over orders 0-6,
+gcc/OpenMP and CUDA:
+
+| quantity | gcc | CUDA |
+|---|---|---|
+| inverse, exp | 12.0 (K=6) | 12.0 (K=3) |
+| forward, log | 199 (K=6) | 210 (K=6) |
+| inverse log-Jacobian | 102794 (K=6) | 291832 (K=6) |
+| forward log-Jacobian | 3293 (K=3) | 2364 (K=3) |
+
+The exponential is within 12 ulpN at every order. The logarithm loses about
+30 ulpN per order (K Newton steps, each dividing by the f[s_i, s_j] of the
+spread point). The log-Jacobians at orders 3-6 lose most where the value is
+small against its order: the worst inverse ones are tuples of the spread
+point of p = 2 whose values (7.7e-4 at order 5, 1.4e-3 at order 6) are 1/24
+to 1/70 of the largest derivative of their order; the absolute error is
+about 1e-14. The logarithms of the LU pivots cancel to give them.
+
+ns per call (`benchmarks/bijector_coupled.cpp`, tuple (0, ..., 0), the
+cheapest shape for the arithmetic, prod (m_v + 1) = 7 at order 6; one gcc
+thread / 8 OpenMP threads / CUDA):
+
+| p | inverse, K = 0 | inverse, K = 6 | forward, K = 0 | forward, K = 6 | inverse log-Jac., K = 6 | forward log-Jac., K = 6 |
+|---|---|---|---|---|---|---|
+| 3 | 406 / 90 / 52 | 8029 / 1684 / 1672 | 361 / 88 / 52 | 54075 / 7898 / 13864 | 134294 / 18708 / 28488 | 225681 / 34058 / 53396 |
+| 4 | 881 / 144 / 123 | 12781 / 1822 / 3576 | 886 / 176 / 128 | 92496 / 13632 / 32173 | 372422 / 55355 / 101556 | 612460 / 89873 / 187509 |
+
+On CUDA the arithmetic's elements (up to 64 p x p matrices per element, in
+the caller's scratch in global memory) make the device slower than 8 OpenMP
+threads beyond order 0. Prototype timings for the other shapes of order 6
+(one gcc thread, p = 4): exp 12-180 microseconds, log 0.11-1.8 ms, inverse
+log-Jacobian 0.33-6.4 ms, from a pure tuple to six distinct coordinates.
+
+**Open.** The log-Jacobian derivatives of orders 3-6 through the
+log-determinant (a form with less cancellation, through the eigenvalues, is
+not found); the Newton steps recompute exp of the whole element each time;
+the scratch grows like p^4 (23360 doubles at p = 4).
+
+**Chosen.** This version; tested in `tests/bijector/test_coupled.cpp` on gcc
+and CUDA, bounds 1.5 times the larger measured error.

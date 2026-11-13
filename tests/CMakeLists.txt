@@ -29,6 +29,7 @@ set(LAPLACE_TEST_SOURCES
   bijector/test_power_softplus.cpp
   bijector/test_box_cox.cpp
   bijector/test_yeo_johnson.cpp
+  bijector/test_coupled.cpp
   math/test_exprel.cpp
   math/test_log1prel.cpp
   math/test_stirling.cpp
