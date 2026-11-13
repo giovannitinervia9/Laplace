@@ -16,7 +16,7 @@
 #include <laplace/distrib/generic_info.hpp>
 #include <laplace/distrib/generic_quantile.hpp>
 #include <laplace/distrib/generic_rng.hpp>
-#include <laplace/distrib/laplace.hpp>
+#include <laplace/distrib/laplace1.hpp>
 #include <laplace/distrib/poisson.hpp>
 
 #include <Kokkos_Random.hpp>
@@ -34,7 +34,7 @@ struct make_gaussian {
   KOKKOS_INLINE_FUNCTION ld::gaussian1_distrib operator()(double t) const { return {0.4, t}; }
 };
 struct make_laplace {
-  KOKKOS_INLINE_FUNCTION ld::laplace_distrib operator()(double t) const { return {0.4, t}; }
+  KOKKOS_INLINE_FUNCTION ld::laplace1_distrib operator()(double t) const { return {0.4, t}; }
 };
 struct make_gamma {
   KOKKOS_INLINE_FUNCTION ld::gamma1_distrib operator()(double t) const { return {2.0, t}; }
@@ -193,7 +193,7 @@ int main(int argc, char** argv) {
       }
     }
     evals_line("gaussian1", ld::gaussian1_distrib{0.4, 1.3});
-    evals_line("laplace", ld::laplace_distrib{0.4, 1.3});
+    evals_line("laplace1", ld::laplace1_distrib{0.4, 1.3});
     evals_line("gamma1(2, 0.3)", ld::gamma1_distrib{2.0, 0.3});
     evals_line("gamma1(2, 4)", ld::gamma1_distrib{2.0, 4.0});
     evals_line("poisson(3.5)", ld::poisson_distrib{3.5});

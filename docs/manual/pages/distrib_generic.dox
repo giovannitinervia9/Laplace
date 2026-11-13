@@ -21,7 +21,7 @@ The distribution dispatch functions:
 
 select at compile time (using C++20 `requires` clauses) the distribution's specialized member function when provided, and fall back to the corresponding generic numerical route otherwise, incurring zero run-time overhead. The generic routes may also be invoked directly by name (\ref laplace::distrib::quantile_by_root "quantile_by_root()", \ref laplace::distrib::quantile_by_search "quantile_by_search()", \ref laplace::distrib::log_cdf_by_sum "log_cdf_by_sum()", \ref laplace::distrib::expected_info_by_integral "expected_info_by_integral()", and related functions).
 
-For the structure of distributions, parameter descriptors \ref laplace::distrib::distrib_param_info, regularity orders, and symmetric tensor packing, see \ref distrib_core. Specialized distribution implementations are documented in \ref distrib_gaussian1, \ref distrib_laplace, \ref distrib_poisson, and \ref distrib_gamma1.
+For the structure of distributions, parameter descriptors \ref laplace::distrib::distrib_param_info, regularity orders, and symmetric tensor packing, see \ref distrib_core. Specialized distribution implementations are documented in \ref distrib_gaussian1, \ref distrib_laplace1, \ref distrib_poisson, and \ref distrib_gamma1.
 
 ## Quantiles
 

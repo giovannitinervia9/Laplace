@@ -1,4 +1,4 @@
-// laplace_distrib (laplace::distrib): the Laplace (double exponential)
+// laplace1_distrib (laplace::distrib): the Laplace (double exponential)
 // distribution in its location mu and scale sigma > 0,
 //
 //   l(mu, sigma; y) = -log(2 sigma) - |z|,   z = (y - mu)/sigma.
@@ -28,7 +28,7 @@
 
 namespace laplace::distrib {
 
-namespace detail_laplace {
+namespace detail_laplace1 {
 
 LAPLACE_HD_FORCEINLINE constexpr double fact(int n) {
   double r = 1.0;
@@ -99,6 +99,12 @@ LAPLACE_HD sym_tensor<2, K> log1m_half_exp_dk(double az, double s, double sigma)
     for (int a = 0; a <= K; ++a, npow *= n) na[a] = npow;
     for (int b = 0; b <= K; ++b) {
       const int a = K - b;
+      // L_b^(a-1)(u). At a = 0 the order is -1, where the identity
+      // L_b^(-1)(u) = -(u/b) L_(b-1)^(1)(u) (DLMF 18.5.12) removes a degeneracy of the
+      // recurrence; it is worth using when the negative part of the order is large (laplace2,
+      // where it goes to -b and saved a factor 32), but here it is only -1 and the identity
+      // measured 12.2 ulp against 11.2 for log F and no change for log(1 - F) (2026-11-13),
+      // so the plain recurrence is kept.
       const double alpha = a - 1.0;
       double l0 = 1.0, l1 = 1.0 + alpha - u;
       double lb = b == 0 ? l0 : l1;
@@ -127,18 +133,18 @@ LAPLACE_HD sym_tensor<2, K> log1m_half_exp_dk(double az, double s, double sigma)
   return t;
 }
 
-}  // namespace detail_laplace
+}  // namespace detail_laplace1
 
 /**
- * \ingroup distrib_laplace
+ * \ingroup distrib_laplace1
  * \brief Univariate Laplace (double exponential) distribution parameterized by location \f$\mu\f$ and scale \f$\sigma > 0\f$.
  *
  * Implements the continuous density \f$\ell(\mu, \sigma; y) = -\log(2\sigma) - \frac{|y - \mu|}{\sigma}\f$,
  * its parameter derivatives away from the kink at \f$\mu = y\f$, score-based Fisher information,
  * and cumulative distribution functions with series expansions for tails.
- * \see distrib_laplace, distrib_core
+ * \see distrib_laplace1, distrib_core
  */
-struct laplace_distrib {
+struct laplace1_distrib {
   /// Location parameter \f$\mu \in (-\infty, \infty)\f$.
   double mu;
   /// Scale parameter \f$\sigma \in (0, \infty)\f$.
@@ -150,7 +156,7 @@ struct laplace_distrib {
   static constexpr int n_params = 2;
   // log f is C^0 in y at y = mu (y_kinks)
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Differentiability order of the log-density in the observation \f$y\f$ (0, \f$C^0\f$ with a kink at \f$y = \mu\f$).
    */
   static constexpr int y_regularity = 0;  // regularity of log f in y (continuous only)
@@ -160,7 +166,7 @@ struct laplace_distrib {
       {"sigma", 0.0, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth}};
 
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates the log-density \f$\log f(y; \mu, \sigma) = -\log(2\sigma) - \frac{|y - \mu|}{\sigma}\f$.
    * \param y Observation point \f$y \in (-\infty, \infty)\f$.
    * \return Log-density value.
@@ -170,7 +176,7 @@ struct laplace_distrib {
   }
 
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log f(y; \mu, \sigma)\f$ in parameters \f$(\mu, \sigma)\f$.
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param y Observation point \f$y \in (-\infty, \infty)\f$.
@@ -178,7 +184,7 @@ struct laplace_distrib {
    */
   template <int K>
   LAPLACE_HD sym_tensor<2, K> logpdf_dk(double y) const {
-    using detail_laplace::fact;
+    using detail_laplace1::fact;
     const double r = y - mu, is = 1.0 / sigma, az = Kokkos::fabs(r) * is;
     const double sg = r > 0.0 ? 1.0 : (r < 0.0 ? -1.0 : 0.0);
     sym_tensor<2, K> t;
@@ -213,7 +219,7 @@ struct laplace_distrib {
   // with a derivatives in mu and b in sigma is (-1)^J times the (a + J, b) component of
   // logpdf_dk; at y = mu the convention sign(0) = 0 of logpdf_dk. J = 0 is logpdf_dk or the value.
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates mixed partial derivatives of \f$\log f(y; \mu, \sigma)\f$ with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters.
    *
    * Evaluates \f$\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \log f(y; \mu, \sigma)\f$ as a symmetric tensor of order \f$K\f$ in \f$(\mu, \sigma)\f$.
@@ -229,7 +235,7 @@ struct laplace_distrib {
    * \tparam K Derivative order with respect to parameters \f$(\mu, \sigma)\f$ (\f$K \ge 0\f$, \f$J + K \le 6\f$).
    * \param y Observation point \f$y \in (-\infty, \infty)\f$.
    * \return Packed symmetric tensor \c sym_tensor<2, K> of derivatives.
-   * \see distrib_laplace, logpdf(), logpdf_dk(), y_kinks()
+   * \see distrib_laplace1, logpdf(), logpdf_dk(), y_kinks()
    */
   template <int J, int K>
   LAPLACE_HD sym_tensor<2, K> logpdf_dy_dk(double y) const {
@@ -239,7 +245,7 @@ struct laplace_distrib {
       else t = logpdf_dk<K>(y);
       return t;
     } else {
-      using detail_laplace::fact;
+      using detail_laplace1::fact;
       const double r = y - mu, is = 1.0 / sigma;
       const double sg = r > 0.0 ? 1.0 : (r < 0.0 ? -1.0 : 0.0);
       const double sj = (J % 2 == 0) ? 1.0 : -1.0;
@@ -255,7 +261,7 @@ struct laplace_distrib {
   /** @} */
 
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates the expected Fisher information matrix \f$I(\mu, \sigma) = \operatorname{diag}(1/\sigma^2, 1/\sigma^2)\f$.
    * \return Symmetric tensor \c sym_tensor<2, 2> with \f$I_{\mu\mu}\f$ at index 0 and \f$I_{\sigma\sigma}\f$ at index 2.
    */
@@ -267,14 +273,14 @@ struct laplace_distrib {
     return t;
   }
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates partial derivatives of order \f$K\f$ of the expected Fisher information in \f$(\mu, \sigma)\f$.
    * \tparam K Derivative order (\f$1 \le K \le 4\f$).
    * \return Container \c expected_info_tensor<2, K> of information derivatives.
    */
   template <int K>
   LAPLACE_HD expected_info_tensor<2, K> expected_info_dk() const {
-    double d = detail_laplace::fact(K + 1) / (sigma * sigma);
+    double d = detail_laplace1::fact(K + 1) / (sigma * sigma);
     for (int k = 0; k < K; ++k) d /= -sigma;
     expected_info_tensor<2, K> t;
     t.pair[0][K] = d;
@@ -298,7 +304,7 @@ struct laplace_distrib {
 
   // F(y) = e^z/2 for z < 0, 1 - e^-z/2 otherwise; each tail written directly
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates the cumulative distribution function \f$F(y)\f$.
    * \param y Observation point \f$y\f$.
    * \return Probability \f$\mathbb{P}(Y \le y)\f$.
@@ -308,7 +314,7 @@ struct laplace_distrib {
     return z < 0.0 ? 0.5 * math::exp(z) : 1.0 - 0.5 * math::exp(-z);
   }
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates the complementary cumulative distribution function \f$1 - F(y)\f$.
    * \param y Observation point \f$y\f$.
    * \return Probability \f$\mathbb{P}(Y > y)\f$.
@@ -318,7 +324,7 @@ struct laplace_distrib {
     return z > 0.0 ? 0.5 * math::exp(-z) : 1.0 - 0.5 * math::exp(z);
   }
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates the logarithm of the cumulative distribution function, \f$\log F(y)\f$.
    * \param y Observation point \f$y\f$.
    * \return Log-probability \f$\log F(y)\f$.
@@ -328,7 +334,7 @@ struct laplace_distrib {
     return z < 0.0 ? z - 0.69314718055994530942 : Kokkos::log1p(-0.5 * math::exp(-z));
   }
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates the logarithm of the complementary cumulative distribution function, \f$\log(1 - F(y))\f$.
    * \param y Observation point \f$y\f$.
    * \return Log-probability \f$\log(1 - F(y))\f$.
@@ -339,7 +345,7 @@ struct laplace_distrib {
   }
   // F^-1(p) = mu + sigma log(2p) below 1/2, mu - sigma log(2 - 2p) above (2 - 2p exact)
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates the quantile function \f$F^{-1}(p)\f$.
    * \param p Probability \f$p \in (0, 1)\f$.
    * \return Quantile value \f$y\f$.
@@ -352,7 +358,7 @@ struct laplace_distrib {
   // where the function is log(1 - e^(-|z|)/2) (log F for z >= series_split, log(1 - F) for
   // z <= -series_split) by the series of log1m_half_exp_dk, the rest by mixed_dk
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log F(y)\f$ in \f$(\mu, \sigma)\f$.
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param y Observation point \f$y\f$.
@@ -361,13 +367,13 @@ struct laplace_distrib {
   template <int K>
   LAPLACE_HD sym_tensor<2, K> log_cdf_dk(double y) const {
     const double z = (y - mu) / sigma;
-    if (z >= detail_laplace::series_split) return detail_laplace::log1m_half_exp_dk<K>(z, -1.0, sigma);
+    if (z >= detail_laplace1::series_split) return detail_laplace1::log1m_half_exp_dk<K>(z, -1.0, sigma);
     double L[K + 1];
-    detail_laplace::log_cdf0_derivs<K>(z, L);
+    detail_laplace1::log_cdf0_derivs<K>(z, L);
     return detail_location_scale::mixed_dk<K>(L, z, sigma);
   }
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log(1 - F(y))\f$ in \f$(\mu, \sigma)\f$.
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param y Observation point \f$y\f$.
@@ -376,9 +382,9 @@ struct laplace_distrib {
   template <int K>
   LAPLACE_HD sym_tensor<2, K> log_ccdf_dk(double y) const {
     const double z = (y - mu) / sigma;
-    if (z <= -detail_laplace::series_split) return detail_laplace::log1m_half_exp_dk<K>(-z, 1.0, sigma);
+    if (z <= -detail_laplace1::series_split) return detail_laplace1::log1m_half_exp_dk<K>(-z, 1.0, sigma);
     double L[K + 1];
-    detail_laplace::log_cdf0_derivs<K>(-z, L);
+    detail_laplace1::log_cdf0_derivs<K>(-z, L);
     for (int j = 1; j <= K; j += 2) L[j] = -L[j];
     return detail_location_scale::mixed_dk<K>(L, z, sigma);
   }
@@ -429,7 +435,7 @@ struct laplace_distrib {
   LAPLACE_HD double scale() const { return sigma; }
   // mu: kink at y, continuous (order 0); sigma: none
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Non-smooth points in parameter \f$\theta_j\f$ for observation \f$y\f$.
    *
    * For \f$j = 0\f$ (\c mu), returns one kink at \f$\mu = y\f$ with \c continuous_order = 0.
@@ -447,7 +453,7 @@ struct laplace_distrib {
     return k;
   }
   /**
-   * \ingroup distrib_laplace
+   * \ingroup distrib_laplace1
    * \brief Non-smooth points in observation \f$y\f$ for parameters \f$(\mu, \sigma)\f$.
    *
    * Returns one kink at \f$y = \mu\f$ with \c continuous_order = 0.

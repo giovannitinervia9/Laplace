@@ -58,7 +58,7 @@ The structure \ref laplace::distrib::distrib_param_info "distrib_param_info" des
 For smooth distributions such as \ref laplace::distrib::gaussian1_distrib "gaussian1_distrib", both parameters have `regularity = infinitely_smooth` and `cdf_regularity = infinitely_smooth`.
 
 For distributions with non-smooth points, regularity fields state the exact degree of smoothness:
-- In \ref laplace::distrib::laplace_distrib "laplace_distrib", the location parameter \f$\mu\f$ has `regularity = 0` and `cdf_regularity = 1`.
+- In \ref laplace::distrib::laplace1_distrib "laplace1_distrib", the location parameter \f$\mu\f$ has `regularity = 0` and `cdf_regularity = 1`.
 - The log-density \f$\log f(y; \mu, \sigma) = -\log(2\sigma) - |y - \mu|/\sigma\f$ is \f$C^0\f$ in \f$\mu\f$ at \f$\mu = y\f$; its first derivative in \f$\mu\f$ has a step discontinuity, and its pointwise second derivative is zero almost everywhere.
 - Because the second derivative in \f$\mu\f$ carries a Dirac point mass at the kink \f$\mu = y\f$, the pointwise expectation \f$-\mathbb{E}[\frac{\partial^2}{\partial\mu^2}\log f]\f$ vanishes and does not equal the Fisher information. The expected Fisher information is defined by the variance of the score:
   \f[
@@ -68,7 +68,7 @@ For distributions with non-smooth points, regularity fields state the exact degr
 
 Continuous distributions also specify `y_regularity`, the differentiability order of \f$\log f(y; \theta)\f$ with respect to the observation \f$y\f$:
 - For smooth distributions such as \ref laplace::distrib::gaussian1_distrib "gaussian1_distrib" and \ref laplace::distrib::gamma1_distrib "gamma1_distrib", `y_regularity = infinitely_smooth`.
-- In \ref laplace::distrib::laplace_distrib "laplace_distrib", `y_regularity = 0`, indicating that \f$\log f\f$ is \f$C^0\f$ in \f$y\f$ with a kink at \f$y = \mu\f$ reported by `y_kinks()`.
+- In \ref laplace::distrib::laplace1_distrib "laplace1_distrib", `y_regularity = 0`, indicating that \f$\log f\f$ is \f$C^0\f$ in \f$y\f$ with a kink at \f$y = \mu\f$ reported by `y_kinks()`.
 
 ## Symmetric tensors
 

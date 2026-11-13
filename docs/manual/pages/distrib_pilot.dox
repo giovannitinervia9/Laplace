@@ -126,7 +126,7 @@ Expected information and log-density derivatives agree with 5-point finite diffe
 */
 
 /**
-\defgroup distrib_laplace Laplace distribution
+\defgroup distrib_laplace1 Laplace distribution
 \ingroup distrib
 \brief Laplace distribution in location and scale, with kinks, score-based Fisher information, and tail series.
 
@@ -134,7 +134,7 @@ Functions in this module are marked `LAPLACE_HD` and can be called on the host a
 
 ## Mathematical definition
 
-The Laplace (double exponential) distribution `laplace_distrib` is parameterized by its location \f$\mu \in (-\infty, \infty)\f$ (`mu`) and scale \f$\sigma \in (0, \infty)\f$ (`sigma`). The support is \f$y \in (-\infty, \infty)\f$.
+The Laplace (double exponential) distribution `laplace1_distrib` is parameterized by its location \f$\mu \in (-\infty, \infty)\f$ (`mu`) and scale \f$\sigma \in (0, \infty)\f$ (`sigma`). The support is \f$y \in (-\infty, \infty)\f$.
 
 Let \f$z = \frac{y - \mu}{\sigma}\f$ be the standardized argument. The log-density is:
 \f[
@@ -255,7 +255,7 @@ Measured on the gcc build (CPU) against reference values from mpmath at 300 and 
 
 In the tails, the maximum error of an individual component is \f$53.9\f$ ulp for `log_cdf` (order 5; test bound \f$81.0\f$ ulp) and \f$35.2\f$ ulp for `log_ccdf` (order 6; test bound \f$53.0\f$ ulp).
 
-Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score (evaluated by numerical quadrature with a knot at the kink \f$y = \mu\f$) within \f$10^{-12}\f$. Mixed derivatives \ref laplace::distrib::laplace_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>()" away from the kink agree with 5-point finite differences in \f$y\f$ and in parameters within relative tolerance \f$10^{-8}\f$ of the largest component of the order (measured on the gcc build at \f$(\mu, \sigma) = (0.4, 1.3)\f$ across \f$y \in \{-3, 0.2, 1.7, 9\}\f$ and inside a Kokkos kernel).
+Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score (evaluated by numerical quadrature with a knot at the kink \f$y = \mu\f$) within \f$10^{-12}\f$. Mixed derivatives \ref laplace::distrib::laplace1_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>()" away from the kink agree with 5-point finite differences in \f$y\f$ and in parameters within relative tolerance \f$10^{-8}\f$ of the largest component of the order (measured on the gcc build at \f$(\mu, \sigma) = (0.4, 1.3)\f$ across \f$y \in \{-3, 0.2, 1.7, 9\}\f$ and inside a Kokkos kernel).
 */
 
 /**

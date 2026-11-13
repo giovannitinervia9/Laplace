@@ -2226,7 +2226,7 @@ their quantile, expected information and, for the Poisson, the cdf family) and
 `benchmarks/distrib_generic.cpp`. Errors against the hidden closed forms.
 
 Quantile by root, 13 values of p from 1e-300 to 1 - 1e-15 and the three
-inputs, on gaussian1(0.4, 1.3), gaussian1(-20, 1e-3), laplace(0.4, 1.3),
+inputs, on gaussian1(0.4, 1.3), gaussian1(-20, 1e-3), laplace1(0.4, 1.3),
 gamma1(2, 0.3), gamma1(1.5, 4), gamma1(1.5, 0.02): worst 31.9 (gcc) in units
 of the change of y caused by one ulp of y or of p, at p = 1e-300 on
 gamma1(2, 0.3) (y = 1.2e-90); without the last Newton step on F(y) = p it was
@@ -2280,12 +2280,12 @@ hessian form gives I_musigma and I_sigmasigma, NaN for I_mumu (0 where the
 true value is 1/sigma^2).
 
 Moments (mean, variance, third and fourth central moments) against their
-closed forms, in eps of the scale: gaussian1 and laplace 1.8, gamma1 3.0,
+closed forms, in eps of the scale: gaussian1 and laplace1 1.8, gamma1 3.0,
 Poisson 0.6 / 3.1 / 2.4 / 6.7 at mu = 0.05 / 3.5 / 40 / 1000 (1343 at 1000
 with the first logpmf).
 
 Evaluations of l per component (one quadrature or sum): gaussian1 1472,
-laplace 1460, gamma1 816 and 812 (phi = 0.3, 4), Poisson 33 (mu = 3.5) and
+laplace1 1460, gamma1 816 and 812 (phi = 0.3, 4), Poisson 33 (mu = 3.5) and
 111 (mu = 40).
 
 ns per call, one gcc thread / OpenMP 8 threads (`distrib_generic`):
@@ -2293,7 +2293,7 @@ ns per call, one gcc thread / OpenMP 8 threads (`distrib_generic`):
 | quantity | member | generic (hessian) | generic (score) |
 |---|---|---|---|
 | quantile gaussian1 | 29 / 13 | 514 / 80 | |
-| quantile laplace | 7.7 / 9.5 | 120 / 28 | |
+| quantile laplace1 | 7.7 / 9.5 | 120 / 28 | |
 | quantile gamma1(2, 0.3) | 604 / 96 | 3619 / 496 | |
 | quantile poisson(3.5), member cdf | | 2272 / 327 | |
 | log cdf poisson(3.5), \|z\| < 3 | 199 / 53 | 648 / 96 | |
@@ -2305,7 +2305,7 @@ ns per call, one gcc thread / OpenMP 8 threads (`distrib_generic`):
 | d4 I gamma1(2, 0.3) | 729 | 6.0e6 / 8.4e5 | 4.5e6 / 6.5e5 |
 | I poisson(3.5) | 3.5 | 1788 / 434 | 1847 / 448 |
 | d4 I poisson(3.5) | 4.3 | 8686 / 1462 | 1.1e4 / 1705 |
-| I laplace | 1.6 | | 8.7e4 / 1.2e4 |
+| I laplace1 | 1.6 | | 8.7e4 / 1.2e4 |
 
 The expected information is computed in one pass: every component on the same
 nodes of panels_quad (or the same terms of the sum), a level refined until every
@@ -2325,7 +2325,7 @@ all the components).
 | rng gamma1(2, 0.3), counter | | 603 / 81 | |
 
 On the CUDA build (RTX 4070 SUPER; first column one MSVC host thread, second
-the GPU, ns per call): quantile gaussian1 479 / 139 (member 22 / 14), laplace
+the GPU, ns per call): quantile gaussian1 479 / 139 (member 22 / 14), laplace1
 101 / 22 (9 / 5), gamma1(2, 0.3) 2964 / 2762 (460 / 141), gamma1(2, 4) 1941 /
 604 (318 / 102); quantile poisson(3.5) by search 2682 / 563; log cdf by sum
 poisson(3.5) 780 / 118, (40) 2578 / 395, (1000) 12761 / 1612 (member 99 / 33,
@@ -2537,9 +2537,9 @@ bench). For the Poisson cdf, the exponential form of the density ratio for
 a >= 2, x >= a/2 and Temme from a = 50, by the measurements above; to confirm
 on the CUDA build.
 
-## Tails of the log F derivatives of gaussian1 and laplace
+## Tails of the log F derivatives of gaussian1 and laplace1
 
-2026-11-12 (night). `include/laplace/distrib/gaussian1.hpp` and `laplace.hpp`:
+2026-11-12 (night). `include/laplace/distrib/gaussian1.hpp` and `laplace1.hpp`:
 the derivatives in (mu, sigma) to order 6 of log F and log(1 - F) were all
 built by `detail_location_scale::mixed_dk`, which writes each component as
 sigma^-K sum c_jm z^m L_j, z = (y - mu)/sigma, with L_j the derivatives in z.
@@ -2587,7 +2587,7 @@ at x = 5.9, order 6 with 2 in sigma at x = 7.3), where any route loses in ulp
 of the component. Below x = 4 the parts are larger than their sum and the
 split loses; the switch is x = 4 (z <= -4 for log F, z >= 4 for log(1 - F)).
 
-**How (laplace).** With p = e^(-|z|)/2, log(1 - e^(-|z|)/2) = -sum_(n>=1) p^n/n,
+**How (laplace1).** With p = e^(-|z|)/2, log(1 - e^(-|z|)/2) = -sum_(n>=1) p^n/n,
 and p^n = 2^-n exp(c_n/sigma), c_n = n s (y - mu) (s = 1 for log(1 - F) at
 z < 0, -1 for log F at z > 0). With a = K - b derivatives in mu and b in sigma,
 d^a/dmu^a d^b/dsigma^b exp(c/sigma) = (-n s)^a (-1)^b b! sigma^-(a+b) exp(c/sigma) L_b^(a-1)(n |z|),
@@ -2606,7 +2606,7 @@ is |z| = 0.25, where the series starts to win in ulp of the component.
 
 **Measured** (gcc, CPU; `tests/distrib/test_pilot.cpp`, new case on
 `distrib_log_cdf_tails.csv`, written by `tools/reference/distrib_log_cdf_tails.py`:
-1674 rows, gaussian1 |z| = 1.5 .. 35 on the tail side, laplace |z| = 0.05 .. 30
+1674 rows, gaussian1 |z| = 1.5 .. 35 on the tail side, laplace1 |z| = 0.05 .. 30
 on the series side, mu = 0.4, sigma = 1.3). Largest error per order, in ulp
 of the component ("own") and of the order's largest component ("scaled"),
 before -> after:
@@ -2619,10 +2619,10 @@ before -> after:
 | gaussian1 log(1 - F) | 4 | 773 -> 11.4 | 1.87 -> 2.44 |
 | | 5 | 3.20e3 -> 162 | 2.88 -> 3.88 |
 | | 6 | 1.57e5 -> 1.48e3 | 2.64 -> 4.38 |
-| laplace log F | 3 | 74.6 -> 16.6 | 37.3 -> 16.6 |
+| laplace1 log F | 3 | 74.6 -> 16.6 | 37.3 -> 16.6 |
 | | 5 | 504 -> 53.9 | 126 -> 13.5 |
 | | 6 | 986 -> 48.9 | 202 -> 16.7 |
-| laplace log(1 - F) | 3 | 59.3 -> 8.84 | 29.6 -> 3.42 |
+| laplace1 log(1 - F) | 3 | 59.3 -> 8.84 | 29.6 -> 3.42 |
 | | 5 | 484 -> 24.2 | 121 -> 6.05 |
 | | 6 | 921 -> 35.2 | 190 -> 5.80 |
 
@@ -2633,21 +2633,21 @@ more than 1 ulp. Per component, order 6 of gaussian1 log F (b derivatives in
 sigma, b = 0..6), own ulp before: 47.8, 576, 7.56e3, 1.57e5, 3.85, 6.28, 2.08;
 after: 47.8, 51.3, 1.46e3, 606, 3.85, 6.28, 4.81 (b = 0, 1, 4, 5 are taken at
 |z| < 4, where nothing changed; 1.46e3 at z = -7 is next to the zero of that
-component at z = -7.3, 606 at z = -2.5 next to the zero at -3.4). laplace log F
+component at z = -7.3, 606 at z = -2.5 next to the zero at -3.4). laplace1 log F
 order 6 per component, own ulp before: 15.8, 17.3, 218, 65.1, 986, 139, 202;
 after: 15.8, 13.7, 15.5, 11.1, 48.9, 35.2, 18.7. The largest own errors left
-in laplace log F (13 to 16 ulp at z = 20 and 30) are those of e^(-|z|) under
+in laplace1 log F (13 to 16 ulp at z = 20 and 30) are those of e^(-|z|) under
 the rounding of z = (y - mu)/sigma, which no form in z removes. On the older
 reference file (`distrib_log_cdf.csv`) the worst errors in ulp of the order's
 scale are now 30.9, 29.7 (gaussian1, unchanged: they are at |z| < 4) and 11.2,
-9.86 (laplace; 57.2 and 391 before); in ulp of the component gaussian1 goes
+9.86 (laplace1; 57.2 and 391 before); in ulp of the component gaussian1 goes
 from 2.65e4, 3.57e4 to 524, 237 (the largest now at z = 1, not in a tail).
 Test bounds are these maxima plus half.
 
 **Cost** (order 6, one thread, ns per call of the detail routes): gaussian1
 on |z| in [4, 40] 2.8-2.9e3 against 3.1-3.3e3 for the z-polynomials (the
 downward recursion is shorter at x >= 4 than log_Phi_dK's, which runs once
-per order); laplace 2.5e3 against 2.6e3 at |z| in [0.25, 0.5], 1.0e3 against
+per order); laplace1 2.5e3 against 2.6e3 at |z| in [0.25, 0.5], 1.0e3 against
 2.6e3 at [1, 3], 156 against 2.7e3 at [10, 30].
 
 **Open.** The CUDA build was not run for these routes (no CUDA build in this
@@ -2656,7 +2656,7 @@ components with 2 or 3 derivatives in sigma keep up to 1.9e3 ulp of the
 component next to their zeros.
 
 **Chosen.** The tail route for gaussian1 from |z| = 4 and the series route for
-laplace from |z| = 0.25, by the measurements above.
+laplace1 from |z| = 0.25, by the measurements above.
 
 ## The pure derivatives of orders 5 and 6 in x and c near the mean at large shapes
 
@@ -2910,7 +2910,7 @@ the psdmat structures (`note/pdmat_structures.md` section 8).
 **Chosen.** This version; tested in `tests/pdmat/test_pilot.cpp` on gcc and
 CUDA, bounds 1.5 times the larger measured error.
 
-## Univariate distributions: the pilot (gaussian1, laplace, poisson, gamma1)
+## Univariate distributions: the pilot (gaussian1, laplace1, poisson, gamma1)
 
 **What.** `include/laplace/distrib/`: `core.hpp` (the kind, continuous or
 discrete; the descriptor of a parameter, `distrib_param_info`: name, natural
@@ -2918,7 +2918,7 @@ domain, regularity order of log f, whether it moves the support, regularity
 order of log F; `distrib_kinks`; the packed symmetric tensor `sym_tensor<P, K>`
 over sorted indices in lexicographic order; `expected_info_tensor<P, K>`),
 and four distributions as structs whose fields are the natural parameters:
-`gaussian1_distrib` (mu, sigma), `laplace_distrib` (mu, sigma),
+`gaussian1_distrib` (mu, sigma), `laplace1_distrib` (mu, sigma),
 `poisson_distrib` (mu), `gamma1_distrib` (mu, phi; shape 1/phi). Each has the
 log-density (or log-mass) and its derivatives in the parameters to order 6,
 the expected information I = -E[d^2 l] and its derivatives to order 4 (total
@@ -2932,7 +2932,7 @@ center and scale, and the non-smooth points. Decisions in note/distrib.md.
   polynomials in q = 1/(2 e^z - 1) or, in the tails, the series
   -sum p^n/n) and carried to (mu, sigma) by the location-scale rules
   (`detail/location_scale.hpp`; tails: section "Tails of the log F
-  derivatives of gaussian1 and laplace").
+  derivatives of gaussian1 and laplace1").
 - laplace: l is C^0 in mu at mu = y (derivative sign(0) = 0 there, the mean
   of the one-sided ones), log F is C^1 there (`cdf_regularity` 1).
 - poisson: the log-mass in saddle-point form
@@ -2969,7 +2969,7 @@ error is larger, see the tails section):
 | distribution | log F | log(1 - F) |
 |---|---|---|
 | gaussian1 | 30.9 | 29.7 |
-| laplace | 11.2 | 9.86 |
+| laplace1 | 11.2 | 9.86 |
 | poisson | 3.84e3 (k = 39, mu = 40, order 6, value 4.8e-7 next to -7e-7, absolute 2e-19) | 867 |
 | gamma1 | 379 | 356 |
 
@@ -2983,7 +2983,7 @@ CUDA.
 
 ## Derivatives of the log-density in y and mixed (y, theta)
 
-**What.** For the continuous distributions of the pilot (gaussian1, laplace,
+**What.** For the continuous distributions of the pilot (gaussian1, laplace1,
 gamma1): `logpdf_dy_dk<J, K>(y)`, the derivatives with J derivatives in the
 observation y and the symmetric tensor of order K in the parameters,
 J + K <= 6 (J = 0 is `logpdf_dk`, J = K = 0 the value); and
@@ -2996,7 +2996,7 @@ plays the role of y), a random effect, a latent response, a transformation
 of the response with parameters (decided with Giovanni on 2026-11-12,
 note/distrib.md). The Poisson, discrete, has none.
 
-**How.** gaussian1 and laplace depend on y - mu only, so d/dy = -d/dmu and
+**How.** gaussian1 and laplace1 depend on y - mu only, so d/dy = -d/dmu and
 the (J, K) component with a derivatives in mu and b in sigma is (-1)^J times
 the (a + J, b) component of the parameter derivatives, already measured
 (Laplace: sign(0) = 0 at y = mu, as for mu). gamma1: the terms of l with y
@@ -3008,7 +3008,7 @@ whose zero (the mode) is then a single subtraction.
 **Measurement.** Every (J, K) with J >= 1 against a 5-point difference in y
 of (J - 1, K) and, for K >= 1, in each parameter of (J, K - 1), relative
 1e-8 (gamma1 1e-7) of the largest component of the order, at gaussian1 and
-laplace (0.4, 1.3), y in {-3, 0.2, 1.7, 9}, and gamma1 (2, phi),
+laplace1 (0.4, 1.3), y in {-3, 0.2, 1.7, 9}, and gamma1 (2, phi),
 phi in {0.02, 0.3, 4}, y in {0.3, 1.4, 2, 5}; and inside a Kokkos kernel.
 No mpmath reference: the forms are elementary and each is the exact
 derivative of a measured one.
@@ -3228,3 +3228,128 @@ the scratch grows like p^4 (23360 doubles at p = 4).
 
 **Chosen.** This version; tested in `tests/bijector/test_coupled.cpp` on gcc
 and CUDA, bounds 1.5 times the larger measured error.
+
+## Univariate distributions, batch 1: the location-scale families in closed form
+
+**What.** `include/laplace/distrib/`: `gaussian2.hpp` (mu, v = sigma^2),
+`gaussian3.hpp` (mu, tau = 1/sigma^2), `cauchy.hpp`, `logistic.hpp`,
+`gumbel.hpp` (all three in mu and sigma) and `laplace2.hpp` (mu, lambda = 1/sigma),
+each with the whole interface of `core.hpp`: the parameter descriptors, the
+log-density and its derivatives to order 6, the mixed (y, theta) derivatives,
+the expected information and its derivatives to order 4, cdf, ccdf, log F,
+log(1 - F) with their derivatives to order 6, and the quantile. All six are
+continuous with a fixed support; only laplace2 has kinks, those of laplace1
+(mu is C^0 in log f and C^1 in log F at mu = y). Written by three Haiku 5.5
+subagents, one pair each, and reviewed here. Tests in
+`tests/distrib/test_<name>.cpp`, references in
+`tools/reference/distrib_gaussian23.py` (2267 and 2248 rows),
+`distrib_cauchy_logistic.py` (4734 rows, 612 dropped) and
+`distrib_gumbel_laplace2.py` (1314 rows, 468 dropped). The suite goes from
+122 cases and 14950 assertions to 181 and 35400, green on gcc and on CUDA.
+
+**How.** Every closed form was derived and checked against SymPy's own
+derivative in a script under `tools/reference/` before being transcribed;
+`gaussian23_forms.py` alone checks 232 of them. The z-derivatives of log F go
+to the parameters through the location-scale rules of
+`detail/location_scale.hpp`. gaussian2 and gaussian3 reuse gaussian1's log Phi
+derivatives and its tail route, with the new power-scale chain below; cauchy
+uses a Riccati recurrence for log(1 - F) and a monomial series in 1/|z| beyond
+|z| = 2, where the z-polynomials cancel (1e41 ulp at |z| = 1e8 without it);
+logistic runs one recurrence in p = F(z), and its log F and log(1 - F) are
+exact as written; gumbel has log F = -e^(-z) exactly; laplace2 reuses
+laplace1's series.
+
+**The power-scale chain.** `mixed_dk` carries the z-derivatives to (mu, sigma)
+only. For a second parameter w with sigma = w^k (the variance k = 1/2, the
+precision k = -1/2, the rate k = -1), a derivative in w leaves the power of
+sigma where it is and multiplies by k/w, but that factor is itself a function
+of w, so with the state after i derivatives written as sigma^-a w^-i R_i(z),
+
+    d^a/dmu^a d^b/dw^b Lambda = sigma^-a w^-b R_b,
+    R_0 = (-d/dz)^a Lambda,   R_(i+1) = -((k a + i) R_i + k z R_i').
+
+`mixed_power_dk` implements this. Its first version dropped the w-dependence
+of k/w and was wrong from b = 2 on (relative error up to 2.4 at k = 1),
+caught by the agent writing gaussian2 and gaussian3 against SymPy.
+`tools/reference/location_scale_forms.py` now checks both chains against
+sympy.diff of Lambda((y - mu) w^-k) with Lambda an undefined function: 162
+forms, k = 1/2, -1/2, -1, 1, 1/3, orders 1 to 6, every split between the two
+parameters, all agreeing. `mixed_dk` is kept as it stands because the bounds
+of gaussian1 and laplace1 were measured on that code.
+
+**The Laguerre order of laplace2.** The series for the derivatives of log F
+differentiates e^(-n lambda q) term by term, which gives b! L_b^(a-b)(u). For
+a < b that order is a negative integer, where the forward recurrence starts
+from terms of size b and has to cancel them down to a result of size u^(b-a);
+at a = 0 the exact value is (-u)^b and the recurrence lost 720 ulp of it. The
+identity L_b^(-m)(u) = (-u)^m ((b - m)!/b!) L_(b-m)^(m)(u) with m = b - a
+(DLMF 18.5.12) makes the degeneracy explicit and leaves a recurrence of
+positive order. Applied to laplace1, where the negative part of the order is
+only -1, it measured 12.2 ulp against 11.2 for log F and no change for
+log(1 - F), so it was not kept there.
+
+**Accuracy of the log F derivatives**, against mpmath at 300 and 400 bits, in
+ulp of the largest component of the order at that point ("scaled"), maximum
+over orders 1 to 6, gcc build, 2026-11-13:
+
+| distribution | log F | log(1 - F) | bounds |
+|---|---|---|---|
+| gaussian2 | 483 | 441 | 730, 670 |
+| gaussian3 | 301 | 156 | 460, 240 |
+| cauchy | 59 | 41 | 90, 62 |
+| logistic | 108 | 44.4 | 162, 67 |
+| gumbel | 19.1 | 394 | 30, 600 |
+| laplace2 | 5.64 | 24.8 | 8.5, 37 |
+
+For comparison the pilot measured 30.9 and 29.7 (gaussian1) and 11.2 and 9.86
+(laplace1) on the same scale. laplace2's figures are those after the Laguerre
+identity; before it they were 180 and 176.
+
+**FMA contraction in the cauchy kernel test.** The kernel case of the cauchy
+compared a host sum and a device sum of seven quantities at a relative
+1e-14 and failed on CUDA. nvcc contracts the multiply-adds of the far tail's
+hundred alternating coefficients into FMA and the host compiler does not, and
+no other distribution of the batch sums a series of that length. With
+`LAPLACE_CUDA_FMAD=OFF` (`build_cuda.bat <dir> nofmad`) the case passes; on
+the default build the worst relative difference is 2.43e-14, so the case now
+measures that difference and bounds it at 3.7e-14. Noted in passing: on the
+nofmad build `tests/math/test_bessel_k.cpp` fails at 10.9 ulp against a bound
+of 9, those bounds having been tuned on the FMA build; nofmad is not the
+default build and nothing was changed.
+
+**An extended device lambda in a function with internal linkage.** On CUDA the
+kernel cases of gaussian3 and logistic passed every assertion and the process
+then died, with an access violation for a single case and heap corruption for
+a whole run. The cause is not in the distributions: doctest expands TEST_CASE
+to `static void DOCTEST_ANON_FUNC_<__COUNTER__>()`, which has internal linkage
+and whose counter restarts in every translation unit, while nvcc tags each
+extended `__device__` lambda with the address of its enclosing function
+(`__nv_dl_tag<void(*)(void), &DOCTEST_ANON_FUNC_39, 1>` in the report of
+AddressSanitizer). Two units that reach the same counter produce the same
+mangled tag for two different closure types; the linker merges them, and with
+them the function-local `static std::map` of Kokkos's
+`configure_max_dynamic_shmem` (`Cuda/Kokkos_Cuda_KernelLaunch.hpp:254`), which
+is then destroyed twice at exit. nvcc's manual forbids defining an extended
+lambda inside a function with internal linkage. Measured: the fault is present
+with and without relocatable device code, `/OPT:NOICF /OPT:NOREF` does not
+avoid it, the device constant bank (65296 of 65536 bytes) is not involved
+(freeing 800 bytes changed nothing) and neither is the device stack (raising
+the limit from 1024 to 131072 bytes changed nothing). Moving the two kernels
+into named functions with external linkage, with nothing else changed, cleared
+both faults; the same shape was then given to the other four cases of the
+batch and to `tests/distrib/test_pilot.cpp`. The diagnosis came from MSVC's
+AddressSanitizer, built in a scratch directory with
+`/D_DISABLE_STRING_ANNOTATION=1 /D_DISABLE_VECTOR_ANNOTATION=1` because the
+installed Kokkos libraries carry no sanitizer.
+
+**What is open.** The worst errors of gaussian2 and gaussian3 are on the
+central branch at |z| between 13 and 22, not in the tail route; whether that is
+`log_Phi_dK` at a large positive argument or the composition is not located.
+The gumbel's log(1 - F) at 394 ulp is twenty times its log F at 19.1, and the
+choice between the Laguerre route and the z-polynomials there was never
+measured. Every other test file of the project that writes a `KOKKOS_LAMBDA`
+in a TEST_CASE body carries the latent collision above and passes only because
+its counters do not collide today.
+
+**Chosen.** The six distributions as written, with the bounds of each test at
+about 1.5 times the measured maximum, on gcc and on CUDA.

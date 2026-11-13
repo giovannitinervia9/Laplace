@@ -36,6 +36,12 @@ set(LAPLACE_TEST_SOURCES
   math/test_stirling.cpp
   distrib/test_pilot.cpp
   distrib/test_generic.cpp
+  distrib/test_gaussian2.cpp
+  distrib/test_gaussian3.cpp
+  distrib/test_cauchy.cpp
+  distrib/test_logistic.cpp
+  distrib/test_gumbel.cpp
+  distrib/test_laplace2.cpp
   pdmat/test_pilot.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
