@@ -1,0 +1,141 @@
+/**
+\defgroup chain_pair The chain rule for two variables in two variables
+\ingroup math
+\brief The chain rule for the composition of two variables in two variables up to total order 6.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Mathematical definition
+
+Let \f$G \colon \mathbb{R}^2 \to \mathbb{R}\f$ be an outer function of two variables \f$(u_0, u_1)\f$, and let \f$u_0, u_1 \colon \mathbb{R}^2 \to \mathbb{R}\f$ be two inner functions of the coordinates \f$(x_0, x_1)\f$. The composite function \f$H \colon \mathbb{R}^2 \to \mathbb{R}\f$ is defined by
+\f[
+H(x_0, x_1) = G(u_0(x_0, x_1), u_1(x_0, x_1)).
+\f]
+Given the partial derivatives of the outer function \f$G\f$ in its two arguments and the partial derivatives of the two inner functions \f$u_0\f$ and \f$u_1\f$ with respect to \f$(x_0, x_1)\f$ up to total order \f$K\f$ (\f$1 \le K \le 6\f$), this module computes all partial derivatives of \f$H\f$ of total order \f$K\f$:
+\f[
+\frac{\partial^K H}{\partial x_0^{K-b} \partial x_1^b}, \quad b \in \{0, \dots, K\},
+\f]
+where \f$b\f$ is the number of derivatives taken in the second variable \f$x_1\f$ and \f$K - b\f$ is the number of derivatives taken in the first variable \f$x_0\f$.
+
+## Distinction from univariate composition
+
+The composition of a univariate function is treated on the page \ref faa_di_bruno "Faà di Bruno's formula and partial Bell polynomials". When extending composition to several variables, a mixed partial derivative of a composite function factorizes into a product of univariate Faà di Bruno sums (one partial Bell polynomial per variable) only when each inner function depends on a single independent variable alone. In the general bivariate setting addressed here, each of the two inner functions \f$u_0\f$ and \f$u_1\f$ may depend simultaneously on both variables \f$x_0\f$ and \f$x_1\f$. Consequently, the mixed partial derivatives cannot be factored into products of univariate Bell polynomials, requiring a bivariate chain rule.
+
+## Numerical method and recurrence
+
+The derivatives are computed by a numerical recurrence rather than multivariate Bell polynomials. Let \f$\gamma = (p, q) \in \mathbb{N}_0^2\f$ be a multi-index representing partial derivatives with respect to the coordinates \f$(x_0, x_1)\f$, with total order \f$|\gamma| = p + q\f$. Let \f$k = (i, j) \in \mathbb{N}_0^2\f$ be a multi-index representing partial derivatives of the outer function \f$G\f$ with respect to its arguments \f$(u_0, u_1)\f$, with total order \f$|k| = i + j\f$, and write \f$G_k = \partial^k G = \partial^{i+j} G / \partial u_0^i \partial u_1^j\f$.
+
+Define the intermediate table of composite derivatives:
+\f[
+D[\gamma][k] = \partial^\gamma (G_k \circ u).
+\f]
+Differentiating \f$D[\gamma][k]\f$ once more in coordinate \f$x_m\f$ (\f$m \in \{0, 1\}\f$, where \f$e_m\f$ denotes the standard unit basis vector in coordinate direction \f$m\f$) and expanding the derivative of the product via Leibniz's rule gives the recurrence relation:
+\f[
+D[\gamma + e_m][k] = \sum_{\alpha \le \gamma} \binom{\gamma}{\alpha} \sum_{r=0}^1 D[\alpha][k + e_r] \, \partial^{\gamma - \alpha + e_m} u_r,
+\f]
+where:
+- \f$\alpha = (p', q')\f$ is a multi-index satisfying \f$\alpha \le \gamma\f$ (that is, \f$0 \le p' \le p\f$ and \f$0 \le q' \le q\f$),
+- \f$\binom{\gamma}{\alpha} = \binom{p}{p'} \binom{q}{q'}\f$ is the product of two scalar binomial coefficients,
+- \f$e_r\f$ is the standard unit basis vector in argument direction \f$r \in \{0, 1\}\f$ for the arguments of \f$G\f$,
+- \f$u_r\f$ is the \f$r\f$-th inner function.
+
+The table is filled by induction on increasing order \f$|\gamma|\f$, starting from the initial condition:
+\f[
+D[0][k] = G_k.
+\f]
+Only the entries satisfying \f$|\gamma| + |k| \le K\f$ are read and computed. For total order \f$K\f$, the required state size is:
+\f[
+\sum_{n=0}^K (n + 1) \binom{K - n + 2}{2}
+\f]
+doubles, which equals 210 doubles at \f$K = 6\f$.
+
+Every coefficient in this recurrence is a positive binomial coefficient. Therefore, the recurrence introduces no cancellation of its own, and whatever cancellation occurs does so in the partial derivatives it is given.
+
+## Layout of inputs and output
+
+A multi-index \f$(i, j)\f$ of total order \f$n = i + j\f$ sits at linear index
+\f[
+\frac{n(n + 1)}{2} + j = \frac{(i + j)(i + j + 1)}{2} + j,
+\f]
+ordered first by total derivative order \f$n\f$, and within each order by the number of derivatives \f$j\f$ in the second variable. Within one total order \f$n\f$, this corresponds to the packing of a symmetric tensor of order \f$n\f$ in two variables, where the component with \f$j\f$ indices equal to 1 sits at relative offset \f$j\f$.
+
+A caller provides three input arrays and one output array:
+- `G`: partial derivatives of the outer function \f$G\f$. The derivative \f$\partial^{i+j} G / \partial u_0^i \partial u_1^j\f$ sits at position \f$(i + j)(i + j + 1)/2 + j\f$ for all \f$i + j \le K\f$, requiring \f$(K + 1)(K + 2)/2\f$ elements.
+- `u0`: partial derivatives of the first inner map \f$u_0\f$ in \f$(x_0, x_1)\f$. The derivative \f$\partial^{p+q} u_0 / \partial x_0^p \partial x_1^q\f$ sits at position \f$(p + q)(p + q + 1)/2 + q\f$ for orders \f$1 \le p + q \le K\f$. Position 0 (the undifferentiated value of \f$u_0\f$) is never read.
+- `u1`: partial derivatives of the second inner map \f$u_1\f$ in \f$(x_0, x_1)\f$, packed identically to `u0`. Position 0 (the undifferentiated value of \f$u_1\f$) is never read.
+- `out`: output array of \f$K + 1\f$ doubles. Element `out[b]` receives \f$\partial^K H / \partial x_0^{K-b} \partial x_1^b\f$ for \f$b \in \{0, \dots, K\}\f$, which is component \f$b\f$ of a symmetric tensor of order \f$K\f$ in two variables.
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
+
+Reference values are computed at 300 bits of precision using mpmath (`tools/reference/chain_pair.py`, written to `tests/data/reference/chain_pair.csv`). The reference method is independent of the library's recurrence: it evaluates the composition on truncated bivariate Taylor series.
+
+The reference dataset contains 96 cases in total:
+- 60 cases with derivatives drawn at random, with magnitudes log-uniformly distributed on \f$(2^{-8}, 2^8)\f$ and random signs, so that the sums cancel;
+- 36 cases from two non-linear bivariate coordinate maps with an outer function shaped like a log-density.
+
+Accuracy is measured in units in the last place (ulp) of the largest component of the order (see \ref accuracy). The maximum errors by group, measured on the gcc build (2026-11-13), and the test bound of `tests/math/test_chain_pair.cpp` are:
+
+| Order \f$K\f$ | Random derivatives (ulp of the order's scale) | The two coordinate maps (ulp) | Test bound (ulp) |
+|---|---|---|---|
+| 1 | 0.841 | 0.647 | 40.0 |
+| 2 | 0.898 | 1.06 | 40.0 |
+| 3 | 2.48 | 1.59 | 40.0 |
+| 4 | 0.994 | 3.74 | 40.0 |
+| 5 | 2.07 | 0.755 | 40.0 |
+| 6 | 2.8 | 26.2 | 40.0 |
+
+The random cases, whose signs are drawn so that the sums cancel, stay within 2.8 ulp at every order. The order-6 maximum of 26.2 ulp comes from a single point of one of the two maps, at which the arguments of the outer function span a very wide range; that same point is the worst at orders 1 to 4.
+
+
+## Example
+
+The following example evaluates the order-2 composite derivatives of \f$H(x_0, x_1) = G(u_0(x_0, x_1), u_1(x_0, x_1))\f$ inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/math/chain_pair.hpp>
+#include <Kokkos_Core.hpp>
+
+void compute_pair_derivatives(Kokkos::View<double**>& out_derivs, int n) {
+  constexpr int K = 2;
+  constexpr int num_inputs = (K + 1) * (K + 2) / 2;  // 6 entries for K = 2
+  constexpr int num_outputs = K + 1;                 // 3 entries for K = 2
+
+  Kokkos::parallel_for("eval_chain_pair", n, KOKKOS_LAMBDA(const int i) {
+    // Buffers with compile-time constant sizes
+    double G[num_inputs] = {};
+    double u0[num_inputs] = {};
+    double u1[num_inputs] = {};
+
+    // Partial derivatives of G in (u0, u1) up to order 2:
+    // (i + j)*(i + j + 1)/2 + j
+    G[1] = 2.0;    // dG/du0
+    G[2] = -3.0;   // dG/du1
+    G[3] = 5.0;    // d^2 G / du0^2
+    G[4] = 7.0;    // d^2 G / du0 du1
+    G[5] = -11.0;  // d^2 G / du1^2
+
+    // Partial derivatives of u0 and u1 in (x0, x1) up to order 2:
+    // element 0 is never read
+    u0[1] = 0.5;   // du0/dx0
+    u0[2] = 1.5;   // du0/dx1
+    u1[1] = -0.25; // du1/dx0
+    u1[2] = 2.0;   // du1/dx1
+
+    double d[num_outputs];
+    laplace::math::chain_rule_pair_dk<K>(G, u0, u1, d);
+
+    for (int b = 0; b < num_outputs; ++b) {
+      out_derivs(i, b) = d[b];
+    }
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+- \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()" — Evaluates partial derivatives of \f$G(u_0(x), u_1(x))\f$ of total order \f$K\f$ in \f$x = (x_0, x_1)\f$ for \f$1 \le K \le 6\f$
+*/

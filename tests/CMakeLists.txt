@@ -43,6 +43,13 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_gumbel.cpp
   distrib/test_laplace2.cpp
   distrib/test_conditioning.cpp
+  distrib/test_exponential.cpp
+  distrib/test_chisq.cpp
+  distrib/test_gamma2.cpp
+  distrib/test_invgauss.cpp
+  distrib/test_lognormal1.cpp
+  distrib/test_lognormal2.cpp
+  math/test_chain_pair.cpp
   pdmat/test_pilot.cpp
   pdmat/test_unstructured.cpp
   pdmat/test_unit_diagonal_scaled.cpp

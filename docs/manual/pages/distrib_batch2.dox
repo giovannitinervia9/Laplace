@@ -1,0 +1,861 @@
+/**
+\defgroup distrib_exponential Exponential distribution
+\ingroup distrib
+\brief Univariate exponential distribution in its mean, with Eulerian tail derivatives and pole-cancelling series.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Classic form and reparametrization
+
+The classic textbook density of the exponential distribution is written in terms of its rate parameter \f$\lambda \in (0, \infty)\f$:
+\f[
+f(y; \lambda) = \lambda e^{-\lambda y}, \quad y > 0
+\f]
+where \f$\lambda\f$ represents the event rate (the reciprocal of the mean) and \f$y \in (0, \infty)\f$ is the observation point. Laplace's \ref laplace::distrib::exponential_distrib "exponential_distrib" substitutes \f$\lambda = 1/\mu\f$, where \f$\mu \in (0, \infty)\f$ is the mean parameter. The resulting density is:
+\f[
+f(y; \mu) = \frac{1}{\mu} \exp\left(-\frac{y}{\mu}\right), \quad y > 0
+\f]
+
+## Parameters and regularity
+
+The distribution has one parameter:
+- Mean parameter \f$\mu \in (0, \infty)\f$ (`mu`), representing the mean and standard deviation.
+
+The support is \f$y \in (0, \infty)\f$. The parameter has `regularity = infinitely_smooth` and `cdf_regularity = infinitely_smooth`, and does not move the support (`moves_support = false`). The observation regularity is `y_regularity = infinitely_smooth`. There are no kinks (`count = 0`).
+
+## What the module computes
+
+Let \f$u = y/\mu\f$. The log-density is:
+\f[
+\ell(\mu; y) = -\log\mu - u = -\log\mu - \frac{y}{\mu}
+\f]
+For total derivative order \f$K \in \{1, \dots, 6\}\f$, the \f$K\f$-th derivative of \f$\ell\f$ with respect to \f$\mu\f$ is:
+\f[
+\frac{\mathrm{d}^K}{\mathrm{d}\mu^K} \ell(\mu; y) = \frac{(-1)^K (K - 1)!}{\mu^K} (1 - K u)
+\f]
+stored as the single component of \ref laplace::distrib::sym_tensor "sym_tensor<1, K>". The term \f$-\log\mu\f$ contributes \f$(-1)^K (K - 1)!/\mu^K\f$, and \f$-u\f$ contributes \f$-(-1)^K K! u/\mu^K\f$.
+
+Mixed partial derivatives \ref laplace::distrib::exponential_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>(y)" compute \f$\frac{\partial^{J+K}}{\partial y^J \partial\mu^K}\ell(\mu; y)\f$ for \f$J + K \le 6\f$. Because \f$\ell\f$ is linear in \f$y\f$:
+- For \f$J = 0\f$: returns \f$\ell(\mu; y)\f$ if \f$K = 0\f$, and `logpdf_dk<K>(y)` if \f$K \ge 1\f$.
+- For \f$J = 1\f$: \f$\frac{\partial}{\partial y} \ell = -1/\mu\f$, giving:
+  \f[
+  \frac{\partial^{1+K}}{\partial y \partial\mu^K} \ell = -\frac{(-1)^K K!}{\mu^{K+1}}
+  \f]
+- For \f$J \ge 2\f$:
+  \f[
+  \frac{\partial^{J+K}}{\partial y^J \partial\mu^K} \ell = 0
+  \f]
+
+The cumulative distribution functions are:
+\f[
+F(y) = 1 - e^{-y/\mu}, \quad 1 - F(y) = e^{-y/\mu}
+\f]
+Their logarithms are:
+\f[
+\log F(y) = \log(1 - e^{-y/\mu}) = \log(-\operatorname{expm1}(-y/\mu)), \quad \log(1 - F(y)) = -\frac{y}{\mu} = -u
+\f]
+Derivatives of \f$\log(1 - F)\f$ in \f$\mu\f$ are closed forms:
+\f[
+\frac{\mathrm{d}^K}{\mathrm{d}\mu^K} \log(1 - F(y)) = \frac{(-1)^{K+1} K! u}{\mu^K} = \frac{(-1)^{K+1} K! y}{\mu^{K+1}}
+\f]
+Derivatives of \f$\log F(y)\f$ in \f$\mu\f$ are computed by the univariate chain rule \ref faa_di_bruno "chain_rule_dK" composed with \f$u(\mu) = y/\mu\f$.
+
+## How the forms avoid cancellation
+
+Derivatives of \f$\log F(y) = G(u)\f$ with \f$G(u) = \log(1 - e^{-u})\f$ are split at \f$u = y/\mu = 1\f$:
+- For \f$u \ge 1\f$: \f$G^{(k)}(u) = (-1)^{k+1} q A_{k-1}(q)/(1 - q)^k\f$, where \f$q = e^{-u}\f$, \f$1 - q = -\operatorname{expm1}(-u)\f$ is exact in its leading digits, and \f$A_m(q)\f$ are the Eulerian polynomials:
+  \f[
+  A_0 = 1, \quad A_1 = 1, \quad A_2 = 1 + q, \quad A_3 = 1 + 4q + q^2, \quad A_4 = 1 + 11q + 11q^2 + q^3, \quad A_5 = 1 + 26q + 66q^2 + 26q^3 + q^4
+  \f]
+  This follows from \f$G^{(k)}(u) = (-1)^{k+1} \sum_{n=1}^\infty n^{k-1} q^n = (-1)^{k+1} \operatorname{Li}_{1-k}(q)\f$. Because every coefficient of the Eulerian polynomials is positive, no subtraction occurs.
+- For \f$0 < u < 1\f$: \f$G(u)\f$ has a logarithmic singularity at \f$u = 0\f$. This pole is factored out analytically:
+  \f[
+  G(u) = \log u + L(u), \quad L(u) = \log\left(\frac{1 - e^{-u}}{u}\right) = \log\operatorname{exprel}(-u)
+  \f]
+  Since \f$\log u = \log y - \log\mu\f$, its \f$K\f$-th derivative in \f$\mu\f$ is \f$(-1)^K (K - 1)!/\mu^K\f$, evaluated in closed form. The regular remainder \f$L(u)\f$ passes through the univariate chain rule of \f$\log\f$ at \f$z = \operatorname{exprel}(-u)\f$ using \ref exprel "exprel_dK". Here \f$L^{(k)}(u) = O(1)\f$ and each term in \f$B_{K, k}(u^{(1)}, \dots)\f$ carries a factor of \f$u\f$, giving an \f$O(u/\mu^K)\f$ contribution. The pole cancels by exact mathematical identity rather than floating-point subtraction.
+- The value \f$\log F(y) = \log(-\operatorname{expm1}(-u))\f$ uses `Kokkos::expm1` directly and requires no split.
+
+## Expected Fisher information
+
+The expected Fisher information \f$I(\mu) = -\mathbb{E}\left[\frac{\mathrm{d}^2}{\mathrm{d}\mu^2}\ell\right] = \frac{1}{\mu^2}\f$ is a scalar. Stored as \ref laplace::distrib::sym_tensor "sym_tensor<1, 2>", `v[0] = 1.0 / (mu * mu)`.
+
+The \f$K\f$-th derivative of \f$I(\mu)\f$ is:
+\f[
+\frac{\mathrm{d}^K}{\mathrm{d}\mu^K} I(\mu) = \frac{(-1)^K (K + 1)!}{\mu^{K + 2}}
+\f]
+stored in \ref laplace::distrib::expected_info_tensor "expected_info_tensor<1, K>" at `pair[0][0]`.
+
+## Quantile
+
+The quantile function is:
+\f[
+F^{-1}(p) = -\mu \log(1 - p) = -\mu \operatorname{log1p}(-p), \quad p \in (0, 1)
+\f]
+evaluated via `Kokkos::log1p`.
+
+## Measured accuracy
+
+Measured against reference values from mpmath at 300 and 400 bits (`tests/data/reference/distrib_exponential.csv`, grid \f$u = y/\mu \in [10^{-8}, 300]\f$ at \f$\mu \in \{10^{-3}, 1, 10^4\}\f$) on the gcc build (Kokkos Serial and OpenMP). Figures are in scaled ulp (see \ref accuracy), which is the error in units in the last place of the largest component of that derivative order at that point, not of the component being read:
+- \f$\log F\f$ derivatives (\f$K = 1 \dots 6\f$): measured maxima 1.7, 1.74, 6.39, 7.77, 11.9, 22.6 ulp (maximum 22.6 ulp at order 6, \f$y = 1.01\f$, \f$\mu = 1\f$); test bounds per order: 3.0, 3.0, 10.0, 12.0, 18.0, 34.0 ulp.
+- \f$\log(1 - F)\f$ derivatives (\f$K = 1 \dots 6\f$): measured maxima 0.68, 0.501, 0.887, 1.02, 1.42, 1.68 ulp (maximum 1.68 ulp); test bounds per order: 1.1, 1.0, 1.5, 1.6, 2.2, 2.6 ulp.
+- Expected information agrees with the variance of the score within relative tolerance \f$10^{-10}\f$.
+- Derivatives of \f$\ell\f$, mixed \f$(y, \mu)\f$ derivatives, and expected information derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$; cumulative derivatives agree within \f$10^{-7}\f$.
+
+## Example in Kokkos
+
+\code{.cpp}
+constexpr int n = 64;
+Kokkos::View<double*> out("out", n);
+Kokkos::parallel_for(
+    "distrib_exponential_eval", n, KOKKOS_LAMBDA(const int i) {
+      const double y = 0.1 + 0.3 * i;
+      const laplace::distrib::exponential_distrib d{1.7};
+      out(i) = d.logpdf(y) + d.logpdf_d1(y)[0] + d.expected_info()[0] + d.quantile(0.25);
+    });
+\endcode
+
+## Module members
+
+| Member | Return type | Description |
+|---|---|---|
+| `mu` | `double` | Mean parameter \f$\mu \in (0, \infty)\f$. |
+| `kind` | `distrib_kind` | Distribution kind (`continuous`). |
+| `n_params` | `int` | Number of parameters (1). |
+| `y_regularity` | `int` | Regularity in \f$y\f$ (`infinitely_smooth`). |
+| `params` | `const distrib_param_info[1]` | Parameter descriptor of \c mu. |
+| `logpdf(y)` | `double` | Log-density \f$\ell(\mu; y) = -\log\mu - y/\mu\f$. |
+| `logpdf_dk<K>(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\ell\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `logpdf_d1(y)` ... `_d6(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\ell\f$ for orders 1 to 6. |
+| `logpdf_dy_dk<J, K>(y)` | `sym_tensor<1, K>` | Mixed partial derivatives \f$\partial_y^J \partial_\mu^K \ell\f$ (\f$J + K \le 6\f$). |
+| `expected_info()` | `sym_tensor<1, 2>` | Expected Fisher information \f$I(\mu) = 1/\mu^2\f$. |
+| `expected_info_dk<K>()` | `expected_info_tensor<1, K>` | Parameter derivatives of \f$I(\mu)\f$ of order \f$K \in \{1, \dots, 4\}\f$. |
+| `expected_info_d1()` ... `_d4()` | `expected_info_tensor<1, K>` | Parameter derivatives of \f$I(\mu)\f$ for orders 1 to 4. |
+| `cdf(y)` | `double` | Cumulative distribution function \f$F(y) = 1 - e^{-y/\mu}\f$. |
+| `ccdf(y)` | `double` | Complementary cumulative distribution function \f$1 - F(y) = e^{-y/\mu}\f$. |
+| `log_cdf(y)` | `double` | Logarithm of the cumulative distribution function, \f$\log F(y)\f$. |
+| `log_ccdf(y)` | `double` | Logarithm of the complementary cdf, \f$\log(1 - F(y)) = -y/\mu\f$. |
+| `log_cdf_dk<K>(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\log F(y)\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_cdf_d1(y)` ... `_d6(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\log F(y)\f$ for orders 1 to 6. |
+| `log_ccdf_dk<K>(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_ccdf_d1(y)` ... `_d6(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ for orders 1 to 6. |
+| `quantile(p)` | `double` | Quantile function \f$F^{-1}(p) = -\mu\log(1 - p)\f$. |
+| `support_lower()` | `double` | Lower bound of support (`0.0`). |
+| `support_upper()` | `double` | Upper bound of support (\f$+\infty\f$). |
+| `center()` | `double` | Location hint (\f$\mu\f$). |
+| `scale()` | `double` | Spread hint (\f$\mu\f$). |
+| `param_kinks(j, y)` | `distrib_kinks` | Parameter kinks (none). |
+| `y_kinks()` | `distrib_kinks` | Observation kinks (none). |
+
+## References
+
+- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
+*/
+
+/**
+\defgroup distrib_chisq Chi-square distribution
+\ingroup distrib
+\brief Chi-square distribution in continuous degrees of freedom, with saddle-point log-density and shape-linear incomplete gamma cumulative derivatives.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Classic form and reparametrization
+
+The classic textbook density of the chi-square distribution with \f$k \in \{1, 2, \dots\}\f$ degrees of freedom is:
+\f[
+f(y; k) = \frac{1}{2^{k/2} \Gamma(k/2)} y^{k/2 - 1} e^{-y/2}, \quad y > 0
+\f]
+where \f$k\f$ represents the integer degrees of freedom and \f$y \in (0, \infty)\f$ is the observation point. Laplace's \ref laplace::distrib::chisq_distrib "chisq_distrib" treats the degrees of freedom as a continuous parameter \f$\mu \in (0, \infty)\f$ (`mu`). The chi-square distribution is a special case of the gamma distribution with shape \f$a = \mu/2\f$ and scale \f$\theta = 2\f$, with mean \f$\mu\f$ and variance \f$2\mu\f$. The resulting density is:
+\f[
+f(y; \mu) = \frac{1}{2^{\mu/2} \Gamma(\mu/2)} y^{\mu/2 - 1} e^{-y/2}, \quad y > 0
+\f]
+
+## Parameters and regularity
+
+The distribution has one parameter:
+- Degrees of freedom parameter \f$\mu \in (0, \infty)\f$ (`mu`), also representing the mean.
+
+The support is \f$y \in (0, \infty)\f$. The parameter has `regularity = infinitely_smooth` and `cdf_regularity = infinitely_smooth`, and does not move the support (`moves_support = false`). The observation regularity is `y_regularity = infinitely_smooth`. There are no kinks (`count = 0`).
+
+## What the module computes
+
+Let \f$a = \mu/2\f$. The log-density is:
+\f[
+\ell(\mu; y) = (a - 1) \log y - \frac{y}{2} - \log\Gamma(a) - a \log 2
+\f]
+Because \f$a = \mu/2\f$, differentiation satisfies \f$\frac{\mathrm{d}}{\mathrm{d}\mu} = \frac{1}{2}\frac{\mathrm{d}}{\mathrm{d}a}\f$. In terms of polygamma functions \f$\psi^{(m)}\f$ (\ref laplace::math::own::polygamma "polygamma()", \ref laplace::math::own::digamma "digamma()", \ref laplace::math::own::trigamma "trigamma()"):
+- For order \f$K = 1\f$:
+  \f[
+  \frac{\mathrm{d}}{\mathrm{d}\mu} \ell = \frac{1}{2}\left(\log(y/2) - \psi(a)\right)
+  \f]
+- For order \f$K \ge 2\f$:
+  \f[
+  \frac{\mathrm{d}^K}{\mathrm{d}\mu^K} \ell = -2^{-K} \psi^{(K - 1)}(a)
+  \f]
+stored as the single component of \ref laplace::distrib::sym_tensor "sym_tensor<1, K>".
+
+Mixed partial derivatives \ref laplace::distrib::chisq_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>(y)" compute \f$\frac{\partial^{J+K}}{\partial y^J \partial\mu^K}\ell(\mu; y)\f$ for \f$J + K \le 6\f$. Letting \f$c_J = (-1)^{J-1}(J - 1)! y^{-J}\f$:
+- For \f$J = 0\f$: returns \f$\ell(\mu; y)\f$ if \f$K = 0\f$, and `logpdf_dk<K>(y)` if \f$K \ge 1\f$.
+- For \f$J = 1\f$: returns \f$\frac{a - 1}{y} - \frac{1}{2}\f$ for \f$K = 0\f$, \f$\frac{1}{2y}\f$ for \f$K = 1\f$, and 0 for \f$K \ge 2\f$.
+- For \f$J \ge 2\f$: returns \f$(a - 1) c_J\f$ for \f$K = 0\f$, \f$\frac{1}{2} c_J\f$ for \f$K = 1\f$, and 0 for \f$K \ge 2\f$.
+
+The cumulative distribution functions are:
+\f[
+F(y) = P(a, y/2), \quad 1 - F(y) = Q(a, y/2)
+\f]
+where \f$P(a, x)\f$ and \f$Q(a, x)\f$ are the regularized lower and upper incomplete gamma functions (\ref incomplete_gamma). Because the argument \f$x = y/2\f$ does not depend on \f$\mu\f$ and \f$a = \mu/2\f$ is linear in \f$\mu\f$, parameter derivatives of order \f$K \in \{1, \dots, 6\}\f$ are:
+\f[
+\frac{\mathrm{d}^K}{\mathrm{d}\mu^K} \log F(y) = 2^{-K} \frac{\partial^K}{\partial a^K} \log P(a, y/2), \quad
+\frac{\mathrm{d}^K}{\mathrm{d}\mu^K} \log(1 - F(y)) = 2^{-K} \frac{\partial^K}{\partial a^K} \log Q(a, y/2)
+\f]
+which are \f$2^{-K}\f$ times the pure shape derivatives of \f$\log P\f$ and \f$\log Q\f$ (the \f$j = 0\f$ column of \ref incomplete_gamma).
+
+## How the forms avoid cancellation
+
+- Saddle-point rewriting of the log-density:
+  The textbook form \f$(a - 1)\log y - y/2 - \log\Gamma(a) - a\log 2\f$ subtracts large terms when \f$a\f$ is large, cancelling to about \f$10^{-12}\f$ absolute error at \f$\mu = 10^4\f$. Laplace evaluates the log-density using the saddle-point form of \ref distrib_gamma1 "gamma1_distrib" at shape \f$a = \mu/2\f$ and mean \f$\mu\f$:
+  \f[
+  \ell(\mu; y) = -a D(y/\mu) + \frac{1}{2}\log a - \delta(a) - \log y - \frac{1}{2}\log(2\pi)
+  \f]
+  where \f$D(u) = u - 1 - \log u \ge 0\f$ is the unit deviance and \f$\delta(a)\f$ is Stirling's error (\ref stirling). The deviance and Stirling error are reused from \ref distrib_gamma1 "gamma1_distrib".
+- Linear shape composition in cumulative derivatives:
+  Because \f$a = \mu/2\f$ is strictly linear in \f$\mu\f$ and \f$x = y/2\f$ is independent of \f$\mu\f$, the derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$ require no multivariate chain rule: they are \f$2^{-K}\f$ times the pure shape derivatives of the regularized incomplete gamma functions. This composition involves only a single factor of \f$2^{-K}\f$, introducing no cancellation.
+
+## Expected Fisher information
+
+The expected Fisher information \f$I(\mu) = -\mathbb{E}\left[\frac{\mathrm{d}^2}{\mathrm{d}\mu^2}\ell\right] = \frac{1}{4} \psi'(a) = \frac{1}{4} \psi'(\mu/2)\f$ is a scalar. Stored in \ref laplace::distrib::sym_tensor "sym_tensor<1, 2>", `v[0] = 0.25 * math::trigamma(0.5 * mu)`.
+
+The \f$K\f$-th derivative of \f$I(\mu)\f$ is:
+\f[
+\frac{\mathrm{d}^K}{\mathrm{d}\mu^K} I(\mu) = 2^{-(K + 2)} \psi^{(K + 1)}(\mu/2)
+\f]
+stored in \ref laplace::distrib::expected_info_tensor "expected_info_tensor<1, K>" at `pair[0][0]`.
+
+## Quantile
+
+The quantile function is:
+\f[
+F^{-1}(p) = 2 P^{-1}(\mu/2, p), \quad p \in (0, 1)
+\f]
+where \f$P^{-1}\f$ is the inverse incomplete gamma function (\ref incomplete_gamma). For \f$\mu = 2\f$, \f$F(y) = 1 - e^{-y/2}\f$ and the quantile is \f$-2\log(1 - p)\f$.
+
+## Measured accuracy
+
+Measured against reference values from mpmath at 300 and 400 bits (`tests/data/reference/distrib_chisq.csv`, \f$\mu \in [10^{-3}, 10^4]\f$, \f$y = \mu r\f$ with \f$r \in [10^{-4}, 20]\f$) on the gcc build (Kokkos Serial and OpenMP, measured 2026-11-13). Figures are in scaled ulp (see \ref accuracy), which is the error in units in the last place of the largest component of that derivative order at that \f$\mu\f$, not of the component being read:
+- \f$\log F\f$ derivatives (\f$K = 1 \dots 6\f$): measured maxima 1.41, 18, 59.5, 111, 251, 294 ulp (maximum 294 ulp at order 6, \f$y = \mu = 17\f$); test bounds per order: 2.2, 27.0, 90.0, 167.0, 377.0, 441.0 ulp.
+- \f$\log(1 - F)\f$ derivatives (\f$K = 1 \dots 6\f$): measured maxima 0.83, 7.6, 23.6, 41.5, 292, 525 ulp (maximum 525 ulp at order 6, \f$y = 15.3\f$, \f$\mu = 17\f$); test bounds per order: 1.3, 11.4, 36.0, 63.0, 438.0, 788.0 ulp.
+- These figures sit where the incomplete gamma cdf module does: the pure shape column of \f$\log P\f$ reaches 176 ulp at order 5 and 651 at order 6, and \f$\log Q\f$ at \f$a \ge 1\f$ reaches 45.7 and 97.2 (measured in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$). Because the composition is a single power of \f$1/2\f$, the chisq figures are inherited from that module and not introduced by the distribution.
+- Expected information agrees with the variance of the score within relative tolerance \f$10^{-9}\f$ across \f$\mu \in \{0.5, 3.0, 40.0\}\f$ (at \f$\mu = 0.05\f$, the integrand mass of \f$\log Y\f$ below \f$-200\f$ is about 8 per cent and exceeds the reach of panel quadrature).
+- Derivatives of \f$\ell\f$, mixed \f$(y, \mu)\f$ derivatives, and expected information derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$; cumulative derivatives agree within \f$10^{-7}\f$.
+
+## Example in Kokkos
+
+\code{.cpp}
+constexpr int n = 64;
+Kokkos::View<double*> out("out", n);
+Kokkos::parallel_for(
+    "distrib_chisq_eval", n, KOKKOS_LAMBDA(const int i) {
+      const double y = 0.2 + 0.5 * i;
+      const laplace::distrib::chisq_distrib d{4.5};
+      out(i) = d.logpdf(y) + d.logpdf_d1(y)[0] + d.expected_info()[0] + d.quantile(0.4);
+    });
+\endcode
+
+## Module members
+
+| Member | Return type | Description |
+|---|---|---|
+| `mu` | `double` | Degrees of freedom parameter \f$\mu \in (0, \infty)\f$. |
+| `kind` | `distrib_kind` | Distribution kind (`continuous`). |
+| `n_params` | `int` | Number of parameters (1). |
+| `y_regularity` | `int` | Regularity in \f$y\f$ (`infinitely_smooth`). |
+| `params` | `const distrib_param_info[1]` | Parameter descriptor of \c mu. |
+| `logpdf(y)` | `double` | Log-density \f$\ell(\mu; y)\f$. |
+| `logpdf_dk<K>(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\ell\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `logpdf_d1(y)` ... `_d6(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\ell\f$ for orders 1 to 6. |
+| `logpdf_dy_dk<J, K>(y)` | `sym_tensor<1, K>` | Mixed partial derivatives \f$\partial_y^J \partial_\mu^K \ell\f$ (\f$J + K \le 6\f$). |
+| `expected_info()` | `sym_tensor<1, 2>` | Expected Fisher information \f$I(\mu) = \psi'(\mu/2)/4\f$. |
+| `expected_info_dk<K>()` | `expected_info_tensor<1, K>` | Parameter derivatives of \f$I(\mu)\f$ of order \f$K \in \{1, \dots, 4\}\f$. |
+| `expected_info_d1()` ... `_d4()` | `expected_info_tensor<1, K>` | Parameter derivatives of \f$I(\mu)\f$ for orders 1 to 4. |
+| `cdf(y)` | `double` | Cumulative distribution function \f$F(y) = P(\mu/2, y/2)\f$. |
+| `ccdf(y)` | `double` | Complementary cumulative distribution function \f$1 - F(y) = Q(\mu/2, y/2)\f$. |
+| `log_cdf(y)` | `double` | Logarithm of the cumulative distribution function, \f$\log F(y)\f$. |
+| `log_ccdf(y)` | `double` | Logarithm of the complementary cdf, \f$\log(1 - F(y))\f$. |
+| `log_cdf_dk<K>(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\log F(y)\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_cdf_d1(y)` ... `_d6(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\log F(y)\f$ for orders 1 to 6. |
+| `log_ccdf_dk<K>(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_ccdf_d1(y)` ... `_d6(y)` | `sym_tensor<1, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ for orders 1 to 6. |
+| `quantile(p)` | `double` | Quantile function \f$F^{-1}(p) = 2 P^{-1}(\mu/2, p)\f$. |
+| `support_lower()` | `double` | Lower bound of support (`0.0`). |
+| `support_upper()` | `double` | Upper bound of support (\f$+\infty\f$). |
+| `center()` | `double` | Location hint (\f$\mu\f$). |
+| `scale()` | `double` | Spread hint (\f$\sqrt{2\mu}\f$). |
+| `param_kinks(j, y)` | `distrib_kinks` | Parameter kinks (none). |
+| `y_kinks()` | `distrib_kinks` | Observation kinks (none). |
+
+## References
+
+- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
+*/
+
+/**
+\defgroup distrib_gamma2 Gamma distribution in mean and variance
+\ingroup distrib
+\brief Gamma distribution in mean and variance, with bivariate chain rule, non-orthogonal Fisher information, and incomplete gamma cumulative derivatives.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Classic form and reparametrization
+
+The classic textbook density of the gamma distribution with shape parameter \f$\alpha \in (0, \infty)\f$ and scale parameter \f$\beta \in (0, \infty)\f$ is:
+\f[
+f(y; \alpha, \beta) = \frac{1}{\beta^\alpha \Gamma(\alpha)} y^{\alpha - 1} \exp\left(-\frac{y}{\beta}\right), \quad y > 0
+\f]
+where \f$\alpha\f$ is the shape parameter, \f$\beta\f$ is the scale parameter, and \f$y \in (0, \infty)\f$ is the observation point. Laplace's \ref laplace::distrib::gamma2_distrib "gamma2_distrib" substitutes:
+\f[
+\text{shape } s = \frac{\mu^2}{\sigma^2}, \quad \text{scale } \theta = \frac{\sigma^2}{\mu}
+\f]
+so that \f$\mu \in (0, \infty)\f$ (`mu`) is the mean and \f$\sigma^2 \in (0, \infty)\f$ (`sigma2`) is the variance of the distribution (\f$\mathbb{E}[Y] = s \theta = \mu\f$, \f$\operatorname{Var}(Y) = s \theta^2 = \sigma^2\f$).
+
+See \ref distrib_gamma1 "gamma1_distrib" for the mean-and-dispersion form \f$(\mu, \phi)\f$ with \f$\phi = \sigma^2/\mu^2\f$. Those two parameters are orthogonal (the Fisher information matrix is diagonal), whereas the parameters \f$(\mu, \sigma^2)\f$ implemented here are not orthogonal: the off-diagonal entry of the expected information is nonzero, and differentiating in \f$\mu\f$ reaches both the shape \f$s\f$ and the ratio \f$y/\mu\f$.
+
+The resulting density is:
+\f[
+f(y; \mu, \sigma^2) = \frac{1}{(\sigma^2/\mu)^s \Gamma(s)} y^{s - 1} \exp\left(-\frac{\mu y}{\sigma^2}\right), \quad y > 0
+\f]
+where \f$s = \mu^2/\sigma^2\f$.
+
+## Parameters and regularity
+
+The distribution has two parameters:
+- Mean parameter \f$\mu \in (0, \infty)\f$ (`mu`).
+- Variance parameter \f$\sigma^2 \in (0, \infty)\f$ (`sigma2`).
+
+The support is \f$y \in (0, \infty)\f$. Both parameters have `regularity = infinitely_smooth` and `cdf_regularity = infinitely_smooth`, and do not move the support (`moves_support = false`). The observation regularity is `y_regularity = infinitely_smooth`. There are no kinks (`count = 0`).
+
+## What the module computes
+
+Let \f$s = \mu^2/\sigma^2\f$ and \f$c = y/\mu\f$. The log-density is:
+\f[
+\ell(\mu, \sigma^2; y) = -s D(c) + \frac{1}{2}\log s - \delta(s) - \log y - \frac{1}{2}\log(2\pi)
+\f]
+where \f$D(c) = c - 1 - \log c \ge 0\f$ is the unit deviance and \f$\delta(s)\f$ is Stirling's error (\ref stirling).
+
+Parameter derivatives are evaluated by the bivariate chain rule \ref chain_pair "chain_rule_pair_dk":
+- The outer function \f$G(s, c) = -s D(c) + \frac{1}{2}\log s - \delta(s)\f$ has closed partial derivatives in \f$(s, c)\f$ up to total order 6. The only mixed term is \f$-s D(c)\f$, whose derivatives in \f$s\f$ vanish for order greater than 1.
+- The inner maps \f$s(\mu, \sigma^2) = \mu^2/\sigma^2\f$ and \f$c(\mu) = y/\mu\f$ have closed partial derivatives up to order 6.
+Because both inner variables depend on \f$\mu\f$, the composition is evaluated via \ref chain_pair "chain_rule_pair_dk". Stored in \ref laplace::distrib::sym_tensor "sym_tensor<2, K>", with position \f$b\f$ holding \f$b\f$ derivatives in \f$\sigma^2\f$ and \f$K - b\f$ in \f$\mu\f$.
+
+Mixed partial derivatives \ref laplace::distrib::gamma2_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>(y)" compute \f$\frac{\partial^{J+K}}{\partial y^J \partial\theta^K}\ell\f$ for \f$J + K \le 6\f$. The observation enters \f$\ell\f$ through \f$-s y/\mu + (s - 1)\log y\f$, composed via \ref chain_pair "chain_rule_pair_dk" with inner maps \f$s\f$ and \f$\mu\f$.
+
+The cumulative distribution functions are:
+\f[
+F(y) = P(s, s c) = P\left(\frac{\mu^2}{\sigma^2}, \frac{\mu y}{\sigma^2}\right), \quad 1 - F(y) = Q(s, s c) = Q\left(\frac{\mu^2}{\sigma^2}, \frac{\mu y}{\sigma^2}\right)
+\f]
+Derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$ in \f$(\mu, \sigma^2)\f$ are evaluated by composing the fixed-ratio partial derivatives of \f$\log P(a, a c)\f$ and \f$\log Q(a, a c)\f$ with inner maps \f$s(\mu, \sigma^2)\f$ and \f$c(\mu) = y/\mu\f$ via \ref chain_pair "chain_rule_pair_dk".
+
+The quantile function is:
+\f[
+F^{-1}(p) = \frac{\sigma^2}{\mu} P^{-1}\left(\frac{\mu^2}{\sigma^2}, p\right), \quad p \in (0, 1)
+\f]
+where \f$P^{-1}\f$ is the inverse incomplete gamma function (\ref incomplete_gamma).
+
+## How the forms avoid cancellation
+
+- Unit deviance and Stirling error:
+  Evaluating \f$\log\Gamma(s)\f$ and \f$s\log s\f$ directly cancels catastrophically when \f$s\f$ is large. \ref laplace::distrib::gamma2_distrib "gamma2_distrib" reuses the cancellation-free unit deviance \f$D(y/\mu) = y/\mu - 1 - \log(y/\mu) \ge 0\f$ and Stirling error \f$\delta(s)\f$ from \ref distrib_gamma1 "gamma1_distrib" evaluated at shape \f$s = \mu^2/\sigma^2\f$.
+- Fixed-ratio incomplete gamma composition:
+  Derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$ compose the fixed-ratio partial derivatives of \f$\log P(a, a c)\f$ and \f$\log Q(a, a c)\f$ at constant ratio \f$c = y/\mu\f$ via \ref chain_pair "chain_rule_pair_dk". This avoids the catastrophic cancellation between \f$\partial/\partial a\f$ and \f$c \partial/\partial x\f$ that occurs in independent \f$(a, x)\f$ coordinates.
+
+## Expected Fisher information
+
+The expected Fisher information matrix \f$I(\mu, \sigma^2) = -\mathbb{E}\left[\frac{\partial^2}{\partial\theta^2}\ell\right]\f$ is not diagonal. It is obtained as the tensor transform \f$I_{\mathrm{new}} = J^\top I_{\mathrm{old}} J\f$ of \ref distrib_gamma1 "gamma1_distrib"'s diagonal information in \f$(\mu, \phi)\f$ with \f$\phi = \sigma^2/\mu^2 = 1/s\f$, where \f$J = \frac{\partial(\mu, \phi)}{\partial(\mu, \sigma^2)}\f$ has entries \f$J_{\mu,\mu} = 1\f$, \f$J_{\phi,\mu} = -2\phi/\mu\f$, \f$J_{\phi,\sigma^2} = 1/\mu^2\f$, and \f$J_{\mu,\sigma^2} = 0\f$.
+
+The entries of \f$I(\mu, \sigma^2)\f$ are:
+\f[
+I_{\mu\mu} = \frac{s + 2 + 4 s^2 \delta''(s)}{\mu^2}, \quad
+I_{\mu\sigma^2} = -\frac{s + 2 s^3 \delta''(s)}{\mu^3}, \quad
+I_{\sigma^2\sigma^2} = \frac{s^2/2 + s^4 \delta''(s)}{\mu^4}
+\f]
+Stored in \ref laplace::distrib::sym_tensor "sym_tensor<2, 2>", `v[0] = I_{\mu\mu}`, `v[1] = I_{\mu\sigma^2}`, and `v[2] = I_{\sigma^2\sigma^2}`.
+
+Derivatives of \f$I\f$ of order \f$K \in \{1, \dots, 4\}\f$ are evaluated by closed-form Leibniz expansions in \f$\mu\f$ and \f$s\f$ composed with \f$s(\mu, \sigma^2)\f$ via \ref chain_pair "chain_rule_pair_dk".
+
+## Quantile
+
+The quantile function is evaluated by:
+\f[
+F^{-1}(p) = \frac{\sigma^2}{\mu} P^{-1}\left(\frac{\mu^2}{\sigma^2}, p\right), \quad p \in (0, 1)
+\f]
+where \f$P^{-1}\f$ is the inverse incomplete gamma function (\ref incomplete_gamma).
+
+## Measured accuracy
+
+Measured against reference values from mpmath at 200 and 260 bits (`tests/data/reference/distrib_gamma2.csv`, 4510 rows, shapes \f$10^{-4}\f$ to \f$10^4\f$, \f$c = y/\mu \in [0.01, 10]\f$) on the gcc build (Kokkos Serial and OpenMP, measured 2026-11-14). Figures are in scaled ulp (see \ref accuracy), the error in units in the last place of the largest component of that derivative order at that point, not of the component being read:
+- Log-density derivatives (\f$K = 1 \dots 6\f$): measured maxima 4.41, 5.41, 39.8, 20.1, 38.7, 186 ulp; test bound 280.0 ulp.
+- \f$\log F\f$ derivatives (\f$K = 1 \dots 6\f$): measured maxima 138, 131, 191, 274, \f$1.13 \times 10^3\f$, \f$4.60 \times 10^3\f$ ulp (maximum \f$4.60 \times 10^3\f$ ulp at order 6 with all 6 derivatives in \f$\mu\f$, \f$c = 0.95\f$); test bound 6900.0 ulp.
+- \f$\log(1 - F)\f$ derivatives (\f$K = 1 \dots 6\f$): measured maxima 122, 125, 97.3, 197, 482, \f$1.20 \times 10^3\f$ ulp; test bound 6900.0 ulp.
+- SymPy direct closed forms of orders 1 and 2: reproduced by the composed route within 5.41 ulp (test bound 8.2 ulp).
+- The worst rows occur at shape 1 with \f$c\f$ between 0.7 and 10 in components with all derivatives in \f$\mu\f$ (\f$4.60 \times 10^3\f$ at order 6 at \f$c = 0.95\f$), reflecting the cost of the bivariate composition where the chain sums the largest number of products.
+- Expected information agrees with the variance of the score within relative tolerance \f$10^{-9}\f$, and with the generic quadrature route within \f$10^{-9}\f$ (order 0) and \f$10^{-8}\f$ (order 1).
+- Derivatives of \f$\ell\f$, mixed \f$(y, \theta)\f$ derivatives, and expected information derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$; cumulative derivatives agree within \f$10^{-7}\f$.
+
+## Example in Kokkos
+
+\code{.cpp}
+constexpr int n = 64;
+Kokkos::View<double*> out("out", n);
+Kokkos::parallel_for(
+    "distrib_gamma2_eval", n, KOKKOS_LAMBDA(const int i) {
+      const double y = 0.1 + 0.1 * i;
+      const laplace::distrib::gamma2_distrib d{0.4, 0.16};
+      out(i) = d.logpdf(y) + d.logpdf_d1(y)[0] + d.expected_info()[0] + d.quantile(0.3);
+    });
+\endcode
+
+## Module members
+
+| Member | Return type | Description |
+|---|---|---|
+| `mu` | `double` | Mean parameter \f$\mu \in (0, \infty)\f$. |
+| `sigma2` | `double` | Variance parameter \f$\sigma^2 \in (0, \infty)\f$. |
+| `kind` | `distrib_kind` | Distribution kind (`continuous`). |
+| `n_params` | `int` | Number of parameters (2). |
+| `y_regularity` | `int` | Regularity in \f$y\f$ (`infinitely_smooth`). |
+| `params` | `const distrib_param_info[2]` | Parameter descriptors of \c mu and \c sigma2. |
+| `logpdf(y)` | `double` | Log-density \f$\ell(\mu, \sigma^2; y)\f$. |
+| `logpdf_dk<K>(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\ell\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `logpdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\ell\f$ for orders 1 to 6. |
+| `logpdf_dy_dk<J, K>(y)` | `sym_tensor<2, K>` | Mixed partial derivatives \f$\partial_y^J \partial_\theta^K \ell\f$ (\f$J + K \le 6\f$). |
+| `expected_info()` | `sym_tensor<2, 2>` | Expected Fisher information matrix \f$I(\mu, \sigma^2)\f$. |
+| `expected_info_dk<K>()` | `expected_info_tensor<2, K>` | Parameter derivatives of \f$I\f$ of order \f$K \in \{1, \dots, 4\}\f$. |
+| `expected_info_d1()` ... `_d4()` | `expected_info_tensor<2, K>` | Parameter derivatives of \f$I\f$ for orders 1 to 4. |
+| `cdf(y)` | `double` | Cumulative distribution function \f$F(y)\f$. |
+| `ccdf(y)` | `double` | Complementary cumulative distribution function \f$1 - F(y)\f$. |
+| `log_cdf(y)` | `double` | Logarithm of the cumulative distribution function, \f$\log F(y)\f$. |
+| `log_ccdf(y)` | `double` | Logarithm of the complementary cdf, \f$\log(1 - F(y))\f$. |
+| `log_cdf_dk<K>(lower, y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log F\f$ or \f$\log(1 - F)\f$, order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_cdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log F(y)\f$ for orders 1 to 6. |
+| `log_ccdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ for orders 1 to 6. |
+| `quantile(p)` | `double` | Quantile function \f$F^{-1}(p) = (\sigma^2/\mu) P^{-1}(s, p)\f$. |
+| `support_lower()` | `double` | Lower bound of support (`0.0`). |
+| `support_upper()` | `double` | Upper bound of support (\f$+\infty\f$). |
+| `center()` | `double` | Location hint (\f$\mu\f$). |
+| `scale()` | `double` | Spread hint (\f$\sqrt{\sigma^2}\f$). |
+| `param_kinks(j, y)` | `distrib_kinks` | Parameter kinks (none). |
+| `y_kinks()` | `distrib_kinks` | Observation kinks (none). |
+
+## References
+
+- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
+- A. Meurer and others (2017). SymPy: symbolic computing in Python. *PeerJ Computer Science*, 3:e103.
+*/
+
+/**
+\defgroup distrib_invgauss Inverse Gaussian distribution
+\ingroup distrib
+\brief Inverse Gaussian distribution in mean and dispersion, with erfcx continued fraction and tail survival expansions.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Classic form and reparametrization
+
+The classic textbook density of the inverse Gaussian (Wald) distribution with mean parameter \f$\mu \in (0, \infty)\f$ and shape parameter \f$\lambda \in (0, \infty)\f$ is:
+\f[
+f(y; \mu, \lambda) = \sqrt{\frac{\lambda}{2\pi y^3}} \exp\left( -\frac{\lambda (y - \mu)^2}{2\mu^2 y} \right), \quad y > 0
+\f]
+where \f$\mu\f$ is the mean parameter, \f$\lambda\f$ is the shape parameter, and \f$y \in (0, \infty)\f$ is the observation point. Laplace's \ref laplace::distrib::invgauss_distrib "invgauss_distrib" substitutes \f$\lambda = 1/\phi\f$, where \f$\phi \in (0, \infty)\f$ is the dispersion parameter, so that the variance of the distribution is \f$\operatorname{Var}(Y) = \phi \mu^3\f$. The resulting density is:
+\f[
+f(y; \mu, \phi) = \frac{1}{\sqrt{2\pi \phi y^3}} \exp\left( -\frac{(y - \mu)^2}{2 \phi \mu^2 y} \right), \quad y > 0
+\f]
+
+## Parameters and regularity
+
+The distribution has two parameters:
+- Mean parameter \f$\mu \in (0, \infty)\f$ (`mu`).
+- Dispersion parameter \f$\phi \in (0, \infty)\f$ (`phi`), where variance is \f$\phi \mu^3\f$.
+
+The support is \f$y \in (0, \infty)\f$. Both parameters have `regularity = infinitely_smooth` and `cdf_regularity = infinitely_smooth`, and do not move the support (`moves_support = false`). The observation regularity is `y_regularity = infinitely_smooth`. There are no kinks (`count = 0`).
+
+## What the module computes
+
+Let \f$g(\mu, y) = \frac{(y - \mu)^2}{\mu^2 y} = \frac{y}{\mu^2} - \frac{2}{\mu} + \frac{1}{y}\f$. The log-density is:
+\f[
+\ell(\mu, \phi; y) = -\frac{1}{2}\log(2\pi \phi y^3) - \frac{g(\mu, y)}{2\phi}
+\f]
+For total derivative order \f$K = a + b\f$ with \f$a\f$ derivatives in \f$\mu\f$ and \f$b\f$ in \f$\phi\f$ (stored at index \f$b\f$ in \ref laplace::distrib::sym_tensor "sym_tensor<2, K>"):
+\f[
+\frac{\partial^K}{\partial\mu^a \partial\phi^b}\ell = -\frac{1}{2} g^{(a)}(\mu) \frac{(-1)^b b!}{\phi^{b+1}} + [a = 0, b \ge 1] \frac{(-1)^b (b - 1)!}{2\phi^b}
+\f]
+where \f$g^{(a)}(\mu) = (-1)^a a! \mu^{-(a+2)} ((a+1) y - 2\mu)\f$ for \f$a \ge 1\f$ and \f$g^{(0)}(\mu) = (y - \mu)^2 / (\mu^2 y)\f$.
+
+Mixed partial derivatives \ref laplace::distrib::invgauss_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>(y)" compute \f$\frac{\partial^{J+K}}{\partial y^J \partial\theta^K}\ell\f$ for \f$J + K \le 6\f$ in closed form.
+
+With \f$z_1 = \frac{y/\mu - 1}{\sqrt{\phi y}}\f$, \f$z_2 = \frac{y/\mu + 1}{\sqrt{\phi y}}\f$, and \f$E = \frac{2}{\phi\mu} = \frac{z_2^2 - z_1^2}{2}\f$, the cumulative distribution functions are:
+\f[
+F(y) = \Phi(z_1) + e^E \Phi(-z_2), \quad 1 - F(y) = \Phi(-z_1) - e^E \Phi(-z_2)
+\f]
+Using \f$H(z) = \log\Phi(-z) + z^2/2 = \log(\operatorname{erfcx}(z/\sqrt{2})/2)\f$ (evaluated without cancellation via \ref laplace::math::own::erfcx "erfcx()"):
+\f[
+E + \log\Phi(-z_2) = H(z_2) - \frac{z_1^2}{2}
+\f]
+The \f$z_1^2/2\f$ part is differentiated in closed form, and \f$H\f$ passes through \ref chain_pair "chain_rule_pair_dk". The survival is evaluated as \f$1 - F(y) = \Phi(-z_1)(1 - e^X)\f$ with \f$X = H(z_2) - H(z_1)\f$.
+
+## How the forms avoid cancellation
+
+- Removal of \f$\exp(2/(\phi\mu))\f$ before differentiation:
+  At small \f$\phi\mu\f$, \f$2/(\phi\mu)\f$ is large, and \f$e^{2/(\phi\mu)}\Phi(-z_2)\f$ cancels against \f$\Phi(-z_1)\f$ by factors up to \f$8 \times 10^3\f$. Applying the identity \f$E + \log\Phi(-z_2) = H(z_2) - z_1^2/2\f$ removes the exponential factor analytically before differentiating.
+- Survival as a logarithm of a ratio:
+  Direct subtraction \f$1 - F\f$ loses up to 2035 ulp in the far upper tail. Laplace evaluates the survival as \f$\log(1 - F) = \log\Phi(-z_1) + \operatorname{log1p}(-e^X)\f$ with \f$X = H(z_2) - H(z_1)\f$. When \f$d = \sqrt{2/(\phi y)}\f$ is small (\f$d(1 + |a|) \le 1\f$, the threshold named `survival_threshold` in the header), the difference of \f$\operatorname{erfcx}\f$ values is evaluated via its Taylor series in \f$d\f$.
+- Backward continued fraction:
+  For \f$a = z/\sqrt{2} \ge 1.25\f$ (`cf_min_a`), \f$H'\f$ and \f$H''\f$ are computed from the continued fraction of \f$\operatorname{erfc}\f$ evaluated backwards at depth 200, whose recurrence factors are all positive, avoiding the \f$a^2\f$ cancellation of the direct formula. For \f$n \ge 3\f$, derivatives of \f$H\f$ match those of \f$\log\Phi\f$.
+
+## Expected Fisher information
+
+The expected Fisher information matrix \f$I(\mu, \phi) = -\mathbb{E}\left[\frac{\partial^2}{\partial\theta^2}\ell\right]\f$ is diagonal:
+\f[
+I(\mu, \phi) = \begin{pmatrix} \frac{1}{\phi\mu^3} & 0 \\ 0 & \frac{1}{2\phi^2} \end{pmatrix}
+\f]
+Stored in \ref laplace::distrib::sym_tensor "sym_tensor<2, 2>", `v[0] = 1.0 / (phi * mu * mu * mu)`, `v[1] = 0.0`, and `v[2] = 0.5 / (phi * phi)`.
+
+Derivatives of \f$I\f$ up to order 4 in \f$(\mu, \phi)\f$ are evaluated in closed form.
+
+## Quantile
+
+The inverse Gaussian family has no closed-form quantile and has no member function of its own. Quantiles are supplied by the generic numerical route (\ref distrib_generic "distrib_quantile()").
+
+## Measured accuracy
+
+Measured against reference values from mpmath at 300 and 400 bits (`tests/data/reference/distrib_invgauss.csv` and `distrib_invgauss_logpdf.csv`) on the gcc build (Kokkos Serial and OpenMP, measured 2026-11-13). Figures are in scaled ulp (see \ref accuracy), which is the error in units in the last place of the largest component of that derivative order at that point, not of the component being read:
+- \f$\log F\f$ derivatives (\f$K = 0 \dots 6\f$): maximum measured error 580 ulp (at order 3 in the far upper tail; this error is unchanged across switch configurations and is not located); test bound 870.0 ulp.
+- \f$\log(1 - F)\f$ derivatives (\f$K = 0 \dots 6\f$): maximum measured error 116 ulp (order 6, small \f$\phi\mu\f$); test bound 175.0 ulp.
+- Log-density derivatives \ref laplace::distrib::invgauss_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>()" for \f$J + K \le 6\f$: maximum measured error 28.3 ulp (order 0 value); test bound 43.0 ulp.
+- Expected information agrees with the variance of the score within relative tolerance \f$10^{-7}\f$.
+- Derivatives of \f$\ell\f$, mixed \f$(y, \theta)\f$ derivatives, and expected information derivatives agree with 5-point finite differences within relative tolerance \f$10^{-7}\f$; cumulative derivatives agree within \f$10^{-6}\f$.
+- Generic quantile inverts the cdf within relative tolerance \f$10^{-9}\f$ in probability and \f$10^{-8}\f$ in log upper tail.
+
+## Example in Kokkos
+
+\code{.cpp}
+constexpr int n = 64;
+Kokkos::View<double*> out("out", n);
+Kokkos::parallel_for(
+    "distrib_invgauss_eval", n, KOKKOS_LAMBDA(const int i) {
+      const double y = 0.2 + 0.1 * i;
+      const laplace::distrib::invgauss_distrib d{0.4, 1.69};
+      out(i) = d.logpdf(y) + d.logpdf_d1(y)[0] + d.expected_info()[0];
+    });
+\endcode
+
+## Module members
+
+| Member | Return type | Description |
+|---|---|---|
+| `mu` | `double` | Mean parameter \f$\mu \in (0, \infty)\f$. |
+| `phi` | `double` | Dispersion parameter \f$\phi \in (0, \infty)\f$. |
+| `kind` | `distrib_kind` | Distribution kind (`continuous`). |
+| `n_params` | `int` | Number of parameters (2). |
+| `y_regularity` | `int` | Regularity in \f$y\f$ (`infinitely_smooth`). |
+| `params` | `const distrib_param_info[2]` | Parameter descriptors of \c mu and \c phi. |
+| `logpdf(y)` | `double` | Log-density \f$\ell(\mu, \phi; y)\f$. |
+| `logpdf_dk<K>(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\ell\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `logpdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\ell\f$ for orders 1 to 6. |
+| `logpdf_dy_dk<J, K>(y)` | `sym_tensor<2, K>` | Mixed partial derivatives \f$\partial_y^J \partial_\theta^K \ell\f$ (\f$J + K \le 6\f$). |
+| `expected_info()` | `sym_tensor<2, 2>` | Expected Fisher information matrix \f$I(\mu, \phi)\f$. |
+| `expected_info_dk<K>()` | `expected_info_tensor<2, K>` | Parameter derivatives of \f$I\f$ of order \f$K \in \{1, \dots, 4\}\f$. |
+| `expected_info_d1()` ... `_d4()` | `expected_info_tensor<2, K>` | Parameter derivatives of \f$I\f$ for orders 1 to 4. |
+| `cdf(y)` | `double` | Cumulative distribution function \f$F(y)\f$. |
+| `ccdf(y)` | `double` | Complementary cumulative distribution function \f$1 - F(y)\f$. |
+| `log_cdf(y)` | `double` | Logarithm of the cumulative distribution function, \f$\log F(y)\f$. |
+| `log_ccdf(y)` | `double` | Logarithm of the complementary cdf, \f$\log(1 - F(y))\f$. |
+| `log_cdf_dk<K>(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log F(y)\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_cdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log F(y)\f$ for orders 1 to 6. |
+| `log_ccdf_dk<K>(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_ccdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ for orders 1 to 6. |
+| `support_lower()` | `double` | Lower bound of support (`0.0`). |
+| `support_upper()` | `double` | Upper bound of support (\f$+\infty\f$). |
+| `center()` | `double` | Location hint (\f$\mu\f$). |
+| `scale()` | `double` | Spread hint (\f$\sqrt{\phi\mu^3}\f$). |
+| `param_kinks(j, y)` | `distrib_kinks` | Parameter kinks (none). |
+| `y_kinks()` | `distrib_kinks` | Observation kinks (none). |
+
+## References
+
+- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
+- A. Meurer and others (2017). SymPy: symbolic computing in Python. *PeerJ Computer Science*, 3:e103.
+*/
+
+/**
+\defgroup distrib_lognormal1 Lognormal distribution in the log scale
+\ingroup distrib
+\brief Lognormal distribution in the mean and variance of log Y, forwarding parameter derivatives to the Gaussian.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Classic form and reparametrization
+
+The lognormal distribution is the law of a random variable \f$Y \in (0, \infty)\f$ whose natural logarithm \f$X = \log Y\f$ is normally distributed:
+\f[
+X = \log Y \sim N(\mu, \sigma^2)
+\f]
+Its classic textbook density is written in terms of the mean \f$\mu \in (-\infty, \infty)\f$ and standard deviation \f$\sigma \in (0, \infty)\f$ of \f$\log Y\f$:
+\f[
+f(y; \mu, \sigma) = \frac{1}{y \sigma \sqrt{2\pi}} \exp\left( -\frac{(\log y - \mu)^2}{2\sigma^2} \right), \quad y > 0
+\f]
+where \f$y \in (0, \infty)\f$ is the observation point. Neither parameter is a moment of the variable \f$Y\f$ itself: the mean of \f$Y\f$ is \f$\exp(\mu + \sigma^2/2)\f$ and the variance of \f$Y\f$ is \f$(\exp(\sigma^2) - 1)\exp(2\mu + \sigma^2)\f$.
+
+Laplace's \ref laplace::distrib::lognormal1_distrib "lognormal1_distrib" substitutes \f$v = \sigma^2\f$, so that the second parameter is the variance \f$v \in (0, \infty)\f$ of \f$\log Y\f$. The resulting density is:
+\f[
+f(y; \mu, v) = \frac{1}{y \sqrt{2\pi v}} \exp\left( -\frac{(\log y - \mu)^2}{2v} \right), \quad y > 0
+\f]
+
+## Parameters and regularity
+
+The distribution has two parameters:
+- Location parameter \f$\mu \in (-\infty, \infty)\f$ (`mu`), representing the mean of \f$\log Y\f$.
+- Dispersion parameter \f$v \in (0, \infty)\f$ (`v`), representing the variance of \f$\log Y\f$.
+
+The support is \f$y \in (0, \infty)\f$. Both parameters have `regularity = infinitely_smooth` and `cdf_regularity = infinitely_smooth`, and do not move the support (`moves_support = false`). The observation regularity is `y_regularity = infinitely_smooth`. There are no kinks (`count = 0`).
+
+## What the module computes
+
+Let \f$x = \log y\f$. The log-density is:
+\f[
+\ell(\mu, v; y) = \ell_{\mathrm{gaussian2}}(\mu, v; x) - x = -\frac{1}{2}\log(2\pi) - \frac{1}{2}\log v - \frac{(x - \mu)^2}{2v} - \log y
+\f]
+Because the term \f$-x = -\log y\f$ carries no parameters, every parameter derivative of order 1 to 6 with respect to \f$(\mu, v)\f$ is bit-for-bit identical to that of \ref distrib_gaussian2 "gaussian2_distrib" evaluated at \f$x = \log y\f$. \ref laplace::distrib::lognormal1_distrib "lognormal1_distrib" forwards `logpdf_dk<K>()` directly to an internal `gaussian2_distrib(mu, v)`.
+
+Mixed partial derivatives \ref laplace::distrib::lognormal1_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>(y)" compute \f$\frac{\partial^{J+K}}{\partial y^J \partial\theta^K}\ell\f$ for \f$J + K \le 6\f$. With \f$\theta_y = y \frac{\mathrm{d}}{\mathrm{d}y}\f$ and \f$x = \log y\f$, \f$y^J \frac{\mathrm{d}^J}{\mathrm{d}y^J} = \theta_y(\theta_y - 1)\dots(\theta_y - J + 1)\f$. For any function \f$g(x)\f$:
+\f[
+\frac{\mathrm{d}^J}{\mathrm{d}y^J} g(\log y) = y^{-J} \sum_{k=1}^J s(J, k) g^{(k)}(\log y)
+\f]
+where \f$s(J, k)\f$ are the signed Stirling numbers of the first kind. Applied to \f$g = \ell_{\mathrm{gaussian2}}\f$, \f$g^{(k)}\f$ is `gaussian2_distrib::logpdf_dy_dk<k, K>(x)`. For \f$K = 0\f$, the term \f$-\log y\f$ adds \f$(-1)^J (J - 1)! y^{-J}\f$.
+
+The cumulative distribution functions are:
+\f[
+F(y) = \Phi\left(\frac{\log y - \mu}{\sqrt{v}}\right), \quad 1 - F(y) = \Phi\left(-\frac{\log y - \mu}{\sqrt{v}}\right)
+\f]
+\f$\log F(y)\f$ and \f$\log(1 - F(y))\f$ and their parameter derivatives forward directly to `gaussian2_distrib` at \f$x = \log y\f$.
+
+The quantile function is:
+\f[
+F^{-1}(p) = \exp\left( \mu + \sqrt{v} \Phi^{-1}(p) \right) = \exp\left( F_{\mathrm{gaussian2}}^{-1}(p) \right), \quad p \in (0, 1)
+\f]
+the exponential of `gaussian2`'s quantile.
+
+## How the forms avoid cancellation
+
+- Forwarding to Gaussian in variance:
+  Instead of duplicating tail expansions and risking cancellation, `lognormal1_distrib` forwards parameter derivatives, expected information, and cumulative functions directly to \ref distrib_gaussian2 "gaussian2_distrib" at \f$x = \log y\f$, which uses the power-scale chain rule and asymptotic Mills ratio expansions.
+- Signed Stirling combinations:
+  Observation derivatives evaluate the Stirling combination with precomputed integer coefficients without numerical differentiation.
+
+## Expected Fisher information
+
+The expected Fisher information matrix \f$I(\mu, v) = -\mathbb{E}\left[\frac{\partial^2}{\partial\theta^2}\ell\right]\f$ is identical to that of \ref distrib_gaussian2 "gaussian2_distrib", because the density of \f$Y\f$ differs from that of \f$\log Y\f$ by \f$1/y\f$, a function of \f$y\f$ alone with no parameters. It is diagonal:
+\f[
+I(\mu, v) = \begin{pmatrix} \frac{1}{v} & 0 \\ 0 & \frac{1}{2v^2} \end{pmatrix}
+\f]
+Stored in \ref laplace::distrib::sym_tensor "sym_tensor<2, 2>", `v[0] = 1.0 / v`, `v[1] = 0.0`, and `v[2] = 0.5 / (v * v)`. Derivatives up to order 4 forward to `gaussian2_distrib`.
+
+## Quantile
+
+The quantile function is evaluated as \f$F^{-1}(p) = \exp(\mu + \sqrt{v}\Phi^{-1}(p))\f$ for \f$p \in (0, 1)\f$.
+
+## Measured accuracy
+
+Measured against reference values from mpmath at 300 and 400 bits (`tests/data/reference/distrib_lognormal.csv`, dist 1) on the gcc build (Kokkos Serial and OpenMP, measured 2026-11-13). Figures are in scaled ulp (see \ref accuracy), the error in units in the last place of the largest component of that derivative order at that point, not of the component being read:
+- \f$\log F\f$ derivatives (\f$K = 1 \dots 6\f$): maximum measured error 322.2 ulp (order 6); test bound 483.0 ulp.
+- \f$\log(1 - F)\f$ derivatives (\f$K = 1 \dots 6\f$): maximum measured error 648.2 ulp (order 6); test bound 973.0 ulp.
+- Conditioning at tiny variance: at \f$(\mu, v) = (3.689, 6.25 \times 10^{-7})\f$, the residual \f$\log y - \mu \approx 10^{-17}\f$ lies below the rounding of \f$\log y\f$ alone (\f$\approx 4 \times 10^{-16}\f$); input digits are lost before reaching the library. Perturbing \f$y\f$ and \f$\mu\f$ by 1 ulp in mpmath shows the library error is at most 0.165 of \f$\max(\text{1 ulp of result}, \text{change per input ulp})\f$ where plain measures read up to \f$5.4 \times 10^6\f$ ulp. These rows are excluded from the plain-ulp test with that figure recorded.
+- Expected information agrees with the variance of the score within relative tolerance \f$3.5 \times 10^{-16}\f$ (diagonal) and \f$1.6 \times 10^{-16}\f$ (off-diagonal).
+- Derivatives of \f$\ell\f$, \f$y\f$-derivatives, and expected information derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$; cumulative derivatives agree within \f$10^{-7}\f$.
+
+## Example in Kokkos
+
+\code{.cpp}
+constexpr int n = 64;
+Kokkos::View<double*> out("out", n);
+Kokkos::parallel_for(
+    "distrib_lognormal1_eval", n, KOKKOS_LAMBDA(const int i) {
+      const double y = 0.1 + 0.2 * i;
+      const laplace::distrib::lognormal1_distrib d{0.3, 0.25};
+      out(i) = d.logpdf(y) + d.logpdf_d1(y)[0] + d.expected_info()[0] + d.quantile(0.5);
+    });
+\endcode
+
+## Module members
+
+| Member | Return type | Description |
+|---|---|---|
+| `mu` | `double` | Mean of \f$\log Y\f$, \f$\mu \in (-\infty, \infty)\f$. |
+| `v` | `double` | Variance of \f$\log Y\f$, \f$v \in (0, \infty)\f$. |
+| `kind` | `distrib_kind` | Distribution kind (`continuous`). |
+| `n_params` | `int` | Number of parameters (2). |
+| `y_regularity` | `int` | Regularity in \f$y\f$ (`infinitely_smooth`). |
+| `params` | `const distrib_param_info[2]` | Parameter descriptors of \c mu and \c v. |
+| `base()` | `gaussian2_distrib` | Base Gaussian distribution in variance. |
+| `logpdf(y)` | `double` | Log-density \f$\ell(\mu, v; y)\f$. |
+| `logpdf_dk<K>(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\ell\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `logpdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\ell\f$ for orders 1 to 6. |
+| `logpdf_dy_dk<J, K>(y)` | `sym_tensor<2, K>` | Mixed partial derivatives \f$\partial_y^J \partial_\theta^K \ell\f$ (\f$J + K \le 6\f$). |
+| `expected_info()` | `sym_tensor<2, 2>` | Expected Fisher information matrix \f$I(\mu, v)\f$. |
+| `expected_info_d1()` ... `_d4()` | `expected_info_tensor<2, K>` | Parameter derivatives of \f$I\f$ for orders 1 to 4. |
+| `cdf(y)` | `double` | Cumulative distribution function \f$F(y)\f$. |
+| `ccdf(y)` | `double` | Complementary cumulative distribution function \f$1 - F(y)\f$. |
+| `log_cdf(y)` | `double` | Logarithm of the cumulative distribution function, \f$\log F(y)\f$. |
+| `log_ccdf(y)` | `double` | Logarithm of the complementary cdf, \f$\log(1 - F(y))\f$. |
+| `log_cdf_dk<K>(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log F(y)\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_cdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log F(y)\f$ for orders 1 to 6. |
+| `log_ccdf_dk<K>(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_ccdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ for orders 1 to 6. |
+| `quantile(p)` | `double` | Quantile function \f$F^{-1}(p) = \exp(F_{\mathrm{gaussian2}}^{-1}(p))\f$. |
+| `support_lower()` | `double` | Lower bound of support (`0.0`). |
+| `support_upper()` | `double` | Upper bound of support (\f$+\infty\f$). |
+| `center()` | `double` | Location hint (\f$\exp(\mu)\f$). |
+| `scale()` | `double` | Spread hint (\f$\exp(\mu)\sqrt{v}\f$). |
+| `param_kinks(j, y)` | `distrib_kinks` | Parameter kinks (none). |
+| `y_kinks()` | `distrib_kinks` | Observation kinks (none). |
+
+## References
+
+- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
+*/
+
+/**
+\defgroup distrib_lognormal2 Lognormal distribution in mean and variance
+\ingroup distrib
+\brief Lognormal distribution in mean and variance of Y, with bivariate chain rule, non-orthogonal Fisher information, and log1p residual.
+
+Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+
+## Classic form and reparametrization
+
+The classic textbook density of the lognormal distribution is written in terms of the mean \f$\mu\f$ and variance \f$\sigma^2\f$ of \f$\log Y\f$. Laplace's \ref laplace::distrib::lognormal2_distrib "lognormal2_distrib" parametrizes the same probability law in the mean \f$m \in (0, \infty)\f$ (`m`) and variance \f$v \in (0, \infty)\f$ (`v`) of the random variable \f$Y\f$ itself (\f$\mathbb{E}[Y] = m\f$, \f$\operatorname{Var}(Y) = v\f$).
+
+Letting \f$s = \sigma^2\f$ denote the variance of \f$\log Y\f$ and \f$\mu\f$ its mean:
+\f[
+s = \log\left(1 + \frac{v}{m^2}\right), \quad \mu = \log m - \frac{s}{2}
+\f]
+Inversely, the mean of \f$Y\f$ is \f$m = \exp(\mu + s/2) = \exp(\mu + \sigma^2/2)\f$ and its variance is \f$v = (e^s - 1)m^2 = (e^{\sigma^2} - 1)\exp(2\mu + \sigma^2)\f$.
+
+The resulting density is:
+\f[
+f(y; m, v) = \frac{1}{y \sqrt{2\pi s}} \exp\left( -\frac{(\log y - \mu)^2}{2s} \right), \quad y > 0
+\f]
+where \f$s = \log(1 + v/m^2)\f$ and \f$\mu = \log m - s/2\f$.
+
+## Parameters and regularity
+
+The distribution has two parameters:
+- Mean parameter \f$m \in (0, \infty)\f$ (`m`), representing \f$\mathbb{E}[Y]\f$.
+- Variance parameter \f$v \in (0, \infty)\f$ (`v`), representing \f$\operatorname{Var}(Y)\f$.
+
+The support is \f$y \in (0, \infty)\f$. Both parameters have `regularity = infinitely_smooth` and `cdf_regularity = infinitely_smooth`, and do not move the support (`moves_support = false`). The observation regularity is `y_regularity = infinitely_smooth`. There are no kinks (`count = 0`).
+
+## What the module computes
+
+Let \f$s = \log(1 + v/m^2)\f$ and \f$\mu = \log m - s/2\f$. The log-density is:
+\f[
+\ell(m, v; y) = \ell_{\mathrm{lognormal1}}(\mu(m, v), s(m, v); y)
+\f]
+Parameter derivatives of order \f$K \in \{1, \dots, 6\}\f$ in \f$(m, v)\f$ are evaluated as the bivariate composition \f$H(m, v) = G(\mu(m, v), s(m, v))\f$, where \f$G\f$ is `lognormal1_distrib`'s log-density. Because both inner variables \f$(\mu, s)\f$ depend on both parameters \f$(m, v)\f$, the derivatives are evaluated via the bivariate chain rule \ref chain_pair "chain_rule_pair_dk" using the closed-form partial derivatives of \f$\mu\f$ and \f$s\f$ in \f$(m, v)\f$ up to order 6. Stored in \ref laplace::distrib::sym_tensor "sym_tensor<2, K>", with position \f$b\f$ holding \f$b\f$ derivatives in \f$v\f$ and \f$K - b\f$ in \f$m\f$.
+
+Mixed partial derivatives \ref laplace::distrib::lognormal2_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>(y)" compute \f$\frac{\partial^{J+K}}{\partial y^J \partial\theta^K}\ell\f$ for \f$J + K \le 6\f$, composing `lognormal1_distrib::logpdf_dy_dk` with \f$(\mu, s)\f$ via \ref chain_pair "chain_rule_pair_dk".
+
+The cumulative distribution functions are:
+\f[
+F(y) = \Phi\left(\frac{\log y - \mu}{\sqrt{s}}\right), \quad 1 - F(y) = \Phi\left(-\frac{\log y - \mu}{\sqrt{s}}\right)
+\f]
+Derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$ in \f$(m, v)\f$ are evaluated by composing `lognormal1`'s parameter derivatives with \f$(\mu, s)\f$ via \ref chain_pair "chain_rule_pair_dk".
+
+The quantile function is:
+\f[
+F^{-1}(p) = \exp\left( \mu + \sqrt{s} \Phi^{-1}(p) \right), \quad p \in (0, 1)
+\f]
+where at \f$p = 1/2\f$ the median is \f$\exp(\mu) = m / \sqrt{1 + v/m^2}\f$.
+
+## How the forms avoid cancellation
+
+- Accurate residual formed with `log1p`:
+  The difference \f$\log y - \mu = \log y - \log m + s/2\f$ cancels catastrophically when \f$y\f$ is near \f$m\f$ and \f$v/m^2\f$ is small (losing relative accuracy to \f$6 \times 10^{-11}\f$ at \f$(m, v) = (40, 0.001)\f$ if subtracted directly). \ref laplace::distrib::lognormal2_distrib "lognormal2_distrib" forms the residual as:
+  \f[
+  \log y - \mu = \log\left(1 + \frac{y - m}{m}\right) + \frac{s}{2} = \operatorname{log1p}\left(\frac{y - m}{m}\right) + \frac{s}{2}
+  \f]
+  for \f$|y - m| < m/2\f$, and as \f$\log y - \log m + s/2\f$ elsewhere.
+- Variance \f$s\f$ formed with `log1p`:
+  The variance \f$s = \operatorname{log1p}(v/m^2)\f$ is evaluated via `Kokkos::log1p`, avoiding the loss of small \f$v/m^2\f$ in \f$1 + v/m^2\f$.
+
+## Expected Fisher information
+
+The expected Fisher information matrix \f$I(m, v) = -\mathbb{E}\left[\frac{\partial^2}{\partial\theta^2}\ell\right]\f$ is not diagonal. It is obtained as the tensor transform \f$I_{\mathrm{new}} = J^\top I_{\mathrm{old}} J\f$ of \ref distrib_gaussian2 "gaussian2_distrib"'s diagonal information \f$\operatorname{diag}(1/s, 1/(2s^2))\f$ in \f$(\mu, s)\f$, with Jacobian \f$J = \frac{\partial(\mu, s)}{\partial(m, v)}\f$:
+\f[
+I_{ab} = \sum_{c \in \{\mu, s\}} I_c(s) \frac{\partial\theta_c}{\partial\theta_a} \frac{\partial\theta_c}{\partial\theta_b}, \quad I_\mu = \frac{1}{s}, \; I_s = \frac{1}{2s^2}
+\f]
+At small \f$v/m^2\f$, the off-diagonal entry is \f$I_{mv} \approx -\frac{3}{2mv}\f$ to leading order. Stored in \ref laplace::distrib::sym_tensor "sym_tensor<2, 2>". Derivatives up to order 4 are evaluated via \ref chain_pair "chain_rule_pair_dk".
+
+## Quantile
+
+The quantile function is evaluated as \f$F^{-1}(p) = \exp(\mu + \sqrt{s}\Phi^{-1}(p))\f$ for \f$p \in (0, 1)\f$.
+
+## Measured accuracy
+
+Measured against reference values from mpmath at 300 and 400 bits (`tests/data/reference/distrib_lognormal.csv`, dist 2, and `distrib_lognormal_ydk.csv`) on the gcc build (Kokkos Serial and OpenMP, measured 2026-11-13). Figures are in scaled ulp (see \ref accuracy), the error in units in the last place of the largest component of that derivative order at that point, not of the component being read:
+- \f$\log F\f$ derivatives (\f$K = 1 \dots 6\f$): maximum measured error 7056 ulp (order 6); test bound 10600.0 ulp.
+- \f$\log(1 - F)\f$ derivatives (\f$K = 1 \dots 6\f$): maximum measured error 169.4 ulp (order 2); test bound 255.0 ulp.
+- Mixed \f$(y, \theta)\f$ derivatives \ref laplace::distrib::lognormal2_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>()" for \f$J + K \le 6\f$: maximum measured error 23.76 ulp (at \f$J = 1, K = 5\f$); test bound 36.0 ulp.
+- The reading of 7056 ulp at order 6 reflects conditioning: the component sits adjacent to a zero of itself and is about 1/120 of the largest component of the order (7056 ulp of the order's scale vs \f$8.55 \times 10^5\f$ ulp of the component itself). The composition through the map costs about 3 times lognormal1's error at orders 1 and 2 and 20 to 30 times at orders 3 to 6 in the far upper tail at large \f$v/m^2 = 200\f$. At \f$(m, v) = (40, 0.001)\f$, lognormal2 is more accurate than lognormal1 (6034 against \f$5.4 \times 10^6\f$ ulp at order 4) because its residual avoids subtraction.
+- 5-point difference stencil in \f$y\f$ at orders 5 and 6 cannot hold tolerance (measured \f$6.7 \times 10^{-8}\f$ against bound \f$3.8 \times 10^{-10}\f$); the mpmath reference of 504 rows is the check.
+- Expected information agrees with the variance of the score within relative tolerance \f$1.1 \times 10^{-15}\f$, and with the generic quadrature route within \f$7.6 \times 10^{-14}\f$ at \f$v < 0.01\f$ and \f$5.0 \times 10^{-16}\f$ elsewhere.
+- Derivatives of \f$\ell\f$ and expected information derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$; cumulative derivatives agree within \f$10^{-7}\f$.
+
+## Example in Kokkos
+
+\code{.cpp}
+constexpr int n = 64;
+Kokkos::View<double*> out("out", n);
+Kokkos::parallel_for(
+    "distrib_lognormal2_eval", n, KOKKOS_LAMBDA(const int i) {
+      const double y = 0.1 + 0.2 * i;
+      const laplace::distrib::lognormal2_distrib d{1.5, 0.8};
+      out(i) = d.logpdf(y) + d.logpdf_d1(y)[0] + d.expected_info()[0] + d.quantile(0.5);
+    });
+\endcode
+
+## Module members
+
+| Member | Return type | Description |
+|---|---|---|
+| `m` | `double` | Mean of \f$Y\f$, \f$m \in (0, \infty)\f$. |
+| `v` | `double` | Variance of \f$Y\f$, \f$v \in (0, \infty)\f$. |
+| `kind` | `distrib_kind` | Distribution kind (`continuous`). |
+| `n_params` | `int` | Number of parameters (2). |
+| `y_regularity` | `int` | Regularity in \f$y\f$ (`infinitely_smooth`). |
+| `params` | `const distrib_param_info[2]` | Parameter descriptors of \c m and \c v. |
+| `base()` | `lognormal1_distrib` | Base lognormal distribution in log scale. |
+| `logpdf(y)` | `double` | Log-density \f$\ell(m, v; y)\f$. |
+| `logpdf_dk<K>(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\ell\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `logpdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\ell\f$ for orders 1 to 6. |
+| `logpdf_dy_dk<J, K>(y)` | `sym_tensor<2, K>` | Mixed partial derivatives \f$\partial_y^J \partial_\theta^K \ell\f$ (\f$J + K \le 6\f$). |
+| `expected_info()` | `sym_tensor<2, 2>` | Expected Fisher information matrix \f$I(m, v)\f$. |
+| `expected_info_d1()` ... `_d4()` | `expected_info_tensor<2, K>` | Parameter derivatives of \f$I\f$ for orders 1 to 4. |
+| `cdf(y)` | `double` | Cumulative distribution function \f$F(y)\f$. |
+| `ccdf(y)` | `double` | Complementary cumulative distribution function \f$1 - F(y)\f$. |
+| `log_cdf(y)` | `double` | Logarithm of the cumulative distribution function, \f$\log F(y)\f$. |
+| `log_ccdf(y)` | `double` | Logarithm of the complementary cdf, \f$\log(1 - F(y))\f$. |
+| `log_cdf_dk<K>(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log F(y)\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_cdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log F(y)\f$ for orders 1 to 6. |
+| `log_ccdf_dk<K>(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ of order \f$K \in \{1, \dots, 6\}\f$. |
+| `log_ccdf_d1(y)` ... `_d6(y)` | `sym_tensor<2, K>` | Parameter derivatives of \f$\log(1 - F(y))\f$ for orders 1 to 6. |
+| `quantile(p)` | `double` | Quantile function \f$F^{-1}(p) = \exp(\mu + \sqrt{s}\Phi^{-1}(p))\f$. |
+| `support_lower()` | `double` | Lower bound of support (`0.0`). |
+| `support_upper()` | `double` | Upper bound of support (\f$+\infty\f$). |
+| `center()` | `double` | Location hint (\f$m\f$). |
+| `scale()` | `double` | Spread hint (\f$\sqrt{v}\f$). |
+| `param_kinks(j, y)` | `distrib_kinks` | Parameter kinks (none). |
+| `y_kinks()` | `distrib_kinks` | Observation kinks (none). |
+
+## References
+
+- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
+- A. Meurer and others (2017). SymPy: symbolic computing in Python. *PeerJ Computer Science*, 3:e103.
+*/
