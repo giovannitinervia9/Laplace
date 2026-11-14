@@ -75,3 +75,8 @@ target_link_libraries(pdmat_unstructured PRIVATE Laplace::laplace)
 
 add_executable(basis_bspline basis_bspline.cpp)
 target_link_libraries(basis_bspline PRIVATE Laplace::laplace)
+
+laplace_kokkos_sources(dense.cpp)
+add_executable(dense dense.cpp)
+target_link_libraries(dense PRIVATE Laplace::dense)
+target_compile_definitions(dense PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")

@@ -4451,3 +4451,138 @@ D^2 (D^2 + nu^2), (D + 1)^3 and D^2 + D + 4.25.
 roots.
 
 **Chosen.** As written.
+
+## Dense linear algebra: laplace::dense
+
+**What.** `include/laplace/dense/dense.hpp`: Cholesky, triangular solve,
+pivoted QR, SVD, symmetric and generalized symmetric eigendecompositions and
+an orthonormal basis of a null space, on host Kokkos Views
+(`View<double**, LayoutLeft>`, column-major). The work is done by Eigen 3.4
+(MPL2, `EIGEN_MPL2_ONLY`) in one translation unit,
+`src/dense/eigen_backend.cpp`, compiled as C++ in every build (never by nvcc)
+into the static library `laplace_dense`; the header does not include Eigen.
+One thread per call (`EIGEN_DONT_PARALLELIZE`). Numerical outcomes come back
+in `dense_decomposition_status` {success, rank, reason}; wrong dimensions
+throw `std::invalid_argument`. Views in device memory are rejected at
+compile time; a copy route for them is added when a caller has device data.
+
+**Candidates, measured before the choice.**
+
+- Kokkidio (Eigen inside Kokkos kernels): GPL-3.0, incompatible with MIT;
+  not measured.
+- Kokkos Kernels 5.2.2. KokkosLapack has potrf, potrs, geqrf, gegqr, gemqr,
+  gesv, svd and trtri, and no code of its own: every routine needs LAPACK,
+  cuSOLVER, rocSOLVER or MAGMA; there is no symmetric or generalized
+  eigensolver. KokkosBatched has QR, QR with pivoting, SVD and LU for many
+  small matrices, banded and tridiagonal Cholesky but no dense Cholesky, and
+  a nonsymmetric eigendecomposition that is host-only with LAPACK and does
+  not compile with gcc. One K x K matrix, ms, CPU (OpenBLAS's LAPACK, one
+  thread) / GPU (cuSOLVER, RTX 4070 SUPER):
+
+  | K | potrf | geqrf | svd |
+  |---|---|---|---|
+  | 50 | 0.004 / 0.19 | 0.017 / 1.0 | 0.27 / 5.6 |
+  | 200 | 0.086 / 0.79 | 0.33 / 2.0 | 10.2 / 36.3 |
+  | 1000 | 6.3 / 3.3 | 22.1 / 12.9 | 1069 / 270 |
+
+  1e5 matrices m x m, ms for the whole batch, KokkosBatched on 16 threads /
+  CUDA, with Eigen in an OpenMP loop on 16 threads in brackets: m = 4 QR
+  0.88 / 0.27 (3.4), SVD 9.8 / 3.3 (11.0); m = 8 QR 2.6 / 2.1 (7.1), SVD
+  32.5 / 24.7 (58.3); m = 16 QR 13.3 / 147 (18.1), SVD 142 / 774 (345);
+  Eigen's symmetric eigendecomposition 8.6 / 23.6 / 79.3 at m = 4 / 8 / 16.
+  The batched SVD errs by 2e-15 to 6e-15. The FP64 units of the card run at
+  1/64 of FP32, so the GPU gains only from K ~ 1000 or on batches of very
+  small matrices.
+- Eigen 3.4, one thread, measured alone: K = 20 / 50 / 200 / 1000,
+  Cholesky 0.001 / 0.007 / 0.16 / 14.7 ms, pivoted QR (factorization only)
+  0.004 / 0.023 / 0.85 / 80, SVD (BDCSVD) 0.085 / 0.70 / 11.0 / 532, null
+  space of 3 constraints (JacobiSVD of 3 x K) 0.002 / 0.011 / 0.105 / 1.7,
+  symmetric eigendecomposition 0.015 / 0.125 / 5.7 / 600, generalized
+  0.017 / 0.155 / 6.2 / 626.
+
+Chosen: Eigen on the host behind an interface of Laplace on Kokkos Views,
+so that Kokkos Kernels, cuSOLVER or code of our own can be put behind the
+same functions when a measurement asks for it, without changing the callers.
+
+**Methods.** Cholesky: `LLT` (lower triangle). Triangular solve: Eigen's
+`triangularView` solves in place, after a check for a zero on the diagonal.
+Pivoted QR: `ColPivHouseholderQR`, with Q formed by applying the Householder
+reflections to the first columns of the identity. SVD: `BDCSVD`, which
+switches to one-sided Jacobi below 16 columns. Symmetric eigenproblem:
+`SelfAdjointEigenSolver` (tridiagonal reduction and QL). Generalized
+problem A v = w B v: with B = L L^T, the symmetric eigenproblem
+C Y = Y diag(w) of C = L^-1 A L^-T, then V = L^-T Y, so that V^T B V = I.
+This is the method of Eigen's `GeneralizedSelfAdjointEigenSolver` and of
+LAPACK's `dsygvd`, written out because Eigen's solver does not check the
+factorization of B. Null space: `JacobiSVD` of C with the full V. Rank: the
+number of s_i above max(m, n) eps s_1 (the rule of NumPy's `matrix_rank`
+and MATLAB's `rank`), or of |R_kk| above the same factor times |R_11| for
+the QR; the caller may give its own relative tolerance.
+
+**Accuracy** (`benchmarks/dense.cpp` on the 17 cases of
+`tools/reference/dense.py`: matrices built at 200 bits from chosen spectra
+and random orthogonal factors, then rounded to double; the references are
+the eigenvalues or singular values of the rounded matrix, from mpmath at 200
+bits). Errors in units of eps, the larger of gcc/OpenMP and of the CUDA
+build (where the backend is compiled by MSVC); every residual and loss of
+orthonormality is a Frobenius norm, relative to the norms given in
+`benchmarks/dense_cases.hpp`:
+
+| kind (cases) | values | residual | orthonormality | other |
+|---|---|---|---|---|
+| symmetric, n = 5..60 (6) | 12.2 | 9.92 | 72.2 (n = 60) | Cholesky L L^T - A 0.62, op(T) X - B 0.44 |
+| generalized, n = 5, 20, 40 (3) | 1270 (below) | 0.19 | 0.10 | |
+| rectangular, 1 x 20 .. 40 x 25 (8) | 7.93 | 14.4 | 44.5 | QR residual 1.56, Q^T Q - I 14.1; null space C T 1.74, T^T T - I 13.1 |
+
+Symmetric and SVD values: max |w_i - w_i,ref| / (eps max |w_ref|). The
+ranks of the SVD and of the QR agree with the expected ones on the eight
+rectangular cases (5, 5, 18, 10, 30, 1, 3, 2); three of them have exact
+rank below min(m, n), and their trailing singular values after rounding are
+1e-18 to 1e-17 of s_1, far below the threshold. A cluster of ten
+eigenvalues within 9e-9 and a condition of 1e12 do not raise the errors.
+
+**The generalized problem with an ill-conditioned B.** The scale
+eps max |w| charges the method with the condition of the problem. In case 8
+(A the second-difference penalty D^T D, of rank n - 2, cond(B) = 1e6) the
+largest eigenvalue, 8.6e6, has the condition
+kappa_i = (||A|| + |w_i| ||B||) ||v_i||^2 = 8.6e12 (v_i B-normalized), and
+a method backward stable on (A, B) may lose eps kappa_i on it. The values
+are therefore measured in units of eps kappa_i, eigenvalue by eigenvalue:
+within 1.4 in cases 7 and 9 (cond(B) 1e2 and 1e3), and up to 1270 in case 8,
+at the two zero eigenvalues of the penalty, whose error is 3.6e-10 against
+eps kappa_i = 4e-14. The reduction with the Cholesky factor of B is not
+backward stable when B is ill-conditioned: its error on an eigenvalue near
+zero is of the order of eps ||A|| ||B^-1|| (here 3.5e-9). LAPACK's `dsygvd`
+(through SciPy 1.17's `eigh(A, B)`), the same reduction, loses more on the
+same matrices: 9057 eps kappa_i in case 8, 1.9 and 41 in cases 7 and 9, and
+max |w - w_ref| / (eps max |w|) 15796 in case 8 against 5731 here. A method
+without this loss (the generalized SVD of the factors of A and B, or a
+reduction of B by its eigendecomposition with deflation of its small
+eigenvalues) is not written; it is worth writing if a caller needs
+eigenvalues near zero to better than eps ||A|| ||B^-1||.
+
+**Speed** (`benchmarks/dense.cpp`, ms per call, one thread; A = G G^T / K + I
+with G uniform on (-1, 1), a general G for the QR and the SVD, three random
+rows for the null space), gcc / MSVC:
+
+| K | Cholesky | triangular solve, K right sides | pivoted QR with Q | SVD with U, V | symmetric eigen | generalized | null space of 3 x K |
+|---|---|---|---|---|---|---|---|
+| 20 | 0.0008 / 0.0017 | 0.0012 / 0.0025 | 0.0063 / 0.010 | 0.055 / 0.077 | 0.011 / 0.016 | 0.016 / 0.023 | 0.0026 / 0.0046 |
+| 50 | 0.0066 / 0.010 | 0.011 / 0.016 | 0.053 / 0.075 | 0.50 / 0.60 | 0.088 / 0.13 | 0.14 / 0.20 | 0.0059 / 0.011 |
+| 200 | 0.16 / 0.23 | 0.52 / 0.61 | 2.18 / 2.45 | 10.4 / 14.8 | 5.97 / 6.56 | 6.53 / 9.35 | 0.070 / 0.11 |
+| 1000 | 15.6 / 17.8 | 44.3 / 50.8 | 194 / 241 | 608 / 630 | 459 / 765 | 736 / 1203 | 3.3 / 4.9 |
+
+On gcc the functions take 0.54 to 1.3 times the time of Eigen measured
+alone above (a separate run), with two exceptions: the pivoted QR takes 1.6
+to 2.6 times the factorization alone, because Q is formed, and the null
+space at K = 1000 takes 1.9 times, because the full 1000 x 1000 V is copied
+into T.
+
+**Tests.** `tests/dense/test_dense.cpp`, on gcc and CUDA: the values and the
+identities of every case with bounds 1.5 times the larger measured error of
+the two builds, the ranks and the number of null-space columns exactly, the
+default and an explicit rank tolerance, the empty set of constraints
+(T = I), the failures reported in the status (A or B not positive definite,
+a NaN in the lower triangle, a zero on a triangular diagonal; a NaN in the
+upper triangle of a symmetric input is not read) and the exceptions for
+wrong dimensions.

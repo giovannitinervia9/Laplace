@@ -64,6 +64,29 @@ else()
   target_link_libraries(laplace INTERFACE Boost::headers)
 endif()
 
+# Dense linear algebra (laplace::dense, include/laplace/dense/dense.hpp): a
+# static library next to the header-only one. Its one source holds all the
+# Eigen code and is compiled as C++ in every build, never by nvcc. Eigen
+# (MPL2) comes from a directory holding Eigen/ given with LAPLACE_EIGEN_INCLUDE,
+# or from an installed Eigen3 found with find_package.
+set(LAPLACE_EIGEN_INCLUDE "" CACHE PATH "Directory holding Eigen/ (Eigen >= 3.4); empty: find_package(Eigen3)")
+add_library(laplace_dense STATIC src/dense/eigen_backend.cpp)
+add_library(Laplace::dense ALIAS laplace_dense)
+target_include_directories(laplace_dense PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(laplace_dense INTERFACE laplace)
+# MPL2-only parts of Eigen; one thread per decomposition, parallelism is the caller's
+target_compile_definitions(laplace_dense PRIVATE EIGEN_MPL2_ONLY EIGEN_DONT_PARALLELIZE)
+if(LAPLACE_EIGEN_INCLUDE)
+  if(NOT EXISTS "${LAPLACE_EIGEN_INCLUDE}/Eigen/Dense")
+    message(FATAL_ERROR "Eigen not found in LAPLACE_EIGEN_INCLUDE=${LAPLACE_EIGEN_INCLUDE}")
+  endif()
+  target_include_directories(laplace_dense SYSTEM PRIVATE ${LAPLACE_EIGEN_INCLUDE})
+else()
+  find_package(Eigen3 3.4 REQUIRED NO_MODULE)
+  target_link_libraries(laplace_dense PRIVATE Eigen3::Eigen)
+endif()
+
 option(LAPLACE_BUILD_BENCHMARKS "Build the measurement tools" ${PROJECT_IS_TOP_LEVEL})
 if(LAPLACE_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)

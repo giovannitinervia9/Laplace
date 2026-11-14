@@ -57,10 +57,11 @@ set(LAPLACE_TEST_SOURCES
   basis/test_fourier.cpp
   basis/test_legendre.cpp
   basis/test_operator.cpp
+  dense/test_dense.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})
-target_link_libraries(laplace_tests PRIVATE Laplace::laplace laplace_doctest)
+target_link_libraries(laplace_tests PRIVATE Laplace::laplace Laplace::dense laplace_doctest)
 # reference values (tests/data/reference) and the shared measurement helpers (benchmarks/)
 target_compile_definitions(laplace_tests PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
 target_include_directories(laplace_tests PRIVATE ${PROJECT_SOURCE_DIR}/benchmarks)
