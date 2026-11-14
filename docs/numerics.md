@@ -4703,3 +4703,117 @@ p >= 10.
 **Chosen.** The lattice for M and L, A^T V^-1 A for M^-1; tested in
 `tests/pdmat/test_toeplitz.cpp` on gcc and CUDA, bounds 1.5 times the larger
 measured error.
+
+## Factor-analytic matrices: factor_analytic_pdmat
+
+**What.** `factor_analytic_pdmat` (`include/laplace/pdmat/factor_analytic.hpp`):
+M = Lambda Lambda^T + Psi, Lambda p x d lower trapezoidal with
+Lambda_jj = e^(theta) on its diagonal and the other loadings free,
+Psi = diag(e^(2 t_i)). theta = the loadings by rows, then t_0, ..., t_(p-1);
+q = pd - d(d-1)/2 + p. Precondition 0 <= d <= p; at d = p Psi is not
+identifiable (Ledermann's bound (p - d)^2 >= p + d, whose largest d is given
+by the host function `factor_analytic_max_factors`). Decided with Giovanni on
+2026-11-14.
+
+**Checks before the code.** The convention of glmmTMB 1.1.14's `rr`
+(vignette covstruct and a fit): the same zero pattern, but the diagonal
+loadings are raw parameters of either sign, placed first, and the other
+loadings follow by columns; `rr` has no Psi. The derivatives of log det M and
+M^-1 by Woodbury, differentiated over the sub-masks of the tuple (below),
+agree with mpmath's numerical derivatives of the definition to 1e-59 at 60
+digits, orders 0 to 6, (p, d) in {(3, 1), (3, 3), (4, 2), (4, 3), (5, 2)}.
+
+**How.** M and its derivatives in closed form: a tuple of t_i alone reaches
+M_ii (2^K e^(2 t_i)); loadings reach M only along at most two variables of
+one column; a tuple that mixes a t with a loading is zero. The values by
+Woodbury with C = I + Lambda^T Psi^-1 Lambda (d x d) and C = R R^T:
+log det M = 2 sum t_i + log det C, M^-1 = Psi^-1 - Z^T Z with
+Z = R^-1 Lambda^T Psi^-1, O(p d^2 + d^3). The derivatives of log det M by
+Woodbury: C[T] (the derivative along the positions in the mask T) is zero
+unless T lies in one row of M, X[S] = -X[0] sum_T C[T] X[S \ T] with
+X = C^-1, and d^F log det C = sum_(T subset of F \ f) tr(X[T] C[f + (F \ f \ T)]),
+f the first position. The derivatives of M^-1 by the recursion on M itself,
+G[S] = -G[0] sum_T M[T] G[S \ T], G = M^-1, with G[0] from a Cholesky
+factorization of M and the M[T] that are zero by structure skipped.
+
+Three routes to the derivatives of M^-1 were measured in double (a
+transcription in Python with NumPy) against the references below (worst ulpN over orders 1-6; "spread" is the point with
+psi_i from e^-4 to e^2 and loadings +-1.5):
+
+| (p, d), point | Woodbury | factor of M | recursion on M |
+|---|---|---|---|
+| (1, 1) spread | 2.5e5 | 18 | 17 |
+| (2, 1) spread | 6.1e6 | 116 | 325 |
+| (3, 2) spread | 1.1e6 | 401 | 410 |
+| (3, 3) spread | 7.3e7 | 137 | 522 |
+| (5, 2) spread | 1.8e5 | 6714 | 12866 |
+| (3, 3) random | 2292 | 11647 | 1903 |
+
+Woodbury's derivatives of M^-1 cancel, Psi^-1 against B C^-1 B^T
+(B = Psi^-1 Lambda), when psi_i is small against the loadings of its row:
+both terms are of order 1/psi_i while d/dt_i M^-1 = -2 psi_i (M^-1 e_i)(M^-1 e_i)^T
+is small, and each order multiplies the Psi^-1 term by -2. The factor route
+(the Cholesky factor of M with its derivatives over the sub-masks, then
+Y = L^-1 and sum_T Y[T]^T Y[F \ T]) and the recursion on M are of the same
+class; at order 6 the factor route cost 3 to 6 times as much (p = 16: 105
+against 31 us per call on OpenMP), because the derivatives of L are dense
+while most M[T] are zero. Giovanni chose the recursion on M. Its G[0] comes
+from a Cholesky factorization of M: with Woodbury's M^-1 in its place the
+recursion lost up to 1.2e5 ulpN at the spread points (933 with Cholesky at
+(3, 3)).
+
+**Measured** (gcc/OpenMP, 2026-11-14; references
+`tools/reference/pdmat_factor_analytic.py`, mpmath at 640 bits from the
+definition of M, mixed central differences with steps 2^-60 and 2^-70 that
+agree to 1.0e-34; 19186 values; (p, d) in {(1, 1), (2, 1), (3, 1), (3, 2),
+(3, 3), (5, 2)}, a random point and a spread one). Worst over orders 0..6, M
+and M^-1 in ulpN, log det in ulp:
+
+| (p, d), point | M | M^-1 | log det |
+|---|---|---|---|
+| (1, 1) random / spread | 0.43 / 0.42 | 27 / 58 | 39 / 784 |
+| (2, 1) random / spread | 0.76 / 0.40 | 83 / 233 | 120 / 764 |
+| (3, 1) random / spread | 0.43 / 0.40 | 117 / 2.4e5 | 11 / 41 |
+| (3, 2) random / spread | 0.41 / 0.40 | 46 / 310 | 16 / 766 |
+| (3, 3) random / spread | 0.49 / 0.40 | 1903 / 360 | 77 / 7.3e5 |
+| (5, 2) random / spread | 0.64 / 0.40 | 112 / 2.5e4 | 361 / 795 |
+
+By order, gcc / CUDA (RTX 4070 SUPER), K = 0..6:
+M^-1 56 / 90, 183 / 156, 2.3e5 / 3.6e5, 7076 / 8748, 2.4e5 / 3.6e5,
+1.5e4 / 1.1e4, 2.3e5 / 3.6e5; log det for d < p 2.0 / 2.0, 1.7 / 2.7,
+3.7 / 4.0, 14 / 12, 66 / 73, 129 / 359, 795 / 926; log det at d = p 3.2 / 3.2,
+107 / 86, 1860 / 3313, 3.6e4 / 1.9e5, 2.1e5 / 1.5e5, 7.3e5 / 1.0e6,
+2.6e5 / 6.6e5; M within 0.76 ulpN on both.
+
+**What it says.** The 2.4e5 of M^-1 at the (3, 1) spread point (orders 2, 4,
+6, along t_2) is the conditioning of that derivative: a relative change of
+one ulp in one theta_k moves the exact derivative by 1.6e4 ulpN (mpmath), and
+the three routes above all lose 3e4 to 2.4e5 there. Elsewhere M^-1 is within
+2.5e4 ulpN. log det keeps Woodbury's cancellation at d = p, where every row
+is explained by the factors (up to 1.0e6 ulp on CUDA at order 5); at d < p it
+stays within 926 ulp.
+
+ns per call (`benchmarks/pdmat_factor_analytic.cpp`, gcc, theta_k =
+0.1 x + 0.05 sin k, x uniform in [-3, 3]), one thread / OpenMP; order 6
+along K distinct parameters spread over the rows; "recursion with Cholesky"
+is the same recursion on M written in the bench, with M^-1 by Cholesky also
+at order 0:
+
+| (p, d) | M^-1, K = 0 | M^-1, K = 6 | recursion with Cholesky, K = 0 / 6 | log det, K = 0 | log det, K = 6 |
+|---|---|---|---|---|---|
+| (4, 2) | 383 / 60 | 7835 / 1183 | 546 / 6303 | 380 / 49 | 2912 / 425 |
+| (8, 2) | 844 / 139 | 26804 / 3815 | 1446 / 22883 | 739 / 122 | 3113 / 519 |
+| (16, 2) | 1691 / 284 | 126049 / 20182 | 5464 / 120995 | 1484 / 278 | 3898 / 750 |
+| (16, 4) | 2865 / 468 | 128777 / 19712 | 6531 / 118704 | 2342 / 356 | 8631 / 1470 |
+
+Woodbury makes the values 1.4 to 3.2 times faster than a Cholesky
+factorization of M at these sizes, and log det at order 6 costs 2.7 to
+32 times less than M^-1 at order 6 (one thread).
+
+**Chosen.** Woodbury for the values and for log det with its derivatives;
+the recursion on M, started from a Cholesky factorization, for the
+derivatives of M^-1 (Giovanni, 2026-11-14). Tested in
+`tests/pdmat/test_factor_analytic.cpp` on gcc and CUDA, bounds 1.5 times the
+larger measured error, log det at d = p in a row of its own; twins: d = 0 is
+`diagonal_pdmat` bit for bit, at d = p M - Psi is `log_cholesky`'s M.
+
