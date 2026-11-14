@@ -627,8 +627,8 @@ points of order 6). Test bounds (tests/math/test_gamma_deriv.cpp): 1160 (P) and
 series, the lower series only for a < 2 and 60 terms), is still to be measured.
 
 ns per call, mixed timing set, orders 1 / 5 / 6, gcc, Serial (1 thread) and
-OpenMP (4 threads), taken while another session's CUDA build (nvcc, ptxas) was
-running: log P 685 / 1044 / 1283 and 179 / 281 / 338; log Q 687 / 1178 / 1473
+OpenMP (4 threads), taken while a CUDA build (nvcc, ptxas) occupied the
+machine: log P 685 / 1044 / 1283 and 179 / 281 / 338; log Q 687 / 1178 / 1473
 and 194 / 318 / 409. By region (Serial, order 5 / 6): a < 1 P 300 / 378, Q 845 /
 1056; centre 1-50 P 1259 / 1565, Q 1233 / 1542; centre a > 50 P 794 / 1003,
 Q 802 / 1017; far lower tail P 375 / 437, Q 697 / 898; far upper tail
@@ -1186,7 +1186,7 @@ distributions are written.
 ## Piecewise Chebyshev expansions of the derivatives of log Phi on [-1, 4)
 
 **What.** `log_Phi_d1..d5` in `include/laplace/math/normal.hpp` on t in
-[-1, 4) (written by an agent, reviewed and verified by the session):
+[-1, 4):
 Chebyshev expansions on five pieces of width 1, evaluated by Clenshaw's
 recurrence from a `__constant__` table (generated block between BEGIN and END
 markers). Outside, t < -1 keeps the cumulants and t >= 4 the recursion from
@@ -1226,8 +1226,7 @@ values near 1.5.
 ## Double-double sqrt, exp, expm1 and log
 
 **What.** `include/laplace/math/detail/double_double.hpp` gains `ddm::sqrt`,
-`exp`, `expm1` and `log` (written by an agent, reviewed and corrected by the
-session). sqrt by Karp's method, scaled by an even power of two outside
+`exp`, `expm1` and `log`. sqrt by Karp's method, scaled by an even power of two outside
 [2^-900, 2^900] (Dekker's split overflows above 2^996, 1/sqrt(a.hi) for
 subnormal a). exp as in the QD library: Cody-Waite reduction by a two-part
 ln 2, Taylor series of e^r - 1 at r = t/2^9, nine steps s <- s (s + 2), which
@@ -1249,7 +1248,7 @@ fraction of the ulp). Error in units of 2^-104 |f|, gcc and CUDA identical:
 | log | 1.86 | 530 / 8.0 | 3.6-29 / 0.15 |
 | expm1 | 2.11 | | |
 
-The agent's version failed three ways, each fixed by the session: sqrt gave
+The first version failed three ways, each repaired before it was kept: sqrt gave
 1.9e23 units on subnormal input and NaN near the largest double (scaling
 added); log near 1 was accurate only to 2^-104 absolute, 8.3e15 units
 relative, because its Newton step works on m exp(-x0) ~ 1 (the expm1 form
@@ -1266,7 +1265,7 @@ the host); a table-driven reduction would cut it if a hot loop needs them.
 **What.** `include/laplace/math/incomplete_gamma.hpp`: `own::gamma_inc` takes
 `gamma_inc_temme` for a >= 100 and |eta| <= 0.5 (eta^2/2 = phi =
 x/a - 1 - log(x/a), signed as x - a), `gamma_inc_classic` (the former code)
-elsewhere (written by an agent, reviewed and corrected by the session).
+elsewhere.
 Q = erfc(s)/2 + R with s = sqrt(a phi), R = e^-(a phi) S(a, eta) / sqrt(2 pi a),
 S = sum_(k<=9) c_k(eta) a^-k, the c_k Boost.Math's 53-bit polynomials
 (igamma_large.hpp, Boost licence); erfc as e^-y erfcx(s) so that nothing
@@ -1276,13 +1275,13 @@ classic route needs O(sqrt(a)) terms near x = a; this one is O(1).
 **Measurement.** New references `gamma_{p,q}_large.csv` and
 `log_gamma_{p,q}_large.csv` (2400 rows: a log-uniform on [1e2, 1e15], x =
 a (1 + d), |d| log-uniform on [2^-40, 1], both signs). Two defects in the
-agent's references, both repaired: mpmath.quad on [0, x] without breakpoints
+first references, both repaired: mpmath.quad on [0, x] without breakpoints
 near x, where the mass sits (wrong by a factor 0.58 at a = 1e12, x 24 sqrt(a)
 below the mode), and the integrand not scaled (values like e^-288 defeat
 quad's absolute error control; scaled by its maximum on the interval, the
 values agree to 30 digits across breakpoints and degrees); and the logarithm
 of the complement taken as log(1 - p) at 200 bits instead of log1p(-p). The
-agent's switch at |eta| <= 3 was wrong: Boost's c_k are polynomials truncated
+first switch at |eta| <= 3 was wrong: Boost's c_k are polynomials truncated
 about eta = 0, and the route, measured on the logarithm of the small tail, is
 within 6 ulp for |eta| < 0.5 at every a, 11-38 ulp for |eta| in [0.5, 1) and
 up to 1.7e3 beyond; the switch is now 0.5 (beyond, the classic route needs a
@@ -1291,7 +1290,7 @@ within 0.82 ulp of max(|f|, 1) and 2.9-3.4 ulpL (the small tail carries
 about a phi ulps from its argument: 1.0e3-1.3e3 plain ulps where a phi is
 near 500); log P and log Q within 5.9-6.4 ulp of max(|f|, 1). Every call
 within 5 us on one thread, against O(sqrt(a)) terms of the classic route
-(1e6 at a = 1e12). The agent's bench ran for hours: Boost outside its own
+(1e6 at a = 1e12). The first bench ran for hours: Boost outside its own
 Temme zone (a sigma^2 < 20) sums O(1/sigma) terms, about 1e6 at a = 1e15;
 Boost is left out of the large-shape part of the bench.
 
@@ -1617,8 +1616,7 @@ phi^(k)(x) = int_0^1 t^k e^(x t) dt, k = 1..6 (`exprel_d1` ... `exprel_d6`).
 psi(0) = 1 (`log1prel`), and psi^(k)(x) = (-1)^k k! int_0^1 t^k (1 + x t)^(-(k+1)) dt
 (`log1prel_d1` ... `log1prel_d6`). Both integrands keep one sign, so phi^(k)
 is positive and psi^(k) has the sign (-1)^k everywhere: no zeros, and the
-plain relative ulp is the measure. Written by two agents (Haiku) from a brief,
-reviewed and optimized in this session.
+plain relative ulp is the measure.
 
 **How, exprel.** The value as expm1(x)/x. The derivatives of order K:
 - 0 < x < T+_K: the power series sum_n x^n/(n! (n + K + 1));
@@ -1661,8 +1659,8 @@ down to 2^-53, x up to 1e300). Maximum ulp, gcc / CUDA:
 | exprel | 1.81 / 1.52 | 2.71 / 2.64 | 4.11 / 4.11 | 5.90 / 5.90 | 4.25 / 4.25 | 5.85 / 5.85 | 5.92 / 6.57 |
 | log1prel | 1.28 / 1.28 | 3.94 / 3.94 | 5.03 / 5.03 | 6.39 / 6.39 | 7.06 / 7.06 | 8.27 / 8.27 | 9.60 / 9.60 |
 
-ns per call on one gcc thread (`benchmarks/math_rel.cpp`, the other session
-building CUDA at the same time): exprel 16-44 (the value 16-31, the
+ns per call on one gcc thread (`benchmarks/math_rel.cpp`, measured while a
+CUDA build occupied the machine): exprel 16-44 (the value 16-31, the
 derivatives 30-44); log1prel 20-60 in the series region, 20-37 with one rule,
 59-68 with two, 22-50 with the recursion. On CUDA (RTX 4070 SUPER, FP64 at
 1/64 of FP32): exprel 0.44 for the value, 0.5-3.3 for the derivatives;
@@ -1706,8 +1704,7 @@ first; the pure derivative is c[0]). `bijector_kinks` declares the point at
 which Yeo-Johnson is only C^2 (v = 0, unless lambda = 1). Invalid parameters
 give NaN everywhere.
 
-**How.** Written by five agents (Haiku) from one brief, reviewed and
-optimized in this session. The forms, each checked against SymPy's
+**How.** The forms, each checked against SymPy's
 derivatives of the definitions (scripts `bijector_*_forms.py` and the
 reference scripts):
 - affine and the shifted maps: closed forms in t = v - p1 or p1 - v, single
@@ -1866,8 +1863,7 @@ Yeo-Johnson and softplus, each traced to its cause by measurement.
   and 11 ns) spend their time in the log1prel quadrature (32 nodes, two FP64
   divisions each).
 
-**Accuracy.** Each cause measured with mpmath (scripts in the session's
-scratch directory, not kept): the ratio of the sum of the absolute values
+**Accuracy.** Each cause measured with mpmath (scratch scripts, not kept): the ratio of the sum of the absolute values
 of the terms of a formula to the ulpC scale, against the measured error.
 - **Yeo-Johnson, inverse log-Jacobian** (46.3 ulpC at u = -3, lambda = 0.4,
   order (3, 3)): the mixed derivatives are rational in u and lambda, and
@@ -1999,8 +1995,8 @@ difference cancels by about a^2, 2^100 at 1e15), kept if the two agree to
 | [1, 10) recurrence | 3.44 | 3.92 | 3.81 | 6.07 | 6.40 | 9.31 | 9.72 |
 | [10, 1e15] asymptotic | 2.51 | 3.62 | 4.20 | 5.27 | 4.76 | 6.69 | 8.19 |
 
-ns per call on one gcc thread (`benchmarks/math_stirling.cpp`, another
-session's agent building at the same time): direct 5-37; recurrence 59-307
+ns per call on one gcc thread (`benchmarks/math_stirling.cpp`, measured while
+another build occupied the machine): direct 5-37; recurrence 59-307
 (the cost grows with the number of steps, n up to 9, and with the order);
 asymptotic 22-44.
 
@@ -2141,8 +2137,8 @@ of the device (the series limits of the CUDA build, run on the host, with the
 lower quadrature for a >= 2) has the same maxima within 10 per cent.
 
 ns per call on the timing set of math_gamma_deriv (a in [1/8, 1024],
-x = a e^(z/2)), one gcc thread / OpenMP with 8 threads, measured while another
-session's CUDA test was running: P orders 1-6: 1197/160, 1400/182, 1581/212,
+x = a e^(z/2)), one gcc thread / OpenMP with 8 threads, measured while a
+CUDA test occupied the GPU: P orders 1-6: 1197/160, 1400/182, 1581/212,
 1867/264, 2246/313, 2788/391; Q: 1340/176, 2423/313, 2679/356, 3135/424,
 3692/517, 4372/621 (the derivatives in a alone take 0.7 to 1.5 us). From
 order 2, Q pays the extra quadrature of its j = 1 component at a < 2; the
@@ -2244,7 +2240,7 @@ Discrete cdf by summing the Poisson mass, k = mu + z sqrt(mu), z in
 
 The first row was measured with the pilot's first logpmf, whose terms near
 7000 cancel to about -4 at mu = 1000: an absolute error of 1e-12, a relative
-error of every mass that no sum can remove. The log F session then wrote the
+error of every mass that no sum can remove. The log-density was then written
 logpmf in the saddle-point form (D(z) = z log z - z + 1, delta Stirling's
 error), which has no cancellation: second row, the same on gcc and on the
 host side of the CUDA build.
@@ -2376,7 +2372,7 @@ of l at the kink, which no distribution declares yet. (5) On CUDA,
 `binomial_coef` in core.hpp was constexpr host-only, and sym_tensor_position
 and the generic lookup gave wrong positions at run time on the device (the
 expected information came out 0 and a sum ran for minutes); found by this
-test, fixed by the log F session (LAPLACE_HD).
+test and repaired (LAPLACE_HD).
 
 ## Partial derivatives of log P(a, a c) and log Q(a, a c) at fixed ratio, and the Poisson cdf
 
@@ -2389,7 +2385,7 @@ F(y) = P(a, a c) with a = 1/phi and c = y/mu, so a depends on phi alone and c
 on mu alone; its log F and log(1 - F) derivatives
 (`detail_gamma_cdf::gamma1_dk`) are now the product of two univariate Faa di
 Bruno sums over these partials (`laplace::math::bell_partial`), each Bell
-polynomial of 1/phi and of y/mu of one sign. In the same session the Poisson
+polynomial of 1/phi and of y/mu of one sign. At the same time the Poisson
 cdf's derivatives in mu (the components j = K of
 `log_gamma_{q,p}_mixed_dK(k + 1, mu)`) were repaired in
 incomplete_gamma_mixed.hpp.
@@ -2650,8 +2646,7 @@ downward recursion is shorter at x >= 4 than log_Phi_dK's, which runs once
 per order); laplace1 2.5e3 against 2.6e3 at |z| in [0.25, 0.5], 1.0e3 against
 2.6e3 at [1, 3], 156 against 2.7e3 at [10, 30].
 
-**Open.** The CUDA build was not run for these routes (no CUDA build in this
-session). The gaussian1 route below x = 4 is unchanged: there the order-6
+**Open.** The CUDA build was not run for these routes. The gaussian1 route below x = 4 is unchanged: there the order-6
 components with 2 or 3 derivatives in sigma keep up to 1.9e3 ulp of the
 component next to their zeros.
 
@@ -2851,8 +2846,7 @@ form -2 (p - 1) tanh^(K-1)(theta) stays within 2.7e-15 at every point.
 - Diagonal: e^(2 theta_i), 2 sum theta_i, e^(-2 theta_i), e^(theta_i); the
   derivatives are nonzero only along a tuple whose indices are all equal.
 
-**Measurement.** References `pdmat_pilot.csv` (`tools/reference/pdmat_pilot.py`,
-written by a Haiku agent): the matrices built from their definitions in mpmath
+**Measurement.** References `pdmat_pilot.csv` (`tools/reference/pdmat_pilot.py`): the matrices built from their definitions in mpmath
 at 640 bits (inverse by `mp.inverse`, L by `mp.cholesky`, log det by
 `mp.det`), derivatives by central differences with steps 2^-60 and 2^-70,
 which agree to 1.6e-35 relative; 16569 rows, AR(1) p in {1, 2, 3, 6} and
@@ -3155,7 +3149,7 @@ p = 4 per tuple, and lost up to 1554 ulpN against mpmath (divided
 differences of close eigenvalues). The best published method (Higham and
 Relton 2014, SIMAX 35:1019-1037) evaluates exp on a 2^K p block matrix,
 O(8^K p^3); no published method was found whose cost is polynomial in K
-(survey in the session notes). At S = 0 an entry of the order-K derivative
+(survey in the project notes). At S = 0 an entry of the order-K derivative
 along basis directions counts the orderings of the tuple's edges that form a
 walk, Eulerian trails, whose counting is #P-complete in general (Brightwell
 and Winkler 2005; the reduction is ours and was not checked further), so a
@@ -3239,8 +3233,7 @@ log-density and its derivatives to order 6, the mixed (y, theta) derivatives,
 the expected information and its derivatives to order 4, cdf, ccdf, log F,
 log(1 - F) with their derivatives to order 6, and the quantile. All six are
 continuous with a fixed support; only laplace2 has kinks, those of laplace1
-(mu is C^0 in log f and C^1 in log F at mu = y). Written by three Haiku 5.5
-subagents, one pair each, and reviewed here. Tests in
+(mu is C^0 in log f and C^1 in log F at mu = y). Tests in
 `tests/distrib/test_<name>.cpp`, references in
 `tools/reference/distrib_gaussian23.py` (2267 and 2248 rows),
 `distrib_cauchy_logistic.py` (4734 rows, 612 dropped) and
@@ -3270,7 +3263,7 @@ of w, so with the state after i derivatives written as sigma^-a w^-i R_i(z),
 
 `mixed_power_dk` implements this. Its first version dropped the w-dependence
 of k/w and was wrong from b = 2 on (relative error up to 2.4 at k = 1),
-caught by the agent writing gaussian2 and gaussian3 against SymPy.
+caught by checking gaussian2 and gaussian3 against SymPy.
 `tools/reference/location_scale_forms.py` now checks both chains against
 sympy.diff of Lambda((y - mu) w^-k) with Lambda an undefined function: 162
 forms, k = 1/2, -1/2, -1, 1, 1/3, orders 1 to 6, every split between the two
