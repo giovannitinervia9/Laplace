@@ -38,6 +38,8 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
   static constexpr bool closed_inverse = true;
   /// \brief Compile-time descriptor: \c true, exact closed-form Cholesky factor is implemented.
   static constexpr bool closed_factor = true;
+  /// \brief Compile-time descriptor: \c false, the map \f$\theta \mapsto M\f$ has no density on the matrices.
+  static constexpr bool has_density = false;
 
   /**
    * \ingroup pdmat
@@ -60,19 +62,27 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
 
   /**
    * \ingroup pdmat
+   * \brief Doubles of caller scratch any function needs: 0 for this structure.
+   * \return 0.
+   */
+  LAPLACE_HD int scratch_size() const { return 0; }
+
+  /**
+   * \ingroup pdmat
    * \brief Evaluates the packed diagonal matrix \f$M(\theta)\f$.
    *
    * Computes \f$M_{ii} = e^{2\theta_i}\f$ on the diagonal and \f$M_{ij} = 0\f$ for \f$i \ne j\f$.
    *
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    *
    * \par Measured accuracy
    * Maximum error 0.52 ulpN (gcc) / 0.52 ulpN (CUDA); test bound 1.0 ulpN.
    *
    * \see inverse(), cholesky(), log_det(), matrix_dk()
    */
-  LAPLACE_HD void matrix(const double* theta, double* m) const { fill(theta, 2.0, m); }
+  LAPLACE_HD void matrix(const double* theta, double* m, [[maybe_unused]] double* w) const { fill(theta, 2.0, m); }
   /**
    * \ingroup pdmat
    * \brief Evaluates the packed inverse matrix \f$M^{-1}(\theta)\f$.
@@ -81,13 +91,14 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    *
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    *
    * \par Measured accuracy
    * Maximum error 0.89 ulpN (gcc) / 0.66 ulpN (CUDA); test bound 1.0 ulpN.
    *
    * \see matrix(), cholesky(), log_det(), inverse_dk()
    */
-  LAPLACE_HD void inverse(const double* theta, double* m) const { fill(theta, -2.0, m); }
+  LAPLACE_HD void inverse(const double* theta, double* m, [[maybe_unused]] double* w) const { fill(theta, -2.0, m); }
   /**
    * \ingroup pdmat
    * \brief Evaluates the packed lower Cholesky factor \f$L(\theta)\f$.
@@ -96,13 +107,14 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    *
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    *
    * \par Measured accuracy
    * Maximum error 0.59 ulpN (gcc) / 0.59 ulpN (CUDA); test bound 1.0 ulpN.
    *
    * \see matrix(), inverse(), log_det(), cholesky_dk()
    */
-  LAPLACE_HD void cholesky(const double* theta, double* l) const { fill(theta, 1.0, l); }
+  LAPLACE_HD void cholesky(const double* theta, double* l, [[maybe_unused]] double* w) const { fill(theta, 1.0, l); }
 
   /**
    * \ingroup pdmat
@@ -114,6 +126,7 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \f]
    *
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return Log-determinant of \f$M(\theta)\f$.
    *
    * \par Measured accuracy
@@ -121,7 +134,7 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    *
    * \see matrix(), log_det_dk()
    */
-  LAPLACE_HD double log_det(const double* theta) const {
+  LAPLACE_HD double log_det(const double* theta, [[maybe_unused]] double* w) const {
     double s = 0.0;
     for (int i = 0; i < dim; ++i) s += theta[i];
     return 2.0 * s;
@@ -141,6 +154,7 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if computed; \c false and buffer left untouched if \c idx contains mixed indices.
    *
    * \par Measured accuracy
@@ -149,7 +163,7 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \see matrix(), pdmat_orders::matrix_d1()
    */
   template <int K>
-  LAPLACE_HD bool matrix_dk(const double* theta, const int (&idx)[K], double* m) const {
+  LAPLACE_HD bool matrix_dk(const double* theta, const int (&idx)[K], double* m, [[maybe_unused]] double* w) const {
     return one_entry(theta, idx, 2.0, m);
   }
   /**
@@ -161,6 +175,7 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return Value of the derivative, or \f$0.0\f$ if \f$K \ge 2\f$ or \c idx is mixed.
    *
    * \par Measured accuracy
@@ -169,7 +184,7 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \see log_det(), pdmat_orders::log_det_d1()
    */
   template <int K>
-  LAPLACE_HD double log_det_dk([[maybe_unused]] const double* theta, [[maybe_unused]] const int (&idx)[K]) const {
+  LAPLACE_HD double log_det_dk([[maybe_unused]] const double* theta, [[maybe_unused]] const int (&idx)[K], [[maybe_unused]] double* w) const {
     return K == 1 ? 2.0 : 0.0;
   }
   /**
@@ -186,6 +201,7 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if computed; \c false and buffer left untouched if \c idx contains mixed indices.
    *
    * \par Measured accuracy
@@ -194,7 +210,7 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \see inverse(), pdmat_orders::inverse_d1()
    */
   template <int K>
-  LAPLACE_HD bool inverse_dk(const double* theta, const int (&idx)[K], double* m) const {
+  LAPLACE_HD bool inverse_dk(const double* theta, const int (&idx)[K], double* m, [[maybe_unused]] double* w) const {
     return one_entry(theta, idx, -2.0, m);
   }
   /**
@@ -211,6 +227,7 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if computed; \c false and buffer left untouched if \c idx contains mixed indices.
    *
    * \par Measured accuracy
@@ -219,7 +236,7 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \see cholesky(), pdmat_orders::cholesky_d1()
    */
   template <int K>
-  LAPLACE_HD bool cholesky_dk(const double* theta, const int (&idx)[K], double* l) const {
+  LAPLACE_HD bool cholesky_dk(const double* theta, const int (&idx)[K], double* l, [[maybe_unused]] double* w) const {
     return one_entry(theta, idx, 1.0, l);
   }
 

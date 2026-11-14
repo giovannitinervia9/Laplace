@@ -52,6 +52,8 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
   static constexpr bool closed_inverse = true;
   /// \brief Compile-time descriptor: \c true, exact closed-form Cholesky factor is implemented.
   static constexpr bool closed_factor = true;
+  /// \brief Compile-time descriptor: \c false, the map \f$\theta \mapsto M\f$ has no density on the matrices.
+  static constexpr bool has_density = false;
 
   /**
    * \ingroup pdmat
@@ -74,6 +76,13 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
 
   /**
    * \ingroup pdmat
+   * \brief Doubles of caller scratch any function needs: 0 for this structure.
+   * \return 0.
+   */
+  LAPLACE_HD int scratch_size() const { return 0; }
+
+  /**
+   * \ingroup pdmat
    * \brief Evaluates the packed compound symmetry matrix \f$M(\theta)\f$.
    *
    * Computes \f$M_{ii} = 1\f$ on the diagonal and \f$M_{ij} = \rho\f$ for \f$i \ne j\f$,
@@ -81,13 +90,14 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    *
    * \par Measured accuracy
    * Maximum error 8.01 ulpN (\f$K=4\f$, gcc) / 6.67 ulpN (\f$K=4\f$, CUDA); test bounds 1 to 13 ulpN.
    *
    * \see inverse(), cholesky(), log_det(), matrix_dk()
    */
-  LAPLACE_HD void matrix(const double* theta, double* m) const {
+  LAPLACE_HD void matrix(const double* theta, double* m, [[maybe_unused]] double* w) const {
     const double rho = dim == 1 ? 0.0 : rho_of(theta[0]);
     for (int i = 0; i < dim; ++i)
       for (int j = 0; j <= i; ++j) m[packed_index(i, j)] = i == j ? 1.0 : rho;
@@ -104,6 +114,7 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    * where \f$s = \operatorname{expit}(\theta_0)\f$.
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return Log-determinant of \f$M(\theta)\f$.
    *
    * \par Measured accuracy
@@ -111,7 +122,7 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    *
    * \see matrix(), log_det_dk()
    */
-  LAPLACE_HD double log_det(const double* theta) const {
+  LAPLACE_HD double log_det(const double* theta, [[maybe_unused]] double* w) const {
     if (dim == 1) return 0.0;
     namespace m = detail_pdmat::m;
     const double p = dim, x = theta[0];
@@ -129,13 +140,14 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    *
    * \par Measured accuracy
    * Maximum error 0.81 ulpN (gcc) / 0.81 ulpN (CUDA); test bounds 1 to 2 ulpN.
    *
    * \see matrix(), cholesky(), log_det(), inverse_dk()
    */
-  LAPLACE_HD void inverse(const double* theta, double* m) const { inverse_entries(theta[0], 0, m); }
+  LAPLACE_HD void inverse(const double* theta, double* m, [[maybe_unused]] double* w) const { inverse_entries(theta[0], 0, m); }
 
   /**
    * \ingroup pdmat
@@ -146,13 +158,14 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    *
    * \par Measured accuracy
    * Maximum error 9.34 ulpN (\f$K=5\f$, gcc) / 9.77 ulpN (\f$K=6\f$, CUDA); test bounds 3 to 13 ulpN.
    *
    * \see matrix(), inverse(), log_det(), cholesky_dk()
    */
-  LAPLACE_HD void cholesky(const double* theta, double* l) const { cholesky_entries(theta[0], 0, l); }
+  LAPLACE_HD void cholesky(const double* theta, double* l, [[maybe_unused]] double* w) const { cholesky_entries(theta[0], 0, l); }
 
   /**
    * \ingroup pdmat
@@ -165,6 +178,7 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
    *
    * \par Measured accuracy
@@ -173,7 +187,7 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    * \see matrix(), pdmat_orders::matrix_d1()
    */
   template <int K>
-  LAPLACE_HD bool matrix_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* m) const {
+  LAPLACE_HD bool matrix_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* m, [[maybe_unused]] double* w) const {
     if (dim == 1) return false;
     const double d = dim / (dim - 1.0) * detail_pdmat::expit_d(K, theta[0]);
     for (int i = 0; i < dim; ++i)
@@ -190,6 +204,7 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return Value of the derivative, or \f$0.0\f$ if \f$p = 1\f$.
    *
    * \par Measured accuracy
@@ -198,7 +213,7 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    * \see log_det(), pdmat_orders::log_det_d1()
    */
   template <int K>
-  LAPLACE_HD double log_det_dk(const double* theta, [[maybe_unused]] const int (&idx)[K]) const {
+  LAPLACE_HD double log_det_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], [[maybe_unused]] double* w) const {
     if (dim == 1) return 0.0;
     if constexpr (K == 1) {
       const double s = detail_pdmat::expit_d(0, theta[0]), q = detail_pdmat::expit_d(0, -theta[0]);
@@ -218,6 +233,7 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
    *
    * \par Measured accuracy
@@ -226,7 +242,7 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    * \see inverse(), pdmat_orders::inverse_d1()
    */
   template <int K>
-  LAPLACE_HD bool inverse_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* m) const {
+  LAPLACE_HD bool inverse_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* m, [[maybe_unused]] double* w) const {
     if (dim == 1) return false;
     inverse_entries(theta[0], K, m);
     return true;
@@ -243,6 +259,7 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
    *
    * \par Measured accuracy
@@ -251,7 +268,7 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    * \see cholesky(), pdmat_orders::cholesky_d1()
    */
   template <int K>
-  LAPLACE_HD bool cholesky_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* l) const {
+  LAPLACE_HD bool cholesky_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* l, [[maybe_unused]] double* w) const {
     if (dim == 1) return false;
     cholesky_entries(theta[0], K, l);
     return true;

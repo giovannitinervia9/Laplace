@@ -15,15 +15,23 @@
 // packed_index(i, j) = i (i + 1)/2 + j, packed_size(p) values in all.
 //
 //   dim, n_params()                p and q
+//   scratch_size()                 doubles of caller scratch w any function needs
 //   unit_diagonal                  M has unit diagonal (a correlation matrix)
-//   closed_inverse, closed_factor  inverse() and cholesky() are available
-//   matrix(theta, m)               M
-//   log_det(theta)                 log det M
-//   inverse(theta, m)              M^-1
-//   cholesky(theta, l)             L, lower triangular with positive diagonal, M = L L^T
-//   matrix_dK(theta, idx, m)       d^K M / dtheta_idx[0] ... dtheta_idx[K-1], K = 1..6
-//   log_det_dK(theta, idx)         likewise for log det M
+//   closed_inverse                 M^-1 in closed form (else inverse() takes the
+//                                  generic route of generic_inverse_dk below)
+//   closed_factor                  cholesky() is available
+//   has_density                    theta -> M is a bijection onto its image, with
+//                                  log_jacobian(_dK) (unstructured_pdmat only)
+//   matrix(theta, m, w)            M
+//   log_det(theta, w)              log det M
+//   inverse(theta, m, w)           M^-1
+//   cholesky(theta, l, w)          L, lower triangular with positive diagonal, M = L L^T
+//   matrix_dK(theta, idx, m, w)    d^K M / dtheta_idx[0] ... dtheta_idx[K-1], K = 1..6
+//   log_det_dK(theta, idx, w)      likewise for log det M
 //   inverse_dK, cholesky_dK        likewise for M^-1 and L
+//
+// w is a caller buffer of scratch_size() doubles (0 for the pilot structures),
+// one per thread; the functions use it freely and leave nothing in it.
 //
 // idx is a sorted tuple of parameter indices, idx[0] <= ... <= idx[K-1]. The
 // matrix derivatives return false, and leave the buffer untouched, when the
@@ -102,11 +110,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 1 parameter index.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see matrix(), log_det_d1(), inverse_d1(), cholesky_d1()
    */
-  LAPLACE_HD bool matrix_d1(const double* t, const int (&i)[1], double* m) const { return s().template matrix_dk<1>(t, i, m); }
+  LAPLACE_HD bool matrix_d1(const double* t, const int (&i)[1], double* m, double* w) const { return s().template matrix_dk<1>(t, i, m, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$M(\theta)\f$ of order 2 along parameter indices \f$i_1 \le i_2\f$.
@@ -120,11 +129,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 2 parameter indices \f$i_1 \le i_2\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see matrix(), log_det_d2(), inverse_d2(), cholesky_d2()
    */
-  LAPLACE_HD bool matrix_d2(const double* t, const int (&i)[2], double* m) const { return s().template matrix_dk<2>(t, i, m); }
+  LAPLACE_HD bool matrix_d2(const double* t, const int (&i)[2], double* m, double* w) const { return s().template matrix_dk<2>(t, i, m, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$M(\theta)\f$ of order 3 along parameter indices \f$i_1 \le i_2 \le i_3\f$.
@@ -138,11 +148,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 3 parameter indices \f$i_1 \le i_2 \le i_3\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see matrix(), log_det_d3(), inverse_d3(), cholesky_d3()
    */
-  LAPLACE_HD bool matrix_d3(const double* t, const int (&i)[3], double* m) const { return s().template matrix_dk<3>(t, i, m); }
+  LAPLACE_HD bool matrix_d3(const double* t, const int (&i)[3], double* m, double* w) const { return s().template matrix_dk<3>(t, i, m, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$M(\theta)\f$ of order 4 along parameter indices \f$i_1 \le \dots \le i_4\f$.
@@ -156,11 +167,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 4 parameter indices \f$i_1 \le \dots \le i_4\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see matrix(), log_det_d4(), inverse_d4(), cholesky_d4()
    */
-  LAPLACE_HD bool matrix_d4(const double* t, const int (&i)[4], double* m) const { return s().template matrix_dk<4>(t, i, m); }
+  LAPLACE_HD bool matrix_d4(const double* t, const int (&i)[4], double* m, double* w) const { return s().template matrix_dk<4>(t, i, m, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$M(\theta)\f$ of order 5 along parameter indices \f$i_1 \le \dots \le i_5\f$.
@@ -174,11 +186,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 5 parameter indices \f$i_1 \le \dots \le i_5\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see matrix(), log_det_d5(), inverse_d5(), cholesky_d5()
    */
-  LAPLACE_HD bool matrix_d5(const double* t, const int (&i)[5], double* m) const { return s().template matrix_dk<5>(t, i, m); }
+  LAPLACE_HD bool matrix_d5(const double* t, const int (&i)[5], double* m, double* w) const { return s().template matrix_dk<5>(t, i, m, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$M(\theta)\f$ of order 6 along parameter indices \f$i_1 \le \dots \le i_6\f$.
@@ -192,11 +205,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 6 parameter indices \f$i_1 \le \dots \le i_6\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see matrix(), log_det_d6(), inverse_d6(), cholesky_d6()
    */
-  LAPLACE_HD bool matrix_d6(const double* t, const int (&i)[6], double* m) const { return s().template matrix_dk<6>(t, i, m); }
+  LAPLACE_HD bool matrix_d6(const double* t, const int (&i)[6], double* m, double* w) const { return s().template matrix_dk<6>(t, i, m, w); }
 
   /**
    * \ingroup pdmat
@@ -209,11 +223,12 @@ struct pdmat_orders {
    *
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 1 parameter index.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
    *
    * \see log_det(), matrix_d1(), inverse_d1(), cholesky_d1()
    */
-  LAPLACE_HD double log_det_d1(const double* t, const int (&i)[1]) const { return s().template log_det_dk<1>(t, i); }
+  LAPLACE_HD double log_det_d1(const double* t, const int (&i)[1], double* w) const { return s().template log_det_dk<1>(t, i, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$\log \det M(\theta)\f$ of order 2 along parameter indices \f$i_1 \le i_2\f$.
@@ -225,11 +240,12 @@ struct pdmat_orders {
    *
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 2 parameter indices \f$i_1 \le i_2\f$.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
    *
    * \see log_det(), matrix_d2(), inverse_d2(), cholesky_d2()
    */
-  LAPLACE_HD double log_det_d2(const double* t, const int (&i)[2]) const { return s().template log_det_dk<2>(t, i); }
+  LAPLACE_HD double log_det_d2(const double* t, const int (&i)[2], double* w) const { return s().template log_det_dk<2>(t, i, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$\log \det M(\theta)\f$ of order 3 along parameter indices \f$i_1 \le i_2 \le i_3\f$.
@@ -241,11 +257,12 @@ struct pdmat_orders {
    *
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 3 parameter indices \f$i_1 \le i_2 \le i_3\f$.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
    *
    * \see log_det(), matrix_d3(), inverse_d3(), cholesky_d3()
    */
-  LAPLACE_HD double log_det_d3(const double* t, const int (&i)[3]) const { return s().template log_det_dk<3>(t, i); }
+  LAPLACE_HD double log_det_d3(const double* t, const int (&i)[3], double* w) const { return s().template log_det_dk<3>(t, i, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$\log \det M(\theta)\f$ of order 4 along parameter indices \f$i_1 \le \dots \le i_4\f$.
@@ -257,11 +274,12 @@ struct pdmat_orders {
    *
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 4 parameter indices \f$i_1 \le \dots \le i_4\f$.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
    *
    * \see log_det(), matrix_d4(), inverse_d4(), cholesky_d4()
    */
-  LAPLACE_HD double log_det_d4(const double* t, const int (&i)[4]) const { return s().template log_det_dk<4>(t, i); }
+  LAPLACE_HD double log_det_d4(const double* t, const int (&i)[4], double* w) const { return s().template log_det_dk<4>(t, i, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$\log \det M(\theta)\f$ of order 5 along parameter indices \f$i_1 \le \dots \le i_5\f$.
@@ -273,11 +291,12 @@ struct pdmat_orders {
    *
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 5 parameter indices \f$i_1 \le \dots \le i_5\f$.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
    *
    * \see log_det(), matrix_d5(), inverse_d5(), cholesky_d5()
    */
-  LAPLACE_HD double log_det_d5(const double* t, const int (&i)[5]) const { return s().template log_det_dk<5>(t, i); }
+  LAPLACE_HD double log_det_d5(const double* t, const int (&i)[5], double* w) const { return s().template log_det_dk<5>(t, i, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$\log \det M(\theta)\f$ of order 6 along parameter indices \f$i_1 \le \dots \le i_6\f$.
@@ -289,11 +308,12 @@ struct pdmat_orders {
    *
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 6 parameter indices \f$i_1 \le \dots \le i_6\f$.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
    *
    * \see log_det(), matrix_d6(), inverse_d6(), cholesky_d6()
    */
-  LAPLACE_HD double log_det_d6(const double* t, const int (&i)[6]) const { return s().template log_det_dk<6>(t, i); }
+  LAPLACE_HD double log_det_d6(const double* t, const int (&i)[6], double* w) const { return s().template log_det_dk<6>(t, i, w); }
 
   /**
    * \ingroup pdmat
@@ -308,11 +328,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 1 parameter index.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see inverse(), matrix_d1(), log_det_d1(), cholesky_d1()
    */
-  LAPLACE_HD bool inverse_d1(const double* t, const int (&i)[1], double* m) const { return s().template inverse_dk<1>(t, i, m); }
+  LAPLACE_HD bool inverse_d1(const double* t, const int (&i)[1], double* m, double* w) const { return s().template inverse_dk<1>(t, i, m, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$M^{-1}(\theta)\f$ of order 2 along parameter indices \f$i_1 \le i_2\f$.
@@ -326,11 +347,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 2 parameter indices \f$i_1 \le i_2\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see inverse(), matrix_d2(), log_det_d2(), cholesky_d2()
    */
-  LAPLACE_HD bool inverse_d2(const double* t, const int (&i)[2], double* m) const { return s().template inverse_dk<2>(t, i, m); }
+  LAPLACE_HD bool inverse_d2(const double* t, const int (&i)[2], double* m, double* w) const { return s().template inverse_dk<2>(t, i, m, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$M^{-1}(\theta)\f$ of order 3 along parameter indices \f$i_1 \le i_2 \le i_3\f$.
@@ -344,11 +366,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 3 parameter indices \f$i_1 \le i_2 \le i_3\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see inverse(), matrix_d3(), log_det_d3(), cholesky_d3()
    */
-  LAPLACE_HD bool inverse_d3(const double* t, const int (&i)[3], double* m) const { return s().template inverse_dk<3>(t, i, m); }
+  LAPLACE_HD bool inverse_d3(const double* t, const int (&i)[3], double* m, double* w) const { return s().template inverse_dk<3>(t, i, m, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$M^{-1}(\theta)\f$ of order 4 along parameter indices \f$i_1 \le \dots \le i_4\f$.
@@ -362,11 +385,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 4 parameter indices \f$i_1 \le \dots \le i_4\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see inverse(), matrix_d4(), log_det_d4(), cholesky_d4()
    */
-  LAPLACE_HD bool inverse_d4(const double* t, const int (&i)[4], double* m) const { return s().template inverse_dk<4>(t, i, m); }
+  LAPLACE_HD bool inverse_d4(const double* t, const int (&i)[4], double* m, double* w) const { return s().template inverse_dk<4>(t, i, m, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$M^{-1}(\theta)\f$ of order 5 along parameter indices \f$i_1 \le \dots \le i_5\f$.
@@ -380,11 +404,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 5 parameter indices \f$i_1 \le \dots \le i_5\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see inverse(), matrix_d5(), log_det_d5(), cholesky_d5()
    */
-  LAPLACE_HD bool inverse_d5(const double* t, const int (&i)[5], double* m) const { return s().template inverse_dk<5>(t, i, m); }
+  LAPLACE_HD bool inverse_d5(const double* t, const int (&i)[5], double* m, double* w) const { return s().template inverse_dk<5>(t, i, m, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of \f$M^{-1}(\theta)\f$ of order 6 along parameter indices \f$i_1 \le \dots \le i_6\f$.
@@ -398,11 +423,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 6 parameter indices \f$i_1 \le \dots \le i_6\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see inverse(), matrix_d6(), log_det_d6(), cholesky_d6()
    */
-  LAPLACE_HD bool inverse_d6(const double* t, const int (&i)[6], double* m) const { return s().template inverse_dk<6>(t, i, m); }
+  LAPLACE_HD bool inverse_d6(const double* t, const int (&i)[6], double* m, double* w) const { return s().template inverse_dk<6>(t, i, m, w); }
 
   /**
    * \ingroup pdmat
@@ -417,11 +443,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 1 parameter index.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see cholesky(), matrix_d1(), log_det_d1(), inverse_d1()
    */
-  LAPLACE_HD bool cholesky_d1(const double* t, const int (&i)[1], double* l) const { return s().template cholesky_dk<1>(t, i, l); }
+  LAPLACE_HD bool cholesky_d1(const double* t, const int (&i)[1], double* l, double* w) const { return s().template cholesky_dk<1>(t, i, l, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order 2 along parameter indices \f$i_1 \le i_2\f$.
@@ -435,11 +462,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 2 parameter indices \f$i_1 \le i_2\f$.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see cholesky(), matrix_d2(), log_det_d2(), inverse_d2()
    */
-  LAPLACE_HD bool cholesky_d2(const double* t, const int (&i)[2], double* l) const { return s().template cholesky_dk<2>(t, i, l); }
+  LAPLACE_HD bool cholesky_d2(const double* t, const int (&i)[2], double* l, double* w) const { return s().template cholesky_dk<2>(t, i, l, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order 3 along parameter indices \f$i_1 \le i_2 \le i_3\f$.
@@ -453,11 +481,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 3 parameter indices \f$i_1 \le i_2 \le i_3\f$.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see cholesky(), matrix_d3(), log_det_d3(), inverse_d3()
    */
-  LAPLACE_HD bool cholesky_d3(const double* t, const int (&i)[3], double* l) const { return s().template cholesky_dk<3>(t, i, l); }
+  LAPLACE_HD bool cholesky_d3(const double* t, const int (&i)[3], double* l, double* w) const { return s().template cholesky_dk<3>(t, i, l, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order 4 along parameter indices \f$i_1 \le \dots \le i_4\f$.
@@ -471,11 +500,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 4 parameter indices \f$i_1 \le \dots \le i_4\f$.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see cholesky(), matrix_d4(), log_det_d4(), inverse_d4()
    */
-  LAPLACE_HD bool cholesky_d4(const double* t, const int (&i)[4], double* l) const { return s().template cholesky_dk<4>(t, i, l); }
+  LAPLACE_HD bool cholesky_d4(const double* t, const int (&i)[4], double* l, double* w) const { return s().template cholesky_dk<4>(t, i, l, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order 5 along parameter indices \f$i_1 \le \dots \le i_5\f$.
@@ -489,11 +519,12 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 5 parameter indices \f$i_1 \le \dots \le i_5\f$.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see cholesky(), matrix_d5(), log_det_d5(), inverse_d5()
    */
-  LAPLACE_HD bool cholesky_d5(const double* t, const int (&i)[5], double* l) const { return s().template cholesky_dk<5>(t, i, l); }
+  LAPLACE_HD bool cholesky_d5(const double* t, const int (&i)[5], double* l, double* w) const { return s().template cholesky_dk<5>(t, i, l, w); }
   /**
    * \ingroup pdmat
    * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order 6 along parameter indices \f$i_1 \le \dots \le i_6\f$.
@@ -507,11 +538,121 @@ struct pdmat_orders {
    * \param t Pointer to parameter vector \f$\theta\f$.
    * \param i Sorted tuple of 6 parameter indices \f$i_1 \le \dots \le i_6\f$.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if identically zero for that tuple.
    *
    * \see cholesky(), matrix_d6(), log_det_d6(), inverse_d6()
    */
-  LAPLACE_HD bool cholesky_d6(const double* t, const int (&i)[6], double* l) const { return s().template cholesky_dk<6>(t, i, l); }
+  LAPLACE_HD bool cholesky_d6(const double* t, const int (&i)[6], double* l, double* w) const { return s().template cholesky_dk<6>(t, i, l, w); }
+
+  /**
+   * \ingroup pdmat
+   * \brief Partial derivative of the log-Jacobian of \f$\theta \mapsto M(\theta)\f$ of order 1 along parameter index \f$i_1\f$.
+   *
+   * Computes the first-order partial derivative
+   * \f[
+   * \frac{\partial \log \lvert\det J(\theta)\rvert}{\partial\theta_{i_1}}
+   * \f]
+   * of the log-Jacobian in reference coordinates (structures with \c has_density only).
+   *
+   * \param t Pointer to parameter vector \f$\theta\f$.
+   * \param i Sorted tuple of 1 parameter index.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
+   * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
+   *
+   * \see matrix_d1(), log_det_d1(), inverse_d1(), cholesky_d1()
+   */
+  LAPLACE_HD double log_jacobian_d1(const double* t, const int (&i)[1], double* w) const { return s().template log_jacobian_dk<1>(t, i, w); }
+  /**
+   * \ingroup pdmat
+   * \brief Partial derivative of the log-Jacobian of \f$\theta \mapsto M(\theta)\f$ of order 2 along parameter indices \f$i_1 \le i_2\f$.
+   *
+   * Computes the second-order partial derivative
+   * \f[
+   * \frac{\partial^2 \log \lvert\det J(\theta)\rvert}{\partial\theta_{i_1}\partial\theta_{i_2}}
+   * \f]
+   * of the log-Jacobian in reference coordinates (structures with \c has_density only).
+   *
+   * \param t Pointer to parameter vector \f$\theta\f$.
+   * \param i Sorted tuple of 2 parameter indices \f$i_1 \le i_2\f$.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
+   * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
+   *
+   * \see matrix_d2(), log_det_d2(), inverse_d2(), cholesky_d2()
+   */
+  LAPLACE_HD double log_jacobian_d2(const double* t, const int (&i)[2], double* w) const { return s().template log_jacobian_dk<2>(t, i, w); }
+  /**
+   * \ingroup pdmat
+   * \brief Partial derivative of the log-Jacobian of \f$\theta \mapsto M(\theta)\f$ of order 3 along parameter indices \f$i_1 \le i_2 \le i_3\f$.
+   *
+   * Computes the third-order partial derivative
+   * \f[
+   * \frac{\partial^3 \log \lvert\det J(\theta)\rvert}{\partial\theta_{i_1}\partial\theta_{i_2}\partial\theta_{i_3}}
+   * \f]
+   * of the log-Jacobian in reference coordinates (structures with \c has_density only).
+   *
+   * \param t Pointer to parameter vector \f$\theta\f$.
+   * \param i Sorted tuple of 3 parameter indices \f$i_1 \le i_2 \le i_3\f$.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
+   * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
+   *
+   * \see matrix_d3(), log_det_d3(), inverse_d3(), cholesky_d3()
+   */
+  LAPLACE_HD double log_jacobian_d3(const double* t, const int (&i)[3], double* w) const { return s().template log_jacobian_dk<3>(t, i, w); }
+  /**
+   * \ingroup pdmat
+   * \brief Partial derivative of the log-Jacobian of \f$\theta \mapsto M(\theta)\f$ of order 4 along parameter indices \f$i_1 \le \dots \le i_4\f$.
+   *
+   * Computes the fourth-order partial derivative
+   * \f[
+   * \frac{\partial^4 \log \lvert\det J(\theta)\rvert}{\partial\theta_{i_1}\cdots\partial\theta_{i_4}}
+   * \f]
+   * of the log-Jacobian in reference coordinates (structures with \c has_density only).
+   *
+   * \param t Pointer to parameter vector \f$\theta\f$.
+   * \param i Sorted tuple of 4 parameter indices \f$i_1 \le \dots \le i_4\f$.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
+   * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
+   *
+   * \see matrix_d4(), log_det_d4(), inverse_d4(), cholesky_d4()
+   */
+  LAPLACE_HD double log_jacobian_d4(const double* t, const int (&i)[4], double* w) const { return s().template log_jacobian_dk<4>(t, i, w); }
+  /**
+   * \ingroup pdmat
+   * \brief Partial derivative of the log-Jacobian of \f$\theta \mapsto M(\theta)\f$ of order 5 along parameter indices \f$i_1 \le \dots \le i_5\f$.
+   *
+   * Computes the fifth-order partial derivative
+   * \f[
+   * \frac{\partial^5 \log \lvert\det J(\theta)\rvert}{\partial\theta_{i_1}\cdots\partial\theta_{i_5}}
+   * \f]
+   * of the log-Jacobian in reference coordinates (structures with \c has_density only).
+   *
+   * \param t Pointer to parameter vector \f$\theta\f$.
+   * \param i Sorted tuple of 5 parameter indices \f$i_1 \le \dots \le i_5\f$.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
+   * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
+   *
+   * \see matrix_d5(), log_det_d5(), inverse_d5(), cholesky_d5()
+   */
+  LAPLACE_HD double log_jacobian_d5(const double* t, const int (&i)[5], double* w) const { return s().template log_jacobian_dk<5>(t, i, w); }
+  /**
+   * \ingroup pdmat
+   * \brief Partial derivative of the log-Jacobian of \f$\theta \mapsto M(\theta)\f$ of order 6 along parameter indices \f$i_1 \le \dots \le i_6\f$.
+   *
+   * Computes the sixth-order partial derivative
+   * \f[
+   * \frac{\partial^6 \log \lvert\det J(\theta)\rvert}{\partial\theta_{i_1}\cdots\partial\theta_{i_6}}
+   * \f]
+   * of the log-Jacobian in reference coordinates (structures with \c has_density only).
+   *
+   * \param t Pointer to parameter vector \f$\theta\f$.
+   * \param i Sorted tuple of 6 parameter indices \f$i_1 \le \dots \le i_6\f$.
+   * \param w Caller scratch buffer of at least \c scratch_size() doubles.
+   * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
+   *
+   * \see matrix_d6(), log_det_d6(), inverse_d6(), cholesky_d6()
+   */
+  LAPLACE_HD double log_jacobian_d6(const double* t, const int (&i)[6], double* w) const { return s().template log_jacobian_dk<6>(t, i, w); }
 
  private:
   LAPLACE_HD const S& s() const { return static_cast<const S&>(*this); }
@@ -522,24 +663,27 @@ struct pdmat_orders {
  * \brief Concept defining what every structured positive definite matrix supplies.
  *
  * A type \c S models `pdmat_structure` if it provides runtime dimension `dim`,
- * parameter count `n_params()`, compile-time descriptors `unit_diagonal`,
- * `closed_inverse`, and `closed_factor`, matrix evaluation `matrix()`,
+ * parameter count `n_params()`, scratch size `scratch_size()`, compile-time
+ * descriptors `unit_diagonal`, `closed_inverse`, `closed_factor` and
+ * `has_density`, matrix evaluation `matrix()`,
  * log-determinant `log_det()`, and the named derivative methods
  * `matrix_d1()`, `matrix_d6()`, `log_det_d1()`, and `log_det_d6()`.
  */
 template <class S>
-concept pdmat_structure = requires(const S s, const double* t, double* m, const int (&i1)[1], const int (&i6)[6]) {
+concept pdmat_structure = requires(const S s, const double* t, double* m, double* w, const int (&i1)[1], const int (&i6)[6]) {
   { s.dim } -> std::convertible_to<int>;
   { s.n_params() } -> std::convertible_to<int>;
+  { s.scratch_size() } -> std::convertible_to<int>;
   { S::unit_diagonal } -> std::convertible_to<bool>;
   { S::closed_inverse } -> std::convertible_to<bool>;
   { S::closed_factor } -> std::convertible_to<bool>;
-  s.matrix(t, m);
-  { s.log_det(t) } -> std::same_as<double>;
-  { s.matrix_d1(t, i1, m) } -> std::same_as<bool>;
-  { s.matrix_d6(t, i6, m) } -> std::same_as<bool>;
-  { s.log_det_d1(t, i1) } -> std::same_as<double>;
-  { s.log_det_d6(t, i6) } -> std::same_as<double>;
+  { S::has_density } -> std::convertible_to<bool>;
+  s.matrix(t, m, w);
+  { s.log_det(t, w) } -> std::same_as<double>;
+  { s.matrix_d1(t, i1, m, w) } -> std::same_as<bool>;
+  { s.matrix_d6(t, i6, m, w) } -> std::same_as<bool>;
+  { s.log_det_d1(t, i1, w) } -> std::same_as<double>;
+  { s.log_det_d6(t, i6, w) } -> std::same_as<double>;
 };
 
 namespace detail_pdmat {
@@ -650,6 +794,138 @@ LAPLACE_HD double exp_chain(int n, double eg, const double* g) {
   double s = 0.0;
   for (int k = n; k >= 1; --k) s += m::bell_partial(n, k, g);
   return eg * s;
+}
+
+// ------------------------------------------------ the generic route to M^-1
+// For a structure without M^-1 in closed form but with its Cholesky factor L:
+// M^-1 = Y^T Y with Y = L^-1, lower triangular. Along a tuple of K positions,
+// with Y[S] the derivative of Y along the positions in the mask S and L[T]
+// that of L, differentiating L Y = I over the subsets gives
+//   Y[S] = -Y[0] sum_(T nonempty subset of S) L[T] Y[S \ T],
+// and Leibniz's rule gives the derivative of M^-1 along the whole tuple F,
+//   X[F] = sum_(T subset of F) Y[T]^T Y[F \ T];
+// about 3^K p^3 / 6 operations for the Y and 2^K p^3 / 3 for X, plus one call
+// of cholesky_dK per sub-tuple. The recursion runs on L rather than on M
+// (X[S] = -X[0] sum M[T] X[S \ T]) because its cancellation grows with the
+// condition number of L, the square root of that of M: at the test's spread
+// points (p = 4, kappa(M) = 8.1e4 for log_cholesky, 9.7e3 for partial_corr)
+// the route through M lost up to 1.4e8 and 2.3e6 ulpN, this one 28 and 60
+// (gcc, 2026-11-13). The sub-tuples of a sorted tuple are sorted. A derivative is zero by
+// structure when every product has a factor that is (cholesky_dK returned
+// false), and the function then returns false with out untouched.
+constexpr int generic_masks = 64;  // 2^6 sub-tuples at order 6
+
+// doubles of scratch, before the structure's own scratch (which follows)
+LAPLACE_HD constexpr int generic_inverse_scratch(int p) {
+  return generic_masks * p * p + generic_masks * packed_size(p) + p * p;
+}
+
+// d^k L along the k indices sub[0..k-1], k = 1..6, with k known at run time
+template <int K, class S>
+LAPLACE_HD bool cholesky_dk_of(const S& s, const double* t, const int* sub, double* l, double* w) {
+  int idx[K];
+  for (int q = 0; q < K; ++q) idx[q] = sub[q];
+  return s.template cholesky_dk<K>(t, idx, l, w);
+}
+template <class S>
+LAPLACE_HD bool cholesky_dk_runtime(const S& s, int k, const double* t, const int* sub, double* l, double* w) {
+  switch (k) {
+    case 1: return cholesky_dk_of<1>(s, t, sub, l, w);
+    case 2: return cholesky_dk_of<2>(s, t, sub, l, w);
+    case 3: return cholesky_dk_of<3>(s, t, sub, l, w);
+    case 4: return cholesky_dk_of<4>(s, t, sub, l, w);
+    case 5: return cholesky_dk_of<5>(s, t, sub, l, w);
+    default: return cholesky_dk_of<6>(s, t, sub, l, w);
+  }
+}
+
+// Y = L^-1 (full storage, lower part, zeros above) from the packed L, by
+// forward substitution
+LAPLACE_HD void lower_inverse(int p, const double* l, double* Y) {
+  for (int j = 0; j < p; ++j) {
+    for (int i = 0; i < j; ++i) Y[i * p + j] = 0.0;
+    Y[j * p + j] = 1.0 / l[packed_index(j, j)];
+    for (int i = j + 1; i < p; ++i) {
+      double r = 0.0;
+      for (int k = j; k < i; ++k) r += l[packed_index(i, k)] * Y[k * p + j];
+      Y[i * p + j] = -r / l[packed_index(i, i)];
+    }
+  }
+}
+
+// out (packed) += sum_k A_ki B_kj over the lower triangles of A and B
+LAPLACE_HD void add_gram(int p, const double* A, const double* B, double* out) {
+  for (int i = 0; i < p; ++i)
+    for (int j = 0; j <= i; ++j) {
+      double r = 0.0;
+      for (int k = i; k < p; ++k) r += A[k * p + i] * B[k * p + j];
+      out[packed_index(i, j)] += r;
+    }
+}
+
+template <class S>
+LAPLACE_HD void generic_inverse(const S& s, const double* t, double* m, double* w) {
+  const int p = s.dim, np = packed_size(p);
+  double* Y = w;
+  double* l = w + p * p;
+  s.cholesky(t, l, w + generic_inverse_scratch(p));
+  lower_inverse(p, l, Y);
+  for (int k = 0; k < np; ++k) m[k] = 0.0;
+  add_gram(p, Y, Y, m);
+}
+
+// ponytail: a tuple with repeated indices recomputes equal sub-tuples (up to
+// 2^K calls where prod (m_v + 1) would do); merge them by multiset if the cost
+// matters.
+template <int K, class S>
+LAPLACE_HD bool generic_inverse_dk(const S& s, const double* t, const int (&idx)[K], double* out, double* w) {
+  constexpr int NM = 1 << K;
+  const int p = s.dim, pp = p * p, np = packed_size(p);
+  double* Y = w;                         // Y[Q] for each mask Q, NM full p x p matrices
+  double* LT = Y + generic_masks * pp;   // L[T], NM packed matrices
+  double* acc = LT + generic_masks * np;  // the sum of products
+  double* ws = w + generic_inverse_scratch(p);
+  bool lz[NM], yz[NM];  // nonzero by structure
+  s.cholesky(t, LT, ws);
+  for (int T = 1; T < NM; ++T) {
+    int sub[K], k = 0;
+    for (int q = 0; q < K; ++q)
+      if (T & (1 << q)) sub[k++] = idx[q];
+    lz[T] = cholesky_dk_runtime(s, k, t, sub, LT + T * np, ws);
+  }
+  lower_inverse(p, LT, Y);
+  yz[0] = true;
+  for (int Q = 1; Q < NM; ++Q) {
+    yz[Q] = false;
+    for (int e = 0; e < pp; ++e) acc[e] = 0.0;
+    for (int T = Q; T != 0; T = (T - 1) & Q) {
+      const int R = Q ^ T;
+      if (!lz[T] || !yz[R]) continue;
+      yz[Q] = true;
+      const double* L = LT + T * np;
+      const double* YR = Y + R * pp;
+      for (int i = 0; i < p; ++i)
+        for (int k = 0; k <= i; ++k) {
+          const double a = L[packed_index(i, k)];
+          for (int j = 0; j <= k; ++j) acc[i * p + j] += a * YR[k * p + j];
+        }
+    }
+    if (!yz[Q]) continue;
+    double* YQ = Y + Q * pp;
+    for (int i = 0; i < p; ++i)
+      for (int j = 0; j < p; ++j) {
+        double r = 0.0;
+        for (int k = j; k <= i; ++k) r += Y[i * p + k] * acc[k * p + j];
+        YQ[i * p + j] = j <= i ? -r : 0.0;
+      }
+  }
+  bool nz = false;
+  for (int T = 0; T < NM; ++T) nz = nz || (yz[T] && yz[(NM - 1) ^ T]);
+  if (!nz) return false;
+  for (int k = 0; k < np; ++k) out[k] = 0.0;
+  for (int T = 0; T < NM; ++T)
+    if (yz[T] && yz[(NM - 1) ^ T]) add_gram(p, Y + T * pp, Y + ((NM - 1) ^ T) * pp, out);
+  return true;
 }
 
 }  // namespace detail_pdmat

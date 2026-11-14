@@ -10,10 +10,12 @@ A structured matrix maps \f$q\f$ real, unconstrained parameters \f$\theta = (\th
 
 The dimension \f$p\f$ is stored in the runtime field `dim`, and the parameter count \f$q\f$ is returned by `n_params()`. Each structure is a lightweight struct designed to be copied by value into Kokkos parallel kernels.
 
-Three structures are implemented:
+Five structures are implemented:
 - \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": diagonal matrix with \f$p\f$ unconstrained parameters \f$\theta_i = \log \sigma_i\f$ such that \f$M_{ii} = \sigma_i^2 = e^{2\theta_i}\f$.
 - \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": equicorrelation matrix with 1 unconstrained parameter mapped to correlation \f$\rho \in (-1/(p - 1), 1)\f$.
 - \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": first-order autoregressive correlation matrix with 1 unconstrained parameter mapped to correlation \f$\rho = \tanh\theta \in (-1, 1)\f$.
+- \ref laplace::pdmat::unstructured_pdmat "unstructured_pdmat": unstructured positive definite matrix or correlation matrix parameterized by a coupled bijector \c B (\ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector", \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector", or \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector").
+- \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat": unstructured correlation matrix using partial correlations (\c unstructured_pdmat with \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector").
 
 ## Storage layout and indexing
 
@@ -30,21 +32,24 @@ All indices are 0-based.
 ## Interface and concepts
 
 Each structure type provides:
-- **Matrix value.** Evaluated by `matrix(theta, m)`, writing \f$M(\theta)\f$ to packed buffer \f$m\f$.
-- **Log-determinant.** Evaluated by `log_det(theta)`, returning \f$\log \det M(\theta)\f$.
-- **Inverse.** Evaluated by `inverse(theta, m)`, writing \f$M^{-1}(\theta)\f$ to packed buffer \f$m\f$.
-- **Cholesky factor.** Evaluated by `cholesky(theta, l)`, writing the lower-triangular Cholesky factor \f$L(\theta)\f$ with strictly positive diagonal entries, satisfying \f$M = L L^\top\f$, to packed buffer \f$l\f$.
+- **Matrix value.** Evaluated by `matrix(theta, m, w)`, writing \f$M(\theta)\f$ to packed buffer \f$m\f$.
+- **Log-determinant.** Evaluated by `log_det(theta, w)`, returning \f$\log \det M(\theta)\f$.
+- **Inverse.** Evaluated by `inverse(theta, m, w)`, writing \f$M^{-1}(\theta)\f$ to packed buffer \f$m\f$. Every structure implements `inverse()`; `closed_inverse` indicates whether it is evaluated in exact closed form or via the generic route from the Cholesky factor.
+- **Cholesky factor.** Evaluated by `cholesky(theta, l, w)`, writing the lower-triangular Cholesky factor \f$L(\theta)\f$ with strictly positive diagonal entries, satisfying \f$M = L L^\top\f$, to packed buffer \f$l\f$.
+- **Log-Jacobian.** Evaluated by `log_jacobian(theta, w)`, returning \f$\log\lvert\det J\rvert\f$ of the transformation \f$\theta \mapsto M\f$ in reference coordinates (structures with `has_density` only).
 - **Derivatives along sorted tuples.** For order \f$K \in \{1, \dots, 6\}\f$ and a sorted tuple of parameter indices \f$i_1 \le \dots \le i_K\f$ with \f$i_k \in \{0, \dots, q - 1\}\f$, the partial derivative is
   \f[
   \frac{\partial^K M}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}}
   \f]
-  and likewise for \f$\log \det M\f$, \f$M^{-1}\f$, and \f$L\f$.
+  and likewise for \f$\log \det M\f$, \f$M^{-1}\f$, \f$L\f$, and \f$\log\lvert\det J\rvert\f$.
   The matrix derivative functions return `bool`: they return `true` when the derivative is computed into the caller buffer, and `false` when the derivative is structurally zero for that index tuple by the structure (leaving the buffer untouched).
-  The log-determinant derivative functions return `double`, returning \f$0.0\f$ when identically zero.
+  The log-determinant and log-Jacobian derivative functions return `double`, returning \f$0.0\f$ when identically zero.
+- **Scratch size.** Evaluated by `scratch_size()`, returning the number of doubles of caller-provided scratch buffer `w` required by functions of the structure (0 for diagonal, compound symmetry, and AR(1)).
 - **Descriptors.** Compile-time boolean constants:
   - `unit_diagonal`: indicates whether \f$M_{ii} = 1\f$ for all \f$i\f$.
-  - `closed_inverse`: indicates whether an exact closed-form inverse is implemented.
-  - `closed_factor`: indicates whether an exact closed-form Cholesky factor is implemented.
+  - `closed_inverse`: indicates whether an exact closed-form inverse is implemented (true for diagonal, compound symmetry, AR(1), and unstructured with `matrix_log_bijector`; false when evaluated via the generic route from the Cholesky factor).
+  - `closed_factor`: indicates whether an exact closed-form Cholesky factor is implemented (available for all except `matrix_log_bijector`).
+  - `has_density`: indicates whether \f$\theta \mapsto M\f$ is a bijection onto its image and supplies `log_jacobian()` and its derivatives (true for `unstructured_pdmat`, false for the three pilot structures).
 - **Concept.** The full interface is formalized in the C++20 concept \ref laplace::pdmat::pdmat_structure "pdmat_structure".
 
 The named derivative functions are exposed through the CRTP base template \ref laplace::pdmat::pdmat_orders "pdmat_orders":
@@ -52,6 +57,7 @@ The named derivative functions are exposed through the CRTP base template \ref l
 - \ref laplace::pdmat::pdmat_orders::log_det_d1 "log_det_d1()" through \ref laplace::pdmat::pdmat_orders::log_det_d6 "log_det_d6()"
 - \ref laplace::pdmat::pdmat_orders::inverse_d1 "inverse_d1()" through \ref laplace::pdmat::pdmat_orders::inverse_d6 "inverse_d6()"
 - \ref laplace::pdmat::pdmat_orders::cholesky_d1 "cholesky_d1()" through \ref laplace::pdmat::pdmat_orders::cholesky_d6 "cholesky_d6()"
+- \ref laplace::pdmat::pdmat_orders::log_jacobian_d1 "log_jacobian_d1()" through \ref laplace::pdmat::pdmat_orders::log_jacobian_d6 "log_jacobian_d6()"
 
 ## Parameter constraints and formulation of derivatives
 
@@ -168,6 +174,87 @@ For \f$p \ge 2\f$:
   \f]
   with integer coefficients computed by the recurrence \f$c'_{n+1} \mathrel{+}= (k + K - 2n) c_n\f$ and \f$c'_n \mathrel{-}= (2n + h) c_n\f$, initialized at \f$c_0 = 1\f$. Every term preserves a factor \f$S\f$, avoiding cancellation as \f$T \to \pm 1\f$.
 
+## Unstructured matrices
+
+The class template \ref laplace::pdmat::unstructured_pdmat "unstructured_pdmat\<B\>" maps the free parameter vector of a coupled bijector \c B (\ref bijector_coupled) to a matrix:
+\f$\theta = u\f$, with the bijector's packing, and \f$M(\theta) = h(\theta)\f$, the bijector's inverse map.
+The template argument \c B must be one of:
+- \ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector": \f$q = p(p + 1)/2\f$, parameterizing any symmetric positive definite \f$M = L L^\top\f$ with \f$L_{ii} = e^{\theta_{ii}}\f$ and \f$L_{ij} = \theta_{ij}\f$ (\f$i > j\f$).
+- \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector": \f$q = p(p + 1)/2\f$, parameterizing any symmetric positive definite \f$M = \exp(S)\f$, where \f$S\f$ is the symmetric matrix with \f$S_{ij} = S_{ji} = \theta_{ij}\f$.
+- \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector": \f$q = p(p - 1)/2\f$, parameterizing any correlation matrix (unit diagonal \f$M_{ii} = 1\f$). The alias \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat" names this structure.
+
+A static assertion rejects any other type for \c B.
+The bijector maps, their coordinate orderings, and their accuracy are documented on the coupled bijectors page (\ref bijector_coupled).
+The matrix \f$M\f$, the Cholesky factor \f$L\f$, and the log-Jacobian are identical bit for bit to the bijector's inverse functions; their accuracy is that of the bijector.
+
+- **Descriptors.**
+  - `unit_diagonal` is \c true only for `partial_corr_bijector` (\ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat").
+  - `closed_inverse` is \c true only for `matrix_log_bijector`.
+  - `closed_factor` is \c false only for `matrix_log_bijector`, which has no `cholesky()` and no `cholesky_dk()` member functions (they do not compile for it).
+  - `has_density` is \c true for all three bijectors.
+- **Log-determinant.** Evaluated in closed form:
+  - For log-Cholesky:
+    \f[
+    \log \det M = 2 \sum_{i=0}^{p-1} \theta_{ii}
+    \f]
+    Its first derivative is 2 along a diagonal coordinate \f$\theta_{ii}\f$, and 0 along off-diagonal coordinates; derivatives of order \f$K \ge 2\f$ are identically 0.
+  - For matrix logarithm:
+    \f[
+    \log \det M = \operatorname{tr} S = \sum_{i=0}^{p-1} \theta_{ii}
+    \f]
+    Its first derivative is 1 along a diagonal coordinate \f$\theta_{ii}\f$, and 0 along off-diagonal coordinates; derivatives of order \f$K \ge 2\f$ are identically 0.
+  - For partial correlation:
+    \f[
+    \log \det M = 2 \sum_{a=0}^{p-1} \log L_{aa} = -2 \sum_{a > b} \log \cosh \theta_{ab}
+    \f]
+    For order \f$K \ge 1\f$, the partial derivative along a sorted tuple whose indices are all equal to the single coordinate \f$(a, b)\f$ is:
+    \f[
+    \frac{\partial^K \log \det M}{\partial\theta_{ab}^K} = -2 \tanh^{(K-1)}(\theta_{ab})
+    \f]
+    and is 0 on any mixed tuple with distinct coordinates.
+- **Matrix inverse.**
+  - For matrix logarithm: evaluated in closed form as \f$M^{-1} = \exp(-S)\f$, with derivatives of order \f$K\f$:
+    \f[
+    \frac{\partial^K M^{-1}}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}} = (-1)^K \frac{\partial^K \exp(-S)}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}}
+    \f]
+    computed from the bijector's inverse derivative evaluated at \f$-\theta\f$.
+  - For log-Cholesky and partial correlation: evaluated by a generic route from the Cholesky factor \f$L\f$. The triangular inverse \f$Y = L^{-1}\f$ is obtained by forward substitution. For a sorted tuple of \f$K\f$ positions, let \f$X[S]\f$ denote the partial derivative of \f$X\f$ along the positions in the subset \f$S\f$, with \f$X[\emptyset] = X\f$. Differentiating \f$L Y = I\f$ over subsets gives the recurrence:
+    \f[
+    Y[S] = -Y[\emptyset] \sum_{\emptyset \ne T \subseteq S} L[T]\,Y[S \setminus T]
+    \f]
+    and Leibniz's rule gives the derivative of \f$M^{-1} = Y^\top Y\f$:
+    \f[
+    M^{-1}[F] = \sum_{T \subseteq F} Y[T]^\top Y[F \setminus T]
+    \f]
+    The recurrence runs on \f$L\f$ rather than directly on \f$M\f$ because cancellation in the recursion grows with the condition number of the factor, \f$\kappa(L) = \sqrt{\kappa(M)}\f$. At the ill-conditioned spread test points (\f$p = 4\f$, condition number \f$\kappa(M) = 8.1 \times 10^4\f$ for log-Cholesky, \f$9.7 \times 10^3\f$ for partial correlation), the route through \f$M\f$ lost up to \f$1.4 \times 10^8\f$ and \f$2.3 \times 10^6\f$ ulpN, while this route on \f$L\f$ lost only 28 and 60 ulpN (gcc).
+    The operation count is approximately \f$3^K p^3/6\f$ operations for \f$Y\f$ plus \f$2^K p^3/3\f$ operations for \f$M^{-1}\f$, and one call of `cholesky_dk()` per sub-tuple. A derivative is structurally zero when every product has a structurally zero factor.
+- **Log-Jacobian.** `log_jacobian(theta, w)` is \f$\log\lvert\det J\rvert\f$ of \f$\theta \mapsto M\f$, the bijector's inverse log-Jacobian, in the bijector's reference coordinates (the lower triangle with the diagonal for log-Cholesky and matrix logarithm, the strict lower triangle for partial correlation). The member functions `log_jacobian_d1()` through `log_jacobian_d6()` evaluate its derivatives (returning \f$0.0\f$ when identically zero). The formulas and accuracy are described on the page \ref bijector_coupled. Compile-time descriptor `has_density` is \c true for these structures (\c false for diagonal, compound symmetry, and AR(1)).
+- **Scratch argument.** Every function of the structured positive definite matrices takes as its last argument `double* w`, pointing to a buffer of at least `scratch_size()` doubles provided by the caller, one buffer per thread, which the function uses freely and leaves in an unspecified state.
+  For diagonal, compound symmetry, and AR(1), `scratch_size()` is 0 (and `nullptr` may be passed).
+  For unstructured structures, `scratch_size()` is \f$64p^2 + 64p(p + 1)/2 + p^2 + q\f$ doubles plus the bijector's `scratch_size()` (about 25000 doubles for matrix logarithm at \f$p = 4\f$). In Kokkos parallel kernels, the scratch buffer is allocated as a 2D View with layout `Kokkos::LayoutRight`, providing one contiguous row per work item.
+- **Accuracy of unstructured matrices.** Reference values were computed from the mathematical definition of each map in mpmath at 640 bits (`tools/reference/pdmat_unstructured.py`, 11012 rows). Points comprise \f$p \in \{1, 2, 3, 4\}\f$ (\f$p \in \{2, 3, 4\}\f$ for partial correlation), a random parameter vector \f$u\f$ (entries sampled from \f$\mathcal{N}(0, 0.5^2)\f$), and an ill-conditioned spread vector \f$u\f$ (diagonal \f$\pm 2\f$ and off-diagonal 0.7 for log-Cholesky and matrix logarithm; \f$u_{ab} = \pm 1.5\f$ for partial correlation; condition number \f$\kappa(M)\f$ at \f$p = 4\f$: \f$8.1 \times 10^4\f$ for log-Cholesky, 344 for matrix logarithm, \f$9.7 \times 10^3\f$ for partial correlation).
+  Error is measured in ulpN (defined under "Measured accuracy" below) for \f$M^{-1}\f$ and relative ulp with floor \f$\max(|\text{ref}|, 1)\f$ for \f$\log \det M\f$. A derivative of \f$M^{-1}\f$ that vanishes at a point (all reference values below \f$10^{-25}\f$) is measured against the largest entry of \f$M^{-1}\f$ there.
+  Maximum error over orders 0 to 6, gcc/OpenMP / CUDA (RTX 4070 SUPER):
+
+| Bijector | \f$M^{-1}\f$ | \f$\log \det M\f$ |
+|---|---|---|
+| log-Cholesky (`log_cholesky_bijector`) | 28.2 ulpN (\f$K=4\f$) / 23.9 ulpN (\f$K=4\f$) | 0.28 ulp (\f$K=0\f$) / 0.28 ulp (\f$K=0\f$) |
+| Matrix logarithm (`matrix_log_bijector`) | 24.2 ulpN (\f$K=1\f$) / 21.7 ulpN (\f$K=1\f$) | 0.06 ulp (\f$K=0\f$) / 0.06 ulp (\f$K=0\f$) |
+| Partial correlation (`partial_corr_bijector`) | 59.7 ulpN (\f$K=6\f$) / 52.2 ulpN (\f$K=6\f$) | 28.4 ulp (\f$K=6\f$) / 7.38 ulp (\f$K=6\f$) |
+
+  The log-determinant derivatives of log-Cholesky and matrix logarithm are exact (0 ulp). For partial correlation, the gcc maximum of 28.4 ulp occurs at order 6 at \f$-2\tanh^{(5)}(0.444)\f$ near a zero of \f$\tanh^{(5)}\f$ (7.38 ulp on CUDA).
+  Test bounds in automated regression tests (`tests/pdmat/test_unstructured.cpp`) are set to 1.5 times the larger of the measured errors on gcc and CUDA, rounded up.
+- **Timings of unstructured matrices.** Timings measured in `benchmarks/pdmat_unstructured.cpp` with parameter coordinates \f$u_k = 0.1 x + 0.05 k\f$ and \f$x\f$ sampled uniformly from \f$[-3, 3]\f$, on one gcc thread, in nanoseconds per call, for \f$M^{-1}\f$ at order 0, order 6 along a pure tuple \f$(0, \dots, 0)\f$, order 6 along six distinct coordinates, and \f$\log \det M\f$ at order 0:
+
+| Bijector and dimension | \f$M^{-1}\f$ (\f$K=0\f$) | \f$M^{-1}\f$ (\f$K=6\f$, pure) | \f$M^{-1}\f$ (\f$K=6\f$, distinct) | \f$\log \det M\f$ (\f$K=0\f$) |
+|---|---|---|---|---|
+| log-Cholesky, \f$p = 3\f$ | 46 ns | 16100 ns | 6130 ns | 2.3 ns |
+| log-Cholesky, \f$p = 4\f$ | 105 ns | 26582 ns | 9982 ns | 2.5 ns |
+| Partial correlation, \f$p = 3\f$ | 104 ns | 18677 ns | — | 83 ns |
+| Partial correlation, \f$p = 4\f$ | 185 ns | 29347 ns | 13710 ns | 171 ns |
+| Matrix logarithm, \f$p = 3\f$ | 474 ns | 9493 ns | 169617 ns | 4.6 ns |
+| Matrix logarithm, \f$p = 4\f$ | 1123 ns | 11915 ns | 296256 ns | 3.0 ns |
+
 ## Measured accuracy
 
 The general method is on the page \ref accuracy "How accuracy is measured"; what is specific here: the reference script `tools/reference/pdmat_pilot.py` builds each matrix from its definition in mpmath at 640 bits (inverse, Cholesky factor and determinant by mpmath's own routines), and takes the derivatives by central differences with steps \f$2^{-60}\f$ and \f$2^{-70}\f$, which agree to \f$1.6 \times 10^{-35}\f$ relative. There are 16569 reference values:
@@ -212,16 +299,27 @@ A structure is constructed and evaluated inside a kernel; here \f$p = 4\f$, one 
 
 ```cpp
 constexpr int p = 4;
+const laplace::pdmat::unstructured_corr_pdmat sc(p);
+Kokkos::View<double**, Kokkos::LayoutRight> scratch("scratch", theta.extent(0), sc.scratch_size());
+
 Kokkos::parallel_for(
     "eval_pdmat", theta.extent(0), KOKKOS_LAMBDA(int i) {
+      // ar1_pdmat needs no scratch: scratch_size() is 0, nullptr can be passed
       const laplace::pdmat::ar1_pdmat s(p);
       const double th[1] = {theta(i)};
       double m[laplace::pdmat::packed_size(p)], dm[laplace::pdmat::packed_size(p)];
-      s.matrix(th, m);
+      s.matrix(th, m, nullptr);
       const int idx[1] = {0};
-      if (s.matrix_d1(th, idx, dm)) {
+      if (s.matrix_d1(th, idx, dm, nullptr)) {
         // dm holds dM/dtheta in packed storage
       }
+
+      // unstructured_corr_pdmat uses caller scratch provided in a View row
+      const laplace::pdmat::unstructured_corr_pdmat sc_kernel(p);
+      double* w = &scratch(i, 0);
+      double mc[laplace::pdmat::packed_size(p)];
+      const double u[6] = {0.1, 0.2, -0.1, 0.05, -0.2, 0.15};
+      sc_kernel.matrix(u, mc, w);
     });
 ```
 
@@ -230,6 +328,8 @@ Kokkos::parallel_for(
 - \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": Diagonal positive definite matrix structure.
 - \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": Compound symmetry (equicorrelation) positive definite matrix structure.
 - \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": First-order autoregressive AR(1) positive definite correlation matrix structure.
+- \ref laplace::pdmat::unstructured_pdmat "unstructured_pdmat": Unstructured positive definite matrix structure parameterized by a coupled bijector.
+- \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat": Unstructured correlation matrix structure parameterized by partial correlations.
 - \ref laplace::pdmat::pdmat_orders "pdmat_orders": CRTP base class template providing named derivative member functions.
 - \ref laplace::pdmat::pdmat_structure "pdmat_structure": Concept defining requirements for structured positive definite matrices.
 - \ref laplace::pdmat::packed_index "packed_index()": Row-major lower-triangular packed storage index.

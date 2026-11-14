@@ -41,6 +41,8 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
   static constexpr bool closed_inverse = true;
   /// \brief Compile-time descriptor: \c true, exact closed-form Cholesky factor is implemented.
   static constexpr bool closed_factor = true;
+  /// \brief Compile-time descriptor: \c false, the map \f$\theta \mapsto M\f$ has no density on the matrices.
+  static constexpr bool has_density = false;
 
   /**
    * \ingroup pdmat
@@ -63,19 +65,27 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
 
   /**
    * \ingroup pdmat
+   * \brief Doubles of caller scratch any function needs: 0 for this structure.
+   * \return 0.
+   */
+  LAPLACE_HD int scratch_size() const { return 0; }
+
+  /**
+   * \ingroup pdmat
    * \brief Evaluates the packed AR(1) correlation matrix \f$M(\theta)\f$.
    *
    * Computes \f$M_{ij} = (\tanh\theta_0)^{|i - j|}\f$ (or \f$M = [1]\f$ for \f$p = 1\f$).
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    *
    * \par Measured accuracy
    * Maximum error 13.0 ulpN (\f$K=6\f$, gcc) / 11.1 ulpN (\f$K=6\f$, CUDA); test bounds 5 to 20 ulpN.
    *
    * \see inverse(), cholesky(), log_det(), matrix_dk()
    */
-  LAPLACE_HD void matrix(const double* theta, double* m) const {
+  LAPLACE_HD void matrix(const double* theta, double* m, [[maybe_unused]] double* w) const {
     const double T = detail_pdmat::tanh_of(theta[0]).T;
     for (int k = 0; k < dim; ++k) {
       const double c = detail_pdmat::ipow(T, k);
@@ -93,6 +103,7 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \f]
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return Log-determinant of \f$M(\theta)\f$.
    *
    * \par Measured accuracy
@@ -100,7 +111,7 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    *
    * \see matrix(), log_det_dk()
    */
-  LAPLACE_HD double log_det(const double* theta) const {
+  LAPLACE_HD double log_det(const double* theta, [[maybe_unused]] double* w) const {
     const double a = theta[0] < 0.0 ? -theta[0] : theta[0];
     const double log_cosh = a + Kokkos::log1p(detail_pdmat::m::exp(-2.0 * a)) - 0.69314718055994530942;
     return -2.0 * (dim - 1) * log_cosh;
@@ -116,13 +127,14 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    *
    * \par Measured accuracy
    * Maximum error 0.52 ulpN (gcc) / 0.58 ulpN (CUDA); test bound 1.0 ulpN.
    *
    * \see matrix(), cholesky(), log_det(), inverse_dk()
    */
-  LAPLACE_HD void inverse(const double* theta, double* m) const { inverse_entries(theta[0], 0, m); }
+  LAPLACE_HD void inverse(const double* theta, double* m, [[maybe_unused]] double* w) const { inverse_entries(theta[0], 0, m); }
 
   /**
    * \ingroup pdmat
@@ -134,13 +146,14 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    *
    * \par Measured accuracy
    * Maximum error 8.22 ulpN (\f$K=4\f$, gcc) / 8.22 ulpN (\f$K=4\f$, CUDA); test bounds 5 to 13 ulpN.
    *
    * \see matrix(), inverse(), log_det(), cholesky_dk()
    */
-  LAPLACE_HD void cholesky(const double* theta, double* l) const {
+  LAPLACE_HD void cholesky(const double* theta, double* l, [[maybe_unused]] double* w) const {
     const auto t = detail_pdmat::tanh_of(theta[0]);
     for (int k = 0; k < dim; ++k) {
       const double c = detail_pdmat::ipow(t.T, k);
@@ -159,6 +172,7 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
    *
    * \par Measured accuracy
@@ -167,7 +181,7 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \see matrix(), pdmat_orders::matrix_d1()
    */
   template <int K>
-  LAPLACE_HD bool matrix_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* m) const {
+  LAPLACE_HD bool matrix_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* m, [[maybe_unused]] double* w) const {
     if (dim == 1) return false;
     const auto t = detail_pdmat::tanh_of(theta[0]);
     // M_ij depends on i - j only: one diagonal band at a time
@@ -187,6 +201,7 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return Value of the derivative, or \f$0.0\f$ if \f$p = 1\f$.
    *
    * \par Measured accuracy
@@ -195,7 +210,7 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \see log_det(), pdmat_orders::log_det_d1()
    */
   template <int K>
-  LAPLACE_HD double log_det_dk(const double* theta, [[maybe_unused]] const int (&idx)[K]) const {
+  LAPLACE_HD double log_det_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], [[maybe_unused]] double* w) const {
     if (dim == 1) return 0.0;
     return -2.0 * (dim - 1) * detail_pdmat::tanh_power_d(K - 1, 1, 0, detail_pdmat::tanh_of(theta[0]));
   }
@@ -211,6 +226,7 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
    *
    * \par Measured accuracy
@@ -219,7 +235,7 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \see inverse(), pdmat_orders::inverse_d1()
    */
   template <int K>
-  LAPLACE_HD bool inverse_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* m) const {
+  LAPLACE_HD bool inverse_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* m, [[maybe_unused]] double* w) const {
     if (dim == 1) return false;
     inverse_entries(theta[0], K, m);
     return true;
@@ -236,6 +252,7 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
+   * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
    *
    * \par Measured accuracy
@@ -244,7 +261,7 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \see cholesky(), pdmat_orders::cholesky_d1()
    */
   template <int K>
-  LAPLACE_HD bool cholesky_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* l) const {
+  LAPLACE_HD bool cholesky_dk(const double* theta, [[maybe_unused]] const int (&idx)[K], double* l, [[maybe_unused]] double* w) const {
     if (dim == 1) return false;
     const auto t = detail_pdmat::tanh_of(theta[0]);
     // L_ij depends on i - j and on whether j = 0: one column of each kind

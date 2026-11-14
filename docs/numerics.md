@@ -3450,3 +3450,109 @@ and gaussian3 alike.
 **Chosen.** The routes as they are, with the conditioning measured and
 recorded, and a test that pins each chain's own error so that a future change
 to a chain is judged on the figure it can actually move.
+
+## Unstructured matrices: unstructured_pdmat and unstructured_corr_pdmat
+
+**What.** `include/laplace/pdmat/unstructured.hpp` (2026-11-13, phase 5,
+batch 2; interface agreed with Giovanni the same day):
+`unstructured_pdmat<B>`, B one of the coupled bijectors `log_cholesky`,
+`matrix_log`, `partial_corr`, and `unstructured_corr_pdmat` =
+`unstructured_pdmat<partial_corr_bijector>`. theta is the bijector's free
+vector u (same packing) and M(theta) its inverse map: any symmetric positive
+definite M with q = p(p+1)/2 (log_cholesky, matrix_log), any correlation
+matrix with q = p(p-1)/2 (partial_corr). With it, every structure (the pilot
+included) gained a last argument `double* w`, a caller scratch of
+`scratch_size()` doubles (0 for the pilot), the flag `has_density`, and the
+log-Jacobian of theta -> M with its derivatives (`log_jacobian`,
+`log_jacobian_d1..d6`, here the bijector's inverse log-Jacobian).
+
+**How.**
+- M, its derivatives, L and its derivatives, the log-Jacobian and its
+  derivatives: the bijector's functions, called directly (identical bit for
+  bit, checked on the host).
+- log det in closed form: log_cholesky 2 sum_i theta_ii, matrix_log
+  tr S = sum_i theta_ii (first derivatives 2 and 1 on the diagonal
+  coordinates, nothing above); partial_corr 2 sum_a log L_aa =
+  -2 sum_(a>b) log cosh theta_ab, order K -2 tanh^(K-1)(theta_ab) on a tuple
+  of one variable, 0 on a mixed one (tanh^(k) from `detail_coupled::tanh_d`).
+- M^-1 for matrix_log: exp(-S), the bijector's inverse at -theta, and
+  d^K exp(-S) = (-1)^K times its derivative at -theta.
+- M^-1 for log_cholesky and partial_corr: a generic route in core.hpp for any
+  structure that has its Cholesky factor (`detail_pdmat::generic_inverse_dk`).
+  Y = L^-1 by forward substitution; along a tuple of K positions, with Y[S]
+  the derivative along the positions in the mask S,
+  Y[S] = -Y[0] sum_(T nonempty in S) L[T] Y[S \ T] (from L Y = I), then
+  M^-1[F] = sum_(T in F) Y[T]^T Y[F \ T] by Leibniz; one call of
+  `cholesky_dK` per sub-tuple, about 3^K p^3/6 + 2^K p^3/3 operations, and a
+  derivative is zero by structure when every product has a zero factor.
+  Scratch 64 p^2 + 64 p(p+1)/2 + p^2 doubles before the structure's own.
+- Why L and not M. The first version ran the same recursion on M,
+  X[S] = -X[0] sum M[T] X[S \ T]: its cancellation grows with kappa(M), and
+  at the spread points of the references it lost up to 1.4e8 ulpN
+  (log_cholesky, p = 4, kappa(M) = 8.1e4, order 4) and 2.3e6 ulpN
+  (partial_corr, p = 4, kappa = 9.7e3, order 6). On L the products are
+  triangular and the loss follows kappa(L) = sqrt(kappa(M)): 28 and 60 ulpN at
+  the same points. It is also cheaper (triangular products, and L[T] is
+  structurally zero more often than M[T]).
+
+**Measurement.** References `pdmat_unstructured.csv`
+(`tools/reference/pdmat_unstructured.py`, 11012 rows): M built from the
+definition of each map in mpmath at 640 bits (`mp.expm` for matrix_log, the
+onion product for partial_corr), M^-1 by `mp.inverse`, log det by
+`mp.det`, none through the closed forms of the C++ code; derivatives along a
+tuple by tensor products of central differences, steps 2^-60 and 2^-70,
+which agree to 1.4e-35 relative. Points: p in {1, 2, 3, 4} (partial_corr
+from 2), a random u (entries N(0, 0.25)) and a spread u (diagonal +-2 and
+off-diagonal 0.7 for log_cholesky and matrix_log, every u_ab = +-1.5 for
+partial_corr; kappa(M) at p = 4: 8.1e4, 344, 9.7e3); tuples: all of orders 1
+and 2, and for orders 3-6 the pure ones and 6 random mixed ones. Errors as
+for the pilot (ulpN for M^-1, relative ulp of max(|ref|, 1) for log det); a
+derivative of M^-1 that vanishes at a point (all of the tuple's references
+below 1e-25, an exact zero computed as rounding noise) is measured in ulps of
+the largest entry of M^-1 there. Maximum over orders 0-6, gcc/OpenMP and
+CUDA:
+
+| B | M^-1 | log det |
+|---|---|---|
+| log_cholesky | 28.2 (K=4) / 23.9 (K=4) | 0.28 (K=0) / 0.28 (K=0) |
+| matrix_log | 24.2 (K=1) / 21.7 (K=1) | 0.06 (K=0) / 0.06 (K=0) |
+| partial_corr | 59.7 (K=6) / 52.2 (K=6) | 28.4 (K=6) / 7.38 (K=6) |
+
+Every worst case of M^-1 beyond order 0 is at a spread point (p = 4, except
+log_cholesky order 6 at p = 3). The partial_corr log det at order 6 on gcc
+is -2 tanh^(5)(0.444), near a zero of tanh^(5) (value 2.08 against 8.1 at
+order 5), the scalar function's own cancellation; on CUDA it is 7.4 ulp. The
+derivatives of log det of log_cholesky and matrix_log are exact (0 ulp).
+Central differences of order K - 1 against order K agree within 4e-4 of
+their tolerance (1e-6 of the largest entries).
+
+ns per call (`benchmarks/pdmat_unstructured.cpp`, u_k = 0.1 x + 0.05 k, x
+uniform in [-3, 3]; one gcc thread / 8 OpenMP threads / CUDA), M^-1 at
+order 0, and order 6 along the pure tuple (0, ..., 0) and along six distinct
+coordinates:
+
+| B, p | M^-1, K = 0 | M^-1, K = 6, pure | M^-1, K = 6, distinct | log det, K = 0 |
+|---|---|---|---|---|
+| log_cholesky, 3 | 46 / 15 / 2.1 | 16100 / 2560 / 782 | 6130 / 1136 / 232 | 2.3 / 3.5 / 1.0 |
+| log_cholesky, 4 | 105 / 27 / 2.8 | 26582 / 3970 / 1379 | 9982 / 1702 / 456 | 2.5 / 3.0 / 1.1 |
+| partial_corr, 3 | 104 / 26 / 2.7 | 18677 / 3483 / 756 | (q = 3) | 83 / 14 / 2.1 |
+| partial_corr, 4 | 185 / 39 / 4.2 | 29347 / 5003 / 1402 | 13710 / 2531 / 616 | 171 / 27 / 3.4 |
+| matrix_log, 3 | 474 / 111 / 55 | 9493 / 1832 / 1469 | 169617 / 35381 / 29282 | 4.6 / 26 / 9.0 |
+| matrix_log, 4 | 1123 / 166 / 127 | 11915 / 2937 / 3308 | 296256 / 64124 / 61653 | 3.0 / 32 / 10 |
+
+The pure tuple is the dear one for the generic route: every one of its 63
+sub-tuples is a nonzero derivative of L (for log_cholesky the diagonal
+coordinate (0, 0) moves the whole column 0), while six distinct coordinates
+leave most L[T] structurally zero. Equal sub-tuples are computed again (64
+calls where prod (m_v + 1) = 7 would do for the pure tuple); merging them is
+the known ceiling, marked in the code. For matrix_log the order of cost is
+reversed (the bijector's Taylor arithmetic grows with the number of distinct
+coordinates). log det costs 1-171 ns, partial_corr's being the q
+logarithms of cosh.
+
+**Open.** The sub-tuple merging above; the generic route needs the
+Cholesky factor (`closed_factor`): a structure with neither M^-1 nor L in
+closed form would need the factor computed from M first.
+
+**Chosen.** This version; tested in `tests/pdmat/test_unstructured.cpp` on
+gcc and CUDA, bounds 1.5 times the larger measured error.

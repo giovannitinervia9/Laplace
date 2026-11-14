@@ -20,10 +20,10 @@ template <int K, class S>
 KOKKOS_INLINE_FUNCTION void eval_k(const S& s, int q, const double* th, double* out) {
   int idx[K];
   for (int k = 0; k < K; ++k) idx[k] = 0;
-  if (q == 0) s.template matrix_dk<K>(th, idx, out);
-  else if (q == 1) s.template inverse_dk<K>(th, idx, out);
-  else if (q == 2) s.template cholesky_dk<K>(th, idx, out);
-  else out[0] = s.template log_det_dk<K>(th, idx);
+  if (q == 0) s.template matrix_dk<K>(th, idx, out, nullptr);
+  else if (q == 1) s.template inverse_dk<K>(th, idx, out, nullptr);
+  else if (q == 2) s.template cholesky_dk<K>(th, idx, out, nullptr);
+  else out[0] = s.template log_det_dk<K>(th, idx, nullptr);
 }
 
 template <class S, int K>
@@ -34,10 +34,10 @@ struct Bench {
     double th[max_p], out[lp::packed_size(max_p)];
     for (int k = 0; k < max_p; ++k) th[k] = x;
     if constexpr (K == 0) {
-      if (q == 0) s.matrix(th, out);
-      else if (q == 1) s.inverse(th, out);
-      else if (q == 2) s.cholesky(th, out);
-      else out[0] = s.log_det(th);
+      if (q == 0) s.matrix(th, out, nullptr);
+      else if (q == 1) s.inverse(th, out, nullptr);
+      else if (q == 2) s.cholesky(th, out, nullptr);
+      else out[0] = s.log_det(th, nullptr);
     } else {
       eval_k<K>(s, q, th, out);
     }

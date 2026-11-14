@@ -44,6 +44,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_laplace2.cpp
   distrib/test_conditioning.cpp
   pdmat/test_pilot.cpp
+  pdmat/test_unstructured.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

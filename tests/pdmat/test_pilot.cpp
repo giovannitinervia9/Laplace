@@ -44,10 +44,10 @@ KOKKOS_INLINE_FUNCTION bool eval_k(const S& s, int quantity, int param, const do
   int idx[K];
   for (int k = 0; k < K; ++k) idx[k] = param;
   switch (quantity) {
-    case 0: return s.template matrix_dk<K>(th, idx, out);
-    case 1: return s.template inverse_dk<K>(th, idx, out);
-    case 2: return s.template cholesky_dk<K>(th, idx, out);
-    default: out[0] = s.template log_det_dk<K>(th, idx); return true;
+    case 0: return s.template matrix_dk<K>(th, idx, out, nullptr);
+    case 1: return s.template inverse_dk<K>(th, idx, out, nullptr);
+    case 2: return s.template cholesky_dk<K>(th, idx, out, nullptr);
+    default: out[0] = s.template log_det_dk<K>(th, idx, nullptr); return true;
   }
 }
 
@@ -58,10 +58,10 @@ KOKKOS_INLINE_FUNCTION bool eval(const S& s, int quantity, int K, int param, con
   bool nz = true;
   switch (K) {
     case 0:
-      if (quantity == 0) s.matrix(th, out);
-      else if (quantity == 1) s.inverse(th, out);
-      else if (quantity == 2) s.cholesky(th, out);
-      else out[0] = s.log_det(th);
+      if (quantity == 0) s.matrix(th, out, nullptr);
+      else if (quantity == 1) s.inverse(th, out, nullptr);
+      else if (quantity == 2) s.cholesky(th, out, nullptr);
+      else out[0] = s.log_det(th, nullptr);
       break;
     case 1: nz = eval_k<1>(s, quantity, param, th, out); break;
     case 2: nz = eval_k<2>(s, quantity, param, th, out); break;
@@ -231,15 +231,15 @@ TEST_CASE("pdmat pilot: structural zeros of diagonal_pdmat") {
   const double th[3] = {0.1, -0.2, 0.3};
   double m[6];
   const int mixed[2] = {0, 1}, pure[2] = {1, 1};
-  CHECK_FALSE(d.matrix_d2(th, mixed, m));
-  CHECK_FALSE(d.inverse_d2(th, mixed, m));
-  CHECK_FALSE(d.cholesky_d2(th, mixed, m));
-  CHECK(d.log_det_d2(th, pure) == 0.0);
-  CHECK(d.matrix_d2(th, pure, m));
+  CHECK_FALSE(d.matrix_d2(th, mixed, m, nullptr));
+  CHECK_FALSE(d.inverse_d2(th, mixed, m, nullptr));
+  CHECK_FALSE(d.cholesky_d2(th, mixed, m, nullptr));
+  CHECK(d.log_det_d2(th, pure, nullptr) == 0.0);
+  CHECK(d.matrix_d2(th, pure, m, nullptr));
   CHECK(m[lp::packed_index(1, 1)] == doctest::Approx(4.0 * std::exp(-0.4)));
   CHECK(m[lp::packed_index(0, 0)] == 0.0);
   const lp::ar1_pdmat a(1);
   const int z[1] = {0};
-  CHECK_FALSE(a.matrix_d1(th, z, m));
-  CHECK(a.log_det_d1(th, z) == 0.0);
+  CHECK_FALSE(a.matrix_d1(th, z, m, nullptr));
+  CHECK(a.log_det_d1(th, z, nullptr) == 0.0);
 }
