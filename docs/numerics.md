@@ -3709,6 +3709,235 @@ multiplies the whole sum); only a route to R^-1 with exact zeros could.
 the gcc and CUDA errors, on the matrices with the scaling undone (D^-1 M D^-1,
 D M^-1 D, D^-1 L), the measure that reaches x^T M^-1 x = z^T R^-1 z for
 x = D z (Giovanni, 2026-11-14). No change to the route.
+## The accuracy of the log Phi derivatives on [-1, 4), absolutely and relatively
+
+**What.** `tests/math/test_normal.cpp`, `check_deriv`, measures a third figure
+for each order k = 1..6 of `log_Phi_dK` on t in [-1, 4), where the piecewise
+Chebyshev expansions live: the error in ulp of the largest |g_k| of that order
+on the band, and, reported beside it, the error relative to the component
+itself at the point where that ratio is worst, with the value there and its
+size relative to the largest component. The band had been measured only in ulp
+of max(|g|, 1), which cannot see a relative error in a component smaller than
+1, and on this band the components of the high orders are of order 1e-2 to
+1e-3. The question came from the other side, where something was plainly
+unbounded: the derivatives of log F of gaussian2 at an argument exact in double
+cost 117 ulp, of which its own chain, run in Python on z-derivatives rounded
+from mpmath, accounts for at most 28.
+
+**How.** The absolute figure is the one bounded, because it is the property of
+the route: the error of the Chebyshev route is an absolute quantity, of the
+size of an ulp of the coefficients of the piece, and the coefficients are of
+the size of the largest component of the order. The relative figure is that
+same error divided by |g_k(t)|, so it grows without limit as a component
+approaches one of its zeros and it bounds nothing; it is reported with the
+ratio |g_k(t)| / max |g_k| so that a reader sees how much of it is
+conditioning rather than inheriting the number. An earlier version of this
+entry bounded the relative error at the points where that ratio is at least a
+hundredth and called them "away from the zeros of the component"; a hundredth
+is not away, since at that ratio an absolute error of one ulp of the largest
+component is already a hundred ulp of the component, so those figures (43.2,
+65.3 and 36.8 ulp for orders 4, 5 and 6) were conditioning as well, and have
+been withdrawn.
+
+**Measurement.** The rows of `log_Phi_d{k}.csv` and `log_Phi_d{k}_mid.csv`
+with t in [-1, 4):
+
+| order | gcc, ulp of max \|g_k\| | CUDA, same | relative at its worst point, gcc | there: t, \|g_k\|/max \|g_k\| |
+|---|---|---|---|---|
+| 1 | 1.19 | 1.10 | 8.62 | 3.916, 1.2e-4 |
+| 2 | 1.28 | 1.26 | 5.34 | 3.986, 7.0e-4 |
+| 3 | 1.36 | 1.36 | 8.80 | 3.964, 7.7e-3 |
+| 4 | 1.41 | 1.61 | 5.34e3 | 1.002, 4.6e-5 |
+| 5 | 0.913 | 0.792 | 982 | 2.071, 1.6e-4 |
+| 6 | 1.72 | 1.36 | 1.70e4 | -0.8712, 6.1e-6 |
+
+**Where the error comes from.** Three stages separated against mpmath at 300
+bits, one piece of width 1 at a time, in ulp of |g_k(t)|: the exact
+coefficients truncated at the degree of the order and summed by Clenshaw's
+recurrence at 300 bits (the truncation of the series alone), the same
+coefficients rounded to double and summed at 300 bits (the rounding of the
+table), and the same summed in double arithmetic (the rounding of the
+recurrence, which is what the header computes).
+
+| order | piece | sum \|c_n\| | truncation | + table rounding | + recurrence | sum \|c_n\| / \|g_k\| there |
+|---|---|---|---|---|---|---|
+| 1 | [-1, 0) | 1.53 | 0.00 | 0.11 | 0.92 | 1.4 |
+| 2 | [2, 3) | 0.114 | 0.12 | 0.67 | 2.72 | 8.0 |
+| 3 | [3, 4) | 0.0357 | 0.01 | 2.61 | 4.35 | 11.3 |
+| 4 | [0, 1) | 0.145 | 0.06 | 15.4 | 26.0 | 60.1 |
+| 4 | [1, 2) | 0.222 | 0.47 | 0.65 | 16.3 | 89.2 |
+| 5 | [-1, 0) | 0.069 | 0.00 | 3.23 | 12.0 | 24.9 |
+| 5 | [2, 3) | 0.221 | 0.12 | 2.64 | 18.8 | 62.6 |
+| 6 | [1, 2) | 0.587 | 1.58 | 9.81 | 20.2 | 120.0 |
+| 6 | [2, 3) | 0.500 | 1.58 | 4.42 | 10.8 | 60.9 |
+
+The truncation of the series contributes nothing: it stays below 0.1 ulp of
+|g_k| everywhere except g5 on [0, 1), 3.0, and g6 on [1, 2) and [2, 3), 1.6.
+The rounding of the table and the rounding of Clenshaw's recurrence each cost
+about one ulp of the coefficient scale of the piece, and both are multiplied
+by sum_n |c_n| / |g_k(t)|, the condition number of the sum at that point,
+which reaches 60 to 120 where the component is small. The last column of the
+first table says the same thing from the other end: for every order that has a
+zero in the band, the worst relative point sits next to one of them. The zeros
+are at t = 1.0023693 for g4, -0.0298336 and 2.0712889 for g5, and -0.8711322,
+1.2313323 and 2.7456390 for g6. Orders 1 to 3 have no zero on the band and stay
+under 9 ulp at their own worst points, in the right tail where |g_k| decays.
+
+**What this says.** The accuracy of the route is 1.7 ulp of the largest
+component of the order, uniformly over the band and on both builds, and
+nothing in the generation of the pieces is loose: a degree criterion relative
+to |g_k| in the point rather than to the maximum of the piece, narrower or
+non-uniform pieces, and an expansion in another variable all act on the
+truncation, which is already invisible. A consumer that composes one component
+at a time inherits that absolute error divided by the size of its own
+component, which near a zero of that component is whatever the ratio says.
+This is the floor under gaussian1, gaussian2, gaussian3 and the two
+lognormals, and it accounts for gaussian2's 117 ulp together with a chain
+costing at most 28.
+
+**Chosen.** The absolute figure bounded, the relative one reported with its
+ratio. Bounds in `tests/math/test_normal.cpp`: 1.8, 2.0, 2.1, 2.2, 1.4 and
+2.6 ulp of the largest component of the order, each about one and a half times
+the larger of the two builds' maxima.
+
+**Open.** Nothing: the candidates were measured the same day and the route
+changed, in the next section.
+
+## The zeros factored out of the Chebyshev pieces of log Phi
+
+**What.** `log_Phi_d1` to `log_Phi_d6` on [-1, 4) keep the piecewise Chebyshev
+route, but each order now has its own pieces, and a piece whose midpoint is a
+zero of the component carries the expansion of g_k(t) / (t - z) rather than of
+g_k. The error relative to the component itself falls from 8.6, 5.3, 8.8,
+5336, 982 and 17048 ulp to between 2.2 and 2.9 at every order over the whole
+band, the zeros included, while the error in ulp of the largest component of
+the order stays where it was. Decided with Giovanni on 2026-11-14 after the
+candidates below were measured. The routes outside the band, t < -1 and
+t >= 4, are untouched.
+
+**Why these two changes and not the others.** The diagnosis of the previous
+section says that the error of the route is absolute, of the size of an ulp of
+the coefficients of the piece, and that the relative figure is that error
+divided by |g_k(t)|, amplified by sum_n |c_n| / |g_k(t)|. Two things make that
+ratio large, and each gets its own remedy:
+
+- the zeros of g_k in the band (g4 at 1.0023693, g5 at -0.0298336 and
+  2.0712889, g6 at -0.8711322, 1.2313323 and 2.7456390). The zero is made the
+  midpoint of its piece and
+  divided out: h(t) = g_k(t) / (t - z) has no zero there, so the coefficients
+  of the piece are of the size of h and the sum is no longer a cancellation.
+  The factor is restored from z written as a pair of doubles, z_hi + z_lo; the
+  subtraction t - z_hi is exact wherever it matters (Sterbenz), so the product
+  keeps its relative accuracy however near t lies to the zero. The quotient is
+  analytic wherever g_k is, the nearest singularity being the complex zeros of
+  Phi at about 3.08 +- 3.81i, so its expansion converges as fast as g_k's.
+- the decay of g_k in the right tail, where g_k falls by an order of magnitude
+  across a piece of width one, so that the coefficients are much larger than
+  |g_k| at the right end. Above t = 1 the pieces are half as wide.
+
+Everything else that was tried acts on the truncation of the series, which the
+diagnosis had already shown to be invisible, and none of it reaches the goal.
+Worst error relative to the component, over the whole band, by order (Python
+prototypes against the test's references):
+
+| variant | 1 | 2 | 3 | 4 | 5 | 6 | table (doubles) |
+|---|---|---|---|---|---|---|---|
+| the route as it was | 8.6 | 5.3 | 8.8 | 5336 | 982 | 17048 | 585 |
+| a relative degree criterion | 7.1 | 5.7 | 8.8 | 451 | 982 | 17048 | 640 |
+| coefficients and Clenshaw in double-double | 0.8 | 0.9 | 0.7 | 78 | 1187 | 493 | 1170 |
+| the same with a relative degree criterion | 0.8 | 0.6 | 0.7 | 0.5 | 1187 | 1.7 | 1280 |
+| half-width pieces above t = 1 | 2.5 | 2.2 | 2.2 | 744 | 557 | 17048 | 904 |
+| the zeros factored out | 7.1 | 5.7 | 8.8 | 4.5 | 2.9 | 2.7 | 698 |
+| **both, the version chosen** | **2.5** | **2.2** | **2.2** | **2.3** | **2.9** | **2.7** | **1093** |
+
+Double-double arithmetic is both dearer and weaker here, which is the
+informative failure: once the arithmetic is exact the limit becomes the
+truncation of the series, and on a piece that contains a zero of g_k no degree
+criterion can be made relative, because the smallest value at the nodes is
+arbitrarily close to zero. Order 5 stays at 1187 ulp however much precision
+the recurrence is given. Only dividing the zero out makes the whole route
+relative, and it does so in plain double arithmetic.
+
+**How.** `tools/reference/log_phi_cheb.py` finds the zeros of each order by a
+scan for sign changes followed by Newton's method on g_k with g_(k+1) at 300
+bits, places the cuts (the ends of the band, z +- 1/2 for each zero, and the
+half-width cuts above t = 1 where they fall no nearer than 0.2 to another cut
+or to a zero), and fits each piece at 80 Chebyshev nodes. The degree of a piece
+is the smallest whose tail of |c_m| falls below 2^-56 of the smallest |value|
+at its nodes, a relative criterion, with the largest |value| as the fallback;
+the degree of an order is the largest of its pieces'. Pieces and degrees: 8, 8,
+8, 8, 8 and 13 pieces of degree 15, 16, 17, 18, 19 and 15, against five pieces
+of degree 17, 17, 18, 19, 20 and 20 before.
+
+The piece of t is found without a scan: 40 bins of width 1/8 cover the band,
+the bin of t gives the piece whose left edge is at or before the bin's left
+end, and one comparison corrects the index, which is enough because no piece is
+narrower than a bin (the generator checks it). The bin index is clamped: for t
+one ulp below 4, t - cheb_lo rounds up to exactly 5 and the index would reach
+40, reading past the row of the order. Without the clamp the symptom is
+gaussian3's derivatives at y = 1.4 and tau = 16, where z = 3.9999999999999996,
+wrong by factors of 1e20, and a segfault at order 6, whose row is the last and
+whose overrun leaves the table altogether.
+
+The coefficients, 928 doubles, no longer live in the constant bank. With them
+there the CUDA link failed, "File uses too much global constant data (0x11388
+bytes, 0x10000 max)": the bank is one 64 KB resource for the whole device
+program, the thirty-odd tables of the library already filled 65.3 KB of it, and
+only 260 bytes were free. They are now in ordinary device global memory,
+through a new `LAPLACE_DEVICE_GLOBAL_TABLE` in `include/laplace/core/config.hpp`
+beside `LAPLACE_DEVICE_TABLE`. That is also the better place for them on their
+own merits: the constant bank serves one address per cycle, so a read whose
+index differs from thread to thread serializes, while a few kilobytes read
+through the caches do not. The edges, the zeros, the bins and the flags, 2.4 KB
+in all, stay in the constant bank, which now holds 2.3 KB less than before the
+change.
+
+**Measurement.** Per order on [-1, 4), old then new; "band" is the error in ulp
+of the largest |g_k| of the order and "relative" the error relative to the
+component itself at its worst point:
+
+| order | relative, gcc | band, gcc | relative, CUDA | band, CUDA |
+|---|---|---|---|---|
+| 1 | 8.62 -> 2.54 | 1.19 -> 1.19 | 7.40 -> 2.45 | 1.10 -> 1.10 |
+| 2 | 5.34 -> 2.21 | 1.28 -> 1.28 | 4.82 -> 2.17 | 1.26 -> 1.27 |
+| 3 | 8.80 -> 2.24 | 1.36 -> 1.33 | 8.74 -> 2.19 | 1.36 -> 1.33 |
+| 4 | 5336 -> 2.30 | 1.41 -> 1.49 | 4312 -> 2.46 | 1.61 -> 1.44 |
+| 5 | 982 -> 2.85 | 0.91 -> 0.84 | 1068 -> 2.85 | 0.79 -> 0.84 |
+| 6 | 17048 -> 2.70 | 1.72 -> 1.34 | 3432 -> 2.45 | 1.36 -> 1.41 |
+
+Time per call on arguments spread over [-1, 4), the old route then the new, on
+one gcc thread: 15.5 -> 15.7, 15.5 -> 16.6, 17.3 -> 18.0, 18.7 -> 20.6,
+19.7 -> 21.7 and 19.7 -> 16.2 ns; on CUDA 0.48 -> 0.50, 0.48 -> 0.52,
+0.48 -> 0.54, 0.49 -> 0.55, 0.50 -> 0.56 and 0.50 -> 0.52 ns. Order 6 gains on
+the host because its degree falls from 20 to 15; the others pay one to two
+nanoseconds for the bin lookup and the extra multiplication. Moving the
+coefficients out of the constant bank costs nothing measurable on CUDA
+(`math_normal` reports 0.21 to 0.24 ns per call for orders 1 to 4 against the
+0.20 to 0.29 recorded for the old route).
+
+**What the consumers gained.** `tests/distrib/test_conditioning.cpp`, the log F
+derivatives of the gaussians at an argument exact in double, before and after:
+gaussian2 117 ulp of the order's scale at z = 3 and order 5 becomes 29 at z = 2
+and order 6, which is the cost of its own chain in the variance, measured
+separately at no more than 28; gaussian1 stays at 38, its worst point being
+z = 4, where the route is the one above the band and unchanged; gaussian3 stays
+at 3.08. lognormal1's figures do not move, its worst points lying in the tail;
+lognormal2's bounded figures (in ulp of the order's scale) do not move either,
+and its component-relative figures shift a little at the zeros of its own
+components, 6034 to 8525 at order 4 and 41500 to 40410 at order 5, which is the
+conditioning of its own chain and not of these inputs.
+
+**Chosen.** This version. Tested in `tests/math/test_normal.cpp`, which now
+bounds both figures on the band: 1.8, 2.0, 2.1, 2.2, 1.4 and 2.6 ulp of the
+largest component of the order, and 3.9, 3.4, 3.4, 3.7, 4.3 and 4.1 relative to
+the component itself, each about one and a half times the larger of the two
+builds' maxima. The whole suite passes on gcc and on CUDA.
+
+**Open.** The constant bank is the resource to watch: before this change it was
+full to 260 bytes, and the next table of any size will have to go to global
+memory as well, or an existing one will have to move. Nobody has looked at
+whether the tables now in it are the ones that most need it.
+
 ## Univariate distributions, batch 2: exponential, chisq and the inverse Gaussian
 
 **What.** `include/laplace/distrib/`: `exponential.hpp` (mean mu),

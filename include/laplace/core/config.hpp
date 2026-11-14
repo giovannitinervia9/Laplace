@@ -26,6 +26,18 @@
 #define LAPLACE_DEVICE_TABLE static __constant__
 #endif
 
+// A table in ordinary device global memory, read through the caches. The
+// constant bank is one 64 KB resource for the whole device program and it is
+// nearly full, so a table of several kilobytes goes here instead. It is also
+// the better place for a table whose index differs from thread to thread: the
+// constant bank serves one address per cycle and serializes a divergent read,
+// while a global read of a few kilobytes is served by the caches.
+#if defined(__CUDACC_RDC__)
+#define LAPLACE_DEVICE_GLOBAL_TABLE inline __device__ const
+#else
+#define LAPLACE_DEVICE_GLOBAL_TABLE static __device__ const
+#endif
+
 namespace laplace {
 
 // The scalar type validated today.

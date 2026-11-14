@@ -129,11 +129,17 @@ The value \f$\operatorname{erfcx}(x)\f$ is computed across two regimes:
 The derivatives \f$g_k(t) = \frac{\mathrm{d}^k}{\mathrm{d}t^k}\log \Phi(t)\f$ for \f$k \in \{1, 2, 3, 4, 5, 6\}\f$ are evaluated across three regimes:
 
 1. **Piecewise Chebyshev expansions** (\f$t \in [-1, 4)\f$):
-   Five pieces of unit length covering \f$[-1, 0), [0, 1), [1, 2), [2, 3), [3, 4)\f$. On piece \f$p \in \{0, 1, 2, 3, 4\}\f$ on \f$[a, a + 1)\f$ with \f$a = -1 + p\f$:
+   The band \f$[-1, 4)\f$ is covered by pieces that differ from order to order: 8, 8, 8, 8, 8, and 13 pieces for \f$k = 1, \dots, 6\f$, with polynomial degrees \f$N_k\f$ of 15, 16, 17, 18, 19, and 15 respectively. On a piece \f$[a, b)\f$:
    \f[
-   x = 2 (t - a) - 1 \in [-1, 1], \quad g_k(t) = c_0 + \sum_{n=1}^{N_k} c_n T_n(x)
+   x = \frac{2 (t - a)}{b - a} - 1 \in [-1, 1], \quad f(t) = c_0 + \sum_{n=1}^{N_k} c_n T_n(x)
    \f]
-   evaluated by Clenshaw's recurrence from stored coefficients rounded to double precision. The polynomial degrees \f$N_k\f$ for orders \f$k = 1, \dots, 6\f$ are \f$17, 17, 18, 19, 20, 20\f$.
+   summed by Clenshaw's recurrence from stored coefficients rounded to double precision. On a piece without a zero of \f$g_k\f$, \f$f(t) = g_k(t)\f$. A piece whose midpoint is a zero \f$z\f$ of \f$g_k\f$ holds the coefficients of \f$h(t) = g_k(t) / (t - z)\f$ instead of those of \f$g_k\f$, and the factor \f$t - z\f$ is restored at the end, with \f$z\f$ stored as a pair of doubles \f$z_{\mathrm{hi}} + z_{\mathrm{lo}}\f$ so that the subtraction keeps its accuracy next to the zero. The zeros are \f$g_4\f$ at \f$1.0023693\f$, \f$g_5\f$ at \f$-0.0298336\f$ and \f$2.0712889\f$, and \f$g_6\f$ at \f$-0.8711322\f$, \f$1.2313323\f$ and \f$2.7456390\f$.
+
+   The error of a Chebyshev sum is of the size of an ulp of its coefficients. Near a zero of \f$g_k\f$ the coefficients remain as large as the largest \f$|g_k|\f$ of the piece, while the value itself becomes arbitrarily small, so the error relative to the value grows without bound. Dividing the zero out leaves coefficients as small as the value. The quotient is analytic wherever \f$g_k\f$ is (the nearest singularities are the complex zeros of \f$\Phi\f$ at about \f$3.08 \pm 3.81i\f$), so its expansion converges as fast as \f$g_k\f$'s.
+
+   Above \f$t = 1\f$ the pieces are half as wide, because there \f$g_k\f$ falls by about an order of magnitude from one end of a piece of width one to the other, which has the same effect: the coefficients are much larger than the value at the right end of the piece.
+
+   The piece of \f$t\f$ is found from a table of 40 bins of width \f$1/8\f$ covering the band, which gives the piece whose left edge is at or before the bin, after which one comparison corrects the index; no piece is narrower than a bin. The coefficients (928 doubles) are held in device global memory, and the piece boundaries, the zeros and the bins in device constant memory.
 2. **Downward cumulant recurrence** (\f$t < -1\f$):
    With \f$x = -t > 1\f$:
    \f$\log \Phi(t) = -x^2/2 - \frac{1}{2}\log(2\pi) + \log M_0(x)\f$, where
@@ -204,25 +210,18 @@ The quantiles are measured in ulpC (\ref accuracy_inverse "conditioned error of 
 
 ### Derivative accuracy
 
-For derivative functions, error is measured in \ref accuracy_ulp "ulp" below \f$t = -1\f$, where the derivatives have no zeros, and in \ref accuracy_ulp1 "ulp1" for \f$t \ge -1\f$, where they cross zero:
+For derivative functions, below \f$t = -1\f$ the error is measured in \ref accuracy_ulp "ulp" (the derivatives have no zeros there). On \f$[-1, 4)\f$ two figures are given. The first is the error in ulps of \f$\max_t |g_k(t)|\f$ over the band, the scale of the order, which is the measure a caller sees when it sums the derivatives of one order. The second is the plain relative error of the component itself, in \ref accuracy_ulp "ulp", which is the measure a caller sees when it carries one derivative at a time through a chain rule; it is bounded over the whole band, the zeros of the derivatives included, because each zero is divided out of the expansion that covers it.
 
-| Function | Order \f$k\f$ | Measured max error gcc on \f$[-1, 4)\f$ (ulp1) | Measured max error CUDA overall (ulp) | Test bound \f$t < -1\f$ (ulp) | Test bound \f$t \ge -1\f$ (ulp1) |
-|---|---|---|---|---|---|
-| \ref laplace::math::own::log_Phi_d1 "log_Phi_d1()" | 1 | 1.19 | 0.99 | 2.0 | 2.0 |
-| \ref laplace::math::own::log_Phi_d2 "log_Phi_d2()" | 2 | 0.64 | 0.63 | 2.5 | 1.0 |
-| \ref laplace::math::own::log_Phi_d3 "log_Phi_d3()" | 3 | 0.34 | 0.75 | 22.0 | 1.2 |
-| \ref laplace::math::own::log_Phi_d4 "log_Phi_d4()" | 4 | 0.18 | 1.19 | 50.0 | 2.0 |
-| \ref laplace::math::own::log_Phi_d5 "log_Phi_d5()" | 5 | 0.23 | 1.85 | 120.0 | 3.0 |
-| \ref laplace::math::own::log_Phi_d6 "log_Phi_d6()" | 6 | 0.43 | — | 1150.0 | 1.0 |
+| Function | Order \f$k\f$ | ulp of the order's scale, gcc | same, CUDA | relative to the component, gcc | same, CUDA | bound below \f$t = -1\f$ (ulp) | bound on the scale | relative bound |
+|---|---|---|---|---|---|---|---|---|
+| \ref laplace::math::own::log_Phi_d1 "log_Phi_d1()" | 1 | 1.19 | 1.10 | 2.54 | 2.45 | 2.0 | 1.8 | 3.9 |
+| \ref laplace::math::own::log_Phi_d2 "log_Phi_d2()" | 2 | 1.28 | 1.27 | 2.21 | 2.17 | 2.5 | 2.0 | 3.4 |
+| \ref laplace::math::own::log_Phi_d3 "log_Phi_d3()" | 3 | 1.33 | 1.33 | 2.24 | 2.19 | 22.0 | 2.1 | 3.4 |
+| \ref laplace::math::own::log_Phi_d4 "log_Phi_d4()" | 4 | 1.49 | 1.44 | 2.30 | 2.46 | 50.0 | 2.2 | 3.7 |
+| \ref laplace::math::own::log_Phi_d5 "log_Phi_d5()" | 5 | 0.84 | 0.84 | 2.85 | 2.85 | 120.0 | 1.4 | 4.3 |
+| \ref laplace::math::own::log_Phi_d6 "log_Phi_d6()" | 6 | 1.34 | 1.41 | 2.70 | 2.45 | 1150.0 | 2.6 | 4.1 |
 
-Order 6 was measured by region: below \f$t = -1\f$, 767 ulp on gcc and 478 ulp on CUDA, all of it between \f$t = -3\f$ and \f$t = -1\f$, where \f$g_6\f$ is small (0.0134 at \f$t = -1.1\f$) and the cumulant recursion converges slowly (at most 6.0 ulp1); below \f$t = -5\f$ within 20 ulp. For \f$t \ge -1\f$, 0.43 ulp1 on gcc and 0.34 ulp1 on CUDA.
-
-Across sub-intervals on \f$[-1, 4)\f$ (piecewise Chebyshev expansions, measured on gcc):
-- \f$[-1, 0)\f$: d1 1.19, d2 0.64, d3 0.16, d4 0.082, d5 0.070 ulp1.
-- \f$[0, 1)\f$: d1 0.73, d2 0.62, d3 0.32, d4 0.10, d5 0.20 ulp1.
-- \f$[1, 2)\f$: d1 0.33, d2 0.32, d3 0.34, d4 0.18, d5 0.23 ulp1.
-- \f$[2, 3)\f$: d1 0.051, d2 0.12, d3 0.16, d4 0.14, d5 0.18 ulp1.
-- \f$[3, 4)\f$: d1 0.0055, d2 0.013, d3 0.040, d4 0.094, d5 0.14 ulp1.
+The measured errors below \f$t = -1\f$ on gcc are 1.19, 1.52, 14.6, 25.3, 81.3, and 767 ulp for \f$k = 1, \dots, 6\f$; on CUDA 0.80, 1.12, 12.0, 27.3, 59.1, and 478 ulp. For order 6 below \f$t = -1\f$, all of the error occurs between \f$t = -3\f$ and \f$t = -1\f$, where \f$g_6\f$ is small (0.0134 at \f$t = -1.1\f$) and the cumulant recursion converges slowly (at most 6.0 ulp1); below \f$t = -5\f$ within 20 ulp. A third bound covers \f$t \ge -1\f$ as a whole, the region above the band included, in \ref accuracy_ulp1 "ulp1": 2.0, 1.0, 1.2, 2.0, 3.0 and 1.0 for \f$k = 1, \dots, 6\f$, against measured maxima of 1.19, 0.64, 0.33, 0.19, 0.21 and 0.34 on gcc.
 
 Across downward cumulant sub-intervals (\f$t < -1\f$, relative ulp on gcc):
 - \f$t < -20\f$: d1 0.50, d2 0.50, d3 7.3, d4 10.7, d5 14.1 ulp.

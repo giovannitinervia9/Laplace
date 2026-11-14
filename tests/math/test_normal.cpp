@@ -8,7 +8,11 @@
 
 #include <laplace/math/normal.hpp>
 
+#include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
+#include <vector>
 
 #ifndef LAPLACE_REFERENCE_DIR
 #error "LAPLACE_REFERENCE_DIR must point to tests/data/reference"
@@ -67,10 +71,20 @@ void check(const char* name, auto f, double max_ulp, double max_ulp1) {
 // Derivatives of log Phi: the relative error below t = -1, where they have no
 // zeros; above, where they cross zero, the error in ulps of max(|g|, 1).
 // The rows of the main file and of the dense file log_Phi_d{k}_mid.csv (t in [-1, 10]).
-void check_deriv(int k, double max_ulp_tail, double max_ulp1_centre) {
+void check_deriv(int k, double max_ulp_tail, double max_ulp1_centre, double max_ulp_band = 1e300,
+                 double max_ulp_rel = 1e300) {
   const std::string name = "log_Phi_d" + std::to_string(k);
   double tail = 0, centre = 0, worst_tail = 0, worst_centre = 0;
   std::size_t bad = 0;
+  // Two figures on [-1, 4), where the ulp1 measure above cannot see a relative error:
+  // there the components of the high orders are of order 1e-2 to 1e-3, so a hundred ulp
+  // of the component is half an ulp of max(|g|, 1). `band` is the error in ulp of the
+  // largest |g| of that order on the band and `rel` the error relative to the component
+  // itself at the worst point, reported with the value and with its ratio to the largest
+  // |g|. Both are bounded: since 2026-11-14 the pieces of each order are placed so that
+  // every zero of the component is the midpoint of its piece and is factored out of the
+  // expansion there, which makes the route relatively accurate at the zeros as well.
+  std::vector<std::array<double, 3>> mid;  // t, exact value, absolute error
   for (const char* suffix : {"", "_mid"}) {
     const auto r = bench::read_ref(refdir + "/" + name + suffix + ".csv");
     const auto y = bench::eval_kernel(r.x, LogPhiD{k});
@@ -87,13 +101,33 @@ void check_deriv(int k, double max_ulp_tail, double max_ulp1_centre) {
       } else {
         const double u = e / bench::ulp_of(std::max(std::fabs(r.hi[i]), 1.0));
         if (u > centre) centre = u, worst_centre = t;
+        if (t < 4.0) mid.push_back({t, r.hi[i], e});
       }
     }
   }
-  INFO(name, ": t < -1 max ", tail, " ulp at ", worst_tail, "; t >= -1 max ", centre, " ulp1 at ", worst_centre);
+  double scale = 0;
+  for (const auto& m : mid) scale = std::fmax(scale, std::fabs(m[1]));
+  double band = 0, band_t = 0, rel = 0, rel_t = 0, rel_v = 0;
+  for (const auto& m : mid) {
+    const double b = m[2] / bench::ulp_of(scale);
+    if (b > band) band = b, band_t = m[0];
+    if (m[1] == 0.0) continue;
+    const double u = m[2] / ulp_normal(m[1]);
+    if (u > rel) rel = u, rel_t = m[0], rel_v = m[1];
+  }
+  INFO(name, ": t < -1 max ", tail, " ulp at ", worst_tail, "; t >= -1 max ", centre, " ulp1 at ", worst_centre,
+       "; [-1, 4) max ", band, " ulp of the largest |g| of the order (", scale, ") at ", band_t,
+       "; relative to the component itself ", rel, " ulp at ", rel_t, " (value ", rel_v, ", ", rel_v / scale,
+       " of the largest)");
+  if (std::getenv("LAPLACE_PRINT_ERRORS"))
+    std::printf("%s: tail %.3g ulp | centre %.3g ulp1 | [-1, 4) %.3g ulp of max |g| = %.3g at t = %.4g | relative to "
+                "the component %.3g ulp at t = %.4g (value %.3g, ratio to the largest %.2e)\n",
+                name.c_str(), tail, centre, band, scale, band_t, rel, rel_t, rel_v, rel_v / scale);
   CHECK(bad == 0);
   CHECK(tail <= max_ulp_tail);
   CHECK(centre <= max_ulp1_centre);
+  CHECK(band <= max_ulp_band);
+  CHECK(rel <= max_ulp_rel);
 }
 
 // Quantiles: the error in units of max(ulp(x*), dx), dx the change of the exact
@@ -131,12 +165,17 @@ TEST_CASE("erfc, erfcx, Phi, log Phi against mpmath") {
 }
 
 TEST_CASE("derivatives of log Phi against mpmath") {
-  check_deriv(1, 2.0, 2.0);
-  check_deriv(2, 2.5, 1.0);
-  check_deriv(3, 22.0, 1.2);
-  check_deriv(4, 50.0, 2.0);
-  check_deriv(5, 120.0, 3.0);
-  check_deriv(6, 1150.0, 1.0);
+  // the third bound is the relative error on [-1, 4) away from the zeros of the component,
+  // measured on 2026-11-13 (gcc): 3.57, 4.88, 6.63, 43.2, 65.3, 36.8 ulp, each with half again
+  // on [-1, 4): the third bound in ulp of the largest |g| of the order, the fourth
+  // relative to the component itself, each about one and a half times the larger of the
+  // two builds' measured maxima
+  check_deriv(1, 2.0, 2.0, 1.8, 3.9);
+  check_deriv(2, 2.5, 1.0, 2.0, 3.4);
+  check_deriv(3, 22.0, 1.2, 2.1, 3.4);
+  check_deriv(4, 50.0, 2.0, 2.2, 3.7);
+  check_deriv(5, 120.0, 3.0, 1.4, 4.3);
+  check_deriv(6, 1150.0, 1.0, 2.6, 4.1);
 }
 
 TEST_CASE("normal quantile from p and from log p against mpmath") {
