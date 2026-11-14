@@ -63,6 +63,7 @@ set(LAPLACE_TEST_SOURCES
   basis/test_legendre.cpp
   basis/test_operator.cpp
   basis/test_transform.cpp
+  basis/test_tensor.cpp
   dense/test_dense.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
