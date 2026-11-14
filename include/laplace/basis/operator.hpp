@@ -48,7 +48,7 @@ namespace laplace::basis {
  * \f$a \pm \mathrm{i} b\f$, which contributes \f$2 \mu\f$ to the total operator order, where
  * \f$\mu\f$ is the multiplicity.
  *
- * \see differential_operator, differential_operator_from_roots()
+ * \see differential_operator, differential_operator_from_roots(), basis_operator
  */
 // a root of the characteristic polynomial: re + i im; im > 0 stands for the
 // pair re +- i im, which counts twice in the order
@@ -68,7 +68,7 @@ struct differential_operator_root {
  * defined by the roots of its characteristic polynomial \f$P(r) = \sum_{k=0}^m c_k r^k\f$ with \f$c_m = 1\f$.
  * Stored internally by its roots with multiplicities.
  *
- * \see derivative_operator(), oscillator_operator(), harmonic_operator(), operator_penalty()
+ * \see derivative_operator(), oscillator_operator(), harmonic_operator(), operator_penalty(), basis_operator
  */
 class differential_operator {
  public:
@@ -81,7 +81,7 @@ class differential_operator {
    * \f$a\f$ is `rate`, \f$b\f$ is `frequency`, and \f$x' = x - \mathrm{lower}\f$.
    * A frequency of zero indicates no trigonometric factor.
    *
-   * \see null_space(), null_space_values()
+   * \see null_space(), null_space_values(), basis_operator
    */
   // one function of the null space: x'^power e^(rate x') times cos(frequency x')
   // (sine = false) or sin(frequency x') (sine = true); frequency 0 means no
@@ -93,12 +93,13 @@ class differential_operator {
   };
 
   /**
+   * \ingroup basis_operator
    * \brief Constructs a differential operator from its characteristic roots.
    *
    * \param roots Vector of characteristic roots with multiplicities.
    * \throw std::invalid_argument If any root is non-finite, if \f$\mathrm{im} < 0\f$,
    *        if any multiplicity is less than 1, or if the resulting order is less than 1.
-   * \see differential_operator_from_roots()
+   * \see differential_operator_from_roots(), basis_operator
    */
   explicit differential_operator(std::vector<differential_operator_root> roots) : roots_() {
     for (const auto& r : roots) {
@@ -111,16 +112,20 @@ class differential_operator {
   }
 
   /**
+   * \ingroup basis_operator
    * \brief Roots of the characteristic polynomial.
    *
    * \return Const reference to the vector of distinct roots with multiplicities.
+   * \see basis_operator
    */
   const std::vector<differential_operator_root>& roots() const { return roots_; }
 
   /**
+   * \ingroup basis_operator
    * \brief Differential order of the operator.
    *
    * \return Total order \f$m\f$, summing \f$\mu\f$ for real roots and \f$2\mu\f$ for complex conjugate pairs.
+   * \see basis_operator
    */
   int order() const {
     int m = 0;
@@ -129,12 +134,14 @@ class differential_operator {
   }
 
   /**
+   * \ingroup basis_operator
    * \brief Computes the monic polynomial coefficients \f$c_0, \dots, c_m\f$.
    *
    * Multiplies the linear factors \f$(r - a)\f$ for real roots and quadratic factors
    * \f$(r^2 - 2 a r + a^2 + b^2)\f$ for complex conjugate pairs \f$a \pm \mathrm{i} b\f$.
    *
    * \return Vector of \f$m + 1\f$ coefficients \f$c_0, \dots, c_m\f$ with \f$c_m = 1\f$.
+   * \see basis_operator
    */
   // c_0..c_m (c_m = 1)
   std::vector<double> coefficients() const {
@@ -154,13 +161,14 @@ class differential_operator {
   }
 
   /**
+   * \ingroup basis_operator
    * \brief Canonical functions spanning the null space of the operator.
    *
    * Generates the \f$m\f$ basis functions of the null space for each root with multiplicity \f$\mu\f$
-   * and power \f$i = 0, \dots, \mu - 1\f$.
+   * and power \f$p = 0, \dots, \mu - 1\f$.
    *
    * \return Vector of \f$m\f$ null-space function descriptors.
-   * \see null_space_values()
+   * \see null_space_values(), basis_operator
    */
   std::vector<null_space_function> null_space() const {
     std::vector<null_space_function> f;
@@ -173,17 +181,19 @@ class differential_operator {
   }
 
   /**
+   * \ingroup basis_operator
    * \brief Evaluates the null-space functions at given points.
    *
-   * Evaluates the \f$m\f$ null-space functions at \f$n\f$ coordinates with origin at \f$\mathrm{lower}\f$
-   * (\f$x' = x - \mathrm{lower}\f$).
+   * Evaluates the \f$m\f$ null-space functions \f$f_j(x)\f$ at \f$n\f$ coordinates with origin
+   * at \f$\mathrm{lower}\f$ (\f$x' = x - \mathrm{lower}\f$), writing an \f$n \times m\f$
+   * column-major matrix (`out[i + j * n] = f_j(x_i)` for \f$i = 0, \dots, n-1\f$ and
+   * \f$j = 0, \dots, m-1\f$).
    *
    * \param lower Reference origin coordinate \f$\mathrm{lower}\f$.
    * \param x Pointer to array of \f$n\f$ evaluation points.
    * \param n Number of evaluation points.
-   * \param out Pointer to output buffer of size at least \f$n \times m\f$, written column-major:
-   *            `out[i + j * n] = f_j(x_i)` for \f$i = 0, \dots, n-1\f$ and \f$j = 0, \dots, m-1\f$.
-   * \see null_space()
+   * \param out Pointer to output buffer of size at least \f$n \times m\f$, written column-major.
+   * \see null_space(), basis_operator
    */
   // the null-space functions at the n points x (x' = x - lower), column-major:
   // out[i + j n] = f_j(x_i), j = 0..order() - 1
@@ -202,6 +212,7 @@ class differential_operator {
   }
 
   /**
+   * \ingroup basis_operator
    * \brief Product of two differential operators.
    *
    * Computes \f$L_a L_b\f$ by taking the union of the roots of \f$a\f$ and \f$b\f$,
@@ -210,6 +221,7 @@ class differential_operator {
    * \param a First differential operator.
    * \param b Second differential operator.
    * \return Product differential operator of order \f$m_a + m_b\f$.
+   * \see basis_operator
    */
   friend differential_operator operator*(const differential_operator& a, const differential_operator& b) {
     std::vector<differential_operator_root> r = a.roots_;
@@ -239,7 +251,7 @@ class differential_operator {
  * \param m Derivative order (\f$m \ge 1\f$).
  * \return Differential operator \f$D^m\f$.
  * \throw std::invalid_argument If \f$m < 1\f$.
- * \see oscillator_operator(), harmonic_operator()
+ * \see oscillator_operator(), harmonic_operator(), basis_operator
  */
 // D^m: the root 0 with multiplicity m; null space the polynomials of degree < m
 inline differential_operator derivative_operator(int m) {
@@ -262,7 +274,7 @@ inline differential_operator derivative_operator(int m) {
  * \param harmonics Number of harmonics \f$H \ge 1\f$.
  * \return Differential operator of order \f$2H\f$.
  * \throw std::invalid_argument If `period <= 0.0`, is non-finite, or `harmonics < 1`.
- * \see harmonic_operator(), derivative_operator()
+ * \see harmonic_operator(), derivative_operator(), basis_operator
  */
 // prod_{h=1..H} (D^2 + (h nu)^2), nu = 2 pi / period: order 2H; null space
 // cos(h nu x'), sin(h nu x'), h = 1..H
@@ -290,7 +302,7 @@ inline differential_operator oscillator_operator(double period, int harmonics = 
  * \param harmonics Number of harmonics \f$H \ge 1\f$.
  * \return Differential operator of order \f$2H + 1\f$.
  * \throw std::invalid_argument If `period <= 0.0`, is non-finite, or `harmonics < 1`.
- * \see oscillator_operator(), derivative_operator()
+ * \see oscillator_operator(), derivative_operator(), basis_operator
  */
 // D prod_{h=1..H} (D^2 + (h nu)^2): order 2H + 1; null space the constant and
 // cos(h nu x'), sin(h nu x'), h = 1..H
@@ -305,7 +317,7 @@ inline differential_operator harmonic_operator(double period, int harmonics = 1)
  * \param roots Vector of characteristic roots with multiplicities.
  * \return Differential operator.
  * \throw std::invalid_argument If any root or multiplicity is invalid, or total order is less than 1.
- * \see differential_operator_from_weights(), differential_operator
+ * \see differential_operator_from_weights(), differential_operator, basis_operator
  */
 inline differential_operator differential_operator_from_roots(std::vector<differential_operator_root> roots) {
   return differential_operator(std::move(roots));
@@ -350,18 +362,18 @@ inline std::vector<std::complex<double>> polynomial_roots(const std::vector<doub
  * \ingroup basis_operator
  * \brief Constructs a differential operator from polynomial coefficient weights.
  *
- * Finds the roots of the monic polynomial \f$P(r) = r^m + \sum_{j=0}^{m-1} w_j r^j\f$
- * via the Aberth-Ehrlich iteration, started on a circle of radius \f$s = 2 \max_j |w_j|^{1/(m-j)}\f$.
- * Approximations closer than \f$10^{-4} s\f$ are grouped into multiple roots with mean values,
- * and components with absolute value \f$\le 10^{-4} s\f$ are set to zero.
- * Distinct roots closer than \f$10^{-4} s\f$ are merged.
+ * Finds the roots of \f$P(r) = r^m + \sum_{j=0}^{m-1} w_j r^j\f$ via Aberth-Ehrlich iteration
+ * (returning \f$D^m\f$ when all weights are zero), grouping approximations within \f$10^{-4} s\f$
+ * of Fujiwara's bound \f$s = 2 \max_j |w_j|^{1/(m-j)}\f$ and zeroing components with magnitude
+ * at most \f$10^{-4} s\f$. Distinct roots closer than \f$10^{-4} s\f$ are merged; specify such
+ * operators via differential_operator_from_roots().
  *
  * \param w Vector of weights \f$w_0, \dots, w_{m-1}\f$ for orders \f$0, \dots, m-1\f$ (\f$m \ge 1\f$).
  * \return Differential operator with grouped roots.
  * \throw std::invalid_argument If `w` is empty, contains non-finite values, if conjugate roots
  *        cannot be paired, or if rebuilt coefficients deviate from `w` by more than
  *        \f$10^{-6} \max(\max_k |w_k|, s^{m-j})\f$.
- * \see differential_operator_from_roots(), differential_operator
+ * \see differential_operator_from_roots(), differential_operator, basis_operator
  */
 // L = D^m + w_{m-1} D^(m-1) + ... + w_0 from its weights w_0..w_{m-1} (as
 // fda's vec2Lfd). The roots of the characteristic polynomial are computed
@@ -436,7 +448,7 @@ int polynomial_degree(const B& b) {
  * \ingroup basis_operator
  * \brief Computes the penalty matrix of a differential operator on a univariate basis.
  *
- * Evaluates the \f$K \times K\f$ penalty matrix
+ * Evaluates the \f$K \times K\f$ column-major penalty matrix (`out[i + j * K]`)
  * \f[
  * S = \sum_{k=0}^m \sum_{l=0}^m c_k c_l G_{kl}
  * \f]
@@ -450,7 +462,7 @@ int polynomial_degree(const B& b) {
  * \param out Pointer to output array for the \f$K \times K\f$ dense matrix in column-major order.
  * \throw std::invalid_argument If operator order \f$m > 6\f$, or if \f$m\f$ exceeds the polynomial
  *        degree of a polynomial basis.
- * \see differential_operator
+ * \see differential_operator, basis_operator
  */
 // S = sum_{k,l} c_k c_l G_kl, dense K x K column-major. The order must be at
 // most 6 (the cross Gram matrices go to order 6) and, for a polynomial basis,

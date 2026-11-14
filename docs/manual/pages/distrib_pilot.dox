@@ -1,480 +1,316 @@
 /**
-\defgroup distrib_gaussian1 Gaussian distribution
-\ingroup distrib
-\brief Normal distribution in mean and standard deviation, with parameter derivatives and tail expansions.
-
-Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
-
-## Mathematical definition
-
-The Gaussian distribution `gaussian1_distrib` is parameterized by its mean \f$\mu \in (-\infty, \infty)\f$ (`mu`) and standard deviation \f$\sigma \in (0, \infty)\f$ (`sigma`). The support is \f$y \in (-\infty, \infty)\f$.
-
-Let \f$z = \frac{y - \mu}{\sigma}\f$ be the standardized argument. The log-density is:
-\f[
-\ell(\mu, \sigma; y) = -\log \sigma - \frac{1}{2}\log(2\pi) - \frac{z^2}{2}
-\f]
-
-## Derivatives of the log-density
-
-For total derivative order \f$K \in \{1, \dots, 6\}\f$, let \f$a\f$ denote the number of derivatives in \f$\mu\f$ and \f$b\f$ the number of derivatives in \f$\sigma\f$, with \f$a + b = K\f$. In \ref laplace::distrib::sym_tensor "sym_tensor<2, K>", the component is located at index \f$b\f$:
-- For \f$a = 0\f$ (\f$b = K\f$ derivatives in \f$\sigma\f$):
-  \f[
-  \frac{\partial^K}{\partial\sigma^K} \ell = \frac{(-1)^b}{\sigma^b} \left( (b - 1)! - \frac{(b + 1)!}{2} z^2 \right)
-  \f]
-- For \f$a = 1\f$ (\f$1\f$ derivative in \f$\mu\f$, \f$b = K - 1\f$ in \f$\sigma\f$):
-  \f[
-  \frac{\partial^K}{\partial\mu \partial\sigma^b} \ell = \frac{(-1)^b (b + 1)!}{\sigma^{b + 1}} z
-  \f]
-- For \f$a = 2\f$ (\f$2\f$ derivatives in \f$\mu\f$, \f$b = K - 2\f$ in \f$\sigma\f$):
-  \f[
-  \frac{\partial^K}{\partial\mu^2 \partial\sigma^b} \ell = \frac{(-1)^{b + 1} (b + 1)!}{\sigma^{b + 2}}
-  \f]
-- For \f$a > 2\f$:
-  \f[
-  \frac{\partial^K}{\partial\mu^a \partial\sigma^b} \ell = 0
-  \f]
-
-## Derivatives in the observation and mixed derivatives
-
-For continuous distributions, `logpdf_dy_dk<J, K>(y)` computes the mixed partial derivatives:
-\f[
-\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \ell(\mu, \sigma; y)
-\f]
-as a symmetric tensor \ref laplace::distrib::sym_tensor "sym_tensor<2, K>", with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters \f$(\mu, \sigma)\f$ (\f$J + K \le 6\f$).
-
-Because the Gaussian log-density depends on \f$y\f$ and \f$\mu\f$ solely through the difference \f$y - \mu\f$, differentiation in \f$y\f$ satisfies:
-\f[
-\frac{\partial}{\partial y} = -\frac{\partial}{\partial\mu}
-\f]
-For \f$J \ge 1\f$, let \f$b \in \{0, \dots, K\}\f$ denote the number of derivatives in \f$\sigma\f$ and \f$K - b\f$ the derivatives in \f$\mu\f$. The effective total order in \f$\mu\f$ is \f$a = K - b + J \ge 1\f$. The component at index \f$b\f$ in \ref laplace::distrib::sym_tensor "sym_tensor<2, K>" is \f$(-1)^J\f$ times the \f$(a, b)\f$ component of parameter derivatives:
-- For \f$a = 1\f$ (requiring \f$J = 1\f$ and \f$b = K\f$):
-  \f[
-  \frac{\partial^{J+K}}{\partial y^J \partial\mu^{K-b} \partial\sigma^b} \ell = \frac{(-1)^{J + b} (b + 1)!}{\sigma^{b + 1}} z
-  \f]
-- For \f$a = 2\f$:
-  \f[
-  \frac{\partial^{J+K}}{\partial y^J \partial\mu^{K-b} \partial\sigma^b} \ell = \frac{(-1)^{J + b + 1} (b + 1)!}{\sigma^{b + 2}}
-  \f]
-- For \f$a > 2\f$:
-  \f[
-  \frac{\partial^{J+K}}{\partial y^J \partial\mu^{K-b} \partial\sigma^b} \ell = 0
-  \f]
-For \f$J = 0\f$, \f$K = 0\f$ evaluates the log-density \f$\ell(\mu, \sigma; y)\f$, and \f$J = 0\f$, \f$K \ge 1\f$ matches the parameter derivatives `logpdf_dk<K>(y)`. Each pair \f$(J, K)\f$ is instantiated separately and evaluated only when called.
-
-## Expected Fisher information
-
-The expected Fisher information matrix \f$I(\mu, \sigma) = -\mathbb{E}\left[\frac{\partial^2}{\partial\theta^2} \ell\right]\f$ is diagonal:
-\f[
-I(\mu, \sigma) = \begin{pmatrix} \frac{1}{\sigma^2} & 0 \\ 0 & \frac{2}{\sigma^2} \end{pmatrix}
-\f]
-Stored as \ref laplace::distrib::sym_tensor "sym_tensor<2, 2>", its entries are `v[0] = 1.0 / (sigma * sigma)` and `v[2] = 2.0 / (sigma * sigma)`.
-
-The \f$K\f$-th derivative of \f$I\f$ with respect to \f$\sigma\f$ is:
-\f[
-\frac{\partial^K}{\partial\sigma^K} I(\mu, \sigma) = \frac{(-1)^K (K + 1)!}{\sigma^{K + 2}} \begin{pmatrix} 1 & 0 \\ 0 & 2 \end{pmatrix}
-\f]
-All derivatives with respect to \f$\mu\f$ are identically zero.
-
-## Cumulative distribution and tail derivatives
-
-The cumulative distribution functions are:
-\f[
-F(y) = \Phi(z), \quad 1 - F(y) = \Phi(-z), \quad \log F(y) = \log\Phi(z), \quad \log(1 - F(y)) = \log\Phi(-z)
-\f]
-The quantile function is \f$F^{-1}(p) = \mu + \sigma \Phi^{-1}(p)\f$ for \f$p \in (0, 1)\f$.
-
-### Central region
-
-For \f$|z| < 4\f$, derivatives of \f$\log\Phi(t)\f$ in \f$t = \pm z\f$ are evaluated by \ref laplace::math::own::log_Phi_d1 "log_Phi_d1()" through \ref laplace::math::own::log_Phi_d6 "log_Phi_d6()" and mapped to \f$(\mu, \sigma)\f$ by the location-scale chain rule.
-
-### Asymptotic tail route
-
-For \f$x = -\operatorname{sgn}(z) z \ge 4\f$ (\f$z \le -4\f$ for \f$\log F\f$, and \f$z \ge 4\f$ for \f$\log(1 - F)\f$), letting \f$t = \operatorname{sgn}(z) z = -x\f$ and \f$w = 1/x^2 = \sigma^2 / (y - \mu)^2\f$:
-\f[
-\log\Phi(t) = -\frac{t^2}{2} - \log x - \frac{1}{2}\log(2\pi) - w + S_2(t)
-\f]
-where \f$S_2(t) = \log(x M_0(x)) + w\f$ with Mills ratio \f$M_0(x) = \int_0^\infty \exp(-x s - s^2/2)\,\mathrm{d}s\f$.
-
-The leading terms are differentiated in \f$(\mu, \sigma)\f$ in closed form:
-- \f$-\frac{t^2}{2} = -\frac{(y - \mu)^2}{2\sigma^2}\f$, contributing only up to two derivatives in \f$\mu\f$.
-- \f$-\log x = -\log(\operatorname{sgn}(\mu - y)) + \log\sigma\f$, contributing pure derivatives in \f$\mu\f$ and \f$\sigma\f$ without mixed terms.
-- \f$-w = -\frac{\sigma^2}{(y - \mu)^2}\f$, contributing only up to two derivatives in \f$\sigma\f$.
-
-Only the residual \f$S_2(t)\f$ (of size \f$w^2\f$) is passed through the polynomial recurrence. Differentiating the full \f$\log\Phi(t)\f$ through the recurrence would cancel large terms to zero, losing up to \f$1.57 \times 10^5\f$ ulp of the component in mixed derivatives of order 6.
-
-## Regularity and non-smooth points
-
-- `y_regularity = infinitely_smooth`: the log-density is infinitely differentiable in \f$y\f$.
-- `mu`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
-- `sigma`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
-- `param_kinks(j, y)` and `y_kinks()` report `count = 0` (no kinks).
-
-## Accuracy
-
-Measured on the gcc build (CPU) against reference values from mpmath at 300 and 400 bits (`tests/data/reference/distrib_log_cdf.csv` and `distrib_log_cdf_tails.csv`):
-
-| Quantity | Grid / points | Max error (scaled ulp) | Test bound (scaled ulp) |
-|---|---|---|---|
-| `log_cdf` derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf.csv` (2217 rows) | 30.9 | 46.4 |
-| `log_ccdf` derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf.csv` (2217 rows) | 29.7 | 44.6 |
-| `log_cdf` tail derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf_tails.csv`, \f$z \le -1.5\f$ | 4.81 | 7.3 |
-| `log_ccdf` tail derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf_tails.csv`, \f$z \ge 1.5\f$ | 4.38 | 6.6 |
-
-In the tails, the maximum error of an individual component is \f$1.46 \times 10^3\f$ ulp for `log_cdf` and \f$1.48 \times 10^3\f$ ulp for `log_ccdf` (order 6 at \f$|z| = 7\f$, sitting adjacent to a zero of that component at \f$|z| = 7.3\f$; test bound \f$2.2 \times 10^3\f$ ulp).
-
-Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score within \f$10^{-12}\f$. Mixed derivatives \ref laplace::distrib::gaussian1_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>()" agree with 5-point finite differences in \f$y\f$ and in parameters within relative tolerance \f$10^{-8}\f$ of the largest component of the order (measured on the gcc build at \f$(\mu, \sigma) = (0.4, 1.3)\f$ across \f$y \in \{-3, 0.2, 1.7, 9\}\f$ and inside a Kokkos kernel).
-*/
+ * \defgroup distrib_gaussian1 Gaussian distribution (mean-sd)
+ * \ingroup distrib
+ *
+ * Defined in `<laplace/distrib/gaussian1.hpp>` as \ref laplace::distrib::gaussian1_distrib "gaussian1",
+ * the univariate Gaussian distribution provides log-density, parameter and observation derivatives up
+ * to order \f$6\f$, expected Fisher information with parameter derivatives up to order \f$4\f$, and
+ * cumulative, log-cumulative, and quantile functions with derivatives up to order \f$6\f$. Every
+ * method is marked `LAPLACE_HD` so evaluators run identically on host CPUs and Kokkos device
+ * backends; see \ref distrib_core for the shared interface, `sym_tensor` storage, and Kokkos
+ * execution patterns. Against 400-bit `mpmath` references, `log_cdf()` and `log_ccdf()` reach at
+ * most \f$30.9\f$ and \f$29.7\f$ scaled ulp over the full suite and \f$4.81\f$ and \f$4.38\f$ in
+ * the tails.
+ *
+ * ## Classic form and regularity
+ *
+ * The classic Gaussian density in mean \f$\mu \in \mathbb{R}\f$ and standard deviation
+ * \f$\sigma > 0\f$ is
+ * \f[
+ * f(y; \mu, \sigma) = \frac{1}{\sqrt{2\pi}\,\sigma} \exp\!\left(-\frac{(y - \mu)^2}{2\sigma^2}\right), \qquad y \in (-\infty, \infty).
+ * \f]
+ * The library uses this mean-sd parametrization directly, with `center()` returning \f$\mu\f$ and
+ * `scale()` returning \f$\sigma\f$. The distribution is smooth everywhere: `y_regularity` is
+ * `distrib_regularity::infinitely_smooth`, `moves_support` is `false`, both parameter descriptors
+ * mark `regularity` and `cdf_regularity` as `infinitely_smooth`, and `param_kinks()` and
+ * `y_kinks()` return zero kinks.
+ *
+ * ## Log-density, Fisher information, and cumulative functions
+ *
+ * Let \f$z = (y - \mu)/\sigma\f$. The log-density is
+ * \f[
+ * \ell(\mu, \sigma; y) = -\log\sigma - \frac{1}{2}\log(2\pi) - \frac{z^2}{2}.
+ * \f]
+ * For parameter derivatives of order \f$K \in \{1, \dots, 6\}\f$, the mixed partial with \f$a = K - b\f$
+ * derivatives in \f$\mu\f$ and \f$b\f$ in \f$\sigma\f$ vanishes for \f$a > 2\f$, and otherwise equals
+ * \f$(-1)^b (b + 1)! / \sigma^{b + 2}\f$ for \f$a = 2\f$,
+ * \f$(-1)^b (b + 1)! \, z / \sigma^{b + 1}\f$ for \f$a = 1\f$, and
+ * \f$(-1)^{K - 1} (K - 1)! / \sigma^K + (-1)^K (K + 1)! \, z^2 / (2\sigma^K)\f$ for \f$a = 0\f$.
+ * Mixed partials `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$) exploit translation invariance
+ * \f$\partial/\partial y = -\partial/\partial\mu\f$, multiplying the \f$(\mu, \sigma)\f$ tensor by
+ * \f$(-1)^J\f$ with \f$a = K - b + J\f$.
+ *
+ * The expected Fisher information is diagonal, \f$I(\mu, \sigma) = \operatorname{diag}(1/\sigma^2, 2/\sigma^2)\f$,
+ * stored in `sym_tensor<2, 2>` with `v[0] = 1 / (sigma * sigma)`, `v[1] = 0`, and `v[2] = 2 / (sigma * sigma)`.
+ * Only pure \f$\sigma\f$-derivatives survive, giving
+ * \f$\partial^K I / \partial\sigma^K = (-1)^K (K + 1)! / \sigma^{K + 2} \operatorname{diag}(1, 2)\f$
+ * for \f$K \in \{1, \dots, 4\}\f$.
+ *
+ * Cumulative functions wrap the standard normal primitives in `laplace::math`:
+ * `cdf(y) = normal_cdf(z)`, `ccdf(y) = normal_ccdf(z)`, and `quantile(p) = mu + sigma * normal_quantile(p)`.
+ * For `log_cdf(y)` and `log_ccdf(y)`, central points (\f$|z| < 4\f$) call `log_normal_cdf(z)` and
+ * `log_normal_ccdf(z)`. In the deep tails (\f$z \le -4\f$ for `log_cdf`, \f$z \ge 4\f$ for `log_ccdf`),
+ * setting \f$x = -\operatorname{sgn}(z)\,z \ge 4\f$, \f$t = -x\f$, and \f$w = 1/x^2 = \sigma^2/(y-\mu)^2\f$,
+ * the identity
+ * \f[
+ * \log\Phi(t) = -\frac{t^2}{2} - \log x - \frac{1}{2}\log(2\pi) - w + S_2(t), \qquad S_2(t) = \log(x M_0(x)) + w,
+ * \f]
+ * with Mills ratio \f$M_0(x) = \int_0^\infty \exp(-x s - s^2/2)\,\mathrm{d}s\f$, separates the exact
+ * closed-form leading terms from \f$S_2(t) = O(x^{-4})\f$ and avoids subtracting \f$\log\Phi(t)\f$
+ * against \f$-t^2/2\f$ when differentiating up to order \f$6\f$ via `log_normal_cdf_d1()` ..
+ * `log_normal_cdf_d6()`.
+ *
+ * ## Accuracy
+ *
+ * Measured on the CPU `gcc` build against 400-bit `mpmath` references (details in `docs/numerics.md`),
+ * scaled ulp errors (see \ref accuracy and \ref distrib_core) stay within:
+ *
+ * | Method | Suite | Max scaled ulp | Test bound |
+ * | --- | --- | --- | --- |
+ * | `log_cdf` | `distrib_log_cdf.csv` | \f$30.9\f$ | \f$46.4\f$ |
+ * | `log_ccdf` | `distrib_log_cdf.csv` | \f$29.7\f$ | \f$44.6\f$ |
+ * | `log_cdf` | `distrib_log_cdf_tails.csv` (\f$z \le -1.5\f$) | \f$4.81\f$ | \f$7.3\f$ |
+ * | `log_ccdf` | `distrib_log_cdf_tails.csv` (\f$z \ge 1.5\f$) | \f$4.38\f$ | \f$6.6\f$ |
+ *
+ * Across parameter and observation tests, 5-point finite differences confirm `logpdf_dk`,
+ * `expected_info_dk`, and `logpdf_dy_dk` within relative tolerance \f$10^{-8}\f$, and numerical score
+ * variance matches `expected_info()` within \f$10^{-12}\f$.
+ *
+ * ## References
+ *
+ * - F. Johansson and others, *mpmath: a Python library for arbitrary-precision floating-point arithmetic*, http://mpmath.org/.
+ */
 
 /**
-\defgroup distrib_laplace1 Laplace distribution
-\ingroup distrib
-\brief Laplace distribution in location and scale, with kinks, score-based Fisher information, and tail series.
-
-Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
-
-## Mathematical definition
-
-The Laplace (double exponential) distribution `laplace1_distrib` is parameterized by its location \f$\mu \in (-\infty, \infty)\f$ (`mu`) and scale \f$\sigma \in (0, \infty)\f$ (`sigma`). The support is \f$y \in (-\infty, \infty)\f$.
-
-Let \f$z = \frac{y - \mu}{\sigma}\f$ be the standardized argument. The log-density is:
-\f[
-\ell(\mu, \sigma; y) = -\log(2\sigma) - |z| = -\log(2\sigma) - \frac{|y - \mu|}{\sigma}
-\f]
-
-## Derivatives of the log-density
-
-The log-density \f$\ell\f$ is continuous everywhere, but possesses a sharp kink at \f$\mu = y\f$ (or \f$y = \mu\f$) where its first derivative in \f$\mu\f$ jumps by \f$2/\sigma\f$. Away from the kink (\f$\mu \ne y\f$), for total derivative order \f$K = a + b\f$ with \f$a\f$ derivatives in \f$\mu\f$ and \f$b\f$ in \f$\sigma\f$:
-- For \f$a = 0\f$ (\f$b = K\f$ derivatives in \f$\sigma\f$):
-  \f[
-  \frac{\partial^K}{\partial\sigma^K} \ell = \frac{(-1)^b}{\sigma^b} \left( (b - 1)! - b! |z| \right)
-  \f]
-- For \f$a = 1\f$ (\f$1\f$ derivative in \f$\mu\f$, \f$b = K - 1\f$ in \f$\sigma\f$):
-  \f[
-  \frac{\partial^K}{\partial\mu \partial\sigma^b} \ell = \frac{(-1)^b b!}{\sigma^{b + 1}} \operatorname{sgn}(z)
-  \f]
-- For \f$a > 1\f$:
-  \f[
-  \frac{\partial^K}{\partial\mu^a \partial\sigma^b} \ell = 0
-  \f]
-At the kink \f$\mu = y\f$ (\f$z = 0\f$), `logpdf_d1()` adopts the symmetric convention \f$\operatorname{sgn}(0) = 0\f$, representing the average of the left- and right-hand limits.
-
-## Derivatives in the observation and mixed derivatives
-
-For continuous distributions, `logpdf_dy_dk<J, K>(y)` computes the mixed partial derivatives:
-\f[
-\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \ell(\mu, \sigma; y)
-\f]
-as a symmetric tensor \ref laplace::distrib::sym_tensor "sym_tensor<2, K>", with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters \f$(\mu, \sigma)\f$ (\f$J + K \le 6\f$).
-
-Because the Laplace log-density depends on \f$y\f$ and \f$\mu\f$ solely through \f$y - \mu\f$, differentiation in \f$y\f$ satisfies:
-\f[
-\frac{\partial}{\partial y} = -\frac{\partial}{\partial\mu}
-\f]
-Away from the kink (\f$y \ne \mu\f$), for \f$J \ge 1\f$, let \f$b \in \{0, \dots, K\}\f$ denote derivatives in \f$\sigma\f$ and \f$K - b\f$ in \f$\mu\f$, with total effective order in \f$\mu\f$ given by \f$a = K - b + J \ge 1\f$. The component at position \f$b\f$ in \ref laplace::distrib::sym_tensor "sym_tensor<2, K>" is \f$(-1)^J\f$ times the \f$(a, b)\f$ component of parameter derivatives:
-- For \f$a = 1\f$ (requiring \f$J = 1\f$ and \f$b = K\f$):
-  \f[
-  \frac{\partial^{J+K}}{\partial y^J \partial\mu^{K-b} \partial\sigma^b} \ell = \frac{(-1)^{J + b} b!}{\sigma^{b + 1}} \operatorname{sgn}(z)
-  \f]
-  where \f$z = \frac{y - \mu}{\sigma}\f$.
-- For \f$a > 1\f$:
-  \f[
-  \frac{\partial^{J+K}}{\partial y^J \partial\mu^{K-b} \partial\sigma^b} \ell = 0
-  \f]
-At the kink \f$y = \mu\f$ (\f$z = 0\f$), `logpdf_dy_dk()` follows the symmetric convention \f$\operatorname{sgn}(0) = 0\f$, matching `logpdf_d1()`.
-For \f$J = 0\f$, \f$K = 0\f$ evaluates \f$\ell(\mu, \sigma; y)\f$, and \f$J = 0\f$, \f$K \ge 1\f$ matches `logpdf_dk<K>(y)`. Each pair \f$(J, K)\f$ is instantiated separately and evaluated only when called.
-
-## Expected Fisher information
-
-Because the pointwise second derivative \f$\frac{\partial^2}{\partial\mu^2}\ell\f$ vanishes almost everywhere, its expectation \f$-\mathbb{E}\left[\frac{\partial^2}{\partial\mu^2}\ell\right] = 0\f$ misses the Dirac delta distribution at \f$\mu = y\f$.
-
-The expected Fisher information is defined by the variance of the score:
-\f[
-I(\mu, \sigma) = \mathbb{E}\left[ \left(\nabla_\theta \ell\right) \left(\nabla_\theta \ell\right)^\top \right] = \begin{pmatrix} \frac{1}{\sigma^2} & 0 \\ 0 & \frac{1}{\sigma^2} \end{pmatrix}
-\f]
-Stored as \ref laplace::distrib::sym_tensor "sym_tensor<2, 2>", `v[0] = 1.0 / (sigma * sigma)` and `v[2] = 1.0 / (sigma * sigma)`.
-
-The \f$K\f$-th derivative of \f$I\f$ with respect to \f$\sigma\f$ is:
-\f[
-\frac{\partial^K}{\partial\sigma^K} I(\mu, \sigma) = \frac{(-1)^K (K + 1)!}{\sigma^{K + 2}} \begin{pmatrix} 1 & 0 \\ 0 & 1 \end{pmatrix}
-\f]
-All derivatives with respect to \f$\mu\f$ are identically zero.
-
-## Cumulative distribution and tail derivatives
-
-The cumulative distribution functions are:
-\f[
-F(y) = \begin{cases} \frac{1}{2} e^z & z < 0 \\ 1 - \frac{1}{2} e^{-z} & z \ge 0 \end{cases}, \qquad
-1 - F(y) = \begin{cases} 1 - \frac{1}{2} e^z & z < 0 \\ \frac{1}{2} e^{-z} & z \ge 0 \end{cases}
-\f]
-Their logarithms are:
-\f[
-\log F(y) = \begin{cases} z - \log 2 & z < 0 \\ \log\left(1 - \frac{1}{2} e^{-z}\right) & z \ge 0 \end{cases}, \qquad
-\log(1 - F(y)) = \begin{cases} \log\left(1 - \frac{1}{2} e^z\right) & z < 0 \\ -z - \log 2 & z \ge 0 \end{cases}
-\f]
-The quantile function is \f$F^{-1}(p) = \mu + \sigma \log(2p)\f$ for \f$p < 1/2\f$ and \f$\mu - \sigma \log(2 - 2p)\f$ for \f$p \ge 1/2\f$.
-
-### Linear side
-
-Where \f$\log F\f$ or \f$\log(1 - F)\f$ is linear in \f$z\f$ (\f$z < 0\f$ for \f$\log F\f$, \f$z > 0\f$ for \f$\log(1 - F)\f$), the first derivative in \f$z\f$ is \f$1\f$ (or \f$-1\f$) and all higher derivatives in \f$z\f$ are zero.
-
-### Polynomial recurrence near zero
-
-For \f$|z| < 0.25\f$ on the non-linear side, let \f$q = 1 / (2e^{|z|} - 1)\f$. The derivatives of \f$\log(1 - e^{-|z|}/2)\f$ with respect to \f$|z|\f$ are polynomials \f$P_j(q)\f$ satisfying \f$P_1(q) = q\f$ and \f$P_{j+1}(q) = -q (1 + q) P_j'(q)\f$, which are converted to \f$(\mu, \sigma)\f$ via the location-scale chain rule.
-
-### Series tail route
-
-For \f$|z| \ge 0.25\f$ on the non-linear tail (\f$z \ge 0.25\f$ for \f$\log F\f$, and \f$z \le -0.25\f$ for \f$\log(1 - F)\f$), the function is expanded into its series with \f$p = \frac{1}{2}e^{-|z|}\f$:
-\f[
-\log\left(1 - \frac{1}{2}e^{-|z|}\right) = -\sum_{n=1}^\infty \frac{p^n}{n} = -\sum_{n=1}^\infty \frac{2^{-n}}{n} \exp\left(\frac{c_n}{\sigma}\right)
-\f]
-where \f$c_n = n s (y - \mu)\f$ (\f$s = -1\f$ for \f$\log F\f$, \f$s = 1\f$ for \f$\log(1 - F)\f$). Each term is differentiated in closed form:
-\f[
-\frac{\partial^a}{\partial\mu^a} \frac{\partial^b}{\partial\sigma^b} \exp\left(\frac{c_n}{\sigma}\right) = (-n s)^a (-1)^b b! \sigma^{-(a + b)} \exp\left(\frac{c_n}{\sigma}\right) L_b^{(a - 1)}(n |z|)
-\f]
-where \f$L_b^{(\alpha)}(u)\f$ is the generalized Laguerre polynomial, computed using the three-term forward recurrence \f$(k + 1) L_{k+1} = (2k + 1 + \alpha - u) L_k - (k + \alpha) L_{k-1}\f$ with \f$L_0 = 1\f$ and \f$L_1 = 1 + \alpha - u\f$ (identity verified symbolically with SymPy 1.14.0; Meurer et al. 2017). Evaluating via this series avoids the large alternating terms of the polynomial representation, reducing maximum error from \f$986\f$ to \f$48.9\f$ ulp at order 6.
-
-## Regularity and non-smooth points
-
-- `y_regularity = 0`: the log-density is \f$C^0\f$ in \f$y\f$ with a kink at \f$y = \mu\f$.
-- `mu`: `regularity = 0` (\f$C^0\f$ in \f$\mu\f$), `moves_support = false`, `cdf_regularity = 1` (\f$C^1\f$ in \f$\mu\f$).
-- `sigma`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
-- `param_kinks(0, y)` reports \f$\mu = y\f$ with `continuous_order = 0`.
-- `param_kinks(1, y)` reports `count = 0`.
-- `y_kinks()` reports \f$y = \mu\f$ with `continuous_order = 0`.
-
-## Accuracy
-
-Measured on the gcc build (CPU) against reference values from mpmath at 300 and 400 bits (`tests/data/reference/distrib_log_cdf.csv` and `distrib_log_cdf_tails.csv`):
-
-| Quantity | Grid / points | Max error (scaled ulp) | Test bound (scaled ulp) |
-|---|---|---|---|
-| `log_cdf` derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf.csv` (2217 rows) | 11.2 | 16.8 |
-| `log_ccdf` derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf.csv` (2217 rows) | 9.86 | 14.8 |
-| `log_cdf` tail derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf_tails.csv`, \f$z \ge 0.05\f$ | 16.7 | 25.0 |
-| `log_ccdf` tail derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf_tails.csv`, \f$z \le -0.05\f$ | 6.05 | 9.1 |
-
-In the tails, the maximum error of an individual component is \f$53.9\f$ ulp for `log_cdf` (order 5; test bound \f$81.0\f$ ulp) and \f$35.2\f$ ulp for `log_ccdf` (order 6; test bound \f$53.0\f$ ulp).
-
-Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score (evaluated by numerical quadrature with a knot at the kink \f$y = \mu\f$) within \f$10^{-12}\f$. Mixed derivatives \ref laplace::distrib::laplace1_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>()" away from the kink agree with 5-point finite differences in \f$y\f$ and in parameters within relative tolerance \f$10^{-8}\f$ of the largest component of the order (measured on the gcc build at \f$(\mu, \sigma) = (0.4, 1.3)\f$ across \f$y \in \{-3, 0.2, 1.7, 9\}\f$ and inside a Kokkos kernel).
-*/
+ * \defgroup distrib_laplace1 Laplace distribution (location-scale)
+ * \ingroup distrib
+ *
+ * Defined in `<laplace/distrib/laplace1.hpp>` as \ref laplace::distrib::laplace1_distrib "laplace1",
+ * the univariate Laplace distribution provides log-density and mixed derivatives up to order \f$6\f$,
+ * expected Fisher information with derivatives up to order \f$4\f$, and cumulative, log-cumulative,
+ * and quantile functions with derivatives up to order \f$6\f$. All evaluators are marked `LAPLACE_HD`
+ * for host and Kokkos device execution; see \ref distrib_core for common interface and storage
+ * conventions. Against 400-bit `mpmath` references, `log_cdf()` and `log_ccdf()` reach at most
+ * \f$11.2\f$ and \f$9.86\f$ scaled ulp across the full suite.
+ *
+ * ## Classic form and regularity
+ *
+ * The classic Laplace density in location \f$\mu \in \mathbb{R}\f$ and scale \f$b > 0\f$ is
+ * \f[
+ * f(y; \mu, b) = \frac{1}{2b} \exp\!\left(-\frac{|y - \mu|}{b}\right), \qquad y \in (-\infty, \infty).
+ * \f]
+ * The library identifies \f$\sigma = b\f$, with `center()` returning \f$\mu\f$ and `scale()` returning
+ * \f$\sigma\f$. The cusp at \f$y = \mu\f$ causes a jump of \f$2/\sigma\f$ in the first derivative of
+ * \f$\log f\f$: `y_regularity` is \f$0\f$ (continuous, piecewise smooth), \f$\mu\f$ has `regularity = 0`
+ * and `cdf_regularity = 1` (since \f$F\f$ is \f$C^1\f$), \f$\sigma\f$ is `infinitely_smooth`, and
+ * `moves_support` is `false`. Both `param_kinks(0, y)` and `y_kinks()` report one knot of
+ * `continuous_order = 0` at \f$\mu = y\f$ (or \f$y = \mu\f$), while `param_kinks(1, y)` has count \f$0\f$.
+ *
+ * ## Log-density, Fisher information, and cumulative functions
+ *
+ * With \f$z = (y - \mu)/\sigma\f$, the log-density is \f$\ell(\mu, \sigma; y) = -\log(2\sigma) - |z|\f$.
+ * Parameter and mixed derivatives use the symmetric convention \f$\operatorname{sgn}(0) = 0\f$ at
+ * \f$y = \mu\f$. Away from the kink, for \f$K \in \{1, \dots, 6\}\f$, the partial with \f$a = K - b\f$
+ * derivatives in \f$\mu\f$ and \f$b\f$ in \f$\sigma\f$ vanishes when \f$a \ge 2\f$, equals
+ * \f$(-1)^b b! \, \operatorname{sgn}(z) / \sigma^{b + 1}\f$ when \f$a = 1\f$, and equals
+ * \f$(-1)^K (K - 1)! / \sigma^K + (-1)^{K + 1} K! \, |z| / \sigma^K\f$ when \f$a = 0\f$. Mixed
+ * partials `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$) apply \f$\partial/\partial y = -\partial/\partial\mu\f$.
+ *
+ * Although \f$\ell\f$ is non-differentiable at \f$y = \mu\f$, the score variance defines the regular
+ * Fisher information \f$I(\mu, \sigma) = \operatorname{diag}(1/\sigma^2, 1/\sigma^2)\f$, stored in
+ * `sym_tensor<2, 2>` with `v[0] = v[2] = 1 / (sigma * sigma)` and `v[1] = 0`. For \f$K \in \{1, \dots, 4\}\f$,
+ * only pure \f$\sigma\f$-derivatives are nonzero, equal to \f$(-1)^K (K + 1)! / \sigma^{K + 2} I_2\f$.
+ *
+ * The cumulative and quantile functions split around \f$z = 0\f$:
+ * \f[
+ * F(y) = \begin{cases} \frac{1}{2} e^{z}, & z \le 0, \\ 1 - \frac{1}{2} e^{-z}, & z > 0, \end{cases}
+ * \qquad
+ * F^{-1}(p) = \begin{cases} \mu + \sigma \log(2p), & p \le \frac{1}{2}, \\ \mu - \sigma \log(2(1 - p)), & p > \frac{1}{2}. \end{cases}
+ * \f]
+ * On the linear side (\f$z < 0\f$ for `log_cdf`, \f$z > 0\f$ for `log_ccdf`), \f$\log F = -\log 2 + z\f$
+ * and \f$\log(1 - F) = -\log 2 - z\f$ have exact closed-form derivatives. On the opposite side, two
+ * regimes avoid cancellation:
+ * - For \f$0 \le |z| < 0.25\f$, writing \f$q = 1/(2e^{|z|} - 1)\f$, polynomial derivatives
+ *   \f$\mathrm{d}^j \log(1 - \frac{1}{2}e^{-|z|}) / \mathrm{d}|z|^j = (-1)^{j - 1} P_j(q)\f$ with
+ *   \f$P_1(q) = q\f$ and \f$P_{j+1}(q) = -q(1 + q) P_j'(q)\f$ combine with \f$\partial^k (-|z|) / \partial\theta^k\f$
+ *   via Faà di Bruno composition.
+ * - For \f$|z| \ge 0.25\f$, the Mercator series \f$-\sum_{n = 1}^{\infty} (2^{-n}/n) \exp(c_n/\sigma)\f$
+ *   with \f$c_n = n s (y - \mu)\f$ (\f$s = -1\f$ for `log_cdf`, \f$s = 1\f$ for `log_ccdf`) has
+ *   mixed partials evaluated cleanly through associated Laguerre polynomials \f$L_b^{(a - 1)}(n |z|)\f$
+ *   computed by the recurrence \f$(k + 1) L_{k + 1}^{(\alpha)}(u) = (2k + 1 + \alpha - u) L_k^{(\alpha)}(u) - (k + \alpha) L_{k - 1}^{(\alpha)}(u)\f$,
+ *   verified symbolically with SymPy 1.14.0.
+ *
+ * ## Accuracy
+ *
+ * Measured on the CPU `gcc` build against 400-bit `mpmath` references (details in `docs/numerics.md`):
+ *
+ * | Method | Suite | Max scaled ulp | Test bound |
+ * | --- | --- | --- | --- |
+ * | `log_cdf` | `distrib_log_cdf.csv` | \f$11.2\f$ | \f$16.8\f$ |
+ * | `log_ccdf` | `distrib_log_cdf.csv` | \f$9.86\f$ | \f$14.8\f$ |
+ * | `log_cdf` | `distrib_log_cdf_tails.csv` (\f$z \ge 0.05\f$) | \f$16.7\f$ | \f$25.0\f$ |
+ * | `log_ccdf` | `distrib_log_cdf_tails.csv` (\f$z \le -0.05\f$) | \f$6.05\f$ | \f$9.1\f$ |
+ *
+ * Away from \f$y = \mu\f$, 5-point finite differences verify `logpdf_dk`, `expected_info_dk`, and
+ * `logpdf_dy_dk` within relative tolerance \f$10^{-8}\f$, and score-variance quadrature split at
+ * \f$y = \mu\f$ matches `expected_info()` within \f$10^{-12}\f$.
+ *
+ * ## References
+ *
+ * - F. Johansson and others, *mpmath: a Python library for arbitrary-precision floating-point arithmetic*, http://mpmath.org/.
+ * - A. Meurer and others, *SymPy: symbolic computing in Python*, PeerJ Computer Science 3 (2017), e103.
+ */
 
 /**
-\defgroup distrib_poisson Poisson distribution
-\ingroup distrib
-\brief Poisson distribution in its mean, with saddle-point log-mass and incomplete gamma cumulative derivatives.
-
-Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
-
-## Mathematical definition
-
-The Poisson distribution `poisson_distrib` is a discrete distribution parameterized by its mean \f$\mu \in (0, \infty)\f$ (`mu`). The support is non-negative integers \f$y \in \{0, 1, 2, \dots\}\f$.
-
-### Saddle-point form of the log-mass
-
-To evaluate the log-mass without catastrophic cancellation at large \f$\mu\f$, `poisson_distrib` employs the saddle-point representation:
-\f[
-\ell(\mu; y) = -\mu D(y/\mu) - \frac{1}{2}\log(2\pi y) - \delta(y)
-\f]
-where \f$D(z) = z \log z - z + 1 \ge 0\f$ is the unit deviance, and \f$\delta(y)\f$ is Stirling's error (see \ref stirling).
-- For \f$y = 0\f$, \f$\ell(\mu; 0) = -\mu\f$.
-- For \f$|w| < 0.25\f$ with \f$w = (y - \mu)/\mu\f$, \f$D(y/\mu)\f$ is computed by its Taylor series \f$\sum_{n=2}^\infty \frac{(-1)^n w^n}{n (n - 1)}\f$.
-- The textbook form \f$y \log\mu - \mu - \log(y!)\f$ subtracts two large terms near \f$y = \mu = 1000\f$, losing \f$10^{-12}\f$ absolute error and producing \f$1243\f$ ulp error when summing tail masses; the saddle-point form reduces this error to \f$5.91\f$ ulp.
-
-## Derivatives of the log-mass
-
-With a single parameter \f$\mu\f$, derivatives of order \f$K \in \{1, \dots, 6\}\f$ are scalars stored in \ref laplace::distrib::sym_tensor "sym_tensor<1, K>" at index `v[0]`:
-- For \f$K = 1\f$:
-  \f[
-  \frac{\mathrm{d}}{\mathrm{d}\mu} \ell = \frac{y}{\mu} - 1
-  \f]
-- For \f$K \ge 2\f$:
-  \f[
-  \frac{\mathrm{d}^K}{\mathrm{d}\mu^K} \ell = (-1)^{K - 1} (K - 1)! \frac{y}{\mu^K}
-  \f]
-
-Because the Poisson distribution is discrete on integers \f$y \in \{0, 1, 2, \dots\}\f$, there are no derivatives in \f$y\f$.
-
-## Expected Fisher information
-
-The expected Fisher information is:
-\f[
-I(\mu) = -\mathbb{E}\left[\frac{\mathrm{d}^2}{\mathrm{d}\mu^2} \ell\right] = \frac{1}{\mu}
-\f]
-Stored as \ref laplace::distrib::sym_tensor "sym_tensor<1, 2>", `v[0] = 1.0 / mu`.
-
-The \f$K\f$-th derivative of \f$I(\mu)\f$ is:
-\f[
-\frac{\mathrm{d}^K}{\mathrm{d}\mu^K} I(\mu) = \frac{(-1)^K K!}{\mu^{K + 1}}
-\f]
-Stored in \ref laplace::distrib::expected_info_tensor "expected_info_tensor<1, K>" at `pair[0][0]`.
-
-## Cumulative distribution and derivatives
-
-For any real observation \f$y\f$:
-- If \f$y < 0\f$: \f$F(y) = 0\f$, \f$1 - F(y) = 1\f$, \f$\log F(y) = -\infty\f$, and \f$\log(1 - F(y)) = 0\f$. Derivatives of \f$\log F\f$ return NaN, and derivatives of \f$\log(1 - F)\f$ return \f$0\f$.
-- If \f$y \ge 0\f$: letting \f$k = \lfloor y \rfloor\f$, the cumulative distribution is expressed through the regularized incomplete gamma functions (see \ref incomplete_gamma):
-  \f[
-  F(y) = Q(k + 1, \mu), \qquad 1 - F(y) = P(k + 1, \mu)
-  \f]
-  where \f$Q(a, x) = \frac{\Gamma(a, x)}{\Gamma(a)}\f$ and \f$P(a, x) = \frac{\gamma(a, x)}{\Gamma(a)}\f$.
-
-Derivatives of \f$\log F(y)\f$ and \f$\log(1 - F(y))\f$ with respect to \f$\mu\f$ of order \f$K \in \{1, \dots, 6\}\f$ are the pure \f$x\f$-derivatives of \f$\log Q(k + 1, x)\f$ and \f$\log P(k + 1, x)\f$ evaluated at \f$x = \mu\f$. These are evaluated by `math::log_gamma_q_mixed_dK` and `math::log_gamma_p_mixed_dK`.
-
-## Regularity and non-smooth points
-
-- `mu`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
-- `param_kinks(j, y)` reports `count = 0` (no kinks).
-
-## Accuracy
-
-Measured on the gcc build (CPU) against reference values from mpmath at 300 and 400 bits (`tests/data/reference/distrib_log_cdf.csv`):
-
-| Quantity | Grid / points | Max error (scaled ulp) | Test bound (scaled ulp) |
-|---|---|---|---|
-| `log_cdf` derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf.csv` | \f$3.84 \times 10^3\f$ | \f$5.8 \times 10^3\f$ |
-| `log_ccdf` derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf.csv` | 867 | \f$1.3 \times 10^3\f$ |
-
-The maximum error for `log_cdf` occurs at order 6 for \f$k = 39\f$ at \f$\mu = 40\f$, where the exact derivative value is \f$4.8 \times 10^{-7}\f$ (absolute error \f$2.0 \times 10^{-19}\f$).
-
-Expected information and log-mass derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the sum of squared scores over the support within relative tolerance \f$10^{-13}\f$.
-*/
+ * \defgroup distrib_poisson Poisson distribution (mean)
+ * \ingroup distrib
+ *
+ * Defined in `<laplace/distrib/poisson.hpp>` as \ref laplace::distrib::poisson_distrib "poisson",
+ * the univariate Poisson distribution provides log-mass and parameter derivatives up to order \f$6\f$,
+ * expected Fisher information with derivatives up to order \f$4\f$, and cumulative and log-cumulative
+ * functions with derivatives up to order \f$6\f$. All methods carry `LAPLACE_HD` for host and Kokkos
+ * device execution; see \ref distrib_core for shared conventions. Against 300-bit `mpmath` references,
+ * `log_cdf()` and `log_ccdf()` reach at most \f$3.84 \times 10^3\f$ and \f$867\f$ scaled ulp across
+ * the full suite.
+ *
+ * ## Classic form and regularity
+ *
+ * The classic Poisson probability mass function with rate \f$\lambda > 0\f$ is
+ * \f[
+ * p(y; \lambda) = \frac{\lambda^y e^{-\lambda}}{y!}, \qquad y \in \{0, 1, 2, \dots\}.
+ * \f]
+ * The library names this mean parameter \f$\mu = \lambda\f$, with `center()` returning \f$\mu\f$ and
+ * `scale()` returning \f$\sqrt{\mu}\f$. Because support is discrete on \f$\mathbb{Z}_{\ge 0}\f$,
+ * `poisson` exposes no observation regularity or `y_kinks()` method (`logpdf_dy_dk` is omitted as well),
+ * while `moves_support` is `false`, \f$\mu\f$ has `regularity = infinitely_smooth` and
+ * `cdf_regularity = infinitely_smooth`, and `param_kinks()` always returns count \f$0\f$.
+ *
+ * ## Log-mass, Fisher information, and cumulative functions
+ *
+ * At \f$y = 0\f$, `logpmf(0)` returns \f$-\mu\f$. For integer \f$y \ge 1\f$, `logpmf(y)` uses the
+ * saddle-point deviance identity instead of subtracting \f$\log\Gamma(y + 1)\f$:
+ * \f[
+ * \ell(\mu; y) = -\mu D(y/\mu) - \frac{1}{2}\log(2\pi y) - \delta(y), \qquad D(z) = z \log z - z + 1,
+ * \f]
+ * where \f$\delta(y)\f$ is the Stirling error. Writing \f$w = (y - \mu)/\mu\f$, when \f$|w| < 0.25\f$
+ * the deviance is evaluated as \f$y - \mu + \mu w \sum_{n = 2}^{\infty} (-1)^n w^n / (n(n - 1))\f$
+ * in \f$\mu\f$-space and summed as \f$\mu w^2 \sum \dots\f$, avoiding catastrophic cancellation when
+ * \f$y \approx \mu\f$ is large. Parameter derivatives of order \f$K \in \{1, \dots, 6\}\f$ are exact:
+ * \f$\partial\ell/\partial\mu = y/\mu - 1\f$ and
+ * \f$\partial^K\ell/\partial\mu^K = (-1)^{K - 1} (K - 1)! \, y / \mu^K\f$ for \f$K \ge 2\f$.
+ *
+ * The scalar expected Fisher information is \f$I(\mu) = 1/\mu\f$, stored in `sym_tensor<1, 2>` with
+ * `v[0] = 1 / mu`, and its \f$K\f$-th derivative (\f$K \in \{1, \dots, 4\}\f$) is
+ * \f$(-1)^K K! / \mu^{K + 1}\f$.
+ *
+ * For \f$y < 0\f$, `cdf()` and `log_ccdf()` return \f$0\f$, `ccdf()` returns \f$1\f$, `log_cdf()` returns
+ * \f$-\infty\f$, `log_cdf_dk()` fills quiet NaN, and `log_ccdf_dk()` returns \f$0\f$. For \f$y \ge 0\f$,
+ * letting \f$k = \lfloor y \rfloor\f$, the cumulative and complementary probabilities are the
+ * regularized incomplete gamma functions \f$F(y) = Q(k + 1, \mu)\f$ and \f$1 - F(y) = P(k + 1, \mu)\f$.
+ * Their log-values and derivatives of order \f$K \in \{1, \dots, 6\}\f$ call the pure \f$x\f$-entries of
+ * \ref laplace::math::own::log_gamma_q_mixed_d1 "log_gamma_q_mixed_d1()" .. `log_gamma_q_mixed_d6()` and
+ * \ref laplace::math::own::log_gamma_p_mixed_d1 "log_gamma_p_mixed_d1()" .. `log_gamma_p_mixed_d6()`
+ * at \f$(s, x) = (k + 1, \mu)\f$.
+ *
+ * ## Accuracy
+ *
+ * Measured on the CPU `gcc` build against 300-bit `mpmath` references (details in `docs/numerics.md`):
+ *
+ * | Method | Suite | Max scaled ulp | Test bound |
+ * | --- | --- | --- | --- |
+ * | `log_cdf` | `distrib_log_cdf.csv` | \f$3.84 \times 10^3\f$ | \f$5.8 \times 10^3\f$ |
+ * | `log_ccdf` | `distrib_log_cdf.csv` | \f$867\f$ | \f$1.3 \times 10^3\f$ |
+ *
+ * Finite differences confirm `logpdf_dk` and `expected_info_dk` within relative tolerance \f$10^{-8}\f$,
+ * and direct summation of \f$p(y;\mu) (\partial\ell/\partial\mu)^2\f$ agrees with `expected_info()`
+ * within \f$10^{-13}\f$.
+ *
+ * ## References
+ *
+ * - F. Johansson and others, *mpmath: a Python library for arbitrary-precision floating-point arithmetic*, http://mpmath.org/.
+ */
 
 /**
-\defgroup distrib_gamma1 Gamma distribution
-\ingroup distrib
-\brief Gamma distribution in mean and dispersion, with Stirling log-density, Fisher information, and fixed-ratio cumulative derivatives.
-
-Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
-
-## Mathematical definition
-
-The Gamma distribution `gamma1_distrib` is parameterized by its mean \f$\mu \in (0, \infty)\f$ (`mu`) and dispersion \f$\phi \in (0, \infty)\f$ (`phi`). The support is \f$y \in (0, \infty)\f$.
-
-In terms of standard shape \f$s\f$ and scale \f$\theta\f$:
-\f[
-s = \frac{1}{\phi}, \quad \theta = \mu \phi, \quad \operatorname{Var}(Y) = \phi \mu^2
-\f]
-
-### Stirling error form of the log-density
-
-To avoid catastrophic cancellation between \f$\log\Gamma(s)\f$ and \f$s \log s\f$ when \f$s\f$ is large (\f$\phi \to 0\f$), the log-density is written as:
-\f[
-\ell(\mu, \phi; y) = s G(\mu) + H(\phi) - \log y - \frac{1}{2}\log(2\pi)
-\f]
-where:
-- \f$G(\mu) = -D(y/\mu)\f$, with unit deviance \f$D(z) = z - 1 - \log z \ge 0\f$. For \f$|w| < 0.25\f$ with \f$w = (y - \mu)/\mu\f$, \f$D\f$ is evaluated by the series \f$\sum_{n=2}^\infty \frac{(-1)^n w^n}{n}\f$; for \f$w < -0.5\f$, it evaluates \f$w - \log(y/\mu)\f$; and otherwise \f$w - \log(1 + w)\f$.
-- \f$H(\phi) = \frac{1}{2}\log s - \delta(s)\f$, with \f$s = 1/\phi\f$ and \f$\delta(s)\f$ Stirling's error (see \ref stirling).
-
-## Derivatives of the log-density
-
-For total order \f$K \in \{1, \dots, 6\}\f$, let \f$a\f$ denote derivatives in \f$\mu\f$ and \f$b\f$ derivatives in \f$\phi\f$ (\f$a + b = K\f$, position \f$b\f$ in `sym_tensor<2, K>`). Derivatives of \f$s(\phi) = 1/\phi\f$ are \f$s^{(b)}(\phi) = \frac{(-1)^b b!}{\phi^{b + 1}}\f$ (with \f$s^{(0)} = s\f$).
-- For \f$a \ge 1\f$:
-  \f[
-  \frac{\partial^K}{\partial\mu^a \partial\phi^b} \ell = s^{(b)}(\phi) G^{(a)}(\mu)
-  \f]
-  where
-  \f[
-  G^{(a)}(\mu) = (-1)^a (a - 1)! \frac{\mu - a y}{\mu^{a + 1}}
-  \f]
-- For \f$a = 0, b \ge 1\f$:
-  \f[
-  \frac{\partial^K}{\partial\phi^K} \ell = s^{(K)}(\phi) G(\mu) + H^{(K)}(\phi)
-  \f]
-  where
-  \f[
-  H^{(K)}(\phi) = \frac{(-1)^K (K - 1)!}{2 \phi^K} - \frac{\mathrm{d}^K}{\mathrm{d}\phi^K} \delta(1/\phi)
-  \f]
-  The derivatives \f$\frac{\mathrm{d}^K}{\mathrm{d}\phi^K} \delta(1/\phi)\f$ are evaluated via Faà di Bruno's formula over \f$\delta^{(k)}(s)\f$ for \f$k \le K\f$. Although the individual Faà di Bruno terms can cancel by up to \f$10^{10}\f$ among themselves, the total \f$H^{(K)}\f$ remains accurate to within 8 ulp because \f$\delta\f$ is a small correction to the dominant \f$\frac{1}{2}\log s\f$ term.
-
-## Derivatives in the observation and mixed derivatives
-
-For continuous distributions, `logpdf_dy_dk<J, K>(y)` computes the mixed partial derivatives:
-\f[
-\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \ell(\mu, \phi; y)
-\f]
-as a symmetric tensor \ref laplace::distrib::sym_tensor "sym_tensor<2, K>", with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters \f$(\mu, \phi)\f$ (\f$J + K \le 6\f$).
-
-The terms of the log-density \f$\ell(\mu, \phi; y)\f$ containing the observation \f$y\f$ are \f$-\frac{s y}{\mu} + (s - 1) \log y\f$, where \f$s = 1/\phi\f$. Let \f$s^{(b)} = \frac{\mathrm{d}^b s}{\mathrm{d}\phi^b} = \frac{(-1)^b b!}{\phi^{b + 1}}\f$ with \f$s^{(0)} = s\f$. For total order \f$K\f$, let \f$a = K - b\f$ denote derivatives in \f$\mu\f$ and \f$b\f$ derivatives in \f$\phi\f$ (stored at index \f$b\f$ in \ref laplace::distrib::sym_tensor "sym_tensor<2, K>").
-
-For \f$J \ge 1\f$, the derivatives are evaluated in closed form:
-- For \f$J = 1\f$:
-  - If \f$a = 0\f$ (\f$b = K\f$ derivatives in \f$\phi\f$, none in \f$\mu\f$):
-    \f[
-    \frac{\partial^{1+K}}{\partial y \partial\phi^K} \ell = s^{(b)} \frac{\mu - y}{\mu y} - \frac{[b = 0]}{y}
-    \f]
-    where \f$[b = 0]\f$ equals 1 if \f$b = 0\f$ and 0 otherwise. Combining the two terms into a single expression avoids catastrophic cancellation near the mode \f$y = \mu\f$.
-  - If \f$a \ge 1\f$: the \f$\log y\f$ term vanishes under differentiation in \f$\mu\f$, giving:
-    \f[
-    \frac{\partial^{1+K}}{\partial y \partial\mu^a \partial\phi^b} \ell = -s^{(b)} \frac{(-1)^a a!}{\mu^{a + 1}}
-    \f]
-- For \f$J \ge 2\f$: the term linear in \f$y\f$ vanishes. Only the \f$\log y\f$ term contributes when \f$a = 0\f$, and all components with \f$a \ge 1\f$ are zero:
-  \f[
-  \frac{\partial^{J+K}}{\partial y^J \partial\mu^a \partial\phi^b} \ell = \begin{cases} c_b \frac{(-1)^{J - 1} (J - 1)!}{y^J} & a = 0 \\ 0 & a \ge 1 \end{cases}
-  \f]
-  where \f$c_0 = s - 1\f$ for \f$b = 0\f$ and \f$c_b = s^{(b)}\f$ for \f$b \ge 1\f$.
-
-For \f$J = 0\f$, \f$K = 0\f$ evaluates \f$\ell(\mu, \phi; y)\f$, and \f$J = 0\f$, \f$K \ge 1\f$ matches `logpdf_dk<K>(y)`. Each pair \f$(J, K)\f$ is instantiated separately and evaluated only when called.
-
-## Expected Fisher information
-
-The expected Fisher information matrix is:
-\f[
-I(\mu, \phi) = \begin{pmatrix} \frac{s}{\mu^2} & 0 \\ 0 & \frac{s^2}{2} + s^4 \delta''(s) \end{pmatrix}
-\f]
-where \f$\frac{s^2}{2} + s^4 \delta''(s) = s^4 \left(\psi'(s) - \frac{1}{s}\right)\f$, with \f$\psi'\f$ the trigamma function.
-
-Stored in \ref laplace::distrib::sym_tensor "sym_tensor<2, 2>", `v[0] = s / (mu * mu)` and `v[2] = s * s * (0.5 + s * s * stirling_error_d2(s))`.
-
-Derivatives of \f$I\f$ of order \f$K \in \{1, \dots, 4\}\f$ are stored in \ref laplace::distrib::expected_info_tensor "expected_info_tensor<2, K>":
-- \f$I_{\mu\mu} = s / \mu^2\f$: derivatives with \f$a\f$ in \f$\mu\f$ and \f$b\f$ in \f$\phi\f$ are evaluated as \f$(-1)^a (a + 1)! \mu^{-(a + 2)} s^{(b)}(\phi)\f$.
-- \f$I_{\phi\phi} = \frac{1}{2\phi^2} + f(s(\phi))\f$ with \f$f(s) = s^4 \delta''(s)\f$: evaluated by Faà di Bruno's formula over \f$f^{(k)}(s)\f$, where \f$f^{(k)}(s)\f$ is computed using Leibniz's rule over \f$s^4\f$ and \f$\delta^{(2 + k - i)}(s)\f$.
-
-## Cumulative distribution and derivatives
-
-The cumulative distribution functions are:
-\f[
-F(y) = P\left(s, \frac{s y}{\mu}\right), \quad 1 - F(y) = Q\left(s, \frac{s y}{\mu}\right)
-\f]
-where \f$P(a, x)\f$ and \f$Q(a, x)\f$ are the regularized lower and upper incomplete gamma functions (see \ref incomplete_gamma).
-
-The quantile function is:
-\f[
-F^{-1}(p) = \mu \phi \, P^{-1}(1/\phi, p)
-\f]
-where \f$P^{-1}\f$ is the inverse incomplete gamma function.
-
-### Fixed-ratio partial derivatives
-
-Derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$ in \f$(\mu, \phi)\f$ are evaluated by composing the mixed partial derivatives of \f$\log P(a, a c)\f$ and \f$\log Q(a, a c)\f$ at fixed ratio \f$c = y/\mu\f$ with \f$a = 1/\phi\f$ (evaluated by `math::log_gamma_p_ratio_mixed_dK` and `math::log_gamma_q_ratio_mixed_dK`).
-
-Letting \f$R_{ij} = \frac{\partial^{i+j}}{\partial a^i \partial c^j} \log S(a, a c)\f$, the derivatives in \f$(\mu, \phi)\f$ are evaluated by two univariate Faà di Bruno sums:
-\f[
-\frac{\partial^K}{\partial\mu^r \partial\phi^s} \log S = \sum_{i \le s, j \le r} R_{ij} B_{s, i}(a', a'', \dots) B_{r, j}(c', c'', \dots)
-\f]
-where \f$B_{n, k}\f$ are partial Bell polynomials, \f$a^{(n)}(\phi) = (-1)^n n! / \phi^{n+1}\f$, and \f$c^{(n)}(\mu) = (-1)^n n! y / \mu^{n+1}\f$.
-
-Because the ratio \f$x/a = c\f$ is constant along variations in \f$\phi\f$, evaluating at fixed ratio avoids catastrophic cancellation between \f$\frac{\partial}{\partial a}\f$ and \f$c \frac{\partial}{\partial x}\f$, which would otherwise lose up to \f$4 \times 10^7\f$ ulp.
-
-## Regularity and non-smooth points
-
-- `y_regularity = infinitely_smooth`: the log-density is infinitely differentiable in \f$y\f$ on its support \f$y \in (0, \infty)\f$.
-- `mu`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
-- `phi`: `regularity = infinitely_smooth`, `moves_support = false`, `cdf_regularity = infinitely_smooth`.
-- `param_kinks(j, y)` and `y_kinks()` report `count = 0` (no kinks).
-
-## Accuracy
-
-Measured on the gcc build (CPU) against reference values from mpmath at 300 and 400 bits (`tests/data/reference/distrib_log_cdf.csv`):
-
-| Quantity | Grid / points | Max error (scaled ulp) | Test bound (scaled ulp) |
-|---|---|---|---|
-| `log_cdf` derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf.csv` (\f$\phi \in \{0.02, 0.3, 4\}\f$) | 379 | 570 |
-| `log_ccdf` derivatives (\f$K = 1 \dots 6\f$) | `distrib_log_cdf.csv` (\f$\phi \in \{0.02, 0.3, 4\}\f$) | 356 | 540 |
-
-Expected information and log-density derivatives agree with 5-point finite differences within relative tolerance \f$10^{-8}\f$. Expected information agrees with the variance of the score (evaluated by numerical quadrature using tanh-sinh on \f$[0, \mu]\f$ and exp-sinh on \f$[\mu, \infty)\f$) within \f$10^{-12}\f$ for \f$I_{\mu\mu}\f$ and \f$10^{-10}\f$ for \f$I_{\phi\phi}\f$. Mixed derivatives \ref laplace::distrib::gamma1_distrib::logpdf_dy_dk "logpdf_dy_dk<J, K>()" agree with 5-point finite differences in \f$y\f$ and in parameters within relative tolerance \f$10^{-7}\f$ of the largest component of the order (measured on the gcc build at \f$(\mu, \phi) = (2, \phi)\f$ for \f$\phi \in \{0.02, 0.3, 4\}\f$ across \f$y \in \{0.3, 1.4, 2, 5\}\f$ and inside a Kokkos kernel).
-
-## References
-
-- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
-- A. Meurer, C. P. Smith, M. Paprocki, O. Čertík, S. B. Kirpichev, M. Rocklin, A. Kumar, S. Ivanov, J. K. Moore, S. Singh, T. Rathnayake, S. Vig, B. E. Granger, R. P. Muller, F. Bonazzi, H. Gupta, S. Vats, F. Johansson, F. Pedregosa, M. J. Curry, A. R. Terrel, Š. Roučka, A. Saboo, I. Fernando, S. Kulal, R. Cimrman, and A. Huff (2017). SymPy: symbolic computing in Python. *PeerJ Computer Science*, 3:e103.
-*/
+ * \defgroup distrib_gamma1 Gamma distribution (mean-dispersion)
+ * \ingroup distrib
+ *
+ * Defined in `<laplace/distrib/gamma1.hpp>` as \ref laplace::distrib::gamma1_distrib "gamma1",
+ * the univariate gamma distribution provides log-density and mixed derivatives up to order \f$6\f$,
+ * expected Fisher information with derivatives up to order \f$4\f$, and cumulative, log-cumulative,
+ * and quantile functions with derivatives up to order \f$6\f$. Every method carries `LAPLACE_HD` for
+ * host and Kokkos device execution; see \ref distrib_core for common interface and `sym_tensor`
+ * storage conventions. Against 300-bit `mpmath` references, `log_cdf()` and `log_ccdf()` reach at
+ * most \f$379\f$ and \f$356\f$ scaled ulp across the suite.
+ *
+ * ## Classic form and regularity
+ *
+ * In shape \f$s > 0\f$ and scale \f$\theta > 0\f$, the classic gamma density on \f$y \in (0, \infty)\f$ is
+ * \f[
+ * f(y; s, \theta) = \frac{1}{\Gamma(s)\,\theta^s} y^{s - 1} e^{-y/\theta}.
+ * \f]
+ * Substituting mean \f$\mu = s\theta > 0\f$ and dispersion \f$\phi = 1/s > 0\f$ (so \f$s = 1/\phi\f$,
+ * \f$\theta = \mu\phi\f$, and \f$\operatorname{Var}(Y) = \phi\mu^2\f$) gives
+ * \f[
+ * f(y; \mu, \phi) = \frac{1}{\Gamma(1/\phi)\,(\mu\phi)^{1/\phi}} y^{1/\phi - 1} \exp\!\left(-\frac{y}{\mu\phi}\right).
+ * \f]
+ * Here `center()` returns \f$\mu\f$ and `scale()` returns \f$\mu\sqrt{\phi}\f$. The distribution is
+ * smooth on \f$(0, \infty)\f$: `y_regularity` is `infinitely_smooth`, `moves_support` is `false`, both
+ * parameters mark `regularity` and `cdf_regularity` as `infinitely_smooth`, and `param_kinks()` and
+ * `y_kinks()` return zero kinks.
+ *
+ * ## Log-density, Fisher information, and cumulative functions
+ *
+ * For \f$y \le 0\f$, `logpdf(y)` and `log_cdf(y)` return \f$-\infty\f$, `cdf(y)` and `log_ccdf(y)` return
+ * \f$0\f$, and `ccdf(y)` returns \f$1\f$. For \f$y > 0\f$, with \f$s = 1/\phi\f$, the log-density splits into
+ * separate parameter contributions:
+ * \f[
+ * \ell(\mu, \phi; y) = s G(\mu) + H(\phi) - \log y - \frac{1}{2}\log(2\pi), \qquad
+ * G(\mu) = -D\!\left(\frac{y}{\mu}\right), \qquad H(\phi) = \frac{1}{2}\log s - \delta(s),
+ * \f]
+ * where \f$\delta(s)\f$ is the Stirling error and \f$D(z) = z - 1 - \log z\f$. Setting \f$w = (y - \mu)/\mu\f$,
+ * \f$D(y/\mu)\f$ uses the series \f$\sum_{n = 2}^{\infty} (-1)^n w^n / n\f$ for \f$|w| < 0.25\f$,
+ * \f$w - \log(y/\mu)\f$ for \f$w < -0.5\f$, and \f$w - \log(1 + w)\f$ otherwise, preventing cancellation
+ * when \f$\phi\f$ is small and \f$y \approx \mu\f$. Parameter derivatives combine closed-form
+ * \f$\partial^a G/\partial\mu^a\f$, \f$s^{(b)} = (-1)^b b! / \phi^{b + 1}\f$, and Faà di Bruno composition
+ * of \f$\delta^{(m)}(s)\f$ with \f$s^{(b)}\f$. Mixed partials `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$)
+ * differentiate only \f$-s y/\mu + (s - 1)\log y\f$.
+ *
+ * The expected Fisher information is diagonal,
+ * \f[
+ * I(\mu, \phi) = \operatorname{diag}\!\left(\frac{s}{\mu^2},\; \frac{s^2}{2} + s^4 \delta''(s)\right),
+ * \f]
+ * stored in `sym_tensor<2, 2>` with `v[1] = 0` and `v[2] = s * s * (0.5 + s * s * stirling_error_d2(s))`,
+ * canceling the leading \f$s^2\f$ cancellation in \f$\psi'(s) - 1/s\f$. Its derivatives of order
+ * \f$K \in \{1, \dots, 4\}\f$ propagate \f$s^{(b)}\f$ on \f$I_{\mu\mu}\f$ and apply Faà di Bruno plus
+ * Leibniz differentiation on \f$I_{\phi\phi}\f$.
+ *
+ * For \f$y > 0\f$, `cdf(y) = gamma_p(s, s y / \mu)`, `ccdf(y) = gamma_q(s, s y / \mu)`, and
+ * `quantile(p) = mu * phi * gamma_p_inv(s, p)`. Because \f$x = s y / \mu\f$ scales with \f$s = 1/\phi\f$,
+ * differentiating \f$\log P(s, s r)\f$ or \f$\log Q(s, s r)\f$ directly in \f$(s, x)\f$ loses \f$O(\phi^{-2})\f$
+ * accuracy to chain-rule cancellation. Instead, `log_cdf_dk()` and `log_ccdf_dk()` evaluate fixed-ratio
+ * partials \f$R_{ij} = \partial^{i + j} \log P(s, s r) / \partial s^i \partial r^j\f$ via
+ * \ref laplace::math::own::log_gamma_p_ratio_mixed_d1 "log_gamma_p_ratio_mixed_d1()" .. `_d6()` and
+ * \ref laplace::math::own::log_gamma_q_ratio_mixed_d1 "log_gamma_q_ratio_mixed_d1()" .. `_d6()`, then
+ * compose with \f$s = 1/\phi\f$ and \f$r = y/\mu\f$ through `bell_partial` in \ref faa_di_bruno
+ * (generated with SymPy 1.14.0).
+ *
+ * ## Accuracy
+ *
+ * Measured on the CPU `gcc` build against 300-bit `mpmath` references across \f$\phi \in \{0.02, 0.3, 4\}\f$
+ * (details in `docs/numerics.md`):
+ *
+ * | Method | Suite | Max scaled ulp | Test bound |
+ * | --- | --- | --- | --- |
+ * | `log_cdf` | `distrib_log_cdf.csv` | \f$379\f$ | \f$570\f$ |
+ * | `log_ccdf` | `distrib_log_cdf.csv` | \f$356\f$ | \f$540\f$ |
+ *
+ * Finite differences agree within relative tolerance \f$10^{-8}\f$ for `logpdf_dk` and
+ * `expected_info_dk` and \f$10^{-7}\f$ for `logpdf_dy_dk`; tanh-sinh and exp-sinh score-variance
+ * quadrature split at \f$y = \mu\f$ agrees with `expected_info()` within \f$10^{-12}\f$ for \f$I_{\mu\mu}\f$
+ * and \f$10^{-10}\f$ for \f$I_{\phi\phi}\f$.
+ *
+ * ## References
+ *
+ * - F. Johansson and others, *mpmath: a Python library for arbitrary-precision floating-point arithmetic*, http://mpmath.org/.
+ * - A. Meurer and others, *SymPy: symbolic computing in Python*, PeerJ Computer Science 3 (2017), e103.
+ */

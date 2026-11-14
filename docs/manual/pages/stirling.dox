@@ -3,117 +3,60 @@
 \ingroup special
 \brief Stirling's error \f$\delta(a)\f$ and its derivatives in \f$a\f$ to order 6.
 
-Functions in this module are marked `LAPLACE_HD_FORCEINLINE` and can be called on the host and inside Kokkos kernels on the device.
+This module computes Stirling's error \f$\delta(a)\f$ and its derivatives in \f$a\f$ to order 6. Include `<laplace/math/stirling.hpp>` and call functions in namespace `laplace::math`, from \ref laplace::math::stirling_error "stirling_error()" through \ref laplace::math::stirling_error_d6 "stirling_error_d6()". Every function is marked `LAPLACE_HD_FORCEINLINE` for use on the host and inside Kokkos device kernels. Across all seven functions, the largest measured error is 14.8 ulp on gcc and 16.1 ulp on CUDA, within test bounds up to 22.0 ulp.
 
-## Mathematical definition
+## Definitions
 
-Stirling's error \f$\delta(a)\f$, also known as the Binet function, is defined for positive real argument \f$a > 0\f$ by
+Stirling's error \f$\delta(a)\f$, also known as the Binet function, is the remainder of Stirling's series for \f$\log \Gamma(a)\f$:
 \f[
-\delta(a) = \log \Gamma(a) - \left(a - \frac{1}{2}\right) \log a + a - \frac{1}{2} \log(2\pi)
+\delta(a) = \log \Gamma(a) - \left(a - \frac{1}{2}\right) \log a + a - \frac{1}{2} \log(2\pi).
 \f]
-where:
-- \f$a \in (0, \infty)\f$ is the positive real argument.
-
-The function \f$\delta(a)\f$ represents the remainder of Stirling's series for \f$\log \Gamma(a)\f$.
-
-Its derivatives of order \f$k\f$ (\f$k = 1, \dots, 6\f$) with respect to \f$a\f$ are denoted \f$\delta^{(k)}(a)\f$:
+Its derivatives of order \f$k\f$ with respect to \f$a\f$ are denoted
 \f[
-\delta^{(k)}(a) = \frac{\mathrm{d}^k}{\mathrm{d}a^k} \delta(a)
+\delta^{(k)}(a) = \frac{\mathrm{d}^k}{\mathrm{d}a^k} \delta(a).
 \f]
-where:
-- \f$k \in \{1, \dots, 6\}\f$ is the derivative order.
-
-Asymptotic limits of \f$\delta(a)\f$:
-- As \f$a \to \infty\f$, \f$\delta(a) \sim \frac{1}{12a}\f$.
-- As \f$a \to 0\f$, \f$\delta(a) \sim -\frac{1}{2} \log a\f$.
+Here \f$a \in (0, \infty)\f$ is the positive real argument and \f$k \in \{1, \dots, 6\}\f$ is the derivative order.
 
 ## Domain and special values
 
-- **Domain:** Defined for \f$a \in (0, \infty)\f$.
-- **Special values and boundaries:**
-  - At \f$a = 1\f$: \f$\delta(1) = 1 - \frac{1}{2}\log(2\pi) \approx 0.08106146679532726\f$.
-  - At \f$a = 1\f$ for the first derivative: \f$\delta'(1) = \frac{1}{2} - \gamma \approx -0.07721566490153286\f$, with \f$\gamma\f$ Euler's constant.
-  - If \f$a \le 0\f$ or \f$a\f$ is NaN: returns quiet NaN.
-  - At \f$a \to +\infty\f$: \f$\delta(+\infty) = 0.0\f$ and \f$\delta^{(k)}(+\infty) = 0.0\f$ for all \f$k = 1, \dots, 6\f$.
+All seven functions share the open domain \f$a \in (0, \infty)\f$. Inputs with \f$a \le 0\f$ or NaN return quiet NaN. As \f$a \to 0^+\f$, \f$\delta(a) \sim -\frac{1}{2}\log a\f$, while as \f$a \to \infty\f$, \f$\delta(a) \sim \frac{1}{12a}\f$. At \f$a = +\infty\f$, every function returns \f$0.0\f$. At \f$a = 1\f$, \f$\delta(1) = 1 - \frac{1}{2}\log(2\pi) \approx 0.08106146679532726\f$ and \f$\delta'(1) = \frac{1}{2} - \gamma \approx -0.07721566490153286\f$, where \f$\gamma\f$ is Euler's constant.
 
-## Motivation: cancellation in direct evaluation
+## Method
 
-Evaluating \f$\delta(a)\f$ directly from the definition \f$\log \Gamma(a) - (a - \frac{1}{2})\log a + a - \frac{1}{2}\log(2\pi)\f$, or computing its derivatives \f$\delta^{(k)}(a)\f$ as \f$\psi^{(k-1)}(a) - \frac{\mathrm{d}^k}{\mathrm{d}a^k}[(a - \frac{1}{2})\log a - a]\f$, suffers severe numerical cancellation as \f$a\f$ grows.
-Because \f$\delta(a) \sim \frac{1}{12a}\f$, the exact value is roughly \f$\frac{1}{12a^2}\f$ times the largest term subtracted. In standard double precision, the relative error of the direct formula grows like \f$a^2\f$: about 256 ulp on \f$[2, 4)\f$, \f$10^3\f$ ulp near \f$a = 10\f$, and \f$10^{30}\f$ ulp at \f$a = 10^{15}\f$.
-To maintain high precision across the entire domain \f$a \in (0, \infty)\f$, Laplace avoids direct subtraction for \f$a \ge 1.0\f$ and evaluates \f$\delta(a)\f$ and its derivatives across three numerical regimes.
+Evaluating \f$\delta(a)\f$ or its derivatives directly from the definition cancels severely as \f$a\f$ grows. Because \f$\delta(a) \sim \frac{1}{12a}\f$, the exact value is roughly \f$\frac{1}{12a^2}\f$ times the largest subtracted term, so direct relative error grows like \f$a^2\f$. Direct evaluation is therefore restricted to \f$a < 1.0\f$, and the functions dispatch across three regimes:
 
-## Numerical methods and regimes
-
-The evaluation of \f$\delta(a)\f$ and \f$\delta^{(k)}(a)\f$ (\f$k = 1, \dots, 6\f$) is partitioned into three regimes:
-
-1. **Direct evaluation** (\f$a < 1.0\f$):
-   Evaluates the definition using \ref laplace::math::lgamma "lgamma()", \ref laplace::math::digamma "digamma()", and \ref laplace::math::polygamma "polygamma()":
-   For \f$k = 0\f$:
+1. **Direct evaluation** for \f$a < 1.0\f$. Evaluates the definition using \ref laplace::math::lgamma "lgamma()" for \f$k = 0\f$, and \ref laplace::math::digamma "digamma()" and \ref laplace::math::polygamma "polygamma()" for \f$k \ge 1\f$:
    \f[
-   \delta(a) = \log \Gamma(a) - \left(a - \frac{1}{2}\right) \log a + a - \frac{1}{2} \log(2\pi)
+   \delta'(a) = \psi(a) - \log a + \frac{1}{2a}, \qquad
+   \delta^{(k)}(a) = \psi^{(k-1)}(a) - (-1)^k \left(\frac{(k-2)!}{a^{k-1}} + \frac{(k-1)!}{2a^k}\right) \quad (k \ge 2).
    \f]
-   For \f$k = 1\f$:
+   Here \f$\psi(a)\f$ is the digamma function and \f$\psi^{(k-1)}(a)\f$ is the polygamma function of order \f$k - 1\f$. Below \f$a = 1.0\f$, the pole at the origin dominates, keeping cancellation within 15 ulp.
+2. **Recurrence** for \f$1.0 \le a < 10.0\f$. Shifts the argument upward by \f$n = \lceil 10 - a \rceil\f$ unit steps so that \f$a + n \in [10, 11)\f$, evaluating
    \f[
-   \delta'(a) = \psi(a) - \log a + \frac{1}{2a}
+   \delta^{(k)}(a) = \delta^{(k)}(a + n) + \sum_{j=0}^{n-1} g^{(k)}(a + j).
    \f]
-   For \f$k \ge 2\f$:
+   Here \f$j\f$ is the step index, \f$\delta^{(k)}(a + n)\f$ uses the asymptotic series below, and \f$g^{(0)} = g\f$. Each step difference \f$g(b) = \delta(b) - \delta(b + 1)\f$ at argument \f$b\f$ expands as
    \f[
-   \delta^{(k)}(a) = \psi^{(k-1)}(a) - (-1)^k \left(\frac{(k-2)!}{a^{k-1}} + \frac{(k-1)!}{2a^k}\right)
+   g(b) = \left(b + \frac{1}{2}\right) \log\left(1 + \frac{1}{b}\right) - 1 = \sum_{m=1}^\infty \frac{u^{2m}}{2m + 1},
    \f]
-   where \f$\psi^{(k-1)}(a)\f$ is the polygamma function of order \f$k - 1\f$.
-   In this region, the pole of the polygamma functions at the origin dominates the expression, so cancellation remains small (within 15 ulp).
-
-2. **Recurrence** (\f$1.0 \le a < 10.0\f$):
-   Shifts the argument upward to \f$a + n \ge 10.0\f$ using the recurrence
+   with \f$u = \frac{1}{2b + 1}\f$ and summation index \f$m \in \mathbb{Z}_{\ge 1}\f$. Term-by-term differentiation gives
    \f[
-   \delta(a) = \delta(a + n) + \sum_{j=0}^{n-1} g(a + j)
+   g^{(k)}(b) = (-2)^k \sum_{m=1}^\infty \frac{(2m)(2m + 1)\cdots(2m + k - 1)}{2m + 1} u^{2m + k}.
    \f]
-   where \f$n = \lceil 10 - a \rceil\f$ is the number of unit steps that brings \f$a + n\f$ into \f$[10, 11)\f$, \f$\delta(a + n)\f$ is evaluated by the asymptotic series, and
+   Because \f$u > 0\f$, every term in \f$g^{(k)}(b)\f$ shares the sign \f$(-1)^k\f$, so no cancellation occurs.
+3. **Asymptotic series** for \f$a \ge 10.0\f$. Evaluates the 20-term expansion
    \f[
-   g(b) = \delta(b) - \delta(b + 1) = \left(b + \frac{1}{2}\right) \log\left(1 + \frac{1}{b}\right) - 1 = \sum_{m=1}^\infty \frac{u^{2m}}{2m + 1}
+   \delta(a) \sim \sum_{j=1}^{20} \frac{B_{2j}}{2j(2j - 1) a^{2j - 1}},
    \f]
-   with \f$u = \frac{1}{2b + 1}\f$.
-   Differentiating term by term with respect to \f$b\f$ yields
+   where \f$B_{2j}\f$ are the even Bernoulli numbers and \f$j \in \{1, \dots, 20\}\f$ is the term index. Differentiating term by term gives
    \f[
-   g^{(k)}(b) = (-2)^k \sum_{m=1}^\infty \frac{(2m)(2m + 1)\cdots(2m + k - 1)}{2m + 1} u^{2m + k}
+   \delta^{(k)}(a) \sim (-1)^k \sum_{j=1}^{20} \frac{B_{2j}}{2j(2j - 1)} \left(\prod_{i=0}^{k-1} (2j - 1 + i)\right) a^{-(2j - 1 + k)},
    \f]
-   where \f$m \in \mathbb{Z}_{\ge 1}\f$ is the summation index. Because \f$u > 0\f$, every term in the sum for \f$g^{(k)}(b)\f$ has the same sign \f$(-1)^k\f$, so no cancellation occurs.
-   The recurrence for order \f$k\f$ is
-   \f[
-   \delta^{(k)}(a) = \delta^{(k)}(a + n) + \sum_{j=0}^{n-1} g^{(k)}(a + j)
-   \f]
-   with \f$\delta^{(k)}(a + n)\f$ computed by the asymptotic series. Summation in \f$m\f$ terminates when a term is \f$\le 2^{-54}\f$ of the partial sum (iteration cap 80).
+   where \f$i\f$ is the product index and the empty product for \f$k = 0\f$ is 1. The 20 coefficients \f$\frac{B_{2j}}{2j(2j - 1)}\f$ in the header were computed with mpmath (Johansson and others).
 
-3. **Asymptotic series** (\f$a \ge 10.0\f$):
-   Evaluates the asymptotic expansion
-   \f[
-   \delta(a) \sim \sum_{j=1}^{20} \frac{B_{2j}}{2j(2j - 1) a^{2j - 1}}
-   \f]
-   where \f$B_{2j}\f$ are the even Bernoulli numbers, differentiated term by term for order \f$k\f$:
-   \f[
-   \delta^{(k)}(a) \sim (-1)^k \sum_{j=1}^{20} \frac{B_{2j}}{2j(2j - 1)} \left(\prod_{i=0}^{k-1} (2j - 1 + i)\right) a^{-(2j - 1 + k)}
-   \f]
-   where \f$j \in \{1, \dots, 20\}\f$ is the term index. For \f$k = 0\f$, the empty product is 1.
-   Summation terminates when a term's absolute value is \f$\le 2^{-54}\f$ of the absolute partial sum.
-   The 20 coefficients \f$\frac{B_{2j}}{2j(2j - 1)}\f$ in the header were computed with mpmath (Johansson and others).
+## Accuracy
 
-## Measured accuracy
-
-See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
-
-Because \f$\delta(a)\f$ and its derivatives have no zeros on \f$(0, \infty)\f$, the error measure is plain relative ulp.
-
-Reference values in `tests/data/reference/stirling_error*.csv` are generated by `tools/reference/stirling.py` evaluating the definition using mpmath's `loggamma` and `polygamma` at 400 and 500 bits, verified to agree to \f$2^{-100}\f$ relative. 1384 points per order are sampled log-uniformly in \f$[2^{-40}, 10^{15}]\f$, uniformly in \f$[1/4, 40]\f$, and around candidate thresholds \f$1/2\f$, \f$8\f$, and \f$12\f$.
-
-Maximum relative error in ulp across the three routes on gcc/OpenMP (`docs/numerics.md`):
-
-| Region and route | \f$k = 0\f$ | \f$k = 1\f$ | \f$k = 2\f$ | \f$k = 3\f$ | \f$k = 4\f$ | \f$k = 5\f$ | \f$k = 6\f$ |
-|---|---|---|---|---|---|---|---|
-| \f$(0, 1)\f$ direct | 13.2 | 12.7 | 10.8 | 13.4 | 11.7 | 14.8 | 14.2 |
-| \f$[1, 10)\f$ recurrence | 3.44 | 3.92 | 3.81 | 6.07 | 6.40 | 9.31 | 9.72 |
-| \f$[10, 10^{15}]\f$ asymptotic | 2.51 | 3.62 | 4.20 | 5.27 | 4.76 | 6.69 | 8.19 |
-
-Overall measured maxima on gcc and CUDA (RTX 4070 SUPER), with test bounds from `tests/math/test_stirling.cpp`:
+See \ref accuracy "How accuracy is measured" for error metrics, reference generation, and test bounds. Because \f$\delta(a)\f$ and its derivatives have no zeros on \f$(0, \infty)\f$, the error measure is plain relative ulp.
 
 | Function | Order \f$k\f$ | Measured max error gcc (ulp) | Measured max error CUDA (ulp) | Test bound (ulp) |
 |---|---|---|---|---|
@@ -125,16 +68,11 @@ Overall measured maxima on gcc and CUDA (RTX 4070 SUPER), with test bounds from 
 | \ref laplace::math::stirling_error_d5 "stirling_error_d5()" | 5 | 14.8 | 14.8 | 22.0 |
 | \ref laplace::math::stirling_error_d6 "stirling_error_d6()" | 6 | 14.2 | 16.1 | 21.5 |
 
-On CUDA, all maxima occur on the direct route below \f$a = 1.0\f$. Test bounds are set to approximately 1.5 times the measured gcc maxima.
+On both gcc and CUDA (RTX 4070 SUPER), all measured maxima occur on the direct route below \f$a = 1.0\f$. Test bounds are set to approximately 1.5 times the measured gcc maxima. See `docs/numerics.md` for per-regime errors, reference sampling, and comparisons.
 
-## Timings
+## Speed
 
-Measured in nanoseconds per call on one gcc thread (`benchmarks/math_stirling.cpp`):
-- Direct route (\f$a < 1.0\f$): 5–37 ns/call.
-- Recurrence route (\f$1.0 \le a < 10.0\f$): 59–307 ns/call (cost grows with the number of unit shift steps \f$n \le 9\f$ and with the derivative order).
-- Asymptotic route (\f$a \ge 10.0\f$): 22–44 ns/call.
-
-No CUDA timings were taken for this module.
+Timings were measured in nanoseconds per call on one gcc thread; no CUDA timings were taken for this module. Calls take 5–37 ns on the direct route (\f$a < 1.0\f$), 59–307 ns on the recurrence route (\f$1.0 \le a < 10.0\f$), and 22–44 ns on the asymptotic route (\f$a \ge 10.0\f$). On the recurrence route, cost grows with the number of unit shift steps \f$n \le 9\f$ and with the derivative order.
 
 ## Example
 

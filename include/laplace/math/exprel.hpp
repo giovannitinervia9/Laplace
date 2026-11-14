@@ -120,24 +120,16 @@ LAPLACE_HD double deriv(int k, double x) {
  * \ingroup exprel
  * \brief Relative exponential function, \f$\varphi(x) = (e^x - 1)/x\f$.
  *
- * Computes the relative exponential function:
- * \f[
- * \varphi(x) = \frac{e^x - 1}{x}
- * \f]
- * with \f$\varphi(0) = 1\f$.
+ * Computes \f$\varphi(x) = (e^x - 1)/x\f$ for \f$x \ne 0\f$, with
+ * \f$\varphi(0) = 1.0\f$.
  *
  * \param x Real argument \f$x \in \mathbb{R}\f$.
  * \return The value of \f$\varphi(x)\f$.
  *
- * \par Domain and special values
- * - \f$x \in \mathbb{R}\f$: standard domain.
- * - \f$x = 0\f$: returns \f$1.0\f$.
- * - \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = -\infty\f$: returns \f$0.0\f$.
- * - \f$x = +\infty\f$ or \f$x > 740.0\f$: returns \f$+\infty\f$.
- *
- * \par Measured accuracy
- * Maximum error 1.81 ulp (gcc) / 1.52 ulp (CUDA); test bound 2.8 ulp.
+ * Defined on \f$\mathbb{R}\f$; returns \f$0.0\f$ at \f$x = -\infty\f$,
+ * \f$+\infty\f$ for \f$x = +\infty\f$ or \f$x > 740.0\f$, and quiet NaN for NaN.
+ * Maximum error is 1.81 ulp on gcc and 1.52 ulp on CUDA, with a test bound of
+ * 2.8 ulp.
  *
  * \see exprel, exprel_d1()
  */
@@ -153,24 +145,16 @@ LAPLACE_HD double exprel(double x) {
  * \ingroup exprel
  * \brief First derivative in \f$x\f$ of \f$\varphi(x) = (e^x - 1)/x\f$.
  *
- * Computes the first derivative:
- * \f[
- * \varphi'(x) = \frac{\mathrm{d}}{\mathrm{d}x} \varphi(x) = \int_0^1 t e^{x t} \, \mathrm{d}t = \frac{e^x - \varphi(x)}{x}
- * \f]
- * with \f$\varphi'(0) = 1/2\f$.
+ * Computes \f$\varphi'(x) = \int_0^1 t e^{x t} \, \mathrm{d}t\f$, with
+ * \f$\varphi'(0) = 0.5\f$.
  *
  * \param x Real argument \f$x \in \mathbb{R}\f$.
  * \return The value of \f$\varphi'(x)\f$.
  *
- * \par Domain and special values
- * - \f$x \in \mathbb{R}\f$: standard domain.
- * - \f$x = 0\f$: returns \f$0.5\f$.
- * - \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = -\infty\f$: returns \f$0.0\f$.
- * - \f$x = +\infty\f$ or \f$x > 740.0\f$: returns \f$+\infty\f$.
- *
- * \par Measured accuracy
- * Maximum error 2.71 ulp (gcc) / 2.64 ulp (CUDA); test bound 4.1 ulp.
+ * Defined on \f$\mathbb{R}\f$ (see \ref exprel "the exprel module"); returns
+ * \f$0.0\f$ at \f$x = -\infty\f$, \f$+\infty\f$ for \f$x = +\infty\f$ or
+ * \f$x > 740.0\f$, and quiet NaN for NaN. Maximum error is 2.71 ulp on gcc and
+ * 2.64 ulp on CUDA, with a test bound of 4.1 ulp.
  *
  * \see exprel, exprel(), exprel_d2()
  */
@@ -180,24 +164,16 @@ LAPLACE_HD double exprel_d1(double x) { return detail_exprel::deriv(1, x); }
  * \ingroup exprel
  * \brief Second derivative in \f$x\f$ of \f$\varphi(x) = (e^x - 1)/x\f$.
  *
- * Computes the second derivative:
- * \f[
- * \varphi''(x) = \frac{\mathrm{d}^2}{\mathrm{d}x^2} \varphi(x) = \int_0^1 t^2 e^{x t} \, \mathrm{d}t = \frac{e^x - 2 \varphi'(x)}{x}
- * \f]
- * with \f$\varphi''(0) = 1/3\f$.
+ * Computes \f$\varphi''(x) = \int_0^1 t^2 e^{x t} \, \mathrm{d}t\f$, with
+ * \f$\varphi''(0) = 1/3\f$.
  *
  * \param x Real argument \f$x \in \mathbb{R}\f$.
  * \return The value of \f$\varphi''(x)\f$.
  *
- * \par Domain and special values
- * - \f$x \in \mathbb{R}\f$: standard domain.
- * - \f$x = 0\f$: returns \f$1/3\f$.
- * - \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = -\infty\f$: returns \f$0.0\f$.
- * - \f$x = +\infty\f$ or \f$x > 740.0\f$: returns \f$+\infty\f$.
- *
- * \par Measured accuracy
- * Maximum error 4.11 ulp (gcc) / 4.11 ulp (CUDA); test bound 6.2 ulp.
+ * Defined on \f$\mathbb{R}\f$ (see \ref exprel "the exprel module"); returns
+ * \f$0.0\f$ at \f$x = -\infty\f$, \f$+\infty\f$ for \f$x = +\infty\f$ or
+ * \f$x > 740.0\f$, and quiet NaN for NaN. Maximum error is 4.11 ulp on gcc and
+ * 4.11 ulp on CUDA, with a test bound of 6.2 ulp.
  *
  * \see exprel, exprel(), exprel_d1(), exprel_d3()
  */
@@ -207,24 +183,16 @@ LAPLACE_HD double exprel_d2(double x) { return detail_exprel::deriv(2, x); }
  * \ingroup exprel
  * \brief Third derivative in \f$x\f$ of \f$\varphi(x) = (e^x - 1)/x\f$.
  *
- * Computes the third derivative:
- * \f[
- * \varphi^{(3)}(x) = \frac{\mathrm{d}^3}{\mathrm{d}x^3} \varphi(x) = \int_0^1 t^3 e^{x t} \, \mathrm{d}t = \frac{e^x - 3 \varphi''(x)}{x}
- * \f]
- * with \f$\varphi^{(3)}(0) = 1/4\f$.
+ * Computes \f$\varphi^{(3)}(x) = \int_0^1 t^3 e^{x t} \, \mathrm{d}t\f$, with
+ * \f$\varphi^{(3)}(0) = 0.25\f$.
  *
  * \param x Real argument \f$x \in \mathbb{R}\f$.
  * \return The value of \f$\varphi^{(3)}(x)\f$.
  *
- * \par Domain and special values
- * - \f$x \in \mathbb{R}\f$: standard domain.
- * - \f$x = 0\f$: returns \f$0.25\f$.
- * - \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = -\infty\f$: returns \f$0.0\f$.
- * - \f$x = +\infty\f$ or \f$x > 740.0\f$: returns \f$+\infty\f$.
- *
- * \par Measured accuracy
- * Maximum error 5.90 ulp (gcc) / 5.90 ulp (CUDA); test bound 8.9 ulp.
+ * Defined on \f$\mathbb{R}\f$ (see \ref exprel "the exprel module"); returns
+ * \f$0.0\f$ at \f$x = -\infty\f$, \f$+\infty\f$ for \f$x = +\infty\f$ or
+ * \f$x > 740.0\f$, and quiet NaN for NaN. Maximum error is 5.90 ulp on gcc and
+ * 5.90 ulp on CUDA, with a test bound of 8.9 ulp.
  *
  * \see exprel, exprel(), exprel_d2(), exprel_d4()
  */
@@ -234,24 +202,16 @@ LAPLACE_HD double exprel_d3(double x) { return detail_exprel::deriv(3, x); }
  * \ingroup exprel
  * \brief Fourth derivative in \f$x\f$ of \f$\varphi(x) = (e^x - 1)/x\f$.
  *
- * Computes the fourth derivative:
- * \f[
- * \varphi^{(4)}(x) = \frac{\mathrm{d}^4}{\mathrm{d}x^4} \varphi(x) = \int_0^1 t^4 e^{x t} \, \mathrm{d}t = \frac{e^x - 4 \varphi^{(3)}(x)}{x}
- * \f]
- * with \f$\varphi^{(4)}(0) = 1/5\f$.
+ * Computes \f$\varphi^{(4)}(x) = \int_0^1 t^4 e^{x t} \, \mathrm{d}t\f$, with
+ * \f$\varphi^{(4)}(0) = 0.2\f$.
  *
  * \param x Real argument \f$x \in \mathbb{R}\f$.
  * \return The value of \f$\varphi^{(4)}(x)\f$.
  *
- * \par Domain and special values
- * - \f$x \in \mathbb{R}\f$: standard domain.
- * - \f$x = 0\f$: returns \f$0.2\f$.
- * - \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = -\infty\f$: returns \f$0.0\f$.
- * - \f$x = +\infty\f$ or \f$x > 740.0\f$: returns \f$+\infty\f$.
- *
- * \par Measured accuracy
- * Maximum error 4.25 ulp (gcc) / 4.25 ulp (CUDA); test bound 6.4 ulp.
+ * Defined on \f$\mathbb{R}\f$ (see \ref exprel "the exprel module"); returns
+ * \f$0.0\f$ at \f$x = -\infty\f$, \f$+\infty\f$ for \f$x = +\infty\f$ or
+ * \f$x > 740.0\f$, and quiet NaN for NaN. Maximum error is 4.25 ulp on gcc and
+ * 4.25 ulp on CUDA, with a test bound of 6.4 ulp.
  *
  * \see exprel, exprel(), exprel_d3(), exprel_d5()
  */
@@ -261,24 +221,16 @@ LAPLACE_HD double exprel_d4(double x) { return detail_exprel::deriv(4, x); }
  * \ingroup exprel
  * \brief Fifth derivative in \f$x\f$ of \f$\varphi(x) = (e^x - 1)/x\f$.
  *
- * Computes the fifth derivative:
- * \f[
- * \varphi^{(5)}(x) = \frac{\mathrm{d}^5}{\mathrm{d}x^5} \varphi(x) = \int_0^1 t^5 e^{x t} \, \mathrm{d}t = \frac{e^x - 5 \varphi^{(4)}(x)}{x}
- * \f]
- * with \f$\varphi^{(5)}(0) = 1/6\f$.
+ * Computes \f$\varphi^{(5)}(x) = \int_0^1 t^5 e^{x t} \, \mathrm{d}t\f$, with
+ * \f$\varphi^{(5)}(0) = 1/6\f$.
  *
  * \param x Real argument \f$x \in \mathbb{R}\f$.
  * \return The value of \f$\varphi^{(5)}(x)\f$.
  *
- * \par Domain and special values
- * - \f$x \in \mathbb{R}\f$: standard domain.
- * - \f$x = 0\f$: returns \f$1/6\f$.
- * - \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = -\infty\f$: returns \f$0.0\f$.
- * - \f$x = +\infty\f$ or \f$x > 740.0\f$: returns \f$+\infty\f$.
- *
- * \par Measured accuracy
- * Maximum error 5.85 ulp (gcc) / 5.85 ulp (CUDA); test bound 8.8 ulp.
+ * Defined on \f$\mathbb{R}\f$ (see \ref exprel "the exprel module"); returns
+ * \f$0.0\f$ at \f$x = -\infty\f$, \f$+\infty\f$ for \f$x = +\infty\f$ or
+ * \f$x > 740.0\f$, and quiet NaN for NaN. Maximum error is 5.85 ulp on gcc and
+ * 5.85 ulp on CUDA, with a test bound of 8.8 ulp.
  *
  * \see exprel, exprel(), exprel_d4(), exprel_d6()
  */
@@ -288,24 +240,16 @@ LAPLACE_HD double exprel_d5(double x) { return detail_exprel::deriv(5, x); }
  * \ingroup exprel
  * \brief Sixth derivative in \f$x\f$ of \f$\varphi(x) = (e^x - 1)/x\f$.
  *
- * Computes the sixth derivative:
- * \f[
- * \varphi^{(6)}(x) = \frac{\mathrm{d}^6}{\mathrm{d}x^6} \varphi(x) = \int_0^1 t^6 e^{x t} \, \mathrm{d}t = \frac{e^x - 6 \varphi^{(5)}(x)}{x}
- * \f]
- * with \f$\varphi^{(6)}(0) = 1/7\f$.
+ * Computes \f$\varphi^{(6)}(x) = \int_0^1 t^6 e^{x t} \, \mathrm{d}t\f$, with
+ * \f$\varphi^{(6)}(0) = 1/7\f$.
  *
  * \param x Real argument \f$x \in \mathbb{R}\f$.
  * \return The value of \f$\varphi^{(6)}(x)\f$.
  *
- * \par Domain and special values
- * - \f$x \in \mathbb{R}\f$: standard domain.
- * - \f$x = 0\f$: returns \f$1/7\f$.
- * - \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = -\infty\f$: returns \f$0.0\f$.
- * - \f$x = +\infty\f$ or \f$x > 740.0\f$: returns \f$+\infty\f$.
- *
- * \par Measured accuracy
- * Maximum error 5.92 ulp (gcc) / 6.57 ulp (CUDA); test bound 8.9 ulp.
+ * Defined on \f$\mathbb{R}\f$ (see \ref exprel "the exprel module"); returns
+ * \f$0.0\f$ at \f$x = -\infty\f$, \f$+\infty\f$ for \f$x = +\infty\f$ or
+ * \f$x > 740.0\f$, and quiet NaN for NaN. Maximum error is 5.92 ulp on gcc and
+ * 6.57 ulp on CUDA, with a test bound of 8.9 ulp.
  *
  * \see exprel, exprel(), exprel_d5()
  */

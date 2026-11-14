@@ -128,25 +128,19 @@ LAPLACE_HD double value(double a) {
  * \ingroup stirling
  * \brief Stirling's error \f$\delta(a) = \log \Gamma(a) - (a - \tfrac{1}{2})\log a + a - \tfrac{1}{2}\log(2\pi)\f$.
  *
- * Computes Stirling's error, the remainder of Stirling's asymptotic series for \f$\log \Gamma\f$:
+ * Computes Stirling's error, the remainder of Stirling's asymptotic series for \f$\log \Gamma(a)\f$:
  * \f[
- * \delta(a) = \log \Gamma(a) - \left(a - \frac{1}{2}\right) \log a + a - \frac{1}{2} \log(2\pi)
+ * \delta(a) = \log \Gamma(a) - \left(a - \frac{1}{2}\right) \log a + a - \frac{1}{2} \log(2\pi),
  * \f]
- * where \f$a \in (0, \infty)\f$ is the positive real argument.
- *
- * As \f$a \to \infty\f$, \f$\delta(a) \sim \frac{1}{12a}\f$; as \f$a \to 0\f$, \f$\delta(a) \sim -\frac{1}{2}\log a\f$.
+ * with \f$\delta(a) \sim \frac{1}{12a}\f$ as \f$a \to \infty\f$ and \f$\delta(a) \sim -\frac{1}{2}\log a\f$ as \f$a \to 0^+\f$.
  *
  * \param a Positive argument \f$a \in (0, \infty)\f$.
  * \return The value of Stirling's error \f$\delta(a)\f$.
  *
- * \par Domain and special values
- * - \f$a \in (0, \infty)\f$: standard domain.
- * - \f$a = 1\f$: returns \f$1 - \frac{1}{2}\log(2\pi) \approx 0.08106146679532726\f$.
- * - \f$a \le 0\f$ or \f$a\f$ is NaN: returns quiet NaN.
- * - \f$a = +\infty\f$: returns \f$0.0\f$.
+ * Returns \f$1 - \frac{1}{2}\log(2\pi) \approx 0.08106146679532726\f$ at \f$a = 1\f$; returns \f$0.0\f$ at \f$a = +\infty\f$ and quiet NaN for \f$a \le 0\f$ or NaN (shared by all functions in \ref stirling "Stirling's error").
  *
- * \par Measured accuracy
- * Maximum error 13.2 ulp (gcc) / 12.0 ulp (CUDA); test bound 20.0 ulp.
+ * \par Accuracy
+ * Maximum error 13.2 ulp (gcc) and 12.0 ulp (CUDA); test bound 20.0 ulp.
  *
  * \see stirling, stirling_error_d1()
  */
@@ -156,23 +150,15 @@ LAPLACE_HD_FORCEINLINE double stirling_error(double a) { return detail_stirling:
  * \ingroup stirling
  * \brief First derivative of Stirling's error, \f$\delta'(a) = \psi(a) - \log a + \frac{1}{2a}\f$.
  *
- * Computes the first derivative:
- * \f[
- * \delta'(a) = \frac{\mathrm{d}}{\mathrm{d}a} \delta(a) = \psi(a) - \log a + \frac{1}{2a}
- * \f]
- * with \f$\delta'(1) = \frac{1}{2} - \gamma\f$ where \f$\gamma\f$ is Euler's constant.
+ * Computes \f$\delta'(a) = \frac{\mathrm{d}}{\mathrm{d}a} \delta(a) = \psi(a) - \log a + \frac{1}{2a}\f$, where \f$\psi(a)\f$ is the digamma function.
  *
  * \param a Positive argument \f$a \in (0, \infty)\f$.
  * \return The value of \f$\delta'(a)\f$.
  *
- * \par Domain and special values
- * - \f$a \in (0, \infty)\f$: standard domain.
- * - \f$a = 1\f$: returns \f$\frac{1}{2} - \gamma \approx -0.07721566490153286\f$.
- * - \f$a \le 0\f$ or \f$a\f$ is NaN: returns quiet NaN.
- * - \f$a = +\infty\f$: returns \f$0.0\f$.
+ * Returns \f$\frac{1}{2} - \gamma \approx -0.07721566490153286\f$ at \f$a = 1\f$, where \f$\gamma\f$ is Euler's constant; see \ref stirling "Stirling's error" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 12.7 ulp (gcc) / 13.4 ulp (CUDA); test bound 19.0 ulp.
+ * \par Accuracy
+ * Maximum error 12.7 ulp (gcc) and 13.4 ulp (CUDA); test bound 19.0 ulp.
  *
  * \see stirling, stirling_error(), stirling_error_d2()
  */
@@ -181,22 +167,15 @@ LAPLACE_HD_FORCEINLINE double stirling_error_d1(double a) { return detail_stirli
  * \ingroup stirling
  * \brief Second derivative of Stirling's error, \f$\delta''(a) = \psi'(a) - \frac{1}{a} - \frac{1}{2a^2}\f$.
  *
- * Computes the second derivative:
- * \f[
- * \delta''(a) = \frac{\mathrm{d}^2}{\mathrm{d}a^2} \delta(a) = \psi'(a) - \frac{1}{a} - \frac{1}{2a^2}
- * \f]
- * where \f$\psi'(a)\f$ is the trigamma function.
+ * Computes \f$\delta''(a) = \frac{\mathrm{d}^2}{\mathrm{d}a^2} \delta(a) = \psi'(a) - \frac{1}{a} - \frac{1}{2a^2}\f$, where \f$\psi'(a)\f$ is the trigamma function.
  *
  * \param a Positive argument \f$a \in (0, \infty)\f$.
  * \return The value of \f$\delta''(a)\f$.
  *
- * \par Domain and special values
- * - \f$a \in (0, \infty)\f$: standard domain.
- * - \f$a \le 0\f$ or \f$a\f$ is NaN: returns quiet NaN.
- * - \f$a = +\infty\f$: returns \f$0.0\f$.
+ * Defined on \f$(0, \infty)\f$; see \ref stirling "Stirling's error" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 10.8 ulp (gcc) / 10.8 ulp (CUDA); test bound 16.5 ulp.
+ * \par Accuracy
+ * Maximum error 10.8 ulp (gcc) and 10.8 ulp (CUDA); test bound 16.5 ulp.
  *
  * \see stirling, stirling_error(), stirling_error_d1(), stirling_error_d3()
  */
@@ -205,22 +184,15 @@ LAPLACE_HD_FORCEINLINE double stirling_error_d2(double a) { return detail_stirli
  * \ingroup stirling
  * \brief Third derivative of Stirling's error, \f$\delta^{(3)}(a) = \psi''(a) + \frac{1}{a^2} + \frac{1}{a^3}\f$.
  *
- * Computes the third derivative:
- * \f[
- * \delta^{(3)}(a) = \frac{\mathrm{d}^3}{\mathrm{d}a^3} \delta(a) = \psi''(a) + \frac{1}{a^2} + \frac{1}{a^3}
- * \f]
- * where \f$\psi''(a)\f$ is the second-order polygamma function.
+ * Computes \f$\delta^{(3)}(a) = \frac{\mathrm{d}^3}{\mathrm{d}a^3} \delta(a) = \psi''(a) + \frac{1}{a^2} + \frac{1}{a^3}\f$, where \f$\psi''(a)\f$ is the second-order polygamma function.
  *
  * \param a Positive argument \f$a \in (0, \infty)\f$.
  * \return The value of \f$\delta^{(3)}(a)\f$.
  *
- * \par Domain and special values
- * - \f$a \in (0, \infty)\f$: standard domain.
- * - \f$a \le 0\f$ or \f$a\f$ is NaN: returns quiet NaN.
- * - \f$a = +\infty\f$: returns \f$0.0\f$.
+ * Defined on \f$(0, \infty)\f$; see \ref stirling "Stirling's error" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 13.4 ulp (gcc) / 13.4 ulp (CUDA); test bound 20.0 ulp.
+ * \par Accuracy
+ * Maximum error 13.4 ulp (gcc) and 13.4 ulp (CUDA); test bound 20.0 ulp.
  *
  * \see stirling, stirling_error(), stirling_error_d2(), stirling_error_d4()
  */
@@ -229,22 +201,15 @@ LAPLACE_HD_FORCEINLINE double stirling_error_d3(double a) { return detail_stirli
  * \ingroup stirling
  * \brief Fourth derivative of Stirling's error, \f$\delta^{(4)}(a) = \psi^{(3)}(a) - \frac{2}{a^3} - \frac{3}{a^4}\f$.
  *
- * Computes the fourth derivative:
- * \f[
- * \delta^{(4)}(a) = \frac{\mathrm{d}^4}{\mathrm{d}a^4} \delta(a) = \psi^{(3)}(a) - \frac{2}{a^3} - \frac{3}{a^4}
- * \f]
- * where \f$\psi^{(3)}(a)\f$ is the third-order polygamma function.
+ * Computes \f$\delta^{(4)}(a) = \frac{\mathrm{d}^4}{\mathrm{d}a^4} \delta(a) = \psi^{(3)}(a) - \frac{2}{a^3} - \frac{3}{a^4}\f$, where \f$\psi^{(3)}(a)\f$ is the third-order polygamma function.
  *
  * \param a Positive argument \f$a \in (0, \infty)\f$.
  * \return The value of \f$\delta^{(4)}(a)\f$.
  *
- * \par Domain and special values
- * - \f$a \in (0, \infty)\f$: standard domain.
- * - \f$a \le 0\f$ or \f$a\f$ is NaN: returns quiet NaN.
- * - \f$a = +\infty\f$: returns \f$0.0\f$.
+ * Defined on \f$(0, \infty)\f$; see \ref stirling "Stirling's error" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 11.7 ulp (gcc) / 11.7 ulp (CUDA); test bound 17.5 ulp.
+ * \par Accuracy
+ * Maximum error 11.7 ulp (gcc) and 11.7 ulp (CUDA); test bound 17.5 ulp.
  *
  * \see stirling, stirling_error(), stirling_error_d3(), stirling_error_d5()
  */
@@ -253,22 +218,15 @@ LAPLACE_HD_FORCEINLINE double stirling_error_d4(double a) { return detail_stirli
  * \ingroup stirling
  * \brief Fifth derivative of Stirling's error, \f$\delta^{(5)}(a) = \psi^{(4)}(a) + \frac{6}{a^4} + \frac{12}{a^5}\f$.
  *
- * Computes the fifth derivative:
- * \f[
- * \delta^{(5)}(a) = \frac{\mathrm{d}^5}{\mathrm{d}a^5} \delta(a) = \psi^{(4)}(a) + \frac{6}{a^4} + \frac{12}{a^5}
- * \f]
- * where \f$\psi^{(4)}(a)\f$ is the fourth-order polygamma function.
+ * Computes \f$\delta^{(5)}(a) = \frac{\mathrm{d}^5}{\mathrm{d}a^5} \delta(a) = \psi^{(4)}(a) + \frac{6}{a^4} + \frac{12}{a^5}\f$, where \f$\psi^{(4)}(a)\f$ is the fourth-order polygamma function.
  *
  * \param a Positive argument \f$a \in (0, \infty)\f$.
  * \return The value of \f$\delta^{(5)}(a)\f$.
  *
- * \par Domain and special values
- * - \f$a \in (0, \infty)\f$: standard domain.
- * - \f$a \le 0\f$ or \f$a\f$ is NaN: returns quiet NaN.
- * - \f$a = +\infty\f$: returns \f$0.0\f$.
+ * Defined on \f$(0, \infty)\f$; see \ref stirling "Stirling's error" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 14.8 ulp (gcc) / 14.8 ulp (CUDA); test bound 22.0 ulp.
+ * \par Accuracy
+ * Maximum error 14.8 ulp (gcc) and 14.8 ulp (CUDA); test bound 22.0 ulp.
  *
  * \see stirling, stirling_error(), stirling_error_d4(), stirling_error_d6()
  */
@@ -277,22 +235,15 @@ LAPLACE_HD_FORCEINLINE double stirling_error_d5(double a) { return detail_stirli
  * \ingroup stirling
  * \brief Sixth derivative of Stirling's error, \f$\delta^{(6)}(a) = \psi^{(5)}(a) - \frac{24}{a^5} - \frac{60}{a^6}\f$.
  *
- * Computes the sixth derivative:
- * \f[
- * \delta^{(6)}(a) = \frac{\mathrm{d}^6}{\mathrm{d}a^6} \delta(a) = \psi^{(5)}(a) - \frac{24}{a^5} - \frac{60}{a^6}
- * \f]
- * where \f$\psi^{(5)}(a)\f$ is the fifth-order polygamma function.
+ * Computes \f$\delta^{(6)}(a) = \frac{\mathrm{d}^6}{\mathrm{d}a^6} \delta(a) = \psi^{(5)}(a) - \frac{24}{a^5} - \frac{60}{a^6}\f$, where \f$\psi^{(5)}(a)\f$ is the fifth-order polygamma function.
  *
  * \param a Positive argument \f$a \in (0, \infty)\f$.
  * \return The value of \f$\delta^{(6)}(a)\f$.
  *
- * \par Domain and special values
- * - \f$a \in (0, \infty)\f$: standard domain.
- * - \f$a \le 0\f$ or \f$a\f$ is NaN: returns quiet NaN.
- * - \f$a = +\infty\f$: returns \f$0.0\f$.
+ * Defined on \f$(0, \infty)\f$; see \ref stirling "Stirling's error" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 14.2 ulp (gcc) / 16.1 ulp (CUDA); test bound 21.5 ulp.
+ * \par Accuracy
+ * Maximum error 14.2 ulp (gcc) and 16.1 ulp (CUDA); test bound 21.5 ulp.
  *
  * \see stirling, stirling_error(), stirling_error_d5()
  */

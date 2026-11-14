@@ -540,30 +540,15 @@ LAPLACE_HD double derivative(double nu, double x, const params& p) {
  * \ingroup bessel_k
  * \brief Natural logarithm of the modified Bessel function of the second kind, \f$\log K_\nu(x)\f$.
  *
- * Computes \f$\log K_\nu(x)\f$ for real order \f$\nu\f$ and argument \f$x > 0\f$.
- * The modified Bessel function of the second kind is defined by
- * \f[
- * K_\nu(x) = \int_0^\infty e^{-x \cosh t} \cosh(\nu t) \, \mathrm{d}t
- * \f]
- * where \f$\nu \in \mathbb{R}\f$ is the order, \f$x \in (0, \infty)\f$ is the argument,
- * and \f$t \in [0, \infty)\f$ is the integration variable.
- *
- * The function is symmetric in the order: \f$K_{-\nu}(x) = K_\nu(x)\f$.
+ * Evaluates \f$\log K_\nu(x)\f$ for real order \f$\nu\f$ and positive argument \f$x\f$.
+ * Negative orders are evaluated at \f$|\nu|\f$ by symmetry; see \ref bessel_k for the definition and regimes.
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
- * \return The value of \f$\log K_\nu(x)\f$.
- *
- * \par Domain and special values
- * - \f$x > 0, \nu \in \mathbb{R}\f$: standard domain.
- * - \f$\nu < 0\f$: evaluated as \f$|\nu|\f$ by symmetry \f$\log K_{-\nu}(x) = \log K_\nu(x)\f$.
- * - \f$x < 0\f$, or \f$x\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN.
- * - \f$x = 0\f$: returns \f$+\infty\f$.
- * - \f$x \ge 10^{308}\f$ (\f$x \to +\infty\f$): returns \f$-x\f$ (\f$-\infty\f$).
+ * \return The value of \f$\log K_\nu(x)\f$, \f$+\infty\f$ at \f$x = 0\f$, \f$-x\f$ for \f$x \ge 10^{308}\f$, or quiet NaN for \f$x < 0\f$ or NaN input.
  *
  * \par Measured accuracy
- * Maximum error 4.8 ulp relative to the conditioning scale \f$\max(|\log K|, |x g|, 1)\f$
- * on both CPU and GPU (test bound 7.5 ulp), where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$.
+ * Maximum error 4.8 ulpC on gcc (OpenMP) and CUDA (test bound 7.5 ulpC), relative to \f$\max(|\log K_\nu(x)|, |x g|, 1)\f$ where \f$g\f$ is log_bessel_k_dx1().
  *
  * \see bessel_k, log_bessel_k_dx1()
  */
@@ -573,22 +558,17 @@ LAPLACE_HD double log_bessel_k(double nu, double x) { return detail_bessel_k::lo
  * \ingroup bessel_k
  * \brief First derivative in \f$x\f$ of \f$\log K_\nu(x)\f$.
  *
- * Computes the first derivative:
+ * Computes
  * \f[
- * \frac{\mathrm{d}}{\mathrm{d}x} \log K_\nu(x) = \frac{\nu}{x} - \frac{K_{\nu+1}(x)}{K_\nu(x)}
+ * g(x) = \frac{\mathrm{d}}{\mathrm{d}x} \log K_\nu(x) = \frac{\nu}{x} - \frac{K_{\nu+1}(x)}{K_\nu(x)}.
  * \f]
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
- * \return The value of \f$\frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$.
- *
- * \par Domain and special values
- * - \f$x > 0, \nu \in \mathbb{R}\f$: standard domain, symmetric in \f$\nu\f$.
- * - \f$x \le 0\f$, or \f$x\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN.
- * - \f$x \ge 10^{308}\f$ (\f$x \to +\infty\f$): returns \f$-1.0\f$.
+ * \return The value of \f$g(x)\f$, \f$-1.0\f$ for \f$x \ge 10^{308}\f$, or quiet NaN for \f$x \le 0\f$ or NaN input.
  *
  * \par Measured accuracy
- * Maximum error 8.9 ulp (gcc); test bound 9.0 ulp.
+ * Maximum error 8.9 ulp on gcc (test bound 9.0 ulp).
  *
  * \see bessel_k, log_bessel_k(), log_bessel_k_dx2()
  */
@@ -598,22 +578,18 @@ LAPLACE_HD double log_bessel_k_dx1(double nu, double x) { return detail_bessel_k
  * \ingroup bessel_k
  * \brief Second derivative in \f$x\f$ of \f$\log K_\nu(x)\f$.
  *
- * Computes the second derivative:
+ * Computes the Riccati identity
  * \f[
- * \frac{\mathrm{d}^2}{\mathrm{d}x^2} \log K_\nu(x) = 1 + \frac{\nu^2}{x^2} - \frac{1}{x}\frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x) - \left(\frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\right)^2
+ * \frac{\mathrm{d}^2}{\mathrm{d}x^2} \log K_\nu(x) = g'(x) = 1 + \frac{\nu^2}{x^2} - \frac{g}{x} - g^2,
  * \f]
+ * where \f$g\f$ is log_bessel_k_dx1().
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
- * \return The value of \f$\frac{\mathrm{d}^2}{\mathrm{d}x^2}\log K_\nu(x)\f$.
- *
- * \par Domain and special values
- * - \f$x > 0, \nu \in \mathbb{R}\f$: standard domain, symmetric in \f$\nu\f$.
- * - \f$x \le 0\f$, or \f$x\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN.
- * - \f$x \ge 10^{308}\f$ (\f$x \to +\infty\f$): returns \f$0.0\f$.
+ * \return The value of \f$g'(x)\f$, \f$0.0\f$ for \f$x \ge 10^{308}\f$, or quiet NaN for \f$x \le 0\f$ or NaN input.
  *
  * \par Measured accuracy
- * Maximum error 44.4 ulp (gcc) / 37.4 ulp (CUDA); test bound 66.0 ulp.
+ * Maximum error 44.4 ulp on gcc and 37.4 ulp on CUDA (test bound 66.0 ulp).
  *
  * \see bessel_k, log_bessel_k(), log_bessel_k_dx1(), log_bessel_k_dx3()
  */
@@ -623,23 +599,18 @@ LAPLACE_HD double log_bessel_k_dx2(double nu, double x) { return detail_bessel_k
  * \ingroup bessel_k
  * \brief Third derivative in \f$x\f$ of \f$\log K_\nu(x)\f$.
  *
- * Computes the third derivative:
+ * Computes
  * \f[
- * \frac{\mathrm{d}^3}{\mathrm{d}x^3} \log K_\nu(x) = g'' = -\frac{2\nu^2}{x^3} + \frac{g}{x^2} - \frac{g'}{x} - 2 g g'
+ * \frac{\mathrm{d}^3}{\mathrm{d}x^3} \log K_\nu(x) = g'' = -\frac{2\nu^2}{x^3} + \frac{g}{x^2} - \frac{g'}{x} - 2 g g',
  * \f]
- * where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ is its \f$k\f$-th derivative, the value of the lower-order functions (`log_bessel_k_dx<k+1>()`).
+ * where \f$g\f$ and \f$g'\f$ are log_bessel_k_dx1() and log_bessel_k_dx2().
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
- * \return The value of \f$\frac{\mathrm{d}^3}{\mathrm{d}x^3}\log K_\nu(x)\f$.
- *
- * \par Domain and special values
- * - \f$x > 0, \nu \in \mathbb{R}\f$: standard domain, symmetric in \f$\nu\f$.
- * - \f$x \le 0\f$, or \f$x\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN.
- * - \f$x \ge 10^{308}\f$ (\f$x \to +\infty\f$): returns \f$0.0\f$.
+ * \return The value of \f$g''(x)\f$, \f$0.0\f$ for \f$x \ge 10^{308}\f$, or quiet NaN for \f$x \le 0\f$ or NaN input.
  *
  * \par Measured accuracy
- * Maximum error 44.0 ulp (gcc) / 37.0 ulp (CUDA); test bound 66.0 ulp.
+ * Maximum error 44.0 ulp on gcc and 37.0 ulp on CUDA (test bound 66.0 ulp).
  *
  * \see bessel_k, log_bessel_k(), log_bessel_k_dx2(), log_bessel_k_dx4()
  */
@@ -649,23 +620,18 @@ LAPLACE_HD double log_bessel_k_dx3(double nu, double x) { return detail_bessel_k
  * \ingroup bessel_k
  * \brief Fourth derivative in \f$x\f$ of \f$\log K_\nu(x)\f$.
  *
- * Computes the fourth derivative:
+ * Computes
  * \f[
- * \frac{\mathrm{d}^4}{\mathrm{d}x^4} \log K_\nu(x) = g''' = \frac{6\nu^2}{x^4} - \frac{2g}{x^3} + \frac{2g'}{x^2} - \frac{g''}{x} - 2 g g'' - 2 (g')^2
+ * \frac{\mathrm{d}^4}{\mathrm{d}x^4} \log K_\nu(x) = g''' = \frac{6\nu^2}{x^4} - \frac{2g}{x^3} + \frac{2g'}{x^2} - \frac{g''}{x} - 2 g g'' - 2 (g')^2,
  * \f]
- * where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ is its \f$k\f$-th derivative, the value of the lower-order functions (`log_bessel_k_dx<k+1>()`).
+ * where \f$g\f$, \f$g'\f$, and \f$g''\f$ are log_bessel_k_dx1(), log_bessel_k_dx2(), and log_bessel_k_dx3().
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
- * \return The value of \f$\frac{\mathrm{d}^4}{\mathrm{d}x^4}\log K_\nu(x)\f$.
- *
- * \par Domain and special values
- * - \f$x > 0, \nu \in \mathbb{R}\f$: standard domain, symmetric in \f$\nu\f$.
- * - \f$x \le 0\f$, or \f$x\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN.
- * - \f$x \ge 10^{308}\f$ (\f$x \to +\infty\f$): returns \f$0.0\f$.
+ * \return The value of \f$g'''(x)\f$, \f$0.0\f$ for \f$x \ge 10^{308}\f$, or quiet NaN for \f$x \le 0\f$ or NaN input.
  *
  * \par Measured accuracy
- * Maximum error 24.1 ulp (gcc) / 25.6 ulp (CUDA); test bound 36.0 ulp.
+ * Maximum error 24.1 ulp on gcc and 25.6 ulp on CUDA (test bound 36.0 ulp).
  *
  * \see bessel_k, log_bessel_k(), log_bessel_k_dx3(), log_bessel_k_dx5()
  */
@@ -675,25 +641,20 @@ LAPLACE_HD double log_bessel_k_dx4(double nu, double x) { return detail_bessel_k
  * \ingroup bessel_k
  * \brief Fifth derivative in \f$x\f$ of \f$\log K_\nu(x)\f$.
  *
- * Computes the fifth derivative:
+ * Computes
  * \f[
  * \frac{\mathrm{d}^5}{\mathrm{d}x^5} \log K_\nu(x) = g^{(4)} = (-1)^3 4!\,\frac{\nu^2}{x^5}
  *           - \sum_{k=0}^{3} \binom{3}{k} (-1)^{3-k} (3-k)!\,\frac{g^{(k)}}{x^{4-k}}
- *           - \sum_{k=0}^{3} \binom{3}{k} g^{(k)} g^{(3-k)}
+ *           - \sum_{k=0}^{3} \binom{3}{k} g^{(k)} g^{(3-k)},
  * \f]
- * where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ is its \f$k\f$-th derivative, the value of the lower-order functions (`log_bessel_k_dx<k+1>()`).
+ * where \f$g^{(0)}, \dots, g^{(3)}\f$ are log_bessel_k_dx1() through log_bessel_k_dx4().
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
- * \return The value of \f$\frac{\mathrm{d}^5}{\mathrm{d}x^5}\log K_\nu(x)\f$.
- *
- * \par Domain and special values
- * - \f$x > 0, \nu \in \mathbb{R}\f$: standard domain, symmetric in \f$\nu\f$.
- * - \f$x \le 0\f$, or \f$x\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN.
- * - \f$x \ge 10^{308}\f$ (\f$x \to +\infty\f$): returns \f$0.0\f$.
+ * \return The value of \f$g^{(4)}(x)\f$, \f$0.0\f$ for \f$x \ge 10^{308}\f$, or quiet NaN for \f$x \le 0\f$ or NaN input.
  *
  * \par Measured accuracy
- * Maximum error 12.4 ulp (gcc); test bound 17.0 ulp.
+ * Maximum error 12.4 ulp on gcc (test bound 17.0 ulp).
  *
  * \see bessel_k, log_bessel_k(), log_bessel_k_dx4(), log_bessel_k_dx6()
  */
@@ -703,25 +664,20 @@ LAPLACE_HD double log_bessel_k_dx5(double nu, double x) { return detail_bessel_k
  * \ingroup bessel_k
  * \brief Sixth derivative in \f$x\f$ of \f$\log K_\nu(x)\f$.
  *
- * Computes the sixth derivative:
+ * Computes
  * \f[
  * \frac{\mathrm{d}^6}{\mathrm{d}x^6} \log K_\nu(x) = g^{(5)} = (-1)^4 5!\,\frac{\nu^2}{x^6}
  *           - \sum_{k=0}^{4} \binom{4}{k} (-1)^{4-k} (4-k)!\,\frac{g^{(k)}}{x^{5-k}}
- *           - \sum_{k=0}^{4} \binom{4}{k} g^{(k)} g^{(4-k)}
+ *           - \sum_{k=0}^{4} \binom{4}{k} g^{(k)} g^{(4-k)},
  * \f]
- * where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ is its \f$k\f$-th derivative, the value of the lower-order functions (`log_bessel_k_dx<k+1>()`).
+ * where \f$g^{(0)}, \dots, g^{(4)}\f$ are log_bessel_k_dx1() through log_bessel_k_dx5().
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
- * \return The value of \f$\frac{\mathrm{d}^6}{\mathrm{d}x^6}\log K_\nu(x)\f$.
- *
- * \par Domain and special values
- * - \f$x > 0, \nu \in \mathbb{R}\f$: standard domain, symmetric in \f$\nu\f$.
- * - \f$x \le 0\f$, or \f$x\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN.
- * - \f$x \ge 10^{308}\f$ (\f$x \to +\infty\f$): returns \f$0.0\f$.
+ * \return The value of \f$g^{(5)}(x)\f$, \f$0.0\f$ for \f$x \ge 10^{308}\f$, or quiet NaN for \f$x \le 0\f$ or NaN input.
  *
  * \par Measured accuracy
- * Maximum error 21.9 ulp (gcc); test bound 33.0 ulp.
+ * Maximum error 21.9 ulp on gcc (test bound 33.0 ulp).
  *
  * \see bessel_k, log_bessel_k(), log_bessel_k_dx5(), log_bessel_k_dx7()
  */
@@ -731,25 +687,20 @@ LAPLACE_HD double log_bessel_k_dx6(double nu, double x) { return detail_bessel_k
  * \ingroup bessel_k
  * \brief Seventh derivative in \f$x\f$ of \f$\log K_\nu(x)\f$.
  *
- * Computes the seventh derivative:
+ * Computes
  * \f[
  * \frac{\mathrm{d}^7}{\mathrm{d}x^7} \log K_\nu(x) = g^{(6)} = (-1)^5 6!\,\frac{\nu^2}{x^7}
  *           - \sum_{k=0}^{5} \binom{5}{k} (-1)^{5-k} (5-k)!\,\frac{g^{(k)}}{x^{6-k}}
- *           - \sum_{k=0}^{5} \binom{5}{k} g^{(k)} g^{(5-k)}
+ *           - \sum_{k=0}^{5} \binom{5}{k} g^{(k)} g^{(5-k)},
  * \f]
- * where \f$g = \frac{\mathrm{d}}{\mathrm{d}x}\log K_\nu(x)\f$ and \f$g^{(k)}\f$ is its \f$k\f$-th derivative, the value of the lower-order functions (`log_bessel_k_dx<k+1>()`).
+ * where \f$g^{(0)}, \dots, g^{(5)}\f$ are log_bessel_k_dx1() through log_bessel_k_dx6().
  *
  * \param nu Real order \f$\nu \in \mathbb{R}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
- * \return The value of \f$\frac{\mathrm{d}^7}{\mathrm{d}x^7}\log K_\nu(x)\f$.
- *
- * \par Domain and special values
- * - \f$x > 0, \nu \in \mathbb{R}\f$: standard domain, symmetric in \f$\nu\f$.
- * - \f$x \le 0\f$, or \f$x\f$ is NaN, or \f$\nu\f$ is NaN: returns quiet NaN.
- * - \f$x \ge 10^{308}\f$ (\f$x \to +\infty\f$): returns \f$0.0\f$.
+ * \return The value of \f$g^{(6)}(x)\f$, \f$0.0\f$ for \f$x \ge 10^{308}\f$, or quiet NaN for \f$x \le 0\f$ or NaN input.
  *
  * \par Measured accuracy
- * Maximum error 31.5 ulp (gcc); test bound 48.0 ulp.
+ * Maximum error 31.5 ulp on gcc (test bound 48.0 ulp).
  *
  * \see bessel_k, log_bessel_k(), log_bessel_k_dx6()
  */

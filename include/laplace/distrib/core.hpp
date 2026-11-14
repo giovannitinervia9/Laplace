@@ -151,6 +151,7 @@ LAPLACE_HD constexpr int sym_tensor_position(const int (&idx)[K]) {
  * by sorted multi-indices.
  * \tparam P Number of variables or parameters.
  * \tparam K Tensor derivative order.
+ * \see distrib_core
  */
 template <int P, int K>
 struct sym_tensor {
@@ -174,6 +175,7 @@ struct sym_tensor {
  * symmetric tensor of order \f$K\f$ representing \f$\frac{\partial^K}{\partial\theta^K} I_{ab}(\theta)\f$.
  * \tparam P Number of parameters.
  * \tparam K Derivative order of the expected information matrix.
+ * \see distrib_core
  */
 template <int P, int K>
 struct expected_info_tensor {

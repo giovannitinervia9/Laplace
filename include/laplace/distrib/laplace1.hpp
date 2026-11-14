@@ -223,13 +223,9 @@ struct laplace1_distrib {
    * \brief Evaluates mixed partial derivatives of \f$\log f(y; \mu, \sigma)\f$ with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters.
    *
    * Evaluates \f$\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \log f(y; \mu, \sigma)\f$ as a symmetric tensor of order \f$K\f$ in \f$(\mu, \sigma)\f$.
-   * Because the log-density depends on \f$y - \mu\f$ only, \f$\frac{\partial}{\partial y} = -\frac{\partial}{\partial\mu}\f$. Away from the kink \f$y = \mu\f$,
-   * for \f$J \ge 1\f$ letting \f$a = K - b + J\f$ and \f$b\f$ be the order in \f$\sigma\f$, the component at position \f$b\f$ is
-   * \f$\frac{(-1)^{J + b} b!}{\sigma^{b + 1}} \operatorname{sgn}(z)\f$ for \f$a = 1\f$ and 0 for \f$a > 1\f$, where \f$z = \frac{y - \mu}{\sigma}\f$.
-   * At the kink \f$y = \mu\f$ (\f$z = 0\f$), adopts the symmetric convention \f$\operatorname{sgn}(0) = 0\f$.
+   * Because \f$\log f\f$ depends on \f$y - \mu\f$ only, \f$\frac{\partial}{\partial y} = -\frac{\partial}{\partial\mu}\f$.
+   * At the kink \f$y = \mu\f$, adopts the symmetric convention \f$\operatorname{sgn}(0) = 0\f$.
    * For \f$J = 0\f$, returns parameter derivatives (\f$K \ge 1\f$) or the log-density value (\f$K = 0\f$).
-   *
-   * Away from the kink, agrees with 5-point finite differences within relative tolerance \f$10^{-8}\f$.
    *
    * \tparam J Derivative order with respect to observation \f$y\f$ (\f$J \ge 0\f$, \f$J + K \le 6\f$).
    * \tparam K Derivative order with respect to parameters \f$(\mu, \sigma)\f$ (\f$K \ge 0\f$, \f$J + K \le 6\f$).
@@ -425,13 +421,17 @@ struct laplace1_distrib {
   LAPLACE_HD sym_tensor<2, 6> log_ccdf_d6(double y) const { return log_ccdf_dk<6>(y); }
   /** @} */
 
-  /// Lower bound of support (\f$-\infty\f$).
+  /// \ingroup distrib_laplace1
+  /// \brief Lower bound of support (\f$-\infty\f$).
   LAPLACE_HD double support_lower() const { return -distrib_infinity; }
-  /// Upper bound of support (\f$+\infty\f$).
+  /// \ingroup distrib_laplace1
+  /// \brief Upper bound of support (\f$+\infty\f$).
   LAPLACE_HD double support_upper() const { return distrib_infinity; }
-  /// Central location (\f$\mu\f$).
+  /// \ingroup distrib_laplace1
+  /// \brief Central location (\f$\mu\f$).
   LAPLACE_HD double center() const { return mu; }
-  /// Typical spread (\f$\sigma\f$).
+  /// \ingroup distrib_laplace1
+  /// \brief Typical spread (\f$\sigma\f$).
   LAPLACE_HD double scale() const { return sigma; }
   // mu: kink at y, continuous (order 0); sigma: none
   /**

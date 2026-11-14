@@ -118,18 +118,11 @@ namespace laplace::math {
 
 /**
  * \ingroup incomplete_gamma
- * \brief Return struct for mixed partial derivatives of total order \f$K\f$ of \f$\log P(a, x)\f$ or \f$\log Q(a, x)\f$.
+ * \brief Result struct for bivariate partial derivatives of total order \f$K\f$.
  *
- * Holds an array `v` of \f$K + 1\f$ elements. The component \f$v_j\f$ contains the mixed partial derivative
- * with \f$K - j\f$ derivatives in the shape \f$a\f$ and \f$j\f$ derivatives in the argument \f$x\f$:
- * \f[
- * v_j = \frac{\partial^K}{\partial a^{K-j} \partial x^j} \log S(a, x), \quad j = 0, \dots, K
- * \f]
- * where \f$S(a, x) = P(a, x)\f$ or \f$S(a, x) = Q(a, x)\f$.
- *
- * In particular, \f$v_0\f$ is the pure derivative with respect to \f$a\f$ alone (the value of
- * `log_gamma_p_daK()` or `log_gamma_q_daK()` up to their measured errors) and \f$v_K\f$ is the
- * pure derivative with respect to \f$x\f$ alone.
+ * Holds `double v[K + 1]`, where entry \f$v_j\f$ stores the derivative of order \f$K - j\f$ in
+ * \f$a\f$ and order \f$j\f$ in the second argument (\f$x\f$ for `log_gamma_*_mixed_dK()`,
+ * or fixed-ratio \f$c = x/a\f$ for `log_gamma_*_ratio_mixed_dK()`).
  *
  * \tparam K Total derivative order (\f$K \in \{1, \dots, 6\}\f$).
  *
@@ -1098,28 +1091,18 @@ LAPLACE_HD void log_gamma_mixed(int k, double a, double x, bool want_p, int meth
  * \ingroup incomplete_gamma
  * \brief First mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the first mixed partial derivatives of total order \f$K = 1\f$:
- * \f[
- * v_0 = \frac{\partial}{\partial a}\log P(a, x) = \log(x/a) - (\psi(a + 1) - \log a) + \kappa_{10}
- * \f]
- * \f[
- * v_1 = \frac{\partial}{\partial x}\log P(a, x) = \frac{a}{x I_L}
- * \f]
- * where \f$I_L\f$ is the lower incomplete gamma integral, and \f$\kappa_{10}\f$ is the first cumulant
- * of \f$d = \log(t/x)\f$ under the normalized lower measure (defined on \ref incomplete_gamma).
+ * Evaluates \f$v_0 = \frac{\partial}{\partial a}\log P(a, x) = \log(x/a) - (\psi(a + 1) - \log a) + \kappa_{10}\f$
+ * and \f$v_1 = \frac{\partial}{\partial x}\log P(a, x) = \frac{a}{x I_L}\f$, where \f$I_L\f$ and \f$\kappa_{10}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<1>` struct containing \f$v_0\f$ and \f$v_1\f$.
+ * \return A `gamma_inc_mixed_partials<1>` struct with \f$(v_0, v_1)\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = -\infty\f$, \f$v_1 = +\infty\f$.
- * - \f$x = +\infty\f$: returns \f$v_0 = 0.0\f$, \f$v_1 = 0.0\f$.
+ * \par Special values
+ * Returns \f$(-\infty, +\infty)\f$ at \f$x = 0\f$ and \f$(0, 0)\f$ at \f$x = +\infty\f$; see \ref incomplete_gamma for invalid inputs.
  *
- * \par Measured accuracy
- * Maximum error 5.37 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 8.0 ulp.
+ * \par Accuracy
+ * Max error \f$5.37\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$8.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_mixed_d1(), log_gamma_p_mixed_d2(), log_gamma_p_da1()
  */
@@ -1133,31 +1116,23 @@ LAPLACE_HD math::gamma_inc_mixed_partials<1> log_gamma_p_mixed_d1(double a, doub
  * \ingroup incomplete_gamma
  * \brief Second mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the second mixed partial derivatives of total order \f$K = 2\f$:
+ * Evaluates
  * \f[
- * v_0 = \frac{\partial^2}{\partial a^2}\log P(a, x) = \kappa_{20} - \psi'(a + 1)
+ * v_0 = \kappa_{20} - \psi'(a + 1), \qquad
+ * v_1 = \frac{1 + \kappa_{11}}{x}, \qquad
+ * v_2 = \frac{-a + \kappa_{02}}{x^2},
  * \f]
- * \f[
- * v_1 = \frac{\partial^2}{\partial a \partial x}\log P(a, x) = \frac{1 + \kappa_{11}}{x}
- * \f]
- * \f[
- * v_2 = \frac{\partial^2}{\partial x^2}\log P(a, x) = \frac{-a + \kappa_{02}}{x^2}
- * \f]
- * where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d = \log(t/x)\f$ and \f$j\f$ copies of
- * \f$y = x - t\f$ under the normalized lower measure (defined on \ref incomplete_gamma).
+ * where \f$\kappa_{ij}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<2>` struct containing \f$v_j = \frac{\partial^2 \log P}{\partial a^{2-j} \partial x^j}\f$ for \f$j = 0, 1, 2\f$.
+ * \return A `gamma_inc_mixed_partials<2>` struct with \f$v_j = \frac{\partial^2 \log P}{\partial a^{2-j} \partial x^j}\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = -\psi'(a + 1)\f$, \f$v_1 = +\infty\f$, \f$v_2 = -\infty\f$.
- * - \f$x = +\infty\f$: returns \f$v_j = 0.0\f$ for \f$j = 0, 1, 2\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = -\psi'(a + 1)\f$, \f$v_1 = +\infty\f$, and \f$v_2 = -\infty\f$; at \f$x = +\infty\f$, all components equal \f$0\f$.
  *
- * \par Measured accuracy
- * Maximum error 8.03 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 12.0 ulp.
+ * \par Accuracy
+ * Max error \f$8.03\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$12.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_mixed_d2(), log_gamma_p_mixed_d1(), log_gamma_p_mixed_d3(), log_gamma_p_da2()
  */
@@ -1171,34 +1146,24 @@ LAPLACE_HD math::gamma_inc_mixed_partials<2> log_gamma_p_mixed_d2(double a, doub
  * \ingroup incomplete_gamma
  * \brief Third mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the third mixed partial derivatives of total order \f$K = 3\f$:
+ * Evaluates
  * \f[
- * v_0 = \frac{\partial^3}{\partial a^3}\log P(a, x) = \kappa_{30} - \psi''(a + 1)
+ * v_0 = \kappa_{30} - \psi''(a + 1), \quad
+ * v_1 = \frac{\kappa_{21}}{x}, \quad
+ * v_2 = \frac{-1 + \kappa_{12}}{x^2}, \quad
+ * v_3 = \frac{2a + \kappa_{03}}{x^3},
  * \f]
- * \f[
- * v_1 = \frac{\partial^3}{\partial a^2 \partial x}\log P(a, x) = \frac{\kappa_{21}}{x}
- * \f]
- * \f[
- * v_2 = \frac{\partial^3}{\partial a \partial x^2}\log P(a, x) = \frac{-1 + \kappa_{12}}{x^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^3}{\partial x^3}\log P(a, x) = \frac{2a + \kappa_{03}}{x^3}
- * \f]
- * where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d = \log(t/x)\f$ and \f$j\f$ copies of
- * \f$y = x - t\f$ under the normalized lower measure (defined on \ref incomplete_gamma).
+ * where \f$\kappa_{ij}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<3>` struct containing \f$v_j = \frac{\partial^3 \log P}{\partial a^{3-j} \partial x^j}\f$ for \f$j = 0, \dots, 3\f$.
+ * \return A `gamma_inc_mixed_partials<3>` struct with \f$v_j = \frac{\partial^3 \log P}{\partial a^{3-j} \partial x^j}\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = -\psi''(a + 1)\f$, \f$v_1\f$ is finite, \f$v_2 = -\infty\f$, \f$v_3 = +\infty\f$.
- * - \f$x = +\infty\f$: returns \f$v_j = 0.0\f$ for \f$j = 0, \dots, 3\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = -\psi''(a + 1)\f$, \f$v_1\f$ is finite, \f$v_2 = -\infty\f$, and \f$v_3 = +\infty\f$; at \f$x = +\infty\f$, all components equal \f$0\f$.
  *
- * \par Measured accuracy
- * Maximum error 12.9 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 20.0 ulp.
+ * \par Accuracy
+ * Max error \f$12.9\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$20.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_mixed_d3(), log_gamma_p_mixed_d2(), log_gamma_p_mixed_d4(), log_gamma_p_da3()
  */
@@ -1212,37 +1177,25 @@ LAPLACE_HD math::gamma_inc_mixed_partials<3> log_gamma_p_mixed_d3(double a, doub
  * \ingroup incomplete_gamma
  * \brief Fourth mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the fourth mixed partial derivatives of total order \f$K = 4\f$:
+ * Evaluates
  * \f[
- * v_0 = \frac{\partial^4}{\partial a^4}\log P(a, x) = \kappa_{40} - \psi'''(a + 1)
+ * v_0 = \kappa_{40} - \psi'''(a + 1), \quad
+ * v_1 = \frac{\kappa_{31}}{x}, \quad
+ * v_2 = \frac{\kappa_{22}}{x^2}, \quad
+ * v_3 = \frac{2 + \kappa_{13}}{x^3}, \quad
+ * v_4 = \frac{-6a + \kappa_{04}}{x^4},
  * \f]
- * \f[
- * v_1 = \frac{\partial^4}{\partial a^3 \partial x}\log P(a, x) = \frac{\kappa_{31}}{x}
- * \f]
- * \f[
- * v_2 = \frac{\partial^4}{\partial a^2 \partial x^2}\log P(a, x) = \frac{\kappa_{22}}{x^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^4}{\partial a \partial x^3}\log P(a, x) = \frac{2 + \kappa_{13}}{x^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^4}{\partial x^4}\log P(a, x) = \frac{-6a + \kappa_{04}}{x^4}
- * \f]
- * where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d = \log(t/x)\f$ and \f$j\f$ copies of
- * \f$y = x - t\f$ under the normalized lower measure (defined on \ref incomplete_gamma).
+ * where \f$\kappa_{ij}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<4>` struct containing \f$v_j = \frac{\partial^4 \log P}{\partial a^{4-j} \partial x^j}\f$ for \f$j = 0, \dots, 4\f$.
+ * \return A `gamma_inc_mixed_partials<4>` struct with \f$v_j = \frac{\partial^4 \log P}{\partial a^{4-j} \partial x^j}\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = -\psi'''(a + 1)\f$, \f$v_1\f$ and \f$v_2\f$ are finite, \f$v_3 = +\infty\f$, \f$v_4 = -\infty\f$.
- * - \f$x = +\infty\f$: returns \f$v_j = 0.0\f$ for \f$j = 0, \dots, 4\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = -\psi'''(a + 1)\f$, \f$v_1, v_2\f$ are finite, \f$v_3 = +\infty\f$, and \f$v_4 = -\infty\f$; at \f$x = +\infty\f$, all components equal \f$0\f$.
  *
- * \par Measured accuracy
- * Maximum error 33.4 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 50.0 ulp.
+ * \par Accuracy
+ * Max error \f$33.4\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$50.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_mixed_d4(), log_gamma_p_mixed_d3(), log_gamma_p_mixed_d5(), log_gamma_p_da4()
  */
@@ -1256,40 +1209,26 @@ LAPLACE_HD math::gamma_inc_mixed_partials<4> log_gamma_p_mixed_d4(double a, doub
  * \ingroup incomplete_gamma
  * \brief Fifth mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the fifth mixed partial derivatives of total order \f$K = 5\f$:
+ * Evaluates
  * \f[
- * v_0 = \frac{\partial^5}{\partial a^5}\log P(a, x) = \kappa_{50} - \psi^{(4)}(a + 1)
+ * v_0 = \kappa_{50} - \psi^{(4)}(a + 1), \quad
+ * v_1 = \frac{\kappa_{41}}{x}, \quad
+ * v_2 = \frac{\kappa_{32}}{x^2}, \quad
+ * v_3 = \frac{\kappa_{23}}{x^3}, \quad
+ * v_4 = \frac{-6 + \kappa_{14}}{x^4}, \quad
+ * v_5 = \frac{24a + \kappa_{05}}{x^5},
  * \f]
- * \f[
- * v_1 = \frac{\partial^5}{\partial a^4 \partial x}\log P(a, x) = \frac{\kappa_{41}}{x}
- * \f]
- * \f[
- * v_2 = \frac{\partial^5}{\partial a^3 \partial x^2}\log P(a, x) = \frac{\kappa_{32}}{x^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^5}{\partial a^2 \partial x^3}\log P(a, x) = \frac{\kappa_{23}}{x^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^5}{\partial a \partial x^4}\log P(a, x) = \frac{-6 + \kappa_{14}}{x^4}
- * \f]
- * \f[
- * v_5 = \frac{\partial^5}{\partial x^5}\log P(a, x) = \frac{24a + \kappa_{05}}{x^5}
- * \f]
- * where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d = \log(t/x)\f$ and \f$j\f$ copies of
- * \f$y = x - t\f$ under the normalized lower measure (defined on \ref incomplete_gamma).
+ * where \f$\kappa_{ij}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<5>` struct containing \f$v_j = \frac{\partial^5 \log P}{\partial a^{5-j} \partial x^j}\f$ for \f$j = 0, \dots, 5\f$.
+ * \return A `gamma_inc_mixed_partials<5>` struct with \f$v_j = \frac{\partial^5 \log P}{\partial a^{5-j} \partial x^j}\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = -\psi^{(4)}(a + 1)\f$, \f$v_1, v_2, v_3\f$ are finite, \f$v_4 = -\infty\f$, \f$v_5 = +\infty\f$.
- * - \f$x = +\infty\f$: returns \f$v_j = 0.0\f$ for \f$j = 0, \dots, 5\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = -\psi^{(4)}(a + 1)\f$, \f$v_1, v_2, v_3\f$ are finite, \f$v_4 = -\infty\f$, and \f$v_5 = +\infty\f$; at \f$x = +\infty\f$, all components equal \f$0\f$.
  *
- * \par Measured accuracy
- * Maximum error 176.0 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 265.0 ulp.
+ * \par Accuracy
+ * Max error \f$176.0\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$265.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_mixed_d5(), log_gamma_p_mixed_d4(), log_gamma_p_mixed_d6(), log_gamma_p_da5()
  */
@@ -1303,43 +1242,27 @@ LAPLACE_HD math::gamma_inc_mixed_partials<5> log_gamma_p_mixed_d5(double a, doub
  * \ingroup incomplete_gamma
  * \brief Sixth mixed partial derivatives of \f$\log P(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the sixth mixed partial derivatives of total order \f$K = 6\f$:
+ * Evaluates
  * \f[
- * v_0 = \frac{\partial^6}{\partial a^6}\log P(a, x) = \kappa_{60} - \psi^{(5)}(a + 1)
+ * v_0 = \kappa_{60} - \psi^{(5)}(a + 1), \quad
+ * v_1 = \frac{\kappa_{51}}{x}, \quad
+ * v_2 = \frac{\kappa_{42}}{x^2}, \quad
+ * v_3 = \frac{\kappa_{33}}{x^3}, \quad
+ * v_4 = \frac{\kappa_{24}}{x^4}, \quad
+ * v_5 = \frac{24 + \kappa_{15}}{x^5}, \quad
+ * v_6 = \frac{-120a + \kappa_{06}}{x^6},
  * \f]
- * \f[
- * v_1 = \frac{\partial^6}{\partial a^5 \partial x}\log P(a, x) = \frac{\kappa_{51}}{x}
- * \f]
- * \f[
- * v_2 = \frac{\partial^6}{\partial a^4 \partial x^2}\log P(a, x) = \frac{\kappa_{42}}{x^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^6}{\partial a^3 \partial x^3}\log P(a, x) = \frac{\kappa_{33}}{x^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^6}{\partial a^2 \partial x^4}\log P(a, x) = \frac{\kappa_{24}}{x^4}
- * \f]
- * \f[
- * v_5 = \frac{\partial^6}{\partial a \partial x^5}\log P(a, x) = \frac{24 + \kappa_{15}}{x^5}
- * \f]
- * \f[
- * v_6 = \frac{\partial^6}{\partial x^6}\log P(a, x) = \frac{-120a + \kappa_{06}}{x^6}
- * \f]
- * where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d = \log(t/x)\f$ and \f$j\f$ copies of
- * \f$y = x - t\f$ under the normalized lower measure (defined on \ref incomplete_gamma).
+ * where \f$\kappa_{ij}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<6>` struct containing \f$v_j = \frac{\partial^6 \log P}{\partial a^{6-j} \partial x^j}\f$ for \f$j = 0, \dots, 6\f$.
+ * \return A `gamma_inc_mixed_partials<6>` struct with \f$v_j = \frac{\partial^6 \log P}{\partial a^{6-j} \partial x^j}\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = -\psi^{(5)}(a + 1)\f$, \f$v_1, v_2, v_3, v_4\f$ are finite, \f$v_5 = +\infty\f$, \f$v_6 = -\infty\f$.
- * - \f$x = +\infty\f$: returns \f$v_j = 0.0\f$ for \f$j = 0, \dots, 6\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = -\psi^{(5)}(a + 1)\f$, \f$v_1, \dots, v_4\f$ are finite, \f$v_5 = +\infty\f$, and \f$v_6 = -\infty\f$; at \f$x = +\infty\f$, all components equal \f$0\f$.
  *
- * \par Measured accuracy
- * Maximum error 651.0 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 980.0 ulp.
+ * \par Accuracy
+ * Max error \f$651.0\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$980.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_mixed_d6(), log_gamma_p_mixed_d5(), log_gamma_p_da6()
  */
@@ -1353,28 +1276,18 @@ LAPLACE_HD math::gamma_inc_mixed_partials<6> log_gamma_p_mixed_d6(double a, doub
  * \ingroup incomplete_gamma
  * \brief First mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the first mixed partial derivatives of total order \f$K = 1\f$:
- * \f[
- * v_0 = \frac{\partial}{\partial a}\log Q(a, x) = \log(x/a) + (\log a - \psi(a)) + \kappa_{10}
- * \f]
- * \f[
- * v_1 = \frac{\partial}{\partial x}\log Q(a, x) = -\frac{1}{x I_U}
- * \f]
- * where \f$I_U\f$ is the upper incomplete gamma integral, and \f$\kappa_{10}\f$ is the first cumulant
- * of \f$d = \log(t/x)\f$ under the normalized upper measure (defined on \ref incomplete_gamma).
+ * Evaluates \f$v_0 = \frac{\partial}{\partial a}\log Q(a, x) = \log(x/a) + (\log a - \psi(a)) + \kappa_{10}\f$
+ * and \f$v_1 = \frac{\partial}{\partial x}\log Q(a, x) = -\frac{1}{x I_U}\f$, where \f$I_U\f$ and \f$\kappa_{10}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<1>` struct containing \f$v_0\f$ and \f$v_1\f$.
+ * \return A `gamma_inc_mixed_partials<1>` struct with \f$(v_0, v_1)\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = 0.0\f$; \f$v_1 = 0.0\f$ for \f$a > 1\f$, \f$-\infty\f$ for non-integer \f$a < 1\f$, quiet NaN for integer \f$a \le 1\f$.
- * - \f$x = +\infty\f$: returns \f$v_0 = +\infty\f$, \f$v_1 = -1.0\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = 0\f$ while \f$v_1\f$ is \f$0\f$ for \f$a > 1\f$, \f$-\infty\f$ for non-integer \f$a < 1\f$, and quiet NaN for \f$a = 1\f$; at \f$x = +\infty\f$, \f$v_0 = +\infty\f$ and \f$v_1 = -1\f$.
  *
- * \par Measured accuracy
- * Maximum error 31.0 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 47.0 ulp.
+ * \par Accuracy
+ * Max error \f$31.0\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$47.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_mixed_d1(), log_gamma_q_mixed_d2(), log_gamma_q_da1()
  */
@@ -1388,31 +1301,23 @@ LAPLACE_HD math::gamma_inc_mixed_partials<1> log_gamma_q_mixed_d1(double a, doub
  * \ingroup incomplete_gamma
  * \brief Second mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the second mixed partial derivatives of total order \f$K = 2\f$:
+ * Evaluates
  * \f[
- * v_0 = \frac{\partial^2}{\partial a^2}\log Q(a, x) = \kappa_{20} - \psi'(a)
+ * v_0 = \kappa_{20} - \psi'(a), \qquad
+ * v_1 = \frac{1 + \kappa_{11}}{x}, \qquad
+ * v_2 = \frac{-a + \kappa_{02}}{x^2},
  * \f]
- * \f[
- * v_1 = \frac{\partial^2}{\partial a \partial x}\log Q(a, x) = \frac{1 + \kappa_{11}}{x}
- * \f]
- * \f[
- * v_2 = \frac{\partial^2}{\partial x^2}\log Q(a, x) = \frac{-a + \kappa_{02}}{x^2}
- * \f]
- * where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d = \log(t/x)\f$ and \f$j\f$ copies of
- * \f$y = x - t\f$ under the normalized upper measure (defined on \ref incomplete_gamma).
+ * where \f$\kappa_{ij}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<2>` struct containing \f$v_j = \frac{\partial^2 \log Q}{\partial a^{2-j} \partial x^j}\f$ for \f$j = 0, 1, 2\f$.
+ * \return A `gamma_inc_mixed_partials<2>` struct with \f$v_j = \frac{\partial^2 \log Q}{\partial a^{2-j} \partial x^j}\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = 0.0\f$; for \f$j \in \{1, 2\}\f$, \f$v_j = 0.0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, quiet NaN for integer \f$a \le j\f$.
- * - \f$x = +\infty\f$: returns \f$v_0 = -\psi'(a)\f$, \f$v_1 = 0.0\f$, \f$v_2 = 0.0\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = 0\f$ while \f$v_j\f$ (\f$j = 1, 2\f$) is \f$0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, and quiet NaN for integer \f$a \le j\f$; at \f$x = +\infty\f$, \f$v_0 = -\psi'(a)\f$ and \f$v_1 = v_2 = 0\f$.
  *
- * \par Measured accuracy
- * Maximum error 40.4 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 61.0 ulp.
+ * \par Accuracy
+ * Max error \f$40.4\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$61.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_mixed_d2(), log_gamma_q_mixed_d1(), log_gamma_q_mixed_d3(), log_gamma_q_da2()
  */
@@ -1426,34 +1331,24 @@ LAPLACE_HD math::gamma_inc_mixed_partials<2> log_gamma_q_mixed_d2(double a, doub
  * \ingroup incomplete_gamma
  * \brief Third mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the third mixed partial derivatives of total order \f$K = 3\f$:
+ * Evaluates
  * \f[
- * v_0 = \frac{\partial^3}{\partial a^3}\log Q(a, x) = \kappa_{30} - \psi''(a)
+ * v_0 = \kappa_{30} - \psi''(a), \quad
+ * v_1 = \frac{\kappa_{21}}{x}, \quad
+ * v_2 = \frac{-1 + \kappa_{12}}{x^2}, \quad
+ * v_3 = \frac{2a + \kappa_{03}}{x^3},
  * \f]
- * \f[
- * v_1 = \frac{\partial^3}{\partial a^2 \partial x}\log Q(a, x) = \frac{\kappa_{21}}{x}
- * \f]
- * \f[
- * v_2 = \frac{\partial^3}{\partial a \partial x^2}\log Q(a, x) = \frac{-1 + \kappa_{12}}{x^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^3}{\partial x^3}\log Q(a, x) = \frac{2a + \kappa_{03}}{x^3}
- * \f]
- * where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d = \log(t/x)\f$ and \f$j\f$ copies of
- * \f$y = x - t\f$ under the normalized upper measure (defined on \ref incomplete_gamma).
+ * where \f$\kappa_{ij}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<3>` struct containing \f$v_j = \frac{\partial^3 \log Q}{\partial a^{3-j} \partial x^j}\f$ for \f$j = 0, \dots, 3\f$.
+ * \return A `gamma_inc_mixed_partials<3>` struct with \f$v_j = \frac{\partial^3 \log Q}{\partial a^{3-j} \partial x^j}\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = 0.0\f$; for \f$j \ge 1\f$, \f$v_j = 0.0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, quiet NaN for integer \f$a \le j\f$.
- * - \f$x = +\infty\f$: returns \f$v_0 = -\psi''(a)\f$, \f$v_j = 0.0\f$ for \f$j = 1, 2, 3\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = 0\f$ while \f$v_j\f$ (\f$j \ge 1\f$) is \f$0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, and quiet NaN for integer \f$a \le j\f$; at \f$x = +\infty\f$, \f$v_0 = -\psi''(a)\f$ and \f$v_1 = v_2 = v_3 = 0\f$.
  *
- * \par Measured accuracy
- * Maximum error 113.0 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 170.0 ulp.
+ * \par Accuracy
+ * Max error \f$113.0\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$170.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_mixed_d3(), log_gamma_q_mixed_d2(), log_gamma_q_mixed_d4(), log_gamma_q_da3()
  */
@@ -1467,37 +1362,25 @@ LAPLACE_HD math::gamma_inc_mixed_partials<3> log_gamma_q_mixed_d3(double a, doub
  * \ingroup incomplete_gamma
  * \brief Fourth mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the fourth mixed partial derivatives of total order \f$K = 4\f$:
+ * Evaluates
  * \f[
- * v_0 = \frac{\partial^4}{\partial a^4}\log Q(a, x) = \kappa_{40} - \psi'''(a)
+ * v_0 = \kappa_{40} - \psi'''(a), \quad
+ * v_1 = \frac{\kappa_{31}}{x}, \quad
+ * v_2 = \frac{\kappa_{22}}{x^2}, \quad
+ * v_3 = \frac{2 + \kappa_{13}}{x^3}, \quad
+ * v_4 = \frac{-6a + \kappa_{04}}{x^4},
  * \f]
- * \f[
- * v_1 = \frac{\partial^4}{\partial a^3 \partial x}\log Q(a, x) = \frac{\kappa_{31}}{x}
- * \f]
- * \f[
- * v_2 = \frac{\partial^4}{\partial a^2 \partial x^2}\log Q(a, x) = \frac{\kappa_{22}}{x^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^4}{\partial a \partial x^3}\log Q(a, x) = \frac{2 + \kappa_{13}}{x^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^4}{\partial x^4}\log Q(a, x) = \frac{-6a + \kappa_{04}}{x^4}
- * \f]
- * where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d = \log(t/x)\f$ and \f$j\f$ copies of
- * \f$y = x - t\f$ under the normalized upper measure (defined on \ref incomplete_gamma).
+ * where \f$\kappa_{ij}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<4>` struct containing \f$v_j = \frac{\partial^4 \log Q}{\partial a^{4-j} \partial x^j}\f$ for \f$j = 0, \dots, 4\f$.
+ * \return A `gamma_inc_mixed_partials<4>` struct with \f$v_j = \frac{\partial^4 \log Q}{\partial a^{4-j} \partial x^j}\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = 0.0\f$; for \f$j \ge 1\f$, \f$v_j = 0.0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, quiet NaN for integer \f$a \le j\f$.
- * - \f$x = +\infty\f$: returns \f$v_0 = -\psi'''(a)\f$, \f$v_j = 0.0\f$ for \f$j = 1, \dots, 4\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = 0\f$ while \f$v_j\f$ (\f$j \ge 1\f$) is \f$0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, and quiet NaN for integer \f$a \le j\f$; at \f$x = +\infty\f$, \f$v_0 = -\psi'''(a)\f$ and \f$v_1 = \dots = v_4 = 0\f$.
  *
- * \par Measured accuracy
- * Maximum error 8150.0 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 12300.0 ulp.
+ * \par Accuracy
+ * Max error \f$8150.0\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$12300.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_mixed_d4(), log_gamma_q_mixed_d3(), log_gamma_q_mixed_d5(), log_gamma_q_da4()
  */
@@ -1511,40 +1394,26 @@ LAPLACE_HD math::gamma_inc_mixed_partials<4> log_gamma_q_mixed_d4(double a, doub
  * \ingroup incomplete_gamma
  * \brief Fifth mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the fifth mixed partial derivatives of total order \f$K = 5\f$:
+ * Evaluates
  * \f[
- * v_0 = \frac{\partial^5}{\partial a^5}\log Q(a, x) = \kappa_{50} - \psi^{(4)}(a)
+ * v_0 = \kappa_{50} - \psi^{(4)}(a), \quad
+ * v_1 = \frac{\kappa_{41}}{x}, \quad
+ * v_2 = \frac{\kappa_{32}}{x^2}, \quad
+ * v_3 = \frac{\kappa_{23}}{x^3}, \quad
+ * v_4 = \frac{-6 + \kappa_{14}}{x^4}, \quad
+ * v_5 = \frac{24a + \kappa_{05}}{x^5},
  * \f]
- * \f[
- * v_1 = \frac{\partial^5}{\partial a^4 \partial x}\log Q(a, x) = \frac{\kappa_{41}}{x}
- * \f]
- * \f[
- * v_2 = \frac{\partial^5}{\partial a^3 \partial x^2}\log Q(a, x) = \frac{\kappa_{32}}{x^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^5}{\partial a^2 \partial x^3}\log Q(a, x) = \frac{\kappa_{23}}{x^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^5}{\partial a \partial x^4}\log Q(a, x) = \frac{-6 + \kappa_{14}}{x^4}
- * \f]
- * \f[
- * v_5 = \frac{\partial^5}{\partial x^5}\log Q(a, x) = \frac{24a + \kappa_{05}}{x^5}
- * \f]
- * where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d = \log(t/x)\f$ and \f$j\f$ copies of
- * \f$y = x - t\f$ under the normalized upper measure (defined on \ref incomplete_gamma).
+ * where \f$\kappa_{ij}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<5>` struct containing \f$v_j = \frac{\partial^5 \log Q}{\partial a^{5-j} \partial x^j}\f$ for \f$j = 0, \dots, 5\f$.
+ * \return A `gamma_inc_mixed_partials<5>` struct with \f$v_j = \frac{\partial^5 \log Q}{\partial a^{5-j} \partial x^j}\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = 0.0\f$; for \f$j \ge 1\f$, \f$v_j = 0.0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, quiet NaN for integer \f$a \le j\f$.
- * - \f$x = +\infty\f$: returns \f$v_0 = -\psi^{(4)}(a)\f$, \f$v_j = 0.0\f$ for \f$j = 1, \dots, 5\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = 0\f$ while \f$v_j\f$ (\f$j \ge 1\f$) is \f$0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, and quiet NaN for integer \f$a \le j\f$; at \f$x = +\infty\f$, \f$v_0 = -\psi^{(4)}(a)\f$ and \f$v_1 = \dots = v_5 = 0\f$.
  *
- * \par Measured accuracy
- * Maximum error 2.6e4 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 39000.0 ulp.
+ * \par Accuracy
+ * Max error \f$2.6 \times 10^4\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$39000.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_mixed_d5(), log_gamma_q_mixed_d4(), log_gamma_q_mixed_d6(), log_gamma_q_da5()
  */
@@ -1558,43 +1427,27 @@ LAPLACE_HD math::gamma_inc_mixed_partials<5> log_gamma_q_mixed_d5(double a, doub
  * \ingroup incomplete_gamma
  * \brief Sixth mixed partial derivatives of \f$\log Q(a, x)\f$ in \f$a\f$ and \f$x\f$.
  *
- * Computes the sixth mixed partial derivatives of total order \f$K = 6\f$:
+ * Evaluates
  * \f[
- * v_0 = \frac{\partial^6}{\partial a^6}\log Q(a, x) = \kappa_{60} - \psi^{(5)}(a)
+ * v_0 = \kappa_{60} - \psi^{(5)}(a), \quad
+ * v_1 = \frac{\kappa_{51}}{x}, \quad
+ * v_2 = \frac{\kappa_{42}}{x^2}, \quad
+ * v_3 = \frac{\kappa_{33}}{x^3}, \quad
+ * v_4 = \frac{\kappa_{24}}{x^4}, \quad
+ * v_5 = \frac{24 + \kappa_{15}}{x^5}, \quad
+ * v_6 = \frac{-120a + \kappa_{06}}{x^6},
  * \f]
- * \f[
- * v_1 = \frac{\partial^6}{\partial a^5 \partial x}\log Q(a, x) = \frac{\kappa_{51}}{x}
- * \f]
- * \f[
- * v_2 = \frac{\partial^6}{\partial a^4 \partial x^2}\log Q(a, x) = \frac{\kappa_{42}}{x^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^6}{\partial a^3 \partial x^3}\log Q(a, x) = \frac{\kappa_{33}}{x^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^6}{\partial a^2 \partial x^4}\log Q(a, x) = \frac{\kappa_{24}}{x^4}
- * \f]
- * \f[
- * v_5 = \frac{\partial^6}{\partial a \partial x^5}\log Q(a, x) = \frac{24 + \kappa_{15}}{x^5}
- * \f]
- * \f[
- * v_6 = \frac{\partial^6}{\partial x^6}\log Q(a, x) = \frac{-120a + \kappa_{06}}{x^6}
- * \f]
- * where \f$\kappa_{ij}\f$ is the joint cumulant of \f$i\f$ copies of \f$d = \log(t/x)\f$ and \f$j\f$ copies of
- * \f$y = x - t\f$ under the normalized upper measure (defined on \ref incomplete_gamma).
+ * where \f$\kappa_{ij}\f$ are defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<6>` struct containing \f$v_j = \frac{\partial^6 \log Q}{\partial a^{6-j} \partial x^j}\f$ for \f$j = 0, \dots, 6\f$.
+ * \return A `gamma_inc_mixed_partials<6>` struct with \f$v_j = \frac{\partial^6 \log Q}{\partial a^{6-j} \partial x^j}\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN for all components.
- * - \f$x = 0\f$: returns \f$v_0 = 0.0\f$; for \f$j \ge 1\f$, \f$v_j = 0.0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, quiet NaN for integer \f$a \le j\f$.
- * - \f$x = +\infty\f$: returns \f$v_0 = -\psi^{(5)}(a)\f$, \f$v_j = 0.0\f$ for \f$j = 1, \dots, 6\f$.
+ * \par Special values
+ * At \f$x = 0\f$, \f$v_0 = 0\f$ while \f$v_j\f$ (\f$j \ge 1\f$) is \f$0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, and quiet NaN for integer \f$a \le j\f$; at \f$x = +\infty\f$, \f$v_0 = -\psi^{(5)}(a)\f$ and \f$v_1 = \dots = v_6 = 0\f$.
  *
- * \par Measured accuracy
- * Maximum error 1.05e5 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$; test bound 158000.0 ulp.
+ * \par Accuracy
+ * Max error \f$1.05 \times 10^5\f$ ulp (gcc/OpenMP) in \f$\min(\mathrm{ulpL}, \mathrm{ulp1})\f$ (test bound \f$158000.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_mixed_d6(), log_gamma_q_mixed_d5(), log_gamma_q_da6()
  */

@@ -173,27 +173,14 @@ LAPLACE_HD double log(double x) {
  * \ingroup elementary
  * \brief Exponential function, \f$\exp(x)\f$.
  *
- * Evaluates Laplace's own table-free fdlibm-style implementation (`own::exp`) by default
- * on host execution spaces (6.4 ns/call on gcc, compared to 29.0 ns/call for the platform's
- * libm) and CUDA's libdevice (`platform::exp`) on device execution spaces (0.070 ns/call
- * on CUDA). Defining `LAPLACE_PLATFORM_ELEMENTARY` directs host calls to the platform's libm as well.
+ * Computes \f$e^x\f$, dispatching to the host and device implementations described on \ref elementary.
  *
  * \param x Real argument \f$x \in \mathbb{R}\f$.
  * \return The value of \f$\exp(x)\f$.
  *
- * \par Domain and special values
- * - \f$x \in \mathbb{R}\f$: standard domain.
- * - If \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = 0.0\f$: returns \f$1.0\f$.
- * - \f$x = +\infty\f$: returns \f$+\infty\f$.
- * - \f$x = -\infty\f$: returns \f$0.0\f$.
- * - \f$x > 709.782712893383973096\f$ (overflow threshold): returns \f$+\infty\f$.
- * - \f$x < -745.133219101941108420\f$ (underflow threshold): returns \f$0.0\f$.
- * - \f$|x| < 2^{-28}\f$: returns \f$1.0 + x\f$ for the own version on the host only (on the device the platform's is called).
+ * Defined on \f$\mathbb{R}\f$, returning \f$1.0\f$ at \f$0.0\f$, \f$+\infty\f$ for \f$x > 709.782712893383973096\f$ or \f$+\infty\f$, \f$0.0\f$ for \f$x < -745.133219101941108420\f$ or \f$-\infty\f$, and quiet NaN for NaN; on the host by default, \f$|x| < 2^{-28}\f$ evaluates \f$1.0 + x\f$.
  *
- * \par Measured accuracy
- * Maximum error 1.0000 ulp on CPU (gcc, MSVC) and GPU (CUDA); 0.5002 ulp for the platform
- * candidate on gcc (share of correctly rounded results 0.9270 for own, 0.9997 for platform).
+ * Default accuracy: at most 1.0000 ulp on CPU (gcc, MSVC) and CUDA (0.7930 ulp on normal results).
  *
  * \see elementary, log()
  */
@@ -206,26 +193,14 @@ LAPLACE_HD_FORCEINLINE double exp(double x) {
  * \ingroup elementary
  * \brief Natural logarithm, \f$\log(x)\f$.
  *
- * Evaluates Laplace's own table-free fdlibm-style implementation (`own::log`) by default
- * on host execution spaces (4.1 ns/call on gcc, compared to 27.6 ns/call for the platform's
- * libm) and CUDA's libdevice (`platform::log`) on device execution spaces (0.131 ns/call
- * on CUDA). Defining `LAPLACE_PLATFORM_ELEMENTARY` directs host calls to the platform's libm as well.
+ * Computes \f$\ln(x)\f$, dispatching to the host and device implementations described on \ref elementary.
  *
  * \param x Positive real argument \f$x \in (0, \infty)\f$.
  * \return The value of \f$\log(x)\f$.
  *
- * \par Domain and special values
- * - \f$x \in (0, \infty)\f$: standard domain.
- * - If \f$x < 0.0\f$ or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = 0.0\f$ (or \f$-0.0\f$): returns \f$-\infty\f$.
- * - \f$x = 1.0\f$: returns \f$0.0\f$.
- * - \f$x = +\infty\f$: returns \f$+\infty\f$.
- * - Subnormal arguments (\f$x < 2^{-1022}\f$): supported down to \f$5 \times 10^{-324}\f$.
+ * Defined on \f$(0, \infty)\f$, returning \f$0.0\f$ at \f$1.0\f$, \f$+\infty\f$ at \f$+\infty\f$, \f$-\infty\f$ at \f$\pm 0.0\f$, and quiet NaN for \f$x < 0.0\f$ or NaN; subnormals are supported down to \f$5 \times 10^{-324}\f$.
  *
- * \par Measured accuracy
- * Maximum error 0.7767 ulp on gcc and MSVC, 0.7774 ulp on CUDA (share of correctly rounded
- * results 0.9799 on gcc, 0.9827 on CUDA); 0.5003 ulp for the platform candidate on gcc
- * (share of correctly rounded results 0.9992).
+ * Default accuracy: at most 0.7767 ulp on CPU (gcc, MSVC) and 0.5207 ulp on CUDA.
  *
  * \see elementary, exp()
  */

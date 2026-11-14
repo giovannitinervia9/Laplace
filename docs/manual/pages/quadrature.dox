@@ -3,142 +3,105 @@
 \ingroup math
 \brief Quadrature rules callable inside Kokkos kernels on the host and device: double-exponential, adaptive Gauss-Kronrod, geometric panels, and fixed Gauss rules.
 
-Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+This module provides one-dimensional quadrature rules in `<laplace/math/quadrature.hpp>` (`laplace::math::quad`), marked `LAPLACE_HD` to run on host and Kokkos device without dynamic allocation, recursion, or unbounded loops. On reference integrals, double-exponential and panel rules reach 2.8 to 68 ulp on gcc (2.8 to 21 ulp on CUDA), and Gauss-Kronrod reaches 72 ulp.
 
-## Mathematical definition
+## Definitions
 
-This module evaluates definite integrals of the form
+This module approximates
 \f[
-I = \int_a^b f(x) \, \mathrm{d}x
+I = \int_a^b f(x) \, \mathrm{d}x,
 \f]
-where:
-- \f$f\f$ is an integrand functor mapping \f$x \mapsto f(x) \in \mathbb{R}\f$ (or \f$(x, x_c) \mapsto f(x, x_c) \in \mathbb{R}\f$, where \f$x_c\f$ is the signed distance to the nearer integration boundary),
-- \f$x \in [a, b]\f$ is the real integration variable,
-- \f$a \in [-\infty, \infty)\f$ and \f$b \in (-\infty, \infty]\f$ are the integration boundaries with \f$a < b\f$.
+where \f$a < b\f$ and \f$f\f$ is a real integrand functor. For \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" and \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()", \f$f\f$ may alternatively take \f$(x, x_c)\f$, where \f$x_c\f$ is signed distance to the nearer endpoint.
 
-Every routine in this module is designed for execution inside Kokkos parallel kernels: no dynamic memory allocation is performed, no recursion is used, and every iterative loop is strictly bounded by a static cap.
+Adaptive rules return \ref laplace::math::quad::quad_result "quad_result" (`value`, `error`, `evals`, `converged`). Double-exponential and panel rules accept \ref laplace::math::quad::de_quad_options "de_quad_options" (`stop`, default \f$10^{-9}\f$; `max_level`, default 8). Fixed Gauss rules return `double`.
+
+The table below summarizes all rules.
+
+| Rule | Domain | Integrand | Return | Intended use |
+|---|---|---|---|---|
+| \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" | Finite \f$[a, b]\f$ | `f(x)`, `f(x, x_c)` | `quad_result` | Smooth or endpoint-singular |
+| \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()" | \f$[a, \infty)\f$ | `f(x)`, `f(x, x_c)` | `quad_result` | Decaying or endpoint-singular tails |
+| \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()" | \f$(-\infty, \infty)\f$ | `f(x)` | `quad_result` | Decaying integrands near \f$c\f$ |
+| \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()" | Finite \f$[a, b]\f$ | `f(x)` | `quad_result` | Smooth or interior-kinked |
+| \ref laplace::math::quad::panels_quad "panels_quad()" | General \f$[a, b]\f$ | `f(x)` | `quad_result` | Kinks or mass far from \f$c\f$ |
+| \ref laplace::math::quad::gauss_legendre_quad "gauss_legendre_quad\<N\>()" | Finite \f$[a, b]\f$ | `f(x)` | `double` | Smooth; exact to degree \f$2N - 1\f$ (\f$N \in \{16, 32, 64\}\f$) |
+| \ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()" | \f$(-\infty, \infty)\f$ | `f(x)` | `double` | 32-node rule, weight \f$e^{-y^2}\f$ |
+| \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()" | \f$[a, \infty)\f$ | `f(x)` | `double` | 32-node rule, weight \f$e^{-y}\f$ |
 
 ## Domain and special values
 
-The integration domain depends on the chosen quadrature rule:
-- **Finite intervals.** \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" and \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()" integrate over \f$[a, b]\f$ with finite \f$a, b \in \mathbb{R}\f$.
-- **Semi-infinite intervals.** \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()" and \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()" integrate over \f$[a, \infty)\f$ for finite \f$a \in \mathbb{R}\f$ and scale \f$s > 0\f$.
-- **Infinite intervals.** \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()" and \ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()" integrate over \f$(-\infty, \infty)\f$ for centre \f$c \in \mathbb{R}\f$ and scale \f$s > 0\f$.
-- **Piecewise intervals.** \ref laplace::math::quad::panels_quad "panels_quad()" integrates over \f$[a, b]\f$, where \f$a \le -10^{308}\f$ is treated as \f$-\infty\f$ and \f$b \ge 10^{308}\f$ is treated as \f$+\infty\f$.
-- **Singular endpoints and integrand clipping.** For \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" and \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()", integrands may take a second argument \f$x_c\f$ representing the exact distance to the nearer boundary (\f$x_c = a - x\f$ on the left half of \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()", \f$x_c = b - x\f$ on the right half; \f$x_c = x - a\f$ for \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()"). If a quadrature node rounds to an endpoint in double precision while \f$x_c \ne 0\f$, it is evaluated. Across all double-exponential rules, integrand evaluations are skipped if non-finite or if \f$|v| \ge 10^{308}\f$ (the common test \f$|v| < 10^{308}\f$). In \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()", nodes with displacement \f$|\sinh(q)| \ge 10^{300}\f$ are skipped.
-- **Reversed interval.** (\ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()", \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()", \ref laplace::math::quad::gauss_legendre_quad "gauss_legendre_quad()", \ref laplace::math::quad::panels_quad "panels_quad()"): \f$\int_a^b f = -\int_b^a f\f$; the result of the reversed call has the opposite value and the same error, evaluations and convergence.
-- **Empty interval.** When \f$a = b\f$ (\ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()", \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()", \ref laplace::math::quad::panels_quad "panels_quad()"): value 0, error 0, `converged = true`, no evaluation (\ref laplace::math::quad::gauss_legendre_quad "gauss_legendre_quad()" returns \f$0.0\f$).
-- **Invalid arguments.** Invalid arguments give value and error NaN and `converged = false` (rules returning \ref laplace::math::quad::quad_result "quad_result"), or NaN (\ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()", \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()"):
-  - a NaN or infinite end of \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" and \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()";
-  - a NaN or infinite start of \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()" or centre of \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()", \ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()", and \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()";
-  - a scale \f$s\f$ that is not positive and finite in \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()", \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()", \ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()", \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()", and \ref laplace::math::quad::panels_quad "panels_quad()";
-  - a NaN end or a centre that is not finite in \ref laplace::math::quad::panels_quad "panels_quad()" (whose ends may be infinite).
+Finite-interval rules (`tanh_sinh_quad()`, `gauss_kronrod_quad()`, `gauss_legendre_quad()`) require finite \f$a, b \in \mathbb{R}\f$; semi-infinite (`exp_sinh_quad()`, `gauss_laguerre32_quad()`) and infinite-line (`sinh_sinh_quad()`, `gauss_hermite32_quad()`) rules require finite \f$a\f$ or \f$c\f$ and scale \f$s > 0\f$. `panels_quad()` treats \f$a \le -10^{308}\f$ as \f$-\infty\f$ and \f$b \ge 10^{308}\f$ as \f$+\infty\f$.
 
-## Numerical methods and regimes
+For binary \f$f(x, x_c)\f$, `tanh_sinh_quad()` passes \f$x_c = a - x\f$ (left half) and \f$x_c = b - x\f$ (right half), while `exp_sinh_quad()` passes \f$x_c = x - a\f$; nodes rounding to an endpoint with \f$x_c \ne 0\f$ are still evaluated. Double-exponential rules skip non-finite values or \f$|v| \ge 10^{308}\f$ (via \f$|v| < 10^{308}\f$), and `sinh_sinh_quad()` skips \f$|\sinh(q)| \ge 10^{300}\f$.
+
+When \f$b < a\f$, explicit-endpoint rules (`tanh_sinh_quad()`, `gauss_kronrod_quad()`, `gauss_legendre_quad()`, `panels_quad()`) negate \f$\int_a^b f = -\int_b^a f\f$, preserving error, evaluations, and convergence. When \f$a = b\f$, those adaptive rules return value 0, error 0, `converged = true`, and zero evaluations, while `gauss_legendre_quad()` returns \f$0.0\f$.
+
+Invalid inputs (non-finite endpoint on finite-interval rules, NaN boundary in `panels_quad()`, non-finite start or centre, or \f$s\f$ not positive and finite) return NaN value and error, `converged = false`, and zero evaluations for adaptive rules, or quiet NaN for fixed semi-infinite and infinite rules.
+
+## Method
 
 ### Double-exponential quadrature
 
-The double-exponential rules (Takahasi and Mori, 1974) map the integration variable \f$x\f$ to \f$t \in [-t_{\max}, t_{\max}]\f$ with \f$t_{\max} = 6.8\f$. Beyond \f$|t| > 6.8\f$, transformed nodes leave the IEEE 754 double-precision range. The transformations and weight functions \f$w(t) = \frac{\mathrm{d}x}{\mathrm{d}t}\f$ are:
+Double-exponential rules (Takahasi and Mori, 1974) map \f$x\f$ to \f$t\f$ with \f$q = \frac{\pi}{2}\sinh t\f$ and \f$w(t) = \frac{\mathrm{d}x}{\mathrm{d}t}\f$:
 
-1. **Finite intervals** (\ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()"):
-   \f[
-   x(t) = \frac{a+b}{2} + \frac{b-a}{2} \tanh\left(\frac{\pi}{2} \sinh t\right)
-   \f]
-   Letting \f$q = \frac{\pi}{2} \sinh t\f$, the distance to the nearer boundary is computed directly without subtraction cancellation:
-   \f[
-   d = (b - a) \frac{e^{-2|q|}}{1 + e^{-2|q|}}, \quad w(t) = \frac{\pi}{2} \cosh(t) (b - a) \frac{2 e^{-2|q|}}{(1 + e^{-2|q|})^2}.
-   \f]
-2. **Semi-infinite intervals** (\ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()"):
-   \f[
-   x(t) = a + s \exp\left(\frac{\pi}{2} \sinh t\right), \quad w(t) = s \frac{\pi}{2} \cosh(t) \exp\left(\frac{\pi}{2} \sinh t\right).
-   \f]
-3. **Infinite intervals** (\ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()"):
-   \f[
-   x(t) = c + s \sinh\left(\frac{\pi}{2} \sinh t\right), \quad w(t) = s \frac{\pi}{2} \cosh(t) \cosh\left(\frac{\pi}{2} \sinh t\right).
-   \f]
+1. Finite \f$[a, b]\f$ (`tanh_sinh_quad()`): \f$x(t) = \frac{a+b}{2} + \frac{b-a}{2}\tanh q\f$, endpoint distance \f$d = (b - a)\frac{e^{-2|q|}}{1 + e^{-2|q|}}\f$, and \f$w(t) = \frac{\pi}{2}\cosh(t)(b - a)\frac{2e^{-2|q|}}{(1 + e^{-2|q|})^2}\f$.
+2. Semi-infinite \f$[a, \infty)\f$ (`exp_sinh_quad()`): \f$x(t) = a + s e^q\f$, \f$w(t) = s\frac{\pi}{2}\cosh(t)e^q\f$.
+3. Infinite \f$(-\infty, \infty)\f$ (`sinh_sinh_quad()`): \f$x(t) = c + s \sinh q\f$, \f$w(t) = s\frac{\pi}{2}\cosh(t)\cosh q\f$.
 
-The adaptive summation proceeds as follows:
-- **Level 0 and trimming:** Evaluates the rule at step \f$h = 1/2\f$ over \f$k \in [-K, K]\f$ with \f$K = \lfloor 6.8 / 0.5 \rfloor = 13\f$ (27 nodes). Computes the discrete integral \f$S = \sum v_k\f$ and \f$L_1 = \sum |v_k|\f$, where \f$v_k = f(x_k) w(k h)\f$. The integration bounds in \f$t\f$ are trimmed to \f$[t_{\mathrm{lo}}, t_{\mathrm{hi}}]\f$ where \f$|v_k| > 2^{-64} L_1\f$, keeping one step beyond the last significant node.
-- **Refinement levels:** Halves the step size \f$h \leftarrow h / 2\f$ up to `max_level` (default 8, corresponding to \f$h = 2^{-9} = 1/512\f$), evaluating only odd multiples of \f$h\f$.
-- **Stopping criterion:** Iteration terminates when two successive trapezoidal estimates differ by less than \f$\mathrm{stop} \times (L_1 h)\f$ (default `stop` = \f$10^{-9}\f$).
-- **Error estimate:** When converged, the error is estimated as \f$\mathrm{rel}^2 \times (L_1 h)\f$, where \f$\mathrm{rel} = |\mathrm{est} - \mathrm{prev}| / (L_1 h)\f$, reflecting the quadratic error reduction of the trapezoidal rule under double-exponential decay. When the rule does not converge, `value` holds the last estimate and `error` holds the last difference between successive estimates.
+After tail trimming, step \f$h\f$ halves up to `max_level` (default 8), summing \f$S = \sum v_k\f$ and \f$L_1 = \sum |v_k|\f$ with \f$v_k = f(x_k)w(k h)\f$. Refinement stops when \f$|\mathrm{est} - \mathrm{prev}| \le \mathrm{stop} \cdot L_1 h\f$ (default \f$10^{-9}\f$), yielding error \f$\mathrm{rel}^2 L_1 h\f$ for \f$\mathrm{rel} = |\mathrm{est} - \mathrm{prev}|/(L_1 h)\f$; otherwise `value` is `est` and `error` is \f$|\mathrm{est} - \mathrm{prev}|\f$.
 
-### Gauss-Kronrod quadrature
+### Adaptive Gauss-Kronrod quadrature
 
-\ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()" implements an adaptive Gauss-Kronrod 7–15 rule on \f$[a, b]\f$ using constants from Boost.Math (`boost/math/quadrature/gauss_kronrod_quad.hpp`).
-On each subinterval \f$[u, v]\f$:
-- A 15-point Kronrod estimate \f$K\f$ and an embedded 7-point Gauss-Legendre estimate \f$G\f$ are evaluated with 15 function evaluations.
-- The local error estimate is \f$|(K - G) \cdot \frac{v - u}{2}|\f$.
-- Subintervals are stored in flat arrays of size capped at 64 intervals.
-- At each iteration, the subinterval with the largest error is bisected at its midpoint \f$m = \frac{u+v}{2}\f$.
-- Iteration terminates when the accumulated error satisfies \f$\sum \mathrm{err}_i \le \mathrm{tol} \times |\sum \mathrm{val}_i|\f$ (default `tol` = \f$10^{-14}\f$) or when the interval limit (at most 64) is reached.
+`gauss_kronrod_quad()` runs a Boost.Math 7–15 Gauss-Kronrod rule on \f$[a, b]\f$, bisecting the subinterval with largest error until \f$\sum \mathrm{err}_i \le \mathrm{tol} \cdot |\sum \mathrm{val}_i|\f$ (default \f$10^{-14}\f$), `max_intervals` (cap 64) are reached, or bisection underflows; it fails on endpoint singularities.
 
 ### Geometric panel quadrature
 
-\ref laplace::math::quad::panels_quad "panels_quad()" cuts the interval into pieces and each piece into geometric panels:
-- The interval \f$[a, b]\f$ is cut at the centre \f$c\f$ and at up to 8 user-supplied interior kink points \f$\mathrm{kinks}[0 \dots nk-1]\f$. All cut points are sorted.
-- Each finite subpiece \f$[u, v]\f$ is subdivided into up to 64 geometric panels of doubling widths \f$s, 2s, 4s, \dots, 2^k s\f$ advancing from the end closer to \f$c\f$. Each panel is integrated with \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()".
-- For subpieces extending to \f$\pm\infty\f$, doubling panels cover the first \f$63s\f$, and the remaining unbounded tail is integrated using \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()" with scale \f$s\f$.
-- Convergence is enforced on every panel; the overall result is marked converged only if every subpiece converges.
+`panels_quad()` cuts \f$[a, b]\f$ at \f$c\f$ and up to 8 sorted interior `kinks`, subdivides finite subpieces from the end nearer \f$c\f$ into up to 64 doubling panels \f$s, 2s, 4s, \dots\f$ via `tanh_sinh_quad()`, and integrates tails beyond \f$63s\f$ via `exp_sinh_quad()` at scale \f$s\f$; `converged` requires all panels to converge.
 
 ### Fixed Gauss rules
 
-Node coordinates and weights were generated using the Golub-Welsch algorithm at 256 bits (`tools/reference/quadrature.py nodes`):
-- **Gauss-Legendre** (\ref laplace::math::quad::gauss_legendre_quad "gauss_legendre_quad<N>()"): \f$N \in \{16, 32, 64\}\f$ nodes on \f$[a, b]\f$, exact for polynomials of degree up to \f$2N - 1\f$.
-- **Gauss-Hermite** (\ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()"): 32 nodes on \f$(-\infty, \infty)\f$, evaluating \f$s \sum_{i=0}^{31} w_i e^{y_i^2} f(c + s y_i)\f$.
-- **Gauss-Laguerre** (\ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()"): 32 nodes on \f$[a, \infty)\f$, evaluating \f$s \sum_{i=0}^{31} w_i e^{y_i} f(a + s y_i)\f$.
+Nodes and weights come from 256-bit Golub-Welsch. `gauss_legendre_quad<N>()` (\f$N \in \{16, 32, 64\}\f$) is exact to degree \f$2N - 1\f$. `gauss_hermite32_quad()` and `gauss_laguerre32_quad()` evaluate \f$s\sum_{i=0}^{31} w_i e^{y_i^2} f(c + s y_i)\f$ and \f$s\sum_{i=0}^{31} w_i e^{y_i} f(a + s y_i)\f$.
 
-## Measured accuracy
+## Accuracy
 
-See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
-
-Accuracy is measured against reference tables generated by `tools/reference/quadrature.py` (`tests/data/reference/quadrature.csv`, 540 rows: nine integrals at 60 parameter values each, computed via closed forms or mpmath at 200 bits). Every row in the test suite converged for the rule and integral pairs reported in the table; the pairs marked "fails" are excluded.
-
-### Accuracy on reference integrals
-
-The table below reports measured maximum relative error in ulps on gcc (with CUDA in parentheses where it differs), the mean number of integrand evaluations, and the test bounds enforced in `tests/math/test_quadrature.cpp`. In the table, \f$p\f$ is the parameter of each integral, and \f$\phi\f$ and \f$\Phi\f$ are the standard normal density and distribution function:
+See \ref accuracy "How accuracy is measured" for metrics and precision. Tests cover 540 reference integrals (9 integrands at 60 parameter values, from closed forms or 200-bit `mpmath`); \f$p\f$ is the parameter and \f$\phi, \Phi\f$ are the standard normal density and CDF. Cells give maximum relative error in ulp on gcc (CUDA in parentheses where different), mean evaluations, and `[bound]` in ulp; every reported row converged.
 
 | Integrand | tanh-sinh | exp-sinh | sinh-sinh | panels | GK15 |
 |---|---|---|---|---|---|
-| Beta (singular ends, with distance to end) | 6.5 (7.8), 88 evals [bound: 10.0] | — | — | — | fails |
-| Gamma (singular end, \f$a \le 100\f$) | — | 68 (20), 136 evals [bound: 100.0] | — | 13 (21), 839 evals [bound: 32.0] | — |
-| Student t tail (\f$\nu \ge 0.25\f$) | — | 5.4, 85 evals [bound: 8.0] | — | 4.0, 793 evals [bound: 6.0] | — |
-| Truncated Laplace (kink at 0) | — | — | — | 4.5, 229 evals [bound: 7.0] | 72, 167 evals [bound: 110.0] |
-| \f$x^p \log(x)^2\f$ (\f$p + 1 \ge 0.1\f$) | 6.4 (7.4), 72 evals [bound: 10.0] | — | — | 3.9, 274 evals [bound: 6.0] | fails |
-| \f$2 x^2 \phi(x) \phi(p x)^2 / \Phi(p x)\f$ on the real line | — | — | 7.3 (6.7), 159 evals [bound: 11.0] | 6.8 (5.4), 1527 evals [bound: 10.0] | — |
-| \f$\exp(-p(\sqrt{1 + x^2} - 1))\f$ on the real line | — | — | 18, 615 evals [bound: 27.0] | 2.8, 1557 evals [bound: 5.0] | — |
-| \f$\mathrm{sech}^p\f$ | — | — | 6.3, 182 evals [bound: 10.0] | 3.7, 1561 evals [bound: 6.0] | — |
+| Beta (singular ends, with distance) | 6.5 (7.8), 88 [10.0] | — | — | — | fails |
+| Gamma (singular end, \f$a \le 100\f$) | — | 68 (20), 136 [100.0] | — | 13 (21), 839 [32.0] | — |
+| Student t tail (\f$\nu \ge 0.25\f$) | — | 5.4, 85 [8.0] | — | 4.0, 793 [6.0] | — |
+| Truncated Laplace (kink at 0) | — | — | — | 4.5, 229 [7.0] | 72, 167 [110.0] |
+| \f$x^p \log(x)^2\f$ (\f$p + 1 \ge 0.1\f$) | 6.4 (7.4), 72 [10.0] | — | — | 3.9, 274 [6.0] | fails |
+| \f$2 x^2 \phi(x) \phi(p x)^2 / \Phi(p x)\f$ | — | — | 7.3 (6.7), 159 [11.0] | 6.8 (5.4), 1527 [10.0] | — |
+| \f$\exp(-p(\sqrt{1 + x^2} - 1))\f$ | — | — | 18, 615 [27.0] | 2.8, 1557 [5.0] | — |
+| \f$\mathrm{sech}^p\f$ | — | — | 6.3, 182 [10.0] | 3.7, 1561 [6.0] | — |
 
-Per-rule accuracy figures without a CUDA value in parentheses had identical measured error on gcc and CUDA (`docs/numerics.md` reports "gcc, CUDA where it differs").
+Integrands like \f$x^{a-1}\f$ require nodes below \f$10^{-16/a}\f$ of scale, so \f$a < 0.06\f$ exceeds binary64 range. Fixed Gauss rules are exact for their polynomial weights on smooth integrands. See `docs/numerics.md` for rejected tolerances, oscillatory cancellation, and defect repairs.
 
-Observations from measurements:
-- **Double precision range limit:** Integrands of the form \f$x^{a-1}\f$ require nodes below \f$10^{-16/a}\f$ of the scale; exponents \f$a\f$ below about \f$0.06\f$ cannot be integrated to the last bit within IEEE 754 binary64 range.
-- **Oscillatory cancellation:** Integrals such as \f$\int_{-\infty}^\infty e^{-x^2/2} \cos(px) \, \mathrm{d}x\f$ lose relative precision as \f$p\f$ grows (\f$10^7\f$ ulp at \f$p = 5.7\f$), because the value \f$e^{-p^2/2}\f$ is exponentially small compared to \f$\int |f|\f$.
-- **Stopping tolerance:** Lowering `stop` from \f$10^{-9}\f$ to \f$10^{-11}\f$ yielded no gain in accuracy while increasing evaluation counts by 10% to 30%.
-- **Fixed Gauss rules.** In `tests/math/test_quadrature.cpp`, the test values \f$4 \times 10^{-16}\f$ and \f$10^{-14}\f$ are test tolerances (`doctest::Approx` epsilon), not measured errors. The tests cover \f$N = 16\f$ and \f$64\f$ for Gauss-Legendre (\f$N = 32\f$ untested) on monomials \f$x^k\f$ on \f$[0, 1]\f$ for \f$k \in \{0, 1, 7, 31\}\f$, and monomials times the weight function (\f$x^{2j} e^{-x^2}\f$ for \f$j \in \{0, 1, 2, 3\}\f$, and \f$x^k e^{-x}\f$ for \f$k \in \{0, \dots, 9\}\f$) for Hermite and Laguerre.
+## Speed
 
-### Timings
+Throughput over 69,120 integrals (540 rows repeated 128 times) in \f$\mu\mathrm{s}\f$ per integral on gcc (1 thread), OpenMP (16 threads), and CUDA (RTX 4070 SUPER); cost is dominated by 90 to 1500 evaluations.
 
-Throughput measured on 69,120 integrals (540 reference rows repeated 128 times), reported in microseconds (\f$\mu\mathrm{s}\f$) per integral on gcc (1 thread), OpenMP (16 threads), and CUDA (RTX 4070 SUPER):
-- \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()": 17.3 / 1.51 / 3.44 \f$\mu\mathrm{s}\f$
-- \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()": 10.0 / 0.91 / 0.82 \f$\mu\mathrm{s}\f$
-- \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()": 20.8 / 1.79 / 2.62 \f$\mu\mathrm{s}\f$
-- \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()" (GK15): 61 / 4.4 / 3.9 \f$\mu\mathrm{s}\f$
-- \ref laplace::math::quad::panels_quad "panels_quad()": 121 / 9.5 / 8.7 \f$\mu\mathrm{s}\f$
-- Fixed Gauss rules: 2.1–2.7 / 0.26–0.32 / 0.20 \f$\mu\mathrm{s}\f$
-
-Execution cost is dominated by integrand evaluations (90 to 1500 evaluations, each with exp and log at about 28 ns).
+| Rule | gcc, 1 thread (\f$\mu\mathrm{s}\f$) | OpenMP, 16 threads (\f$\mu\mathrm{s}\f$) | CUDA, RTX 4070 SUPER (\f$\mu\mathrm{s}\f$) |
+|---|---|---|---|
+| `tanh_sinh_quad()` | 17.3 | 1.51 | 3.44 |
+| `exp_sinh_quad()` | 10.0 | 0.91 | 0.82 |
+| `sinh_sinh_quad()` | 20.8 | 1.79 | 2.62 |
+| `gauss_kronrod_quad()` | 61 | 4.4 | 3.9 |
+| `panels_quad()` | 121 | 9.5 | 8.7 |
+| Fixed Gauss rules | 2.1–2.7 | 0.26–0.32 | 0.20 |
 
 ## Example
 
-The following example evaluates a definite integral inside a `Kokkos::parallel_for` kernel:
+Evaluating definite integrals inside `Kokkos::parallel_for`:
 
 \code{.cpp}
 #include <laplace/math/quadrature.hpp>
 #include <Kokkos_Core.hpp>
 
 void compute_integrals(Kokkos::View<double*>& values,
-                       Kokkos::View<int>& evals,
+                       Kokkos::View<int*>& evals,
                        int n) {
   Kokkos::parallel_for("eval_quadrature", n, KOKKOS_LAMBDA(const int i) {
     auto integrand = [](double x) {
@@ -153,24 +116,28 @@ void compute_integrals(Kokkos::View<double*>& values,
 
 ## Module types and functions
 
-Functions in this module are called as `laplace::math::quad::NAME`.
+All symbols below belong to `laplace::math::quad`.
 
 ### Types
 
-- \ref laplace::math::quad::quad_result "quad_result" — Integration result struct containing value, error estimate, evaluation count, and convergence status; when not converged, `value` holds the last estimate and `error` holds the last difference between successive estimates.
-- \ref laplace::math::quad::de_quad_options "de_quad_options" — Options for double-exponential and panel quadrature rules (`stop` tolerance and `max_level`).
+- \ref laplace::math::quad::quad_result "quad_result" — Adaptive result (`value`, `error`, `evals`, `converged`).
+- \ref laplace::math::quad::de_quad_options "de_quad_options" — Double-exponential options (`stop`, `max_level`).
 
 ### Adaptive rules
 
-- \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" — Adaptive tanh-sinh double-exponential quadrature on finite interval \f$[a, b]\f$.
-- \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()" — Adaptive exp-sinh double-exponential quadrature on semi-infinite interval \f$[a, \infty)\f$.
-- \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()" — Adaptive sinh-sinh double-exponential quadrature over the real line \f$(-\infty, \infty)\f$.
-- \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()" — Adaptive Gauss-Kronrod 7–15 quadrature on finite interval \f$[a, b]\f$.
-- \ref laplace::math::quad::panels_quad "panels_quad()" — Geometric panel quadrature rule on \f$[a, b]\f$ cut at a centre and interior kinks.
+- \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" — Tanh-sinh on \f$[a, b]\f$.
+- \ref laplace::math::quad::exp_sinh_quad "exp_sinh_quad()" — Exp-sinh on \f$[a, \infty)\f$.
+- \ref laplace::math::quad::sinh_sinh_quad "sinh_sinh_quad()" — Sinh-sinh on \f$(-\infty, \infty)\f$.
+- \ref laplace::math::quad::gauss_kronrod_quad "gauss_kronrod_quad()" — Adaptive Gauss-Kronrod 7–15 on \f$[a, b]\f$.
+- \ref laplace::math::quad::panels_quad "panels_quad()" — Geometric panels at centre and kinks.
 
-### Fixed Gauss rules
+### Fixed rules
 
-- \ref laplace::math::quad::gauss_legendre_quad "gauss_legendre_quad()" — Fixed Gauss-Legendre quadrature with 16, 32, or 64 nodes on \f$[a, b]\f$.
-- \ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()" — Fixed 32-node Gauss-Hermite quadrature over the real line \f$(-\infty, \infty)\f$.
-- \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()" — Fixed 32-node Gauss-Laguerre quadrature on semi-infinite interval \f$[a, \infty)\f$.
+- \ref laplace::math::quad::gauss_legendre_quad "gauss_legendre_quad()" — Fixed 16/32/64-node Gauss-Legendre on \f$[a, b]\f$.
+- \ref laplace::math::quad::gauss_hermite32_quad "gauss_hermite32_quad()" — 32-node Gauss-Hermite on \f$(-\infty, \infty)\f$.
+- \ref laplace::math::quad::gauss_laguerre32_quad "gauss_laguerre32_quad()" — 32-node Gauss-Laguerre on \f$[a, \infty)\f$.
+
+## References
+
+- H. Takahasi and M. Mori (1974), Double exponential formulas for numerical integration, Publications of the Research Institute for Mathematical Sciences, 9(3), 721–741.
 */

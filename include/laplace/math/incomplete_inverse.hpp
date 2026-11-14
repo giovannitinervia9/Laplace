@@ -92,15 +92,12 @@ namespace own {
 
 /**
  * \ingroup incomplete_beta
- * \brief Result of incomplete beta inverse functions.
+ * \brief Result of \ref incomplete_beta inverse functions holding \f$x\f$ and \f$1 - x\f$.
  *
- * Holds the argument \f$x \in [0, 1]\f$ and its complement \f$y = 1 - x\f$, each retaining full relative precision.
+ * Field `x` stores the root in \f$[0, 1]\f$ and `y` stores \f$1 - x\f$, keeping full relative
+ * precision on `y` even when \f$x\f$ rounds to `1.0`.
  *
- * - `x`:
- * Solution \f$x \in [0, 1]\f$ satisfying the inverse condition.
- *
- * - `y`:
- * Complement \f$y = 1 - x \in [0, 1]\f$, retaining full relative precision when \f$x\f$ rounds to 1.
+ * \see incomplete_beta, ibeta_inv(), ibetac_inv(), ibeta_inv_logp(), ibetac_inv_logq()
  */
 struct beta_inv_result {
   double x, y;  // x and 1 - x
@@ -555,25 +552,17 @@ LAPLACE_HD beta_inv_result beta_solve(double a, double b, bool lower, double lp,
  * \ingroup incomplete_gamma
  * \brief Inverse of the regularized lower incomplete gamma function, \f$P(a, x) = p\f$.
  *
- * Computes the value \f$x \ge 0\f$ such that
- * \f[
- * P(a, x) = \frac{1}{\Gamma(a)} \int_0^x t^{a-1} e^{-t} \, \mathrm{d}t = p
- * \f]
- * for shape parameter \f$a \in (0, \infty)\f$ and probability \f$p \in [0, 1]\f$.
+ * Computes \f$x \ge 0\f$ solving \f$P(a, x) = p\f$ for shape \f$a \in (0, \infty)\f$ and probability \f$p \in [0, 1]\f$ (see \ref incomplete_gamma for the definition of \f$P\f$).
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param p Probability \f$p \in [0, 1]\f$.
  * \return The argument \f$x \in [0, \infty)\f$ satisfying \f$P(a, x) = p\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, p \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$p < 0\f$, \f$p > 1\f$, or \f$a\f$ is NaN, or \f$p\f$ is NaN: returns quiet NaN.
- * - \f$p = 0.0\f$: returns \f$0.0\f$.
- * - \f$p = 1.0\f$: returns \f$+\infty\f$.
- * - Roots below \f$2^{-1075}\f$: rounds to \f$0.0\f$ without iterating (lower-side solve); on the upper side the iteration returns \f$0.0\f$ once it reaches the smallest subnormal.
+ * \par Special values
+ * Returns \f$0.0\f$ when \f$p = 0.0\f$ and \f$+\infty\f$ when \f$p = 1.0\f$. Roots below \f$2^{-1075}\f$ round to \f$0.0\f$ without iterating on lower-side solves; on upper-side solves, the iteration returns \f$0.0\f$ once it reaches the smallest subnormal. Any out-of-domain or NaN input returns quiet NaN, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 6.86 ulpC on bulk, 3.06 ulpC on tail (99th percentiles 2.01 and 1.74 ulpC; test bounds 80.0 ulpC bulk, 1000.0 ulpC tail).
+ * \par Accuracy
+ * Maximum measured error is \f$6.86\f$ ulpC on the bulk and \f$3.06\f$ ulpC on the tail (\f$99\mathrm{th}\f$ percentiles \f$2.01\f$ and \f$1.74\f$ ulpC; test bounds \f$80.0\f$ and \f$1000.0\f$ ulpC).
  *
  * \see incomplete_gamma, gamma_p(), gamma_q_inv(), gamma_p_inv_logp()
  */
@@ -595,25 +584,17 @@ LAPLACE_HD double gamma_p_inv(double a, double p) {
  * \ingroup incomplete_gamma
  * \brief Inverse of the regularized upper incomplete gamma function, \f$Q(a, x) = q\f$.
  *
- * Computes the value \f$x \ge 0\f$ such that
- * \f[
- * Q(a, x) = \frac{1}{\Gamma(a)} \int_x^\infty t^{a-1} e^{-t} \, \mathrm{d}t = q
- * \f]
- * for shape parameter \f$a \in (0, \infty)\f$ and probability \f$q \in [0, 1]\f$.
+ * Computes \f$x \ge 0\f$ solving \f$Q(a, x) = q\f$ for shape \f$a \in (0, \infty)\f$ and probability \f$q \in [0, 1]\f$ (see \ref incomplete_gamma for the definition of \f$Q\f$).
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param q Probability \f$q \in [0, 1]\f$.
  * \return The argument \f$x \in [0, \infty)\f$ satisfying \f$Q(a, x) = q\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, q \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$q < 0\f$, \f$q > 1\f$, or \f$a\f$ is NaN, or \f$q\f$ is NaN: returns quiet NaN.
- * - \f$q = 0.0\f$: returns \f$+\infty\f$.
- * - \f$q = 1.0\f$: returns \f$0.0\f$.
- * - Roots below \f$2^{-1075}\f$: rounds to \f$0.0\f$ without iterating for lower-side solves; on the upper side the iteration returns \f$0.0\f$ once it reaches the smallest subnormal.
+ * \par Special values
+ * Returns \f$+\infty\f$ when \f$q = 0.0\f$ and \f$0.0\f$ when \f$q = 1.0\f$. Roots below \f$2^{-1075}\f$ round to \f$0.0\f$ without iterating on lower-side solves; on upper-side solves, the iteration returns \f$0.0\f$ once it reaches the smallest subnormal. Any out-of-domain or NaN input returns quiet NaN, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 25.0 ulpC on bulk (99th percentile 7.2 ulpC; test bound 40.0 ulpC), measured before double-double logarithms; 6.09 ulpC on tail (99th percentile 1.92 ulpC; test bound 23.0 ulpC) with double-double logarithms.
+ * \par Accuracy
+ * Maximum measured error is \f$25.0\f$ ulpC on the bulk (\f$99\mathrm{th}\f$ percentile \f$7.2\f$ ulpC; test bound \f$40.0\f$ ulpC, measured before double-double logarithms) and \f$6.09\f$ ulpC on the tail (\f$99\mathrm{th}\f$ percentile \f$1.92\f$ ulpC; test bound \f$23.0\f$ ulpC with double-double logarithms).
  *
  * \see incomplete_gamma, gamma_q(), gamma_p_inv(), gamma_q_inv_logq()
  */
@@ -633,28 +614,19 @@ LAPLACE_HD double gamma_q_inv(double a, double q) {
 
 /**
  * \ingroup incomplete_gamma
- * \brief Inverse of the regularized lower incomplete gamma function from its logarithm, \f$\log P(a, x) = \log p\f$.
+ * \brief Inverse of \f$\log P(a, x) = \log p\f$.
  *
- * Computes the value \f$x \ge 0\f$ such that
- * \f[
- * \log P(a, x) = \log p
- * \f]
- * for shape parameter \f$a \in (0, \infty)\f$ and log-probability \f$\log p \in (-\infty, 0]\f$.
- * Solves probabilities far below the IEEE 754 double range.
+ * Computes \f$x \ge 0\f$ solving \f$\log P(a, x) = \log p\f$ for shape \f$a \in (0, \infty)\f$ and log-probability \f$\log p \in (-\infty, 0]\f$, reaching probabilities far below the IEEE 754 double range.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param log_p Logarithm of probability \f$\log p \in (-\infty, 0]\f$.
  * \return The argument \f$x \in [0, \infty)\f$ satisfying \f$\log P(a, x) = \log p\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, \log p \le 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$\log p > 0\f$, or \f$a\f$ is NaN, or \f$\log p\f$ is NaN: returns quiet NaN.
- * - \f$\log p = 0.0\f$: returns \f$+\infty\f$.
- * - \f$\log p = -\infty\f$: returns \f$0.0\f$.
- * - Roots below \f$2^{-1075}\f$: rounds to \f$0.0\f$ without iterating (lower-side solve); on the upper side the iteration returns \f$0.0\f$ once it reaches the smallest subnormal.
+ * \par Special values
+ * Returns \f$+\infty\f$ when \f$\log p = 0.0\f$ and \f$0.0\f$ when \f$\log p = -\infty\f$. Roots below \f$2^{-1075}\f$ round to \f$0.0\f$ without iterating on lower-side solves; on upper-side solves, the iteration returns \f$0.0\f$ once it reaches the smallest subnormal. Any out-of-domain or NaN input returns quiet NaN, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 17.0 ulpC (99th percentile 6.37 ulpC; test bound 60.0 ulpC).
+ * \par Accuracy
+ * Maximum measured error is \f$17.0\f$ ulpC (\f$99\mathrm{th}\f$ percentile \f$6.37\f$ ulpC; test bound \f$60.0\f$ ulpC).
  *
  * \see incomplete_gamma, log_gamma_p(), gamma_p_inv(), gamma_q_inv_logq()
  */
@@ -670,28 +642,19 @@ LAPLACE_HD double gamma_p_inv_logp(double a, double log_p) {
 
 /**
  * \ingroup incomplete_gamma
- * \brief Inverse of the regularized upper incomplete gamma function from its logarithm, \f$\log Q(a, x) = \log q\f$.
+ * \brief Inverse of \f$\log Q(a, x) = \log q\f$.
  *
- * Computes the value \f$x \ge 0\f$ such that
- * \f[
- * \log Q(a, x) = \log q
- * \f]
- * for shape parameter \f$a \in (0, \infty)\f$ and log-probability \f$\log q \in (-\infty, 0]\f$.
- * Solves probabilities far below the IEEE 754 double range.
+ * Computes \f$x \ge 0\f$ solving \f$\log Q(a, x) = \log q\f$ for shape \f$a \in (0, \infty)\f$ and log-probability \f$\log q \in (-\infty, 0]\f$, reaching probabilities far below the IEEE 754 double range.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param log_q Logarithm of probability \f$\log q \in (-\infty, 0]\f$.
  * \return The argument \f$x \in [0, \infty)\f$ satisfying \f$\log Q(a, x) = \log q\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, \log q \le 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$\log q > 0\f$, or \f$a\f$ is NaN, or \f$\log q\f$ is NaN: returns quiet NaN.
- * - \f$\log q = 0.0\f$: returns \f$0.0\f$.
- * - \f$\log q = -\infty\f$: returns \f$+\infty\f$.
- * - Roots below \f$2^{-1075}\f$: rounds to \f$0.0\f$ without iterating for lower-side solves; on the upper side the iteration returns \f$0.0\f$ once it reaches the smallest subnormal.
+ * \par Special values
+ * Returns \f$0.0\f$ when \f$\log q = 0.0\f$ and \f$+\infty\f$ when \f$\log q = -\infty\f$. Roots below \f$2^{-1075}\f$ round to \f$0.0\f$ without iterating on lower-side solves; on upper-side solves, the iteration returns \f$0.0\f$ once it reaches the smallest subnormal. Any out-of-domain or NaN input returns quiet NaN, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 11.1 ulpC (99th percentile 4.9 ulpC; test bound 17.0 ulpC), measured before double-double logarithms.
+ * \par Accuracy
+ * Maximum measured error is \f$11.1\f$ ulpC (\f$99\mathrm{th}\f$ percentile \f$4.9\f$ ulpC; test bound \f$17.0\f$ ulpC), measured before double-double logarithms.
  *
  * \see incomplete_gamma, log_gamma_q(), gamma_q_inv(), gamma_p_inv_logp()
  */
@@ -709,30 +672,22 @@ LAPLACE_HD double gamma_q_inv_logq(double a, double log_q) {
  * \ingroup incomplete_beta
  * \brief Inverse of the regularized incomplete beta function, \f$I_x(a, b) = p\f$.
  *
- * Computes the value \f$x \in [0, 1]\f$ such that
- * \f[
- * I_x(a, b) = \frac{1}{B(a, b)} \int_0^x t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t = p
- * \f]
- * where \f$B(a, b) = \frac{\Gamma(a)\Gamma(b)}{\Gamma(a+b)}\f$ is the complete beta function,
- * for positive shape parameters \f$a, b \in (0, \infty)\f$ and probability \f$p \in [0, 1]\f$.
- * Returns the pair \f$(x, 1 - x)\f$, each with full relative precision.
+ * Solves \f$I_x(a, b) = p\f$ for finite positive shapes \f$a, b \in (0, \infty)\f$ and
+ * \f$p \in [0, 1]\f$, returning both \f$x\f$ and \f$1 - x\f$. Returns `{0.0, 1.0}` at
+ * \f$p = 0.0\f$ and `{1.0, 0.0}` at \f$p = 1.0\f$. Shared domain and underflow rules across all
+ * beta inverse functions: out-of-domain, infinite shapes, or NaN return `{NaN, NaN}`; roots with
+ * \f$x < 2^{-1075}\f$ flush to `{0.0, 1.0}` and roots with \f$1 - x \le 2^{-1074}\f$ flush to
+ * `{1.0, 0.0}` (see \ref incomplete_beta).
  *
- * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
- * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
- * \param p Probability \f$p \in [0, 1]\f$.
- * \return A \ref beta_inv_result struct holding \f$x\f$ and \f$y = 1 - x\f$, each with full relative precision satisfying \f$I_x(a, b) = p\f$.
+ * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second finite positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param p Target probability \f$p \in [0, 1]\f$.
+ * \return A \ref beta_inv_result holding \f$x\f$ and \f$y = 1 - x\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, b > 0, b < +\infty, p \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, \f$p < 0\f$, \f$p > 1\f$, or if \f$a\f$, \f$b\f$, or \f$p\f$ is NaN: returns quiet NaN for both components.
- * - \f$p = 0.0\f$: returns \f$\{0.0, 1.0\}\f$.
- * - \f$p = 1.0\f$: returns \f$\{1.0, 0.0\}\f$.
- * - Roots with \f$x\f$ below \f$2^{-1075}\f$: returns \f$\{0.0, 1.0\}\f$; roots with \f$1 - x\f$ below \f$2^{-1075}\f$ or when \f$1 - x \le 2^{-1074}\f$ (the smallest subnormal): returns \f$\{1.0, 0.0\}\f$.
+ * \par Accuracy
+ * Max error 7.05 ulpC for \f$x\f$ and 19.5 ulpC for \f$1 - x\f$ on bulk (99th 4.09 / 7.27, bounds 750.0 / 4300.0); 5.38 and 11.3 ulpC on tail (99th 2.07 / 2.71, bounds 1250.0 / 800.0) on gcc and CUDA.
  *
- * \par Measured accuracy
- * Maximum error 7.05 ulpC for \f$x\f$ and 19.5 ulpC for \f$1 - x\f$ on bulk (99th percentiles 4.09 and 7.27 ulpC; test bounds 750.0 ulpC for \f$x\f$, 4300.0 ulpC for \f$1 - x\f$); 5.38 ulpC for \f$x\f$ and 11.3 ulpC for \f$1 - x\f$ on tail (99th percentiles 2.07 and 2.71 ulpC; test bounds 1250.0 ulpC for \f$x\f$, 800.0 ulpC for \f$1 - x\f$), measured on gcc (OpenMP 8) and CUDA.
- *
- * \see incomplete_beta, ibeta(), ibetac_inv(), ibeta_inv_logp()
+ * \see incomplete_beta, beta_inv_result, laplace::math::ibeta(), ibetac_inv(), ibeta_inv_logp()
  */
 LAPLACE_HD beta_inv_result ibeta_inv(double a, double b, double p) {
   const double nan = math::detail::quiet_nan();
@@ -753,30 +708,19 @@ LAPLACE_HD beta_inv_result ibeta_inv(double a, double b, double p) {
  * \ingroup incomplete_beta
  * \brief Inverse of the complement of the regularized incomplete beta function, \f$1 - I_x(a, b) = q\f$.
  *
- * Computes the value \f$x \in [0, 1]\f$ such that
- * \f[
- * 1 - I_x(a, b) = I_{1-x}(b, a) = \frac{1}{B(a, b)} \int_x^1 t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t = q
- * \f]
- * where \f$B(a, b) = \frac{\Gamma(a)\Gamma(b)}{\Gamma(a+b)}\f$ is the complete beta function,
- * for positive shape parameters \f$a, b \in (0, \infty)\f$ and complement probability \f$q \in [0, 1]\f$.
- * Returns the pair \f$(x, 1 - x)\f$, each with full relative precision.
+ * Solves \f$1 - I_x(a, b) = q\f$ for \f$q \in [0, 1]\f$, returning `{1.0, 0.0}` at \f$q = 0.0\f$
+ * and `{0.0, 1.0}` at \f$q = 1.0\f$. See `ibeta_inv()` and \ref incomplete_beta for shared domain
+ * and subnormal underflow rules.
  *
- * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
- * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second finite positive shape parameter \f$b \in (0, \infty)\f$.
  * \param q Complement probability \f$q \in [0, 1]\f$.
- * \return A \ref beta_inv_result struct holding \f$x\f$ and \f$y = 1 - x\f$, each with full relative precision satisfying \f$1 - I_x(a, b) = q\f$.
+ * \return A \ref beta_inv_result holding \f$x\f$ and \f$y = 1 - x\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, b > 0, b < +\infty, q \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, \f$q < 0\f$, \f$q > 1\f$, or if \f$a\f$, \f$b\f$, or \f$q\f$ is NaN: returns quiet NaN for both components.
- * - \f$q = 0.0\f$: returns \f$\{1.0, 0.0\}\f$.
- * - \f$q = 1.0\f$: returns \f$\{0.0, 1.0\}\f$.
- * - Roots with \f$1 - x\f$ below \f$2^{-1075}\f$ or when \f$1 - x \le 2^{-1074}\f$ (the smallest subnormal): returns \f$\{1.0, 0.0\}\f$; roots with \f$x\f$ below \f$2^{-1075}\f$: returns \f$\{0.0, 1.0\}\f$.
+ * \par Accuracy
+ * Max error 12.3 ulpC for \f$x\f$ and 7.96 ulpC for \f$1 - x\f$ on bulk (99th 5.53 / 4.32, bounds 7000.0 / 230.0); 4.40 and 4.39 ulpC on tail (99th 1.83 / 2.75, bounds 2050.0 / 1400.0) on gcc and CUDA.
  *
- * \par Measured accuracy
- * Maximum error 12.3 ulpC for \f$x\f$ and 7.96 ulpC for \f$1 - x\f$ on bulk (99th percentiles 5.53 and 4.32 ulpC; test bounds 7000.0 ulpC for \f$x\f$, 230.0 ulpC for \f$1 - x\f$); 4.40 ulpC for \f$x\f$ and 4.39 ulpC for \f$1 - x\f$ on tail (99th percentiles 1.83 and 2.75 ulpC; test bounds 2050.0 ulpC for \f$x\f$, 1400.0 ulpC for \f$1 - x\f$), measured on gcc (OpenMP 8) and CUDA.
- *
- * \see incomplete_beta, ibetac(), ibeta_inv(), ibetac_inv_logq()
+ * \see incomplete_beta, beta_inv_result, laplace::math::ibetac(), ibeta_inv(), ibetac_inv_logq()
  */
 LAPLACE_HD beta_inv_result ibetac_inv(double a, double b, double q) {
   const double nan = math::detail::quiet_nan();
@@ -797,35 +741,19 @@ LAPLACE_HD beta_inv_result ibetac_inv(double a, double b, double q) {
  * \ingroup incomplete_beta
  * \brief Inverse of the regularized incomplete beta function from its logarithm, \f$\log I_x(a, b) = \log p\f$.
  *
- * Computes the value \f$x \in [0, 1]\f$ such that
- * \f[
- * \log I_x(a, b) = \log p
- * \f]
- * where
- * \f[
- * I_x(a, b) = \frac{1}{B(a, b)} \int_0^x t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t
- * \f]
- * and \f$B(a, b) = \frac{\Gamma(a)\Gamma(b)}{\Gamma(a+b)}\f$ is the complete beta function,
- * for positive shape parameters \f$a, b \in (0, \infty)\f$ and log-probability \f$\log p \in (-\infty, 0]\f$.
- * Solves probabilities far below the IEEE 754 double range.
- * Returns the pair \f$(x, 1 - x)\f$, each with full relative precision.
+ * Solves \f$\log I_x(a, b) = \log p\f$ for \f$\log p \in [-\infty, 0]\f$, supporting deep tails
+ * below double underflow. Returns `{1.0, 0.0}` at \f$\log p = 0.0\f$ and `{0.0, 1.0}` at
+ * \f$\log p = -\infty\f$. See `ibeta_inv()` and \ref incomplete_beta for shared domain rules.
  *
- * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
- * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
- * \param log_p Logarithm of probability \f$\log p \in (-\infty, 0]\f$.
- * \return A \ref beta_inv_result struct holding \f$x\f$ and \f$y = 1 - x\f$, each with full relative precision satisfying \f$\log I_x(a, b) = \log p\f$.
+ * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second finite positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param log_p Log-probability \f$\log p \in [-\infty, 0]\f$.
+ * \return A \ref beta_inv_result holding \f$x\f$ and \f$y = 1 - x\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, b > 0, b < +\infty, \log p \le 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, \f$\log p > 0\f$, or if \f$a\f$, \f$b\f$, or \f$\log p\f$ is NaN: returns quiet NaN for both components.
- * - \f$\log p = 0.0\f$: returns \f$\{1.0, 0.0\}\f$.
- * - \f$\log p = -\infty\f$: returns \f$\{0.0, 1.0\}\f$.
- * - Roots with \f$x\f$ below \f$2^{-1075}\f$: returns \f$\{0.0, 1.0\}\f$; roots with \f$1 - x\f$ below \f$2^{-1075}\f$ or when \f$1 - x \le 2^{-1074}\f$ (the smallest subnormal): returns \f$\{1.0, 0.0\}\f$.
+ * \par Accuracy
+ * Max error 18.6 ulpC for \f$x\f$ and 6.49 ulpC for \f$1 - x\f$ (99th 4.90 / 4.40, bounds 2000.0 / 1000.0) on gcc and CUDA.
  *
- * \par Measured accuracy
- * Maximum error 18.6 ulpC for \f$x\f$ and 6.49 ulpC for \f$1 - x\f$ (99th percentiles 4.90 and 4.40 ulpC; test bounds 2000.0 ulpC for \f$x\f$, 1000.0 ulpC for \f$1 - x\f$), measured on gcc (OpenMP 8) and CUDA.
- *
- * \see incomplete_beta, log_ibeta(), ibeta_inv(), ibetac_inv_logq()
+ * \see incomplete_beta, beta_inv_result, laplace::math::log_ibeta(), ibeta_inv(), ibetac_inv_logq()
  */
 LAPLACE_HD beta_inv_result ibeta_inv_logp(double a, double b, double log_p) {
   const double nan = math::detail::quiet_nan();
@@ -842,35 +770,19 @@ LAPLACE_HD beta_inv_result ibeta_inv_logp(double a, double b, double log_p) {
  * \ingroup incomplete_beta
  * \brief Inverse of the complement of the regularized incomplete beta function from its logarithm, \f$\log(1 - I_x(a, b)) = \log q\f$.
  *
- * Computes the value \f$x \in [0, 1]\f$ such that
- * \f[
- * \log(1 - I_x(a, b)) = \log q
- * \f]
- * where
- * \f[
- * 1 - I_x(a, b) = I_{1-x}(b, a) = \frac{1}{B(a, b)} \int_x^1 t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t
- * \f]
- * and \f$B(a, b) = \frac{\Gamma(a)\Gamma(b)}{\Gamma(a+b)}\f$ is the complete beta function,
- * for positive shape parameters \f$a, b \in (0, \infty)\f$ and log-probability \f$\log q \in (-\infty, 0]\f$.
- * Solves probabilities far below the IEEE 754 double range.
- * Returns the pair \f$(x, 1 - x)\f$, each with full relative precision.
+ * Solves \f$\log(1 - I_x(a, b)) = \log q\f$ for \f$\log q \in [-\infty, 0]\f$, supporting deep
+ * tails below double underflow. Returns `{0.0, 1.0}` at \f$\log q = 0.0\f$ and `{1.0, 0.0}` at
+ * \f$\log q = -\infty\f$. See `ibeta_inv()` and \ref incomplete_beta for shared domain rules.
  *
- * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
- * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
- * \param log_q Logarithm of complement probability \f$\log q \in (-\infty, 0]\f$.
- * \return A \ref beta_inv_result struct holding \f$x\f$ and \f$y = 1 - x\f$, each with full relative precision satisfying \f$\log(1 - I_x(a, b)) = \log q\f$.
+ * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second finite positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param log_q Log complement probability \f$\log q \in [-\infty, 0]\f$.
+ * \return A \ref beta_inv_result holding \f$x\f$ and \f$y = 1 - x\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, b > 0, b < +\infty, \log q \le 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, \f$\log q > 0\f$, or if \f$a\f$, \f$b\f$, or \f$\log q\f$ is NaN: returns quiet NaN for both components.
- * - \f$\log q = 0.0\f$: returns \f$\{0.0, 1.0\}\f$.
- * - \f$\log q = -\infty\f$: returns \f$\{1.0, 0.0\}\f$.
- * - Roots with \f$1 - x\f$ below \f$2^{-1075}\f$ or when \f$1 - x \le 2^{-1074}\f$ (the smallest subnormal): returns \f$\{1.0, 0.0\}\f$; roots with \f$x\f$ below \f$2^{-1075}\f$: returns \f$\{0.0, 1.0\}\f$.
+ * \par Accuracy
+ * Max error 5.82 ulpC for \f$x\f$ and 16.3 ulpC for \f$1 - x\f$ (99th 3.28 / 5.34, bounds 1800.0 / 2450.0) on gcc and CUDA.
  *
- * \par Measured accuracy
- * Maximum error 5.82 ulpC for \f$x\f$ and 16.3 ulpC for \f$1 - x\f$ (99th percentiles 3.28 and 5.34 ulpC; test bounds 1800.0 ulpC for \f$x\f$, 2450.0 ulpC for \f$1 - x\f$), measured on gcc (OpenMP 8) and CUDA.
- *
- * \see incomplete_beta, log_ibetac(), ibetac_inv(), ibeta_inv_logp()
+ * \see incomplete_beta, beta_inv_result, laplace::math::log_ibetac(), ibetac_inv(), ibeta_inv_logp()
  */
 LAPLACE_HD beta_inv_result ibetac_inv_logq(double a, double b, double log_q) {
   const double nan = math::detail::quiet_nan();
@@ -894,21 +806,17 @@ LAPLACE_HD_FORCEINLINE double gamma_q_inv_logq(double a, double log_q) { return 
  * \ingroup incomplete_beta
  * \brief Inverse of the regularized incomplete beta function, returning \f$x\f$.
  *
- * Solves \f$I_x(a, b) = p\f$ for \f$x \in [0, 1]\f$. Differs from own::ibeta_inv() by returning only \f$x\f$ as a `double`, discarding the complement \f$1 - x\f$.
+ * Solves \f$I_x(a, b) = p\f$ via `own::ibeta_inv(a, b, p).x`, returning \f$x \in [0, 1]\f$ and
+ * discarding \f$1 - x\f$. Returns \f$0.0\f$ at \f$p = 0.0\f$ and \f$1.0\f$ at \f$p = 1.0\f$; see
+ * `own::ibeta_inv()` and \ref incomplete_beta for shared domain rules.
  *
- * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
- * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second finite positive shape parameter \f$b \in (0, \infty)\f$.
  * \param p Probability \f$p \in [0, 1]\f$.
- * \return The argument \f$x \in [0, 1]\f$ satisfying \f$I_x(a, b) = p\f$.
+ * \return Argument \f$x \in [0, 1]\f$ satisfying \f$I_x(a, b) = p\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, b > 0, b < +\infty, p \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, \f$p < 0\f$, \f$p > 1\f$, or if any argument is NaN: returns quiet NaN.
- * - \f$p = 0.0\f$: returns \f$0.0\f$; \f$p = 1.0\f$: returns \f$1.0\f$.
- * - Roots with \f$x\f$ below \f$2^{-1075}\f$: returns \f$0.0\f$; roots with \f$1 - x\f$ below \f$2^{-1075}\f$ or when \f$1 - x \le 2^{-1074}\f$ (the smallest subnormal): returns \f$1.0\f$.
- *
- * \par Measured accuracy
- * Maximum error 7.05 ulpC on bulk and 5.38 ulpC on tail (gcc, OpenMP 8; CUDA within the same figures).
+ * \par Accuracy
+ * Max error 7.05 ulpC on bulk and 5.38 ulpC on tail (gcc OpenMP 8 and CUDA).
  *
  * \see incomplete_beta, own::ibeta_inv(), ibetac_inv(), ibeta_inv_logp()
  */
@@ -918,21 +826,17 @@ LAPLACE_HD_FORCEINLINE double ibeta_inv(double a, double b, double p) { return o
  * \ingroup incomplete_beta
  * \brief Inverse of the complement of the regularized incomplete beta function, returning \f$x\f$.
  *
- * Solves \f$1 - I_x(a, b) = q\f$ for \f$x \in [0, 1]\f$. Differs from own::ibetac_inv() by returning only \f$x\f$ as a `double`, discarding the complement \f$1 - x\f$.
+ * Solves \f$1 - I_x(a, b) = q\f$ via `own::ibetac_inv(a, b, q).x`, returning \f$x \in [0, 1]\f$
+ * and discarding \f$1 - x\f$. Returns \f$1.0\f$ at \f$q = 0.0\f$ and \f$0.0\f$ at \f$q = 1.0\f$;
+ * see `own::ibeta_inv()` and \ref incomplete_beta for shared domain rules.
  *
- * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
- * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second finite positive shape parameter \f$b \in (0, \infty)\f$.
  * \param q Complement probability \f$q \in [0, 1]\f$.
- * \return The argument \f$x \in [0, 1]\f$ satisfying \f$1 - I_x(a, b) = q\f$.
+ * \return Argument \f$x \in [0, 1]\f$ satisfying \f$1 - I_x(a, b) = q\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, b > 0, b < +\infty, q \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, \f$q < 0\f$, \f$q > 1\f$, or if any argument is NaN: returns quiet NaN.
- * - \f$q = 0.0\f$: returns \f$1.0\f$; \f$q = 1.0\f$: returns \f$0.0\f$.
- * - Roots with \f$1 - x\f$ below \f$2^{-1075}\f$ or when \f$1 - x \le 2^{-1074}\f$ (the smallest subnormal): returns \f$1.0\f$; roots with \f$x\f$ below \f$2^{-1075}\f$: returns \f$0.0\f$.
- *
- * \par Measured accuracy
- * Maximum error 12.3 ulpC on bulk and 4.40 ulpC on tail (gcc, OpenMP 8; CUDA within the same figures).
+ * \par Accuracy
+ * Max error 12.3 ulpC on bulk and 4.40 ulpC on tail (gcc OpenMP 8 and CUDA).
  *
  * \see incomplete_beta, own::ibetac_inv(), ibeta_inv(), ibetac_inv_logq()
  */
@@ -942,21 +846,17 @@ LAPLACE_HD_FORCEINLINE double ibetac_inv(double a, double b, double q) { return 
  * \ingroup incomplete_beta
  * \brief Inverse of the regularized incomplete beta function from its logarithm, returning \f$x\f$.
  *
- * Solves \f$\log I_x(a, b) = \log p\f$ for \f$x \in [0, 1]\f$. Differs from own::ibeta_inv_logp() by returning only \f$x\f$ as a `double`, discarding the complement \f$1 - x\f$.
+ * Solves \f$\log I_x(a, b) = \log p\f$ via `own::ibeta_inv_logp(a, b, log_p).x`, returning
+ * \f$x \in [0, 1]\f$ and discarding \f$1 - x\f$. Returns \f$1.0\f$ at \f$\log p = 0.0\f$ and
+ * \f$0.0\f$ at \f$\log p = -\infty\f$; see `own::ibeta_inv()` and \ref incomplete_beta for shared domain rules.
  *
- * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
- * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
- * \param log_p Logarithm of probability \f$\log p \in (-\infty, 0]\f$.
- * \return The argument \f$x \in [0, 1]\f$ satisfying \f$\log I_x(a, b) = \log p\f$.
+ * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second finite positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param log_p Log-probability \f$\log p \in [-\infty, 0]\f$.
+ * \return Argument \f$x \in [0, 1]\f$ satisfying \f$\log I_x(a, b) = \log p\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, b > 0, b < +\infty, \log p \le 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, \f$\log p > 0\f$, or if any argument is NaN: returns quiet NaN.
- * - \f$\log p = 0.0\f$: returns \f$1.0\f$; \f$\log p = -\infty\f$: returns \f$0.0\f$.
- * - Roots with \f$x\f$ below \f$2^{-1075}\f$: returns \f$0.0\f$; roots with \f$1 - x\f$ below \f$2^{-1075}\f$ or when \f$1 - x \le 2^{-1074}\f$ (the smallest subnormal): returns \f$1.0\f$.
- *
- * \par Measured accuracy
- * Maximum error 18.6 ulpC (gcc, OpenMP 8; CUDA within the same figures).
+ * \par Accuracy
+ * Max error 18.6 ulpC (gcc OpenMP 8 and CUDA).
  *
  * \see incomplete_beta, own::ibeta_inv_logp(), ibeta_inv(), ibetac_inv_logq()
  */
@@ -968,21 +868,17 @@ LAPLACE_HD_FORCEINLINE double ibeta_inv_logp(double a, double b, double log_p) {
  * \ingroup incomplete_beta
  * \brief Inverse of the complement of the regularized incomplete beta function from its logarithm, returning \f$x\f$.
  *
- * Solves \f$\log(1 - I_x(a, b)) = \log q\f$ for \f$x \in [0, 1]\f$. Differs from own::ibetac_inv_logq() by returning only \f$x\f$ as a `double`, discarding the complement \f$1 - x\f$.
+ * Solves \f$\log(1 - I_x(a, b)) = \log q\f$ via `own::ibetac_inv_logq(a, b, log_q).x`, returning
+ * \f$x \in [0, 1]\f$ and discarding \f$1 - x\f$. Returns \f$0.0\f$ at \f$\log q = 0.0\f$ and
+ * \f$1.0\f$ at \f$\log q = -\infty\f$; see `own::ibeta_inv()` and \ref incomplete_beta for shared domain rules.
  *
- * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
- * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
- * \param log_q Logarithm of complement probability \f$\log q \in (-\infty, 0]\f$.
- * \return The argument \f$x \in [0, 1]\f$ satisfying \f$\log(1 - I_x(a, b)) = \log q\f$.
+ * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second finite positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param log_q Log complement probability \f$\log q \in [-\infty, 0]\f$.
+ * \return Argument \f$x \in [0, 1]\f$ satisfying \f$\log(1 - I_x(a, b)) = \log q\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, a < +\infty, b > 0, b < +\infty, \log q \le 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$b \le 0\f$, \f$b = +\infty\f$, \f$\log q > 0\f$, or if any argument is NaN: returns quiet NaN.
- * - \f$\log q = 0.0\f$: returns \f$0.0\f$; \f$\log q = -\infty\f$: returns \f$1.0\f$.
- * - Roots with \f$1 - x\f$ below \f$2^{-1075}\f$ or when \f$1 - x \le 2^{-1074}\f$ (the smallest subnormal): returns \f$1.0\f$; roots with \f$x\f$ below \f$2^{-1075}\f$: returns \f$0.0\f$.
- *
- * \par Measured accuracy
- * Maximum error 5.82 ulpC (gcc, OpenMP 8; CUDA within the same figures).
+ * \par Accuracy
+ * Max error 5.82 ulpC (gcc OpenMP 8 and CUDA).
  *
  * \see incomplete_beta, own::ibetac_inv_logq(), ibetac_inv(), ibeta_inv_logp()
  */

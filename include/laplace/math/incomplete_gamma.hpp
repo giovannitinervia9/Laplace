@@ -46,28 +46,11 @@ namespace own {
 
 /**
  * \ingroup incomplete_gamma
- * \brief Result of incomplete gamma evaluation functions.
+ * \brief Result struct returned by gamma_inc().
  *
- * Holds the values \f$P(a, x)\f$, \f$Q(a, x)\f$, and their natural logarithms,
- * along with low-order correction terms for extended precision in tail regions.
- *
- * - `p`:
- * Regularized lower incomplete gamma function \f$P(a, x)\f$.
- *
- * - `q`:
- * Regularized upper incomplete gamma function \f$Q(a, x) = 1 - P(a, x)\f$.
- *
- * - `log_p`:
- * Natural logarithm of the regularized lower incomplete gamma function, \f$\log P(a, x)\f$.
- *
- * - `log_q`:
- * Natural logarithm of the regularized upper incomplete gamma function, \f$\log Q(a, x)\f$.
- *
- * - `log_p_lo`:
- * Low-order correction of \f$\log P(a, x)\f$ as a double-double number.
- *
- * - `log_q_lo`:
- * Low-order correction of \f$\log Q(a, x)\f$ as a double-double number.
+ * Holds `p` (\f$P(a, x)\f$), `q` (\f$Q(a, x) = 1 - P(a, x)\f$), `log_p` (\f$\log P(a, x)\f$),
+ * `log_q` (\f$\log Q(a, x)\f$), and double-double low parts `log_p_lo` and `log_q_lo` used
+ * when extended logarithmic precision is computed in tail regimes.
  */
 struct gamma_inc_result {
   double p, q;          // P(a, x), Q(a, x)
@@ -340,33 +323,21 @@ LAPLACE_HD gamma_inc_result gamma_inc_temme(double a, double x, double phi) {
  * \ingroup incomplete_gamma
  * \brief Regularized incomplete gamma functions \f$P(a, x)\f$, \f$Q(a, x)\f$, and logarithms in one call.
  *
- * Computes, in one call, everything the module's single functions return: the regularized lower and
- * upper incomplete gamma functions
- * \f[
- * P(a, x) = \frac{1}{\Gamma(a)} \int_0^x t^{a-1} e^{-t} \, \mathrm{d}t, \quad
- * Q(a, x) = \frac{1}{\Gamma(a)} \int_x^\infty t^{a-1} e^{-t} \, \mathrm{d}t = 1 - P(a, x),
- * \f]
- * their natural logarithms \f$\log P(a, x)\f$ and \f$\log Q(a, x)\f$, and the low parts of the logarithms
- * as double-double numbers.
- *
- * The single functions gamma_p(), gamma_q(), log_gamma_p(), and log_gamma_q() each call gamma_inc() and
- * keep one field, so one call costs as much as evaluating one of them; use gamma_inc() when more than
- * one is needed.
+ * Computes \f$P(a, x)\f$, \f$Q(a, x) = 1 - P(a, x)\f$, \f$\log P(a, x)\f$, \f$\log Q(a, x)\f$, and
+ * the double-double low parts of the logarithms together. Because gamma_p(), gamma_q(), log_gamma_p(),
+ * and log_gamma_q() each return one field from gamma_inc(), calling gamma_inc() computes all four
+ * quantities at the cost of a single call.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return A \ref gamma_inc_result struct holding \f$P(a, x)\f$, \f$Q(a, x)\f$, \f$\log P(a, x)\f$,
- * \f$\log Q(a, x)\f$, and the low parts of the logarithms.
+ * \return A gamma_inc_result struct containing \f$P\f$, \f$Q\f$, \f$\log P\f$, \f$\log Q\f$, and log low parts.
  *
- * \par Domain and special values
- * Those of the single functions (see gamma_p(), gamma_q(), log_gamma_p(), log_gamma_q()):
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, or \f$x < 0\f$, or if \f$a\f$ or \f$x\f$ is NaN: returns quiet NaN for the four values (the low parts are 0).
- * - At \f$x = 0\f$: \f$P(a, 0) = 0.0\f$, \f$Q(a, 0) = 1.0\f$, \f$\log P(a, 0) = -\infty\f$, \f$\log Q(a, 0) = 0.0\f$.
- * - At \f$x = +\infty\f$: \f$P(a, \infty) = 1.0\f$, \f$Q(a, \infty) = 0.0\f$, \f$\log P(a, \infty) = 0.0\f$, \f$\log Q(a, \infty) = -\infty\f$.
+ * \par Special values
+ * Returns \f$(0, 1, -\infty, 0)\f$ at \f$x = 0\f$ and \f$(1, 0, 0, -\infty)\f$ at \f$x = +\infty\f$
+ * with zero low parts; see \ref incomplete_gamma for invalid-input behavior.
  *
- * \par Measured accuracy
- * Those of the single functions: see gamma_p(), gamma_q(), log_gamma_p(), and log_gamma_q().
+ * \par Accuracy
+ * Matches the measured bounds reported on gamma_p(), gamma_q(), log_gamma_p(), and log_gamma_q().
  *
  * \see incomplete_gamma, gamma_inc_result, gamma_p(), gamma_q(), log_gamma_p(), log_gamma_q()
  */
@@ -388,28 +359,17 @@ LAPLACE_HD gamma_inc_result gamma_inc(double a, double x) {
  * \ingroup incomplete_gamma
  * \brief Regularized lower incomplete gamma function \f$P(a, x)\f$.
  *
- * Computes the regularized lower incomplete gamma function
- * \f[
- * P(a, x) = \frac{\gamma(a, x)}{\Gamma(a)} = \frac{1}{\Gamma(a)} \int_0^x t^{a-1} e^{-t} \, \mathrm{d}t
- * \f]
- * where \f$a \in (0, \infty)\f$ is the shape parameter, \f$x \in [0, \infty)\f$ is the argument,
- * and \f$t \in [0, x]\f$ is the integration variable.
+ * Evaluates \f$P(a, x) \in [0, 1]\f$ as defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return The value of \f$P(a, x) \in [0, 1]\f$.
+ * \return The value of \f$P(a, x)\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, or \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = 0\f$: returns \f$0.0\f$.
- * - \f$x = +\infty\f$: returns \f$1.0\f$.
+ * \par Special values
+ * Returns \f$0\f$ at \f$x = 0\f$ and \f$1\f$ at \f$x = +\infty\f$; see \ref incomplete_gamma for invalid inputs.
  *
- * \par Measured accuracy
- * Maximum error 7.6 ulp1, 30.3 ulpL on general reference set (test bound 12.0 ulp1, 45.0 ulpL),
- * measured in the section "Own incomplete gamma" before Temme's expansion and double-double logarithms
- * (backend not stated; later measurements showed maxima stayed unchanged or lower);
- * 0.82 ulp1, 2.9–3.4 ulpL for large shapes \f$a \in [10^2, 10^{15}]\f$ (test bound 1.5 ulp1, 4.5 ulpL).
+ * \par Accuracy
+ * Max error \f$7.6\f$ ulp1 (\f$30.3\f$ ulpL) on the general set (bounds \f$12.0\f$ ulp1, \f$45.0\f$ ulpL) and \f$0.82\f$ ulp1 (\f$2.9\f$–\f$3.4\f$ ulpL) for \f$a \in [10^2, 10^{15}]\f$ (bounds \f$1.5\f$ ulp1, \f$4.5\f$ ulpL).
  *
  * \see incomplete_gamma, gamma_q(), log_gamma_p(), gamma_p_inv()
  */
@@ -419,28 +379,17 @@ LAPLACE_HD_FORCEINLINE double gamma_p(double a, double x) { return gamma_inc(a, 
  * \ingroup incomplete_gamma
  * \brief Regularized upper incomplete gamma function \f$Q(a, x)\f$.
  *
- * Computes the regularized upper incomplete gamma function
- * \f[
- * Q(a, x) = \frac{\Gamma(a, x)}{\Gamma(a)} = \frac{1}{\Gamma(a)} \int_x^\infty t^{a-1} e^{-t} \, \mathrm{d}t = 1 - P(a, x)
- * \f]
- * where \f$a \in (0, \infty)\f$ is the shape parameter, \f$x \in [0, \infty)\f$ is the argument,
- * and \f$t \in [x, \infty)\f$ is the integration variable.
+ * Evaluates \f$Q(a, x) = 1 - P(a, x) \in [0, 1]\f$ directly in the upper tail as defined on \ref incomplete_gamma.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return The value of \f$Q(a, x) \in [0, 1]\f$.
+ * \return The value of \f$Q(a, x)\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, or \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = 0\f$: returns \f$1.0\f$.
- * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ * \par Special values
+ * Returns \f$1\f$ at \f$x = 0\f$ and \f$0\f$ at \f$x = +\infty\f$; see \ref incomplete_gamma for invalid inputs.
  *
- * \par Measured accuracy
- * Maximum error 7.6 ulp1, 24.7 ulpL on general reference set (test bound 12.0 ulp1, 40.0 ulpL),
- * measured in the section "Own incomplete gamma" before Temme's expansion and double-double logarithms
- * (backend not stated; later measurements showed maxima stayed unchanged or lower);
- * 0.82 ulp1, 2.9–3.4 ulpL for large shapes \f$a \in [10^2, 10^{15}]\f$ (test bound 1.5 ulp1, 5.5 ulpL).
+ * \par Accuracy
+ * Max error \f$7.6\f$ ulp1 (\f$24.7\f$ ulpL) on the general set (bounds \f$12.0\f$ ulp1, \f$40.0\f$ ulpL) and \f$0.82\f$ ulp1 (\f$2.9\f$–\f$3.4\f$ ulpL) for \f$a \in [10^2, 10^{15}]\f$ (bounds \f$1.5\f$ ulp1, \f$5.5\f$ ulpL).
  *
  * \see incomplete_gamma, gamma_p(), log_gamma_q(), gamma_q_inv()
  */
@@ -456,25 +405,17 @@ LAPLACE_HD_FORCEINLINE double gamma_q(double a, double x) { return own::gamma_in
  * \ingroup incomplete_gamma
  * \brief Natural logarithm of the regularized lower incomplete gamma function, \f$\log P(a, x)\f$.
  *
- * Computes \f$\log P(a, x)\f$ directly without forming \f$P(a, x)\f$, avoiding underflow in the lower tail:
- * \f[
- * \log P(a, x) = \log \left(\frac{1}{\Gamma(a)} \int_0^x t^{a-1} e^{-t} \, \mathrm{d}t\right)
- * \f]
- * where \f$a \in (0, \infty)\f$ is the shape parameter, \f$x \in [0, \infty)\f$ is the argument,
- * and \f$t \in [0, x]\f$ is the integration variable.
+ * Evaluates \f$\log P(a, x) \in (-\infty, 0]\f$ directly without forming \f$P(a, x)\f$, avoiding underflow in the lower tail.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return The value of \f$\log P(a, x) \in (-\infty, 0]\f$.
+ * \return The value of \f$\log P(a, x)\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, or \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = 0\f$: returns \f$-\infty\f$.
- * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ * \par Special values
+ * Returns \f$-\infty\f$ at \f$x = 0\f$ and \f$0\f$ at \f$x = +\infty\f$; see \ref incomplete_gamma for invalid inputs.
  *
- * \par Measured accuracy
- * Maximum error within 5.9–6.4 ulp1 for large shapes \f$a \in [10^2, 10^{15}]\f$ (test bound 9.0 ulp1).
+ * \par Accuracy
+ * Max error within \f$5.9\f$–\f$6.4\f$ ulp1 for \f$a \in [10^2, 10^{15}]\f$ (test bound \f$9.0\f$ ulp1).
  *
  * \see incomplete_gamma, gamma_p(), log_gamma_q(), gamma_p_inv_logp(), log_gamma_p_da1()
  */
@@ -484,25 +425,17 @@ LAPLACE_HD_FORCEINLINE double log_gamma_p(double a, double x) { return own::gamm
  * \ingroup incomplete_gamma
  * \brief Natural logarithm of the regularized upper incomplete gamma function, \f$\log Q(a, x)\f$.
  *
- * Computes \f$\log Q(a, x)\f$ directly without forming \f$Q(a, x)\f$, avoiding underflow in the upper tail:
- * \f[
- * \log Q(a, x) = \log \left(\frac{1}{\Gamma(a)} \int_x^\infty t^{a-1} e^{-t} \, \mathrm{d}t\right)
- * \f]
- * where \f$a \in (0, \infty)\f$ is the shape parameter, \f$x \in [0, \infty)\f$ is the argument,
- * and \f$t \in [x, \infty)\f$ is the integration variable.
+ * Evaluates \f$\log Q(a, x) \in (-\infty, 0]\f$ directly without forming \f$Q(a, x)\f$, avoiding underflow in the upper tail.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param x Non-negative argument \f$x \in [0, \infty)\f$.
- * \return The value of \f$\log Q(a, x) \in (-\infty, 0]\f$.
+ * \return The value of \f$\log Q(a, x)\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, x \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, or \f$x < 0\f$, or \f$a\f$ is NaN, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = 0\f$: returns \f$0.0\f$.
- * - \f$x = +\infty\f$: returns \f$-\infty\f$.
+ * \par Special values
+ * Returns \f$0\f$ at \f$x = 0\f$ and \f$-\infty\f$ at \f$x = +\infty\f$; see \ref incomplete_gamma for invalid inputs.
  *
- * \par Measured accuracy
- * Maximum error within 5.9–6.4 ulp1 for large shapes \f$a \in [10^2, 10^{15}]\f$ (test bound 10.0 ulp1).
+ * \par Accuracy
+ * Max error within \f$5.9\f$–\f$6.4\f$ ulp1 for \f$a \in [10^2, 10^{15}]\f$ (test bound \f$10.0\f$ ulp1).
  *
  * \see incomplete_gamma, gamma_q(), log_gamma_p(), gamma_q_inv_logq(), log_gamma_q_da1()
  */

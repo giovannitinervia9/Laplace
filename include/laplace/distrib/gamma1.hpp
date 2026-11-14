@@ -198,13 +198,7 @@ struct gamma1_distrib {
    * \brief Evaluates mixed partial derivatives of \f$\log f(y; \mu, \phi)\f$ with \f$J\f$ derivatives in \f$y\f$ and order \f$K\f$ in parameters.
    *
    * Evaluates \f$\frac{\partial^{J+K}}{\partial y^J \partial\theta^K} \log f(y; \mu, \phi)\f$ as a symmetric tensor of order \f$K\f$ in \f$(\mu, \phi)\f$.
-   * The terms of \f$\ell\f$ with \f$y\f$ are \f$-\frac{s y}{\mu} + (s - 1) \log y\f$, with \f$s = 1/\phi\f$ and \f$s^{(b)} = \frac{\mathrm{d}^b s}{\mathrm{d}\phi^b}\f$.
-   * For \f$J \ge 1\f$, with \f$a = K - b\f$ derivatives in \f$\mu\f$ and \f$b\f$ in \f$\phi\f$:
-   * - For \f$J = 1\f$: if \f$a = 0\f$, evaluates \f$s^{(b)} \frac{\mu - y}{\mu y} - \frac{[b = 0]}{y}\f$; if \f$a \ge 1\f$, evaluates \f$-s^{(b)} \frac{(-1)^a a!}{\mu^{a + 1}}\f$.
-   * - For \f$J \ge 2\f$: if \f$a = 0\f$, evaluates \f$c_b \frac{(-1)^{J - 1} (J - 1)!}{y^J}\f$ where \f$c_0 = s - 1\f$ and \f$c_b = s^{(b)}\f$ (\f$b \ge 1\f$); returns 0 for \f$a \ge 1\f$.
    * For \f$J = 0\f$, returns parameter derivatives (\f$K \ge 1\f$) or the log-density value (\f$K = 0\f$).
-   *
-   * Agrees with 5-point finite differences in \f$y\f$ and in parameters within relative tolerance \f$10^{-7}\f$.
    *
    * \tparam J Derivative order with respect to observation \f$y\f$ (\f$J \ge 0\f$, \f$J + K \le 6\f$).
    * \tparam K Derivative order with respect to parameters \f$(\mu, \phi)\f$ (\f$K \ge 0\f$, \f$J + K \le 6\f$).
@@ -324,22 +318,31 @@ struct gamma1_distrib {
   /**
    * \ingroup distrib_gamma1
    * \brief Evaluates the cumulative distribution function \f$F(y) = P(1/\phi, y/(\mu\phi))\f$.
+   *
+   * Returns \f$0\f$ when \f$y \le 0\f$.
    * \param y Observation point \f$y\f$.
    * \return Probability \f$\mathbb{P}(Y \le y)\f$.
+   * \see distrib_gamma1, ccdf(), log_cdf(), quantile()
    */
   LAPLACE_HD double cdf(double y) const { return y <= 0.0 ? 0.0 : math::gamma_p(1.0 / phi, y / (mu * phi)); }
   /**
    * \ingroup distrib_gamma1
    * \brief Evaluates the complementary cumulative distribution function \f$1 - F(y) = Q(1/\phi, y/(\mu\phi))\f$.
+   *
+   * Returns \f$1\f$ when \f$y \le 0\f$.
    * \param y Observation point \f$y\f$.
    * \return Probability \f$\mathbb{P}(Y > y)\f$.
+   * \see distrib_gamma1, cdf(), log_ccdf()
    */
   LAPLACE_HD double ccdf(double y) const { return y <= 0.0 ? 1.0 : math::gamma_q(1.0 / phi, y / (mu * phi)); }
   /**
    * \ingroup distrib_gamma1
    * \brief Evaluates the logarithm of the cumulative distribution function, \f$\log F(y)\f$.
+   *
+   * Returns \f$-\infty\f$ when \f$y \le 0\f$.
    * \param y Observation point \f$y\f$.
    * \return Log-probability \f$\log F(y)\f$.
+   * \see distrib_gamma1, cdf(), log_cdf_dk()
    */
   LAPLACE_HD double log_cdf(double y) const {
     return y <= 0.0 ? -distrib_infinity : math::log_gamma_p(1.0 / phi, y / (mu * phi));
@@ -347,8 +350,11 @@ struct gamma1_distrib {
   /**
    * \ingroup distrib_gamma1
    * \brief Evaluates the logarithm of the complementary cumulative distribution function, \f$\log(1 - F(y))\f$.
+   *
+   * Returns \f$0\f$ when \f$y \le 0\f$.
    * \param y Observation point \f$y\f$.
    * \return Log-probability \f$\log(1 - F(y))\f$.
+   * \see distrib_gamma1, ccdf(), log_ccdf_dk()
    */
   LAPLACE_HD double log_ccdf(double y) const { return y <= 0.0 ? 0.0 : math::log_gamma_q(1.0 / phi, y / (mu * phi)); }
   /**
@@ -413,17 +419,23 @@ struct gamma1_distrib {
    */
   LAPLACE_HD double quantile(double p) const { return mu * phi * math::gamma_p_inv(1.0 / phi, p); }
 
-  /// Lower bound of support (0.0).
+  /// \ingroup distrib_gamma1
+  /// \brief Lower bound of support (0.0).
   LAPLACE_HD double support_lower() const { return 0.0; }
-  /// Upper bound of support (\f$+\infty\f$).
+  /// \ingroup distrib_gamma1
+  /// \brief Upper bound of support (\f$+\infty\f$).
   LAPLACE_HD double support_upper() const { return distrib_infinity; }
-  /// Central location (\f$\mu\f$).
+  /// \ingroup distrib_gamma1
+  /// \brief Central location (\f$\mu\f$).
   LAPLACE_HD double center() const { return mu; }
-  /// Typical spread (\f$\mu\sqrt{\phi}\f$).
+  /// \ingroup distrib_gamma1
+  /// \brief Typical spread (\f$\mu\sqrt{\phi}\f$).
   LAPLACE_HD double scale() const { return mu * Kokkos::sqrt(phi); }
-  /// Kinks in parameter \f$\theta_j\f$ for observation \f$y\f$ (none).
+  /// \ingroup distrib_gamma1
+  /// \brief Kinks in parameter \f$\theta_j\f$ for observation \f$y\f$ (none).
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
-  /// Kinks in observation \f$y\f$ (none).
+  /// \ingroup distrib_gamma1
+  /// \brief Kinks in observation \f$y\f$ (none).
   LAPLACE_HD distrib_kinks y_kinks() const { return {}; }
 };
 

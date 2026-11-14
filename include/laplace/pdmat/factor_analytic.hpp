@@ -55,13 +55,6 @@ namespace laplace::pdmat {
  * Precondition: \f$0 \le d \le p\f$. For \f$d = 0\f$, \f$M = \Psi\f$ matches \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat".
  * At \f$d = p\f$, \f$\Psi\f$ is not identifiable, and \f$M - \Psi\f$ matches the log-Cholesky parameterization.
  *
- * \par Measured accuracy
- * Maximum error over orders 0–6 on gcc/OpenMP and CUDA (RTX 4070 SUPER):
- * - \f$M\f$: 0.76 ulpN (gcc) / 0.76 ulpN (CUDA)
- * - \f$M^{-1}\f$: 2.4e5 ulpN (\f$K=4\f$, gcc) / 3.6e5 ulpN (\f$K=2, 4, 6\f$, CUDA)
- * - \f$\log \det M\f$ (\f$d < p\f$): 795 ulp (\f$K=6\f$, gcc) / 926 ulp (\f$K=6\f$, CUDA)
- * - \f$\log \det M\f$ (\f$d = p\f$): 7.3e5 ulp (\f$K=5\f$, gcc) / 1.0e6 ulp (\f$K=5\f$, CUDA)
- *
  * \see pdmat, pdmat_orders, pdmat_structure, diagonal_pdmat, factor_analytic_max_factors()
  */
 struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
@@ -137,8 +130,7 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    *
-   * \par Measured accuracy
-   * Maximum error 0.76 ulpN (gcc) / 0.76 ulpN (CUDA); test bound 2 ulpN.
+   * Accuracy: up to 0.76 ulpN on gcc and CUDA (test bound 2 ulpN).
    *
    * \see inverse(), log_det(), matrix_dk()
    */
@@ -167,8 +159,7 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Log-determinant of \f$M(\theta)\f$.
    *
-   * \par Measured accuracy
-   * Maximum error: for \f$d < p\f$, 2.0 ulp (gcc) / 2.0 ulp (CUDA); for \f$d = p\f$, 3.2 ulp (gcc) / 3.2 ulp (CUDA). Test bounds 4 ulp (\f$d < p\f$) and 5 ulp (\f$d = p\f$).
+   * Accuracy on gcc and CUDA: up to 2.0 ulp for \f$d < p\f$ (test bound 4 ulp) and 3.2 ulp for \f$d = p\f$ (test bound 5 ulp).
    *
    * \see matrix(), inverse(), log_det_dk()
    */
@@ -197,8 +188,7 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    *
-   * \par Measured accuracy
-   * Maximum error 56 ulpN (gcc) / 90 ulpN (CUDA); test bound 136 ulpN.
+   * Accuracy: up to 56 ulpN on gcc and 90 ulpN on CUDA (test bound 136 ulpN).
    *
    * \see matrix(), log_det(), inverse_dk()
    */
@@ -242,8 +232,7 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
    * \param w Caller scratch buffer of at least \c scratch_size() doubles (unused).
    * \return \c true if computed; \c false and buffer left untouched if structurally zero.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 1–6: 0.49 ulpN (gcc) / 0.41 ulpN (CUDA); test bound 1 ulpN.
+   * Accuracy over orders 1–6: up to 0.49 ulpN on gcc and 0.41 ulpN on CUDA (test bound 1 ulpN).
    *
    * \see matrix(), pdmat_orders::matrix_d1()
    */
@@ -280,10 +269,7 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Value of the derivative, or \f$0.0\f$ if identically zero.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 1–6:
-   * - \f$d < p\f$: 795 ulp (\f$K=6\f$, gcc) / 926 ulp (\f$K=6\f$, CUDA); test bounds 5 to 1390 ulp.
-   * - \f$d = p\f$: 7.3e5 ulp (\f$K=5\f$, gcc) / 1.0e6 ulp (\f$K=5\f$, CUDA); test bounds 161 to 1507089 ulp.
+   * Accuracy over orders 1–6: for \f$d < p\f$, up to 795 ulp on gcc and 926 ulp on CUDA (test bounds 5 to 1390 ulp); for \f$d = p\f$, up to 7.3e5 ulp on gcc and 1.0e6 ulp on CUDA (test bounds 161 to 1507089 ulp).
    *
    * \see log_det(), pdmat_orders::log_det_d1()
    */
@@ -323,10 +309,7 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if structurally zero.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 1–6: 2.4e5 ulpN (\f$K=4\f$, gcc) / 3.6e5 ulpN (\f$K=2, 4, 6\f$, CUDA); test bounds 275 to 545993 ulpN.
-   * At the (3, 1) spread point, derivatives along \f$t_2\f$ have high condition number (one ulp of \f$\theta_k\f$ moves the exact
-   * derivative by \f$1.6 \times 10^4\f$ ulpN); elsewhere \f$M^{-1}\f$ remains within \f$2.5 \times 10^4\f$ ulpN.
+   * Accuracy over orders 1–6: up to 2.4e5 ulpN on gcc and 3.6e5 ulpN on CUDA (test bounds 275 to 545993 ulpN); the peak occurs at the (3, 1) spread point where condition reaches \f$1.6 \times 10^4\f$ ulpN per ulp of \f$\theta_k\f$, and errors elsewhere remain within \f$2.5 \times 10^4\f$ ulpN.
    *
    * \see inverse(), pdmat_orders::inverse_d1()
    */

@@ -29,28 +29,13 @@ namespace own {
 
 /**
  * \ingroup incomplete_beta
- * \brief Result of incomplete beta evaluation functions.
+ * \brief Result of \ref beta_inc() holding linear values, logarithms, and log low parts.
  *
- * Holds the values \f$I_x(a, b)\f$, \f$1 - I_x(a, b)\f$, and their natural logarithms,
- * along with low-order correction terms for extended precision in tail regions.
+ * Fields: `i` holds \f$I_x(a, b)\f$, `ic` holds \f$1 - I_x(a, b)\f$, `log_i` holds
+ * \f$\log I_x(a, b)\f$, `log_ic` holds \f$\log(1 - I_x(a, b))\f$, and `log_i_lo` and
+ * `log_ic_lo` hold the double-double low-order correction of the directly computed side.
  *
- * - `i`:
- * Regularized incomplete beta function \f$I_x(a, b)\f$.
- *
- * - `ic`:
- * Complement of the regularized incomplete beta function \f$1 - I_x(a, b)\f$.
- *
- * - `log_i`:
- * Natural logarithm of the regularized incomplete beta function, \f$\log I_x(a, b)\f$.
- *
- * - `log_ic`:
- * Natural logarithm of the complement \f$\log(1 - I_x(a, b))\f$.
- *
- * - `log_i_lo`:
- * Low-order correction of \f$\log I_x(a, b)\f$ as a double-double number.
- *
- * - `log_ic_lo`:
- * Low-order correction of \f$\log(1 - I_x(a, b))\f$ as a double-double number.
+ * \see incomplete_beta, beta_inc()
  */
 struct beta_inc_result {
   double i, ic;          // I_x(a, b), 1 - I_x(a, b)
@@ -64,35 +49,25 @@ struct beta_inc_result {
  * \ingroup incomplete_beta
  * \brief Regularized incomplete beta function \f$I_x(a, b)\f$, complement, and logarithms in one call.
  *
- * Computes, in one call, everything the module's single functions return: the regularized incomplete
- * beta function
+ * Computes
  * \f[
  * I_x(a, b) = \frac{1}{B(a, b)} \int_0^x t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t,
  * \f]
- * its complement \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$, their natural logarithms \f$\log I_x(a, b)\f$
- * and \f$\log(1 - I_x(a, b))\f$, and the low part of the logarithm of the side computed directly (a double-double).
- *
- * The single functions ibeta(), ibetac(), log_ibeta(), and log_ibetac() each call beta_inc() and
- * keep one field, so one call costs as much as evaluating one of them; use beta_inc() when more than
- * one is needed.
+ * \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$, \f$\log I_x(a, b)\f$, \f$\log(1 - I_x(a, b))\f$, and
+ * the double-double log low parts at the same cost as any single scalar call. Requires
+ * \f$a, b \in (0, \infty)\f$ and \f$x \in [0, 1]\f$; invalid or NaN inputs yield quiet NaN
+ * for the four primary fields and zero for the low parts (see \ref incomplete_beta).
  *
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in [0, 1]\f$.
- * \return A \ref beta_inc_result struct holding \f$I_x(a, b)\f$, \f$1 - I_x(a, b)\f$,
- * \f$\log I_x(a, b)\f$, \f$\log(1 - I_x(a, b))\f$, and the low part of the logarithm of the directly computed side.
+ * \return A \ref beta_inc_result holding all four values and log low parts.
  *
- * \par Domain and special values
- * Those of the single functions (see ibeta(), ibetac(), log_ibeta(), log_ibetac()):
- * - \f$a > 0, b > 0, x \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$b \le 0\f$, \f$x < 0\f$, \f$x > 1\f$, or if any argument is NaN: returns quiet NaN for the four values (the low parts are 0).
- * - At \f$x = 0\f$: \f$I_x(a, b) = 0.0\f$, \f$1 - I_x(a, b) = 1.0\f$, \f$\log I_x(a, b) = -\infty\f$, \f$\log(1 - I_x(a, b)) = 0.0\f$.
- * - At \f$x = 1\f$: \f$I_x(a, b) = 1.0\f$, \f$1 - I_x(a, b) = 0.0\f$, \f$\log I_x(a, b) = 0.0\f$, \f$\log(1 - I_x(a, b)) = -\infty\f$.
+ * \par Accuracy
+ * Matches the scalar functions (\ref laplace::math::ibeta "ibeta()", \ref laplace::math::ibetac "ibetac()",
+ * \ref laplace::math::log_ibeta "log_ibeta()", \ref laplace::math::log_ibetac "log_ibetac()").
  *
- * \par Measured accuracy
- * Those of the single functions: see ibeta(), ibetac(), log_ibeta(), and log_ibetac().
- *
- * \see incomplete_beta, beta_inc_result, ibeta(), ibetac(), log_ibeta(), log_ibetac()
+ * \see incomplete_beta, beta_inc_result, \ref laplace::math::ibeta "ibeta()", \ref laplace::math::ibetac "ibetac()"
  */
 LAPLACE_HD beta_inc_result beta_inc(double a, double b, double x) {
   const double nan = math::detail::quiet_nan();
@@ -115,28 +90,18 @@ LAPLACE_HD beta_inc_result beta_inc(double a, double b, double x) {
  * \ingroup incomplete_beta
  * \brief Regularized incomplete beta function \f$I_x(a, b)\f$.
  *
- * Computes the regularized incomplete beta function:
- * \f[
- * I_x(a, b) = \frac{1}{B(a, b)} \int_0^x t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t
- * \f]
- * where \f$B(a, b) = \frac{\Gamma(a)\Gamma(b)}{\Gamma(a+b)}\f$ is the complete beta function.
+ * Returns the `i` field of `own::beta_inc(a, b, x)`. Returns \f$0.0\f$ at \f$x = 0\f$ and
+ * \f$1.0\f$ at \f$x = 1\f$; see \ref incomplete_beta for shared domain rules.
  *
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in [0, 1]\f$.
- * \return The value of \f$I_x(a, b) \in [0, 1]\f$.
+ * \return The value \f$I_x(a, b) \in [0, 1]\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, b > 0, x \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$b \le 0\f$, \f$x < 0\f$, \f$x > 1\f$, or if any argument is NaN: returns quiet NaN.
- * - At \f$x = 0\f$: returns \f$0.0\f$.
- * - At \f$x = 1\f$: returns \f$1.0\f$.
- * - Symmetry: \f$I_x(a, b) = 1 - I_{1-x}(b, a)\f$.
+ * \par Accuracy
+ * Max error 2.82 ulp1 / 12.7 ulpL (gcc) and 3.80 ulp1 / 12.9 ulpL (CUDA), bound 5.7 ulp1 / 19.5 ulpL; hard regions max 3.65 ulp1 / 18.8 ulpL, bound 5.5 ulp1 / 29.5 ulpL.
  *
- * \par Measured accuracy
- * Maximum error 2.82 ulp1 / 12.7 ulpL (gcc) and 3.80 ulp1 / 12.9 ulpL (CUDA); test bound 5.7 ulp1 / 19.5 ulpL. On hard regions, maximum error 3.65 ulp1 / 18.8 ulpL; test bound 5.5 ulp1 / 29.5 ulpL.
- *
- * \see incomplete_beta, ibetac(), log_ibeta(), log_ibetac()
+ * \see incomplete_beta, own::beta_inc(), ibetac(), log_ibeta(), log_ibetac()
  */
 LAPLACE_HD_FORCEINLINE double ibeta(double a, double b, double x) { return own::beta_inc(a, b, x).i; }
 
@@ -144,28 +109,18 @@ LAPLACE_HD_FORCEINLINE double ibeta(double a, double b, double x) { return own::
  * \ingroup incomplete_beta
  * \brief Complement of the regularized incomplete beta function \f$1 - I_x(a, b)\f$.
  *
- * Computes the complement of the regularized incomplete beta function:
- * \f[
- * 1 - I_x(a, b) = I_{1-x}(b, a) = \frac{1}{B(a, b)} \int_x^1 t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t
- * \f]
- * without subtracting from 1 when \f$I_x(a, b)\f$ is near 1, preserving relative accuracy in the upper tail.
+ * Computes \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$ directly from `own::beta_inc(a, b, x).ic`
+ * without subtracting near unity. Returns \f$1.0\f$ at \f$x = 0\f$ and \f$0.0\f$ at \f$x = 1\f$.
  *
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in [0, 1]\f$.
- * \return The value of \f$1 - I_x(a, b) \in [0, 1]\f$.
+ * \return The value \f$1 - I_x(a, b) \in [0, 1]\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, b > 0, x \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$b \le 0\f$, \f$x < 0\f$, \f$x > 1\f$, or if any argument is NaN: returns quiet NaN.
- * - At \f$x = 0\f$: returns \f$1.0\f$.
- * - At \f$x = 1\f$: returns \f$0.0\f$.
- * - Symmetry: \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$.
+ * \par Accuracy
+ * Max error 2.82 ulp1 / 16.9 ulpL (gcc) and 3.80 ulp1 / 12.2 ulpL (CUDA), bound 5.7 ulp1 / 25.5 ulpL; hard regions max 3.65 ulp1 / 18.4 ulpL, bound 5.5 ulp1 / 29.5 ulpL.
  *
- * \par Measured accuracy
- * Maximum error 2.82 ulp1 / 16.9 ulpL (gcc) and 3.80 ulp1 / 12.2 ulpL (CUDA); test bound 5.7 ulp1 / 25.5 ulpL. On hard regions, maximum error 3.65 ulp1 / 18.4 ulpL; test bound 5.5 ulp1 / 29.5 ulpL.
- *
- * \see incomplete_beta, ibeta(), log_ibeta(), log_ibetac()
+ * \see incomplete_beta, own::beta_inc(), ibeta(), log_ibeta(), log_ibetac()
  */
 LAPLACE_HD_FORCEINLINE double ibetac(double a, double b, double x) { return own::beta_inc(a, b, x).ic; }
 
@@ -173,55 +128,37 @@ LAPLACE_HD_FORCEINLINE double ibetac(double a, double b, double x) { return own:
  * \ingroup incomplete_beta
  * \brief Natural logarithm of the regularized incomplete beta function \f$\log I_x(a, b)\f$.
  *
- * Computes:
- * \f[
- * \log I_x(a, b) = \log\left(\frac{1}{B(a, b)} \int_0^x t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t\right)
- * \f]
- * evaluated directly in logarithmic scale without intermediate underflow.
+ * Evaluated on log scale without intermediate underflow via `own::beta_inc(a, b, x).log_i`.
+ * Returns \f$-\infty\f$ at \f$x = 0\f$ and \f$0.0\f$ at \f$x = 1\f$.
  *
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in [0, 1]\f$.
- * \return The value of \f$\log I_x(a, b) \in [-\infty, 0]\f$.
+ * \return The value \f$\log I_x(a, b) \in [-\infty, 0]\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, b > 0, x \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$b \le 0\f$, \f$x < 0\f$, \f$x > 1\f$, or if any argument is NaN: returns quiet NaN.
- * - At \f$x = 0\f$: returns \f$-\infty\f$.
- * - At \f$x = 1\f$: returns \f$0.0\f$.
+ * \par Accuracy
+ * Max error 17 ulpL (gcc) and 12 ulpL (CUDA) on general points, 22 ulpL (gcc) and 19.7 ulpL (CUDA) on hard regions; test bound 33.0 ulpL.
  *
- * \par Measured accuracy
- * Maximum error 17 ulp (gcc) / 12 ulp (CUDA) on general points; 22 ulp on hard regions; test bound 33.0 ulp of \f$\max(|\log f|, 1)\f$.
- *
- * \see incomplete_beta, ibeta(), ibetac(), log_ibetac()
+ * \see incomplete_beta, own::beta_inc(), ibeta(), ibetac(), log_ibetac()
  */
 LAPLACE_HD_FORCEINLINE double log_ibeta(double a, double b, double x) { return own::beta_inc(a, b, x).log_i; }
 
 /**
  * \ingroup incomplete_beta
- * \brief Natural logarithm of the complement of the regularized incomplete beta function \f$\log(1 - I_x(a, b))\f$.
+ * \brief Natural logarithm of the complement \f$\log(1 - I_x(a, b))\f$.
  *
- * Computes:
- * \f[
- * \log(1 - I_x(a, b)) = \log I_{1-x}(b, a) = \log\left(\frac{1}{B(a, b)} \int_x^1 t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t\right)
- * \f]
- * evaluated directly in logarithmic scale without intermediate underflow.
+ * Computes \f$\log(1 - I_x(a, b)) = \log I_{1-x}(b, a)\f$ directly on log scale via
+ * `own::beta_inc(a, b, x).log_ic`. Returns \f$0.0\f$ at \f$x = 0\f$ and \f$-\infty\f$ at \f$x = 1\f$.
  *
  * \param a First positive shape parameter \f$a \in (0, \infty)\f$.
  * \param b Second positive shape parameter \f$b \in (0, \infty)\f$.
  * \param x Argument \f$x \in [0, 1]\f$.
- * \return The value of \f$\log(1 - I_x(a, b)) \in [-\infty, 0]\f$.
+ * \return The value \f$\log(1 - I_x(a, b)) \in [-\infty, 0]\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, b > 0, x \in [0, 1]\f$: standard domain.
- * - \f$a \le 0\f$, \f$b \le 0\f$, \f$x < 0\f$, \f$x > 1\f$, or if any argument is NaN: returns quiet NaN.
- * - At \f$x = 0\f$: returns \f$0.0\f$.
- * - At \f$x = 1\f$: returns \f$-\infty\f$.
+ * \par Accuracy
+ * Max error 10 ulpL (gcc) and 15 ulpL (CUDA) on general points, 15 ulpL (gcc) and 16 ulpL (CUDA) on hard regions; test bound 33.0 ulpL.
  *
- * \par Measured accuracy
- * Maximum error 10 ulp (gcc) / 15 ulp (CUDA) on general points; 15 ulp (gcc) / 16 ulp (CUDA) on hard regions; test bound 33.0 ulp of \f$\max(|\log f|, 1)\f$.
- *
- * \see incomplete_beta, ibeta(), ibetac(), log_ibeta()
+ * \see incomplete_beta, own::beta_inc(), ibeta(), ibetac(), log_ibeta()
  */
 LAPLACE_HD_FORCEINLINE double log_ibetac(double a, double b, double x) { return own::beta_inc(a, b, x).log_ic; }
 

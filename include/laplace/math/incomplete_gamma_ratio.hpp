@@ -756,29 +756,19 @@ LAPLACE_HD void log_gamma_ratio(int k, double a, double c, bool want_p, int meth
 
 /**
  * \ingroup incomplete_gamma
- * \brief First partial derivatives of \f$\log P(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief First partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the first partial derivatives of total order \f$K = 1\f$:
- * \f[
- * v_0 = \frac{\partial}{\partial a}\log P(a, ac) = R_{10}
- * \f]
- * \f[
- * v_1 = \frac{\partial}{\partial c}\log P(a, ac) = \frac{R_{01}}{c} = a \frac{\partial}{\partial x}\log P(a, x)
- * \f]
- * where the derivative in \f$a\f$ is taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log P(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_0 = \partial_a \log P(a, a c)\f$ and \f$v_1 = \partial_c \log P(a, a c) = a \partial_x \log P(a, x)\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
  * \return A `gamma_inc_mixed_partials<1>` struct containing \f$v_0\f$ and \f$v_1\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = -\infty\f$, \f$v_1 = +\infty\f$.
- * - \f$c = +\infty\f$: returns \f$v_0 = 0.0\f$, \f$v_1 = 0.0\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = -\infty\f$ and \f$v_1 = +\infty\f$. At \f$c = +\infty\f$, returns \f$v_0 = v_1 = 0.0\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 1496 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{1-j} c^j v_j| / (a^{1-j} c^j)\f$; test bound 2250 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{1-j} c^j v_j| / (a^{1-j} c^j)\f$ is \f$1496\f$ ulp (gcc/OpenMP; test bound \f$2250\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_ratio_mixed_d1(), log_gamma_p_ratio_mixed_d2(), log_gamma_p_mixed_d1()
  */
@@ -790,32 +780,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<1> log_gamma_p_ratio_mixed_d1(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief Second partial derivatives of \f$\log P(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief Second partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the second partial derivatives of total order \f$K = 2\f$:
- * \f[
- * v_0 = \frac{\partial^2}{\partial a^2}\log P(a, ac) = 2 R_{20}
- * \f]
- * \f[
- * v_1 = \frac{\partial^2}{\partial a \partial c}\log P(a, ac) = \frac{R_{11}}{c}
- * \f]
- * \f[
- * v_2 = \frac{\partial^2}{\partial c^2}\log P(a, ac) = \frac{2 R_{02}}{c^2} = a^2 \frac{\partial^2}{\partial x^2}\log P(a, x)
- * \f]
- * where the derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log P(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_j = \frac{\partial^2 \log P(a, a c)}{\partial a^{2-j} \partial c^j}\f$ for \f$j = 0, 1, 2\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$ and \f$v_2 = a^2 \partial_x^2 \log P(a, x)\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<2>` struct containing \f$v_j = \frac{\partial^2 \log P}{\partial a^{2-j} \partial c^j}\f$ for \f$j = 0, 1, 2\f$.
+ * \return A `gamma_inc_mixed_partials<2>` struct containing \f$v_0, v_1, v_2\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = 1/a - \psi'(a + 1)\f$, \f$v_1 = +\infty\f$, \f$v_2 = -\infty\f$.
- * - \f$c = +\infty\f$: returns \f$v_j = 0.0\f$ for \f$j = 0, 1, 2\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = 1/a - \psi'(a + 1)\f$, \f$v_1 = +\infty\f$, and \f$v_2 = -\infty\f$. At \f$c = +\infty\f$, returns \f$v_j = 0.0\f$ for all \f$j\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 2113 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{2-j} c^j v_j| / (a^{2-j} c^j)\f$; test bound 3200 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{2-j} c^j v_j| / (a^{2-j} c^j)\f$ is \f$2113\f$ ulp (gcc/OpenMP; test bound \f$3200\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_ratio_mixed_d2(), log_gamma_p_ratio_mixed_d1(), log_gamma_p_ratio_mixed_d3(), log_gamma_p_mixed_d2()
  */
@@ -827,35 +804,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<2> log_gamma_p_ratio_mixed_d2(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief Third partial derivatives of \f$\log P(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief Third partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the third partial derivatives of total order \f$K = 3\f$:
- * \f[
- * v_0 = \frac{\partial^3}{\partial a^3}\log P(a, ac) = 6 R_{30}
- * \f]
- * \f[
- * v_1 = \frac{\partial^3}{\partial a^2 \partial c}\log P(a, ac) = \frac{2 R_{21}}{c}
- * \f]
- * \f[
- * v_2 = \frac{\partial^3}{\partial a \partial c^2}\log P(a, ac) = \frac{2 R_{12}}{c^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^3}{\partial c^3}\log P(a, ac) = \frac{6 R_{03}}{c^3} = a^3 \frac{\partial^3}{\partial x^3}\log P(a, x)
- * \f]
- * where the derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log P(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_j = \frac{\partial^3 \log P(a, a c)}{\partial a^{3-j} \partial c^j}\f$ for \f$j = 0, \dots, 3\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$ and \f$v_3 = a^3 \partial_x^3 \log P(a, x)\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<3>` struct containing \f$v_j = \frac{\partial^3 \log P}{\partial a^{3-j} \partial c^j}\f$ for \f$j = 0, \dots, 3\f$.
+ * \return A `gamma_inc_mixed_partials<3>` struct containing \f$v_0, \dots, v_3\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = -1/a^2 - \psi''(a + 1)\f$, \f$v_1\f$ is finite, \f$v_2 = -\infty\f$, \f$v_3 = +\infty\f$.
- * - \f$c = +\infty\f$: returns \f$v_j = 0.0\f$ for \f$j = 0, \dots, 3\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = -1/a^2 - \psi''(a + 1)\f$, finite \f$v_1\f$, \f$v_2 = -\infty\f$, and \f$v_3 = +\infty\f$. At \f$c = +\infty\f$, returns \f$v_j = 0.0\f$ for all \f$j\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 2082 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{3-j} c^j v_j| / (a^{3-j} c^j)\f$; test bound 3150 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{3-j} c^j v_j| / (a^{3-j} c^j)\f$ is \f$2082\f$ ulp (gcc/OpenMP; test bound \f$3150\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_ratio_mixed_d3(), log_gamma_p_ratio_mixed_d2(), log_gamma_p_ratio_mixed_d4(), log_gamma_p_mixed_d3()
  */
@@ -867,38 +828,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<3> log_gamma_p_ratio_mixed_d3(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief Fourth partial derivatives of \f$\log P(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief Fourth partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the fourth partial derivatives of total order \f$K = 4\f$:
- * \f[
- * v_0 = \frac{\partial^4}{\partial a^4}\log P(a, ac) = 24 R_{40}
- * \f]
- * \f[
- * v_1 = \frac{\partial^4}{\partial a^3 \partial c}\log P(a, ac) = \frac{6 R_{31}}{c}
- * \f]
- * \f[
- * v_2 = \frac{\partial^4}{\partial a^2 \partial c^2}\log P(a, ac) = \frac{4 R_{22}}{c^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^4}{\partial a \partial c^3}\log P(a, ac) = \frac{6 R_{13}}{c^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^4}{\partial c^4}\log P(a, ac) = \frac{24 R_{04}}{c^4} = a^4 \frac{\partial^4}{\partial x^4}\log P(a, x)
- * \f]
- * where the derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log P(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_j = \frac{\partial^4 \log P(a, a c)}{\partial a^{4-j} \partial c^j}\f$ for \f$j = 0, \dots, 4\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$ and \f$v_4 = a^4 \partial_x^4 \log P(a, x)\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<4>` struct containing \f$v_j = \frac{\partial^4 \log P}{\partial a^{4-j} \partial c^j}\f$ for \f$j = 0, \dots, 4\f$.
+ * \return A `gamma_inc_mixed_partials<4>` struct containing \f$v_0, \dots, v_4\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = 2/a^3 - \psi'''(a + 1)\f$, \f$v_1, v_2\f$ are finite, \f$v_3 = +\infty\f$, \f$v_4 = -\infty\f$.
- * - \f$c = +\infty\f$: returns \f$v_j = 0.0\f$ for \f$j = 0, \dots, 4\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = 2/a^3 - \psi'''(a + 1)\f$, finite \f$v_1, v_2\f$, \f$v_3 = +\infty\f$, and \f$v_4 = -\infty\f$. At \f$c = +\infty\f$, returns \f$v_j = 0.0\f$ for all \f$j\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 1736 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{4-j} c^j v_j| / (a^{4-j} c^j)\f$; test bound 2650 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{4-j} c^j v_j| / (a^{4-j} c^j)\f$ is \f$1736\f$ ulp (gcc/OpenMP; test bound \f$2650\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_ratio_mixed_d4(), log_gamma_p_ratio_mixed_d3(), log_gamma_p_ratio_mixed_d5(), log_gamma_p_mixed_d4()
  */
@@ -910,41 +852,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<4> log_gamma_p_ratio_mixed_d4(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief Fifth partial derivatives of \f$\log P(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief Fifth partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the fifth partial derivatives of total order \f$K = 5\f$:
- * \f[
- * v_0 = \frac{\partial^5}{\partial a^5}\log P(a, ac) = 120 R_{50}
- * \f]
- * \f[
- * v_1 = \frac{\partial^5}{\partial a^4 \partial c}\log P(a, ac) = \frac{24 R_{41}}{c}
- * \f]
- * \f[
- * v_2 = \frac{\partial^5}{\partial a^3 \partial c^2}\log P(a, ac) = \frac{12 R_{32}}{c^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^5}{\partial a^2 \partial c^3}\log P(a, ac) = \frac{12 R_{23}}{c^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^5}{\partial a \partial c^4}\log P(a, ac) = \frac{24 R_{14}}{c^4}
- * \f]
- * \f[
- * v_5 = \frac{\partial^5}{\partial c^5}\log P(a, ac) = \frac{120 R_{05}}{c^5} = a^5 \frac{\partial^5}{\partial x^5}\log P(a, x)
- * \f]
- * where the derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log P(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_j = \frac{\partial^5 \log P(a, a c)}{\partial a^{5-j} \partial c^j}\f$ for \f$j = 0, \dots, 5\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$ and \f$v_5 = a^5 \partial_x^5 \log P(a, x)\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<5>` struct containing \f$v_j = \frac{\partial^5 \log P}{\partial a^{5-j} \partial c^j}\f$ for \f$j = 0, \dots, 5\f$.
+ * \return A `gamma_inc_mixed_partials<5>` struct containing \f$v_0, \dots, v_5\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = -6/a^4 - \psi^{(4)}(a + 1)\f$, \f$v_1, v_2, v_3\f$ are finite, \f$v_4 = -\infty\f$, \f$v_5 = +\infty\f$.
- * - \f$c = +\infty\f$: returns \f$v_j = 0.0\f$ for \f$j = 0, \dots, 5\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = -6/a^4 - \psi^{(4)}(a + 1)\f$, finite \f$v_1, v_2, v_3\f$, \f$v_4 = -\infty\f$, and \f$v_5 = +\infty\f$. At \f$c = +\infty\f$, returns \f$v_j = 0.0\f$ for all \f$j\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 9.0e3 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{5-j} c^j v_j| / (a^{5-j} c^j)\f$; test bound 13500 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{5-j} c^j v_j| / (a^{5-j} c^j)\f$ is \f$2050.0\f$ ulp on gcc/OpenMP and \f$4193\f$ ulp peak on CUDA (test bound \f$6300.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_ratio_mixed_d5(), log_gamma_p_ratio_mixed_d4(), log_gamma_p_ratio_mixed_d6(), log_gamma_p_mixed_d5()
  */
@@ -956,44 +876,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<5> log_gamma_p_ratio_mixed_d5(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief Sixth partial derivatives of \f$\log P(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief Sixth partial derivatives of \f$\log P(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the sixth partial derivatives of total order \f$K = 6\f$:
- * \f[
- * v_0 = \frac{\partial^6}{\partial a^6}\log P(a, ac) = 720 R_{60}
- * \f]
- * \f[
- * v_1 = \frac{\partial^6}{\partial a^5 \partial c}\log P(a, ac) = \frac{120 R_{51}}{c}
- * \f]
- * \f[
- * v_2 = \frac{\partial^6}{\partial a^4 \partial c^2}\log P(a, ac) = \frac{48 R_{42}}{c^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^6}{\partial a^3 \partial c^3}\log P(a, ac) = \frac{36 R_{33}}{c^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^6}{\partial a^2 \partial c^4}\log P(a, ac) = \frac{48 R_{24}}{c^4}
- * \f]
- * \f[
- * v_5 = \frac{\partial^6}{\partial a \partial c^5}\log P(a, ac) = \frac{120 R_{15}}{c^5}
- * \f]
- * \f[
- * v_6 = \frac{\partial^6}{\partial c^6}\log P(a, ac) = \frac{720 R_{06}}{c^6} = a^6 \frac{\partial^6}{\partial x^6}\log P(a, x)
- * \f]
- * where the derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log P(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_j = \frac{\partial^6 \log P(a, a c)}{\partial a^{6-j} \partial c^j}\f$ for \f$j = 0, \dots, 6\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$ and \f$v_6 = a^6 \partial_x^6 \log P(a, x)\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<6>` struct containing \f$v_j = \frac{\partial^6 \log P}{\partial a^{6-j} \partial c^j}\f$ for \f$j = 0, \dots, 6\f$.
+ * \return A `gamma_inc_mixed_partials<6>` struct containing \f$v_0, \dots, v_6\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = 24/a^5 - \psi^{(5)}(a + 1)\f$, \f$v_1, v_2, v_3, v_4\f$ are finite, \f$v_5 = +\infty\f$, \f$v_6 = -\infty\f$.
- * - \f$c = +\infty\f$: returns \f$v_j = 0.0\f$ for \f$j = 0, \dots, 6\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = 24/a^5 - \psi^{(5)}(a + 1)\f$, finite \f$v_1, \dots, v_4\f$, \f$v_5 = +\infty\f$, and \f$v_6 = -\infty\f$. At \f$c = +\infty\f$, returns \f$v_j = 0.0\f$ for all \f$j\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 7.3e4 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{6-j} c^j v_j| / (a^{6-j} c^j)\f$; test bound 110000 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{6-j} c^j v_j| / (a^{6-j} c^j)\f$ is \f$2638.0\f$ ulp (gcc/OpenMP; test bound \f$3960.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_q_ratio_mixed_d6(), log_gamma_p_ratio_mixed_d5(), log_gamma_p_mixed_d6()
  */
@@ -1005,29 +900,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<6> log_gamma_p_ratio_mixed_d6(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief First partial derivatives of \f$\log Q(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief First partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the first partial derivatives of total order \f$K = 1\f$:
- * \f[
- * v_0 = \frac{\partial}{\partial a}\log Q(a, ac) = R_{10}
- * \f]
- * \f[
- * v_1 = \frac{\partial}{\partial c}\log Q(a, ac) = \frac{R_{01}}{c} = a \frac{\partial}{\partial x}\log Q(a, x)
- * \f]
- * where the derivative in \f$a\f$ is taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log Q(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_0 = \partial_a \log Q(a, a c)\f$ and \f$v_1 = \partial_c \log Q(a, a c) = a \partial_x \log Q(a, x)\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
  * \return A `gamma_inc_mixed_partials<1>` struct containing \f$v_0\f$ and \f$v_1\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = 0.0\f$; \f$v_1 = 0.0\f$ for \f$a > 1\f$, \f$-\infty\f$ for non-integer \f$a < 1\f$, quiet NaN for integer \f$a \le 1\f$.
- * - \f$c = +\infty\f$: returns \f$v_0 = -\infty\f$, \f$v_1 = -a\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = 0.0\f$, while \f$v_1\f$ equals \f$0.0\f$ for \f$a > 1\f$, \f$-\infty\f$ for non-integer \f$a < 1\f$, and quiet NaN for integer \f$a \le 1\f$. At \f$c = +\infty\f$, returns \f$v_0 = -\infty\f$ and \f$v_1 = -a\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 1704 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{1-j} c^j v_j| / (a^{1-j} c^j)\f$; test bound 2600 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{1-j} c^j v_j| / (a^{1-j} c^j)\f$ is \f$1704\f$ ulp (gcc/OpenMP; test bound \f$2600\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_ratio_mixed_d1(), log_gamma_q_ratio_mixed_d2(), log_gamma_q_mixed_d1()
  */
@@ -1039,32 +924,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<1> log_gamma_q_ratio_mixed_d1(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief Second partial derivatives of \f$\log Q(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief Second partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the second partial derivatives of total order \f$K = 2\f$:
- * \f[
- * v_0 = \frac{\partial^2}{\partial a^2}\log Q(a, ac) = 2 R_{20}
- * \f]
- * \f[
- * v_1 = \frac{\partial^2}{\partial a \partial c}\log Q(a, ac) = \frac{R_{11}}{c}
- * \f]
- * \f[
- * v_2 = \frac{\partial^2}{\partial c^2}\log Q(a, ac) = \frac{2 R_{02}}{c^2} = a^2 \frac{\partial^2}{\partial x^2}\log Q(a, x)
- * \f]
- * where the derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log Q(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_j = \frac{\partial^2 \log Q(a, a c)}{\partial a^{2-j} \partial c^j}\f$ for \f$j = 0, 1, 2\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$ and \f$v_2 = a^2 \partial_x^2 \log Q(a, x)\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<2>` struct containing \f$v_j = \frac{\partial^2 \log Q}{\partial a^{2-j} \partial c^j}\f$ for \f$j = 0, 1, 2\f$.
+ * \return A `gamma_inc_mixed_partials<2>` struct containing \f$v_0, v_1, v_2\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = 0.0\f$; for \f$j \in \{1, 2\}\f$, \f$v_j = 0.0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, quiet NaN for integer \f$a \le j\f$.
- * - \f$c = +\infty\f$: returns \f$v_0 = \frac{3}{2a^2} - \delta''(a)\f$, \f$v_1 = -1.0\f$, \f$v_2 = 0.0\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = 0.0\f$, and for \f$j \in \{1, 2\}\f$ returns \f$0.0\f$ when \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, and quiet NaN for integer \f$a \le j\f$. At \f$c = +\infty\f$, returns \f$v_0 = \frac{3}{2a^2} - \delta''(a)\f$ (where \f$\delta\f$ is the Stirling remainder), \f$v_1 = -1.0\f$, and \f$v_2 = 0.0\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 1432 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{2-j} c^j v_j| / (a^{2-j} c^j)\f$; test bound 2150 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{2-j} c^j v_j| / (a^{2-j} c^j)\f$ is \f$1432\f$ ulp (gcc/OpenMP; test bound \f$2150\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_ratio_mixed_d2(), log_gamma_q_ratio_mixed_d1(), log_gamma_q_ratio_mixed_d3(), log_gamma_q_mixed_d2()
  */
@@ -1076,35 +948,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<2> log_gamma_q_ratio_mixed_d2(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief Third partial derivatives of \f$\log Q(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief Third partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the third partial derivatives of total order \f$K = 3\f$:
- * \f[
- * v_0 = \frac{\partial^3}{\partial a^3}\log Q(a, ac) = 6 R_{30}
- * \f]
- * \f[
- * v_1 = \frac{\partial^3}{\partial a^2 \partial c}\log Q(a, ac) = \frac{2 R_{21}}{c}
- * \f]
- * \f[
- * v_2 = \frac{\partial^3}{\partial a \partial c^2}\log Q(a, ac) = \frac{2 R_{12}}{c^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^3}{\partial c^3}\log Q(a, ac) = \frac{6 R_{03}}{c^3} = a^3 \frac{\partial^3}{\partial x^3}\log Q(a, x)
- * \f]
- * where the derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log Q(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_j = \frac{\partial^3 \log Q(a, a c)}{\partial a^{3-j} \partial c^j}\f$ for \f$j = 0, \dots, 3\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$ and \f$v_3 = a^3 \partial_x^3 \log Q(a, x)\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<3>` struct containing \f$v_j = \frac{\partial^3 \log Q}{\partial a^{3-j} \partial c^j}\f$ for \f$j = 0, \dots, 3\f$.
+ * \return A `gamma_inc_mixed_partials<3>` struct containing \f$v_0, \dots, v_3\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = 0.0\f$; for \f$j \in \{1, 2, 3\}\f$, \f$v_j = 0.0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, quiet NaN for integer \f$a \le j\f$.
- * - \f$c = +\infty\f$: returns \f$v_0 = -\frac{3}{a^3} - \delta'''(a)\f$, \f$v_j = 0.0\f$ for \f$j = 1, 2, 3\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = 0.0\f$, and for \f$j \in \{1, 2, 3\}\f$ returns \f$0.0\f$ when \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, and quiet NaN for integer \f$a \le j\f$. At \f$c = +\infty\f$, returns \f$v_0 = -\frac{3}{a^3} - \delta'''(a)\f$ (where \f$\delta\f$ is the Stirling remainder) and \f$v_j = 0.0\f$ for \f$j = 1, 2, 3\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 1204 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{3-j} c^j v_j| / (a^{3-j} c^j)\f$; test bound 1850 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{3-j} c^j v_j| / (a^{3-j} c^j)\f$ is \f$1204\f$ ulp (gcc/OpenMP; test bound \f$1850\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_ratio_mixed_d3(), log_gamma_q_ratio_mixed_d2(), log_gamma_q_ratio_mixed_d4(), log_gamma_q_mixed_d3()
  */
@@ -1116,38 +972,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<3> log_gamma_q_ratio_mixed_d3(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief Fourth partial derivatives of \f$\log Q(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief Fourth partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the fourth partial derivatives of total order \f$K = 4\f$:
- * \f[
- * v_0 = \frac{\partial^4}{\partial a^4}\log Q(a, ac) = 24 R_{40}
- * \f]
- * \f[
- * v_1 = \frac{\partial^4}{\partial a^3 \partial c}\log Q(a, ac) = \frac{6 R_{31}}{c}
- * \f]
- * \f[
- * v_2 = \frac{\partial^4}{\partial a^2 \partial c^2}\log Q(a, ac) = \frac{4 R_{22}}{c^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^4}{\partial a \partial c^3}\log Q(a, ac) = \frac{6 R_{13}}{c^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^4}{\partial c^4}\log Q(a, ac) = \frac{24 R_{04}}{c^4} = a^4 \frac{\partial^4}{\partial x^4}\log Q(a, x)
- * \f]
- * where the derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log Q(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_j = \frac{\partial^4 \log Q(a, a c)}{\partial a^{4-j} \partial c^j}\f$ for \f$j = 0, \dots, 4\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$ and \f$v_4 = a^4 \partial_x^4 \log Q(a, x)\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<4>` struct containing \f$v_j = \frac{\partial^4 \log Q}{\partial a^{4-j} \partial c^j}\f$ for \f$j = 0, \dots, 4\f$.
+ * \return A `gamma_inc_mixed_partials<4>` struct containing \f$v_0, \dots, v_4\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = 0.0\f$; for \f$j = 1, \dots, 4\f$, \f$v_j = 0.0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, quiet NaN for integer \f$a \le j\f$.
- * - \f$c = +\infty\f$: returns \f$v_0 = \frac{9}{a^4} - \delta^{(4)}(a)\f$, \f$v_j = 0.0\f$ for \f$j = 1, \dots, 4\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = 0.0\f$, and for \f$j = 1, \dots, 4\f$ returns \f$0.0\f$ when \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, and quiet NaN for integer \f$a \le j\f$. At \f$c = +\infty\f$, returns \f$v_0 = \frac{9}{a^4} - \delta^{(4)}(a)\f$ (where \f$\delta\f$ is the Stirling remainder) and \f$v_j = 0.0\f$ for \f$j = 1, \dots, 4\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 1179 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{4-j} c^j v_j| / (a^{4-j} c^j)\f$; test bound 1800 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{4-j} c^j v_j| / (a^{4-j} c^j)\f$ is \f$1179\f$ ulp (gcc/OpenMP; test bound \f$1800\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_ratio_mixed_d4(), log_gamma_q_ratio_mixed_d3(), log_gamma_q_ratio_mixed_d5(), log_gamma_q_mixed_d4()
  */
@@ -1159,41 +996,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<4> log_gamma_q_ratio_mixed_d4(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief Fifth partial derivatives of \f$\log Q(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief Fifth partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the fifth partial derivatives of total order \f$K = 5\f$:
- * \f[
- * v_0 = \frac{\partial^5}{\partial a^5}\log Q(a, ac) = 120 R_{50}
- * \f]
- * \f[
- * v_1 = \frac{\partial^5}{\partial a^4 \partial c}\log Q(a, ac) = \frac{24 R_{41}}{c}
- * \f]
- * \f[
- * v_2 = \frac{\partial^5}{\partial a^3 \partial c^2}\log Q(a, ac) = \frac{12 R_{32}}{c^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^5}{\partial a^2 \partial c^3}\log Q(a, ac) = \frac{12 R_{23}}{c^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^5}{\partial a \partial c^4}\log Q(a, ac) = \frac{24 R_{14}}{c^4}
- * \f]
- * \f[
- * v_5 = \frac{\partial^5}{\partial c^5}\log Q(a, ac) = \frac{120 R_{05}}{c^5} = a^5 \frac{\partial^5}{\partial x^5}\log Q(a, x)
- * \f]
- * where the derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log Q(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_j = \frac{\partial^5 \log Q(a, a c)}{\partial a^{5-j} \partial c^j}\f$ for \f$j = 0, \dots, 5\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$ and \f$v_5 = a^5 \partial_x^5 \log Q(a, x)\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<5>` struct containing \f$v_j = \frac{\partial^5 \log Q}{\partial a^{5-j} \partial c^j}\f$ for \f$j = 0, \dots, 5\f$.
+ * \return A `gamma_inc_mixed_partials<5>` struct containing \f$v_0, \dots, v_5\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = 0.0\f$; for \f$j = 1, \dots, 5\f$, \f$v_j = 0.0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, quiet NaN for integer \f$a \le j\f$.
- * - \f$c = +\infty\f$: returns \f$v_0 = -\frac{36}{a^5} - \delta^{(5)}(a)\f$, \f$v_j = 0.0\f$ for \f$j = 1, \dots, 5\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = 0.0\f$, and for \f$j = 1, \dots, 5\f$ returns \f$0.0\f$ when \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, and quiet NaN for integer \f$a \le j\f$. At \f$c = +\infty\f$, returns \f$v_0 = -\frac{36}{a^5} - \delta^{(5)}(a)\f$ (where \f$\delta\f$ is the Stirling remainder) and \f$v_j = 0.0\f$ for \f$j = 1, \dots, 5\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 5.8e4 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{5-j} c^j v_j| / (a^{5-j} c^j)\f$; test bound 87000 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{5-j} c^j v_j| / (a^{5-j} c^j)\f$ is \f$1701.0\f$ ulp (gcc/OpenMP; test bound \f$2560.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_ratio_mixed_d5(), log_gamma_q_ratio_mixed_d4(), log_gamma_q_ratio_mixed_d6(), log_gamma_q_mixed_d5()
  */
@@ -1205,44 +1020,19 @@ LAPLACE_HD math::gamma_inc_mixed_partials<5> log_gamma_q_ratio_mixed_d5(double a
 
 /**
  * \ingroup incomplete_gamma
- * \brief Sixth partial derivatives of \f$\log Q(a, a c)\f$ in the shape \f$a\f$ (at fixed ratio \f$c\f$) and \f$c\f$.
+ * \brief Sixth partial derivatives of \f$\log Q(a, a c)\f$ in \f$a\f$ (at fixed ratio \f$c = x/a\f$) and \f$c\f$.
  *
- * Computes the sixth partial derivatives of total order \f$K = 6\f$:
- * \f[
- * v_0 = \frac{\partial^6}{\partial a^6}\log Q(a, ac) = 720 R_{60}
- * \f]
- * \f[
- * v_1 = \frac{\partial^6}{\partial a^5 \partial c}\log Q(a, ac) = \frac{120 R_{51}}{c}
- * \f]
- * \f[
- * v_2 = \frac{\partial^6}{\partial a^4 \partial c^2}\log Q(a, ac) = \frac{48 R_{42}}{c^2}
- * \f]
- * \f[
- * v_3 = \frac{\partial^6}{\partial a^3 \partial c^3}\log Q(a, ac) = \frac{36 R_{33}}{c^3}
- * \f]
- * \f[
- * v_4 = \frac{\partial^6}{\partial a^2 \partial c^4}\log Q(a, ac) = \frac{48 R_{24}}{c^4}
- * \f]
- * \f[
- * v_5 = \frac{\partial^6}{\partial a \partial c^5}\log Q(a, ac) = \frac{120 R_{15}}{c^5}
- * \f]
- * \f[
- * v_6 = \frac{\partial^6}{\partial c^6}\log Q(a, ac) = \frac{720 R_{06}}{c^6} = a^6 \frac{\partial^6}{\partial x^6}\log Q(a, x)
- * \f]
- * where the derivatives in \f$a\f$ are taken at fixed ratio \f$c = x/a\f$, and \f$R_{ij}\f$ are the series coefficients of \f$\log Q(a + h, c(1 + g))\f$ in \f$(h, g)\f$ (defined on \ref incomplete_gamma).
+ * Computes \f$v_j = \frac{\partial^6 \log Q(a, a c)}{\partial a^{6-j} \partial c^j}\f$ for \f$j = 0, \dots, 6\f$, with derivatives in \f$a\f$ taken at fixed ratio \f$c = x/a\f$ and \f$v_6 = a^6 \partial_x^6 \log Q(a, x)\f$.
  *
  * \param a Positive shape parameter \f$a \in (0, \infty)\f$.
  * \param c Non-negative ratio \f$c = x/a \in [0, \infty)\f$.
- * \return A `gamma_inc_mixed_partials<6>` struct containing \f$v_j = \frac{\partial^6 \log Q}{\partial a^{6-j} \partial c^j}\f$ for \f$j = 0, \dots, 6\f$.
+ * \return A `gamma_inc_mixed_partials<6>` struct containing \f$v_0, \dots, v_6\f$.
  *
- * \par Domain and special values
- * - \f$a > 0, c \ge 0\f$: standard domain.
- * - \f$a \le 0\f$, \f$a = +\infty\f$, \f$c < 0\f$, or \f$a\f$ is NaN, or \f$c\f$ is NaN: returns quiet NaN for all components.
- * - \f$c = 0\f$: returns \f$v_0 = 0.0\f$; for \f$j = 1, \dots, 6\f$, \f$v_j = 0.0\f$ for \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, quiet NaN for integer \f$a \le j\f$.
- * - \f$c = +\infty\f$: returns \f$v_0 = \frac{180}{a^6} - \delta^{(6)}(a)\f$, \f$v_j = 0.0\f$ for \f$j = 1, \dots, 6\f$.
+ * \par Special values
+ * At \f$c = 0\f$, returns \f$v_0 = 0.0\f$, and for \f$j = 1, \dots, 6\f$ returns \f$0.0\f$ when \f$a > j\f$, \f$\pm\infty\f$ for non-integer \f$a < j\f$, and quiet NaN for integer \f$a \le j\f$. At \f$c = +\infty\f$, returns \f$v_0 = \frac{180}{a^6} - \delta^{(6)}(a)\f$ (where \f$\delta\f$ is the Stirling remainder) and \f$v_j = 0.0\f$ for \f$j = 1, \dots, 6\f$. Any out-of-domain or NaN input returns quiet NaN for all components, as specified on \ref incomplete_gamma.
  *
- * \par Measured accuracy
- * Maximum error 6.2e4 ulp (gcc/OpenMP; CUDA not yet measured) in \f$\max_j |a^{6-j} c^j v_j| / (a^{6-j} c^j)\f$; test bound 94000 ulp.
+ * \par Accuracy
+ * Maximum measured error in \f$\max_j |a^{6-j} c^j v_j| / (a^{6-j} c^j)\f$ is \f$1892.0\f$ ulp (gcc/OpenMP; test bound \f$2840.0\f$ ulp).
  *
  * \see incomplete_gamma, log_gamma_p_ratio_mixed_d6(), log_gamma_q_ratio_mixed_d5(), log_gamma_q_mixed_d6()
  */

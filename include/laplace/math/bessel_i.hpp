@@ -557,22 +557,13 @@ LAPLACE_HD void ratios(double k, int m, double* out) {
  * \ingroup bessel_i
  * \brief Logarithm of the modified Bessel function of the first kind of order 0, \f$\log I_0(k)\f$.
  *
- * Computes \f$\log I_0(k)\f$, where \f$I_0(k)\f$ is the modified Bessel function of the first kind of order 0:
- * \f[
- * I_0(k) = \sum_{m=0}^\infty \frac{1}{(m!)^2} \left(\frac{k}{2}\right)^{2m}.
- * \f]
+ * Evaluates \f$\log I_0(k)\f$ without intermediate overflow.
  *
  * \param k Non-negative argument \f$k \in [0, \infty)\f$.
- * \return The value of \f$\log I_0(k)\f$.
- *
- * \par Domain and special values
- * - \f$k \ge 0\f$: standard domain.
- * - \f$k = 0\f$: returns \f$0.0\f$.
- * - \f$k < 0\f$ or \f$k\f$ is NaN: returns quiet NaN.
- * - For \f$k \ge 10^{308}\f$: returns \f$k\f$, which is finite for finite \f$k\f$; only \f$k = +\infty\f$ gives \f$+\infty\f$.
+ * \return The value \f$\log I_0(k)\f$, equal to \f$0.0\f$ at \f$k = 0\f$ and \f$k\f$ for \f$k \ge 10^{308}\f$ (\f$+\infty\f$ at \f$k = +\infty\f$).
  *
  * \par Measured accuracy
- * Maximum error 2.31 ulp (gcc) / 2.15 ulp (CUDA); test bound 3.5 ulp.
+ * Maximum error 2.31 ulp (gcc) and 2.15 ulp (CUDA); test bound 3.5 ulp.
  *
  * \see bessel_i, log_bessel_i0_scaled(), bessel_i_ratio()
  */
@@ -582,19 +573,13 @@ LAPLACE_HD double log_bessel_i0(double k) { return detail_bessel::log_i0(k, fals
  * \ingroup bessel_i
  * \brief Scaled logarithm of the modified Bessel function of the first kind of order 0, \f$\log I_0(k) - k\f$.
  *
- * Computes \f$\log(e^{-k} I_0(k)) = \log I_0(k) - k\f$. Remains finite across all finite \f$k \ge 0\f$ without intermediate overflow (returns \f$-\infty\f$ only at \f$k = +\infty\f$).
+ * Evaluates \f$\log(e^{-k} I_0(k)) = \log I_0(k) - k\f$.
  *
  * \param k Non-negative argument \f$k \in [0, \infty)\f$.
- * \return The value of \f$\log I_0(k) - k\f$.
- *
- * \par Domain and special values
- * - \f$k \ge 0\f$: standard domain.
- * - \f$k = 0\f$: returns \f$0.0\f$.
- * - \f$k < 0\f$ or \f$k\f$ is NaN: returns quiet NaN.
- * - For \f$k \ge 10^{308}\f$: returns \f$-k\f$, which is finite for finite \f$k\f$; only \f$k = +\infty\f$ gives \f$-\infty\f$.
+ * \return The value \f$\log I_0(k) - k\f$, equal to \f$0.0\f$ at \f$k = 0\f$ and \f$-k\f$ for \f$k \ge 10^{308}\f$ (\f$-\infty\f$ at \f$k = +\infty\f$).
  *
  * \par Measured accuracy
- * Maximum error 3.0 ulp (gcc) / 3.0 ulp (CUDA); test bound 4.5 ulp.
+ * Maximum error 3.0 ulp (gcc and CUDA); test bound 4.5 ulp.
  *
  * \see bessel_i, log_bessel_i0(), bessel_i_ratio()
  */
@@ -604,22 +589,13 @@ LAPLACE_HD double log_bessel_i0_scaled(double k) { return detail_bessel::log_i0(
  * \ingroup bessel_i
  * \brief Ratio of modified Bessel functions of the first kind of orders 1 and 0, \f$A(k) = I_1(k) / I_0(k)\f$.
  *
- * Computes the ratio:
- * \f[
- * A(k) = \frac{I_1(k)}{I_0(k)} = \frac{\mathrm{d}}{\mathrm{d}k}\log I_0(k).
- * \f]
+ * Computes \f$A(k) = I_1(k) / I_0(k) = \frac{\mathrm{d}}{\mathrm{d}k}\log I_0(k)\f$.
  *
  * \param k Non-negative argument \f$k \in [0, \infty)\f$.
- * \return The value of \f$A(k) \in [0, 1)\f$.
- *
- * \par Domain and special values
- * - \f$k \ge 0\f$: standard domain.
- * - \f$k = 0\f$: returns \f$0.0\f$.
- * - \f$k < 0\f$ or \f$k\f$ is NaN: returns quiet NaN.
- * - \f$k \to +\infty\f$: approaches \f$1.0\f$.
+ * \return The value \f$A(k) \in [0, 1)\f$, equal to \f$0.0\f$ at \f$k = 0\f$ and approaching \f$1.0\f$ as \f$k \to +\infty\f$.
  *
  * \par Measured accuracy
- * Maximum error 3.30 ulp (gcc) / 3.48 ulp (CUDA); test bound 5.0 ulp.
+ * Maximum error 3.30 ulp (gcc) and 3.48 ulp (CUDA); test bound 5.0 ulp.
  *
  * \see bessel_i, log_bessel_i0(), bessel_i_ratio_d1(), bessel_i_ratio_inv()
  */
@@ -629,19 +605,10 @@ LAPLACE_HD double bessel_i_ratio(double k) { return detail_bessel::ratio_dm<0>(k
  * \ingroup bessel_i
  * \brief First derivative of the ratio \f$A(k) = I_1(k) / I_0(k)\f$.
  *
- * Computes the first derivative:
- * \f[
- * A'(k) = \frac{\mathrm{d}}{\mathrm{d}k}A(k) = \frac{\mathrm{d}^2}{\mathrm{d}k^2}\log I_0(k) = 1 - \frac{A(k)}{k} - A(k)^2.
- * \f]
+ * Computes \f$A'(k) = \frac{\mathrm{d}^2}{\mathrm{d}k^2}\log I_0(k) = 1 - \frac{A(k)}{k} - A(k)^2\f$.
  *
  * \param k Non-negative argument \f$k \in [0, \infty)\f$.
- * \return The value of \f$A'(k)\f$.
- *
- * \par Domain and special values
- * - \f$k \ge 0\f$: standard domain.
- * - \f$k = 0\f$: returns \f$0.5\f$.
- * - \f$k < 0\f$ or \f$k\f$ is NaN: returns quiet NaN.
- * - \f$k \to +\infty\f$: approaches \f$0.0\f$.
+ * \return The value \f$A'(k)\f$, equal to \f$0.5\f$ at \f$k = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 2.04 ulp (gcc and CUDA); test bound 3.0 ulp.
@@ -654,19 +621,10 @@ LAPLACE_HD double bessel_i_ratio_d1(double k) { return detail_bessel::ratio_dm<1
  * \ingroup bessel_i
  * \brief Second derivative of the ratio \f$A(k) = I_1(k) / I_0(k)\f$.
  *
- * Computes the second derivative:
- * \f[
- * A''(k) = \frac{\mathrm{d}^2}{\mathrm{d}k^2}A(k) = \frac{\mathrm{d}^3}{\mathrm{d}k^3}\log I_0(k) = \frac{A(k)}{k^2} - \frac{A'(k)}{k} - 2 A(k) A'(k).
- * \f]
+ * Computes \f$A''(k) = \frac{\mathrm{d}^3}{\mathrm{d}k^3}\log I_0(k) = \frac{A(k)}{k^2} - \frac{A'(k)}{k} - 2 A(k) A'(k)\f$.
  *
  * \param k Non-negative argument \f$k \in [0, \infty)\f$.
- * \return The value of \f$A''(k)\f$.
- *
- * \par Domain and special values
- * - \f$k \ge 0\f$: standard domain.
- * - \f$k = 0\f$: returns \f$0.0\f$.
- * - \f$k < 0\f$ or \f$k\f$ is NaN: returns quiet NaN.
- * - \f$k \to +\infty\f$: approaches \f$0.0\f$.
+ * \return The value \f$A''(k)\f$, equal to \f$0.0\f$ at \f$k = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 2.23 ulp (gcc and CUDA); test bound 3.5 ulp.
@@ -679,19 +637,10 @@ LAPLACE_HD double bessel_i_ratio_d2(double k) { return detail_bessel::ratio_dm<2
  * \ingroup bessel_i
  * \brief Third derivative of the ratio \f$A(k) = I_1(k) / I_0(k)\f$.
  *
- * Computes the third derivative:
- * \f[
- * A'''(k) = \frac{\mathrm{d}^3}{\mathrm{d}k^3}A(k) = \frac{\mathrm{d}^4}{\mathrm{d}k^4}\log I_0(k) = -\frac{2A(k)}{k^3} + \frac{2A'(k)}{k^2} - \frac{A''(k)}{k} - 2 (A'(k))^2 - 2 A(k) A''(k).
- * \f]
+ * Computes \f$A'''(k) = \frac{\mathrm{d}^4}{\mathrm{d}k^4}\log I_0(k) = -\frac{2A(k)}{k^3} + \frac{2A'(k)}{k^2} - \frac{A''(k)}{k} - 2 (A'(k))^2 - 2 A(k) A''(k)\f$.
  *
  * \param k Non-negative argument \f$k \in [0, \infty)\f$.
- * \return The value of \f$A'''(k)\f$.
- *
- * \par Domain and special values
- * - \f$k \ge 0\f$: standard domain.
- * - \f$k = 0\f$: returns \f$-0.375\f$.
- * - \f$k < 0\f$ or \f$k\f$ is NaN: returns quiet NaN.
- * - \f$k \to +\infty\f$: approaches \f$0.0\f$.
+ * \return The value \f$A'''(k)\f$, equal to \f$-0.375\f$ at \f$k = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 2.00 ulp (gcc and CUDA); test bound 3.0 ulp.
@@ -704,19 +653,10 @@ LAPLACE_HD double bessel_i_ratio_d3(double k) { return detail_bessel::ratio_dm<3
  * \ingroup bessel_i
  * \brief Fourth derivative of the ratio \f$A(k) = I_1(k) / I_0(k)\f$.
  *
- * Computes the fourth derivative:
- * \f[
- * A^{(4)}(k) = \frac{\mathrm{d}^4}{\mathrm{d}k^4}A(k) = \frac{\mathrm{d}^5}{\mathrm{d}k^5}\log I_0(k) = \frac{6A(k)}{k^4} - \frac{6A'(k)}{k^3} + \frac{3A''(k)}{k^2} - \frac{A'''(k)}{k} - 6 A'(k) A''(k) - 2 A(k) A'''(k).
- * \f]
+ * Computes \f$A^{(4)}(k) = \frac{\mathrm{d}^5}{\mathrm{d}k^5}\log I_0(k) = \frac{6A(k)}{k^4} - \frac{6A'(k)}{k^3} + \frac{3A''(k)}{k^2} - \frac{A'''(k)}{k} - 6 A'(k) A''(k) - 2 A(k) A'''(k)\f$.
  *
  * \param k Non-negative argument \f$k \in [0, \infty)\f$.
- * \return The value of \f$A^{(4)}(k)\f$.
- *
- * \par Domain and special values
- * - \f$k \ge 0\f$: standard domain.
- * - \f$k = 0\f$: returns \f$0.0\f$.
- * - \f$k < 0\f$ or \f$k\f$ is NaN: returns quiet NaN.
- * - \f$k \to +\infty\f$: approaches \f$0.0\f$.
+ * \return The value \f$A^{(4)}(k)\f$, equal to \f$0.0\f$ at \f$k = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 2.42 ulp (gcc and CUDA); test bound 3.5 ulp.
@@ -729,18 +669,10 @@ LAPLACE_HD double bessel_i_ratio_d4(double k) { return detail_bessel::ratio_dm<4
  * \ingroup bessel_i
  * \brief Fifth derivative of the ratio \f$A(k) = I_1(k) / I_0(k)\f$.
  *
- * Computes the fifth derivative:
- * \f[
- * A^{(5)}(k) = \frac{\mathrm{d}^5}{\mathrm{d}k^5}A(k) = \frac{\mathrm{d}^6}{\mathrm{d}k^6}\log I_0(k) = -\sum_{j=0}^4 \binom{4}{j} A^{(j)}(k) \left( (-1)^{4-j}\frac{(4-j)!}{k^{5-j}} + A^{(4-j)}(k) \right).
- * \f]
+ * Computes \f$A^{(5)}(k) = \frac{\mathrm{d}^6}{\mathrm{d}k^6}\log I_0(k) = -\sum_{j=0}^4 \binom{4}{j} A^{(j)}(k) \left( (-1)^{4-j}\frac{(4-j)!}{k^{5-j}} + A^{(4-j)}(k) \right)\f$.
  *
  * \param k Non-negative argument \f$k \in [0, \infty)\f$.
- * \return The value of \f$A^{(5)}(k)\f$.
- *
- * \par Domain and special values
- * - \f$k \ge 0\f$: standard domain.
- * - \f$k < 0\f$ or \f$k\f$ is NaN: returns quiet NaN.
- * - \f$k \to +\infty\f$: approaches \f$0.0\f$.
+ * \return The value \f$A^{(5)}(k)\f$, equal to \f$1.25\f$ at \f$k = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 2.08 ulp (gcc and CUDA); test bound 3.0 ulp.
@@ -753,19 +685,10 @@ LAPLACE_HD double bessel_i_ratio_d5(double k) { return detail_bessel::ratio_dm<5
  * \ingroup bessel_i
  * \brief Sixth derivative of the ratio \f$A(k) = I_1(k) / I_0(k)\f$.
  *
- * Computes the sixth derivative:
- * \f[
- * A^{(6)}(k) = \frac{\mathrm{d}^6}{\mathrm{d}k^6}A(k) = \frac{\mathrm{d}^7}{\mathrm{d}k^7}\log I_0(k) = -\sum_{j=0}^5 \binom{5}{j} A^{(j)}(k) \left( (-1)^{5-j}\frac{(5-j)!}{k^{6-j}} + A^{(5-j)}(k) \right).
- * \f]
+ * Computes \f$A^{(6)}(k) = \frac{\mathrm{d}^7}{\mathrm{d}k^7}\log I_0(k) = -\sum_{j=0}^5 \binom{5}{j} A^{(j)}(k) \left( (-1)^{5-j}\frac{(5-j)!}{k^{6-j}} + A^{(5-j)}(k) \right)\f$.
  *
  * \param k Non-negative argument \f$k \in [0, \infty)\f$.
- * \return The value of \f$A^{(6)}(k)\f$.
- *
- * \par Domain and special values
- * - \f$k \ge 0\f$: standard domain.
- * - \f$k = 0\f$: returns \f$0.0\f$.
- * - \f$k < 0\f$ or \f$k\f$ is NaN: returns quiet NaN.
- * - \f$k \to +\infty\f$: approaches \f$0.0\f$.
+ * \return The value \f$A^{(6)}(k)\f$, equal to \f$0.0\f$ at \f$k = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 2.42 ulp (gcc and CUDA); test bound 3.5 ulp.
@@ -778,16 +701,10 @@ LAPLACE_HD double bessel_i_ratio_d6(double k) { return detail_bessel::ratio_dm<6
  * \ingroup bessel_i
  * \brief Inverse of the Bessel function ratio, \f$K(\rho) = A^{-1}(\rho)\f$.
  *
- * Computes the inverse function \f$K(\rho)\f$ satisfying \f$A(K(\rho)) = \rho\f$ for \f$\rho \in [0, 1)\f$ via Newton's method.
+ * Solves \f$A(K(\rho)) = \rho\f$ for \f$\rho \in [0, 1)\f$.
  *
  * \param rho Ratio value \f$\rho \in [0, 1)\f$.
- * \return The value \f$k = K(\rho) \in [0, \infty)\f$.
- *
- * \par Domain and special values
- * - \f$\rho \in [0, 1)\f$: standard domain.
- * - \f$\rho = 0\f$: returns \f$0.0\f$.
- * - \f$\rho = 1\f$: returns \f$+\infty\f$.
- * - \f$\rho < 0\f$, \f$\rho > 1\f$, or \f$\rho\f$ is NaN: returns quiet NaN.
+ * \return The value \f$k = K(\rho) \in [0, \infty)\f$, equal to \f$0.0\f$ at \f$\rho = 0\f$ and \f$+\infty\f$ at \f$\rho = 1\f$.
  *
  * \par Measured accuracy
  * Maximum error 1.80 ulp (gcc and CUDA); test bound 3.0 ulp.
@@ -800,19 +717,10 @@ LAPLACE_HD double bessel_i_ratio_inv(double rho) { return detail_bessel::ratio_i
  * \ingroup bessel_i
  * \brief First derivative of the inverse ratio, \f$K'(\rho)\f$, evaluated at \f$\rho = A(\kappa)\f$.
  *
- * Computes the first derivative:
- * \f[
- * K'(\rho) = \frac{\mathrm{d}K}{\mathrm{d}\rho} = w
- * \f]
- * where \f$w = \frac{1}{A'(\kappa)}\f$. Evaluated at \f$\kappa\f$ rather than \f$\rho = A(\kappa)\f$ to preserve precision near \f$\rho = 1\f$.
+ * Computes \f$K'(\rho) = \frac{\mathrm{d}K}{\mathrm{d}\rho} = w\f$, where \f$w = \frac{1}{A'(\kappa)}\f$ and \f$r_j = \frac{A^{(j)}(\kappa)}{A'(\kappa)}\f$.
  *
- * \param kappa Point \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
- * \return The value of \f$K'(\rho)\f$ at \f$\rho = A(\kappa)\f$.
- *
- * \par Domain and special values
- * - \f$\kappa \ge 0\f$: standard domain.
- * - \f$\kappa = 0\f$: returns \f$2.0\f$.
- * - \f$\kappa < 0\f$ or \f$\kappa\f$ is NaN: returns quiet NaN.
+ * \param kappa Argument \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
+ * \return The value \f$K'(A(\kappa))\f$, equal to \f$2.0\f$ at \f$\kappa = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 1.99 ulp (gcc and CUDA); test bound 3.0 ulp.
@@ -825,19 +733,10 @@ LAPLACE_HD double bessel_i_ratio_inv_d1(double kappa) { return detail_bessel::ra
  * \ingroup bessel_i
  * \brief Second derivative of the inverse ratio, \f$K''(\rho)\f$, evaluated at \f$\rho = A(\kappa)\f$.
  *
- * Computes the second derivative:
- * \f[
- * K''(\rho) = \frac{\mathrm{d}^2K}{\mathrm{d}\rho^2} = -r_2 w^2
- * \f]
- * where \f$w = \frac{1}{A'(\kappa)}\f$ and \f$r_2 = \frac{A''(\kappa)}{A'(\kappa)}\f$. Evaluated at \f$\kappa\f$ rather than \f$\rho = A(\kappa)\f$ to preserve precision near \f$\rho = 1\f$.
+ * Computes \f$K''(\rho) = \frac{\mathrm{d}^2K}{\mathrm{d}\rho^2} = -r_2 w^2\f$.
  *
- * \param kappa Point \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
- * \return The value of \f$K''(\rho)\f$ at \f$\rho = A(\kappa)\f$.
- *
- * \par Domain and special values
- * - \f$\kappa \ge 0\f$: standard domain.
- * - \f$\kappa = 0\f$: returns \f$0.0\f$.
- * - \f$\kappa < 0\f$ or \f$\kappa\f$ is NaN: returns quiet NaN.
+ * \param kappa Argument \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
+ * \return The value \f$K''(A(\kappa))\f$, equal to \f$0.0\f$ at \f$\kappa = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 2.14 ulp (gcc and CUDA); test bound 3.5 ulp.
@@ -850,18 +749,10 @@ LAPLACE_HD double bessel_i_ratio_inv_d2(double kappa) { return detail_bessel::ra
  * \ingroup bessel_i
  * \brief Third derivative of the inverse ratio, \f$K'''(\rho)\f$, evaluated at \f$\rho = A(\kappa)\f$.
  *
- * Computes the third derivative:
- * \f[
- * K'''(\rho) = \frac{\mathrm{d}^3K}{\mathrm{d}\rho^3} = (3 r_2^2 - r_3) w^3
- * \f]
- * where \f$w = \frac{1}{A'(\kappa)}\f$ and \f$r_j = \frac{A^{(j)}(\kappa)}{A'(\kappa)}\f$. Evaluated at \f$\kappa\f$ rather than \f$\rho = A(\kappa)\f$ to preserve precision near \f$\rho = 1\f$.
+ * Computes \f$K'''(\rho) = \frac{\mathrm{d}^3K}{\mathrm{d}\rho^3} = (3 r_2^2 - r_3) w^3\f$.
  *
- * \param kappa Point \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
- * \return The value of \f$K'''(\rho)\f$ at \f$\rho = A(\kappa)\f$.
- *
- * \par Domain and special values
- * - \f$\kappa \ge 0\f$: standard domain.
- * - \f$\kappa < 0\f$ or \f$\kappa\f$ is NaN: returns quiet NaN.
+ * \param kappa Argument \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
+ * \return The value \f$K'''(A(\kappa))\f$, equal to \f$6.0\f$ at \f$\kappa = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 2.31 ulp (gcc and CUDA); test bound 3.5 ulp.
@@ -874,19 +765,10 @@ LAPLACE_HD double bessel_i_ratio_inv_d3(double kappa) { return detail_bessel::ra
  * \ingroup bessel_i
  * \brief Fourth derivative of the inverse ratio, \f$K^{(4)}(\rho)\f$, evaluated at \f$\rho = A(\kappa)\f$.
  *
- * Computes the fourth derivative:
- * \f[
- * K^{(4)}(\rho) = \frac{\mathrm{d}^4K}{\mathrm{d}\rho^4} = (-15 r_2^3 + 10 r_2 r_3 - r_4) w^4
- * \f]
- * where \f$w = \frac{1}{A'(\kappa)}\f$ and \f$r_j = \frac{A^{(j)}(\kappa)}{A'(\kappa)}\f$. Evaluated at \f$\kappa\f$ rather than \f$\rho = A(\kappa)\f$ to preserve precision near \f$\rho = 1\f$.
+ * Computes \f$K^{(4)}(\rho) = \frac{\mathrm{d}^4K}{\mathrm{d}\rho^4} = (-15 r_2^3 + 10 r_2 r_3 - r_4) w^4\f$.
  *
- * \param kappa Point \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
- * \return The value of \f$K^{(4)}(\rho)\f$ at \f$\rho = A(\kappa)\f$.
- *
- * \par Domain and special values
- * - \f$\kappa \ge 0\f$: standard domain.
- * - \f$\kappa = 0\f$: returns \f$0.0\f$.
- * - \f$\kappa < 0\f$ or \f$\kappa\f$ is NaN: returns quiet NaN.
+ * \param kappa Argument \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
+ * \return The value \f$K^{(4)}(A(\kappa))\f$, equal to \f$0.0\f$ at \f$\kappa = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 1.96 ulp (gcc and CUDA); test bound 3.0 ulp.
@@ -899,18 +781,10 @@ LAPLACE_HD double bessel_i_ratio_inv_d4(double kappa) { return detail_bessel::ra
  * \ingroup bessel_i
  * \brief Fifth derivative of the inverse ratio, \f$K^{(5)}(\rho)\f$, evaluated at \f$\rho = A(\kappa)\f$.
  *
- * Computes the fifth derivative:
- * \f[
- * K^{(5)}(\rho) = \frac{\mathrm{d}^5K}{\mathrm{d}\rho^5} = (105 r_2^4 - 105 r_2^2 r_3 + 15 r_2 r_4 + 10 r_3^2 - r_5) w^5
- * \f]
- * where \f$w = \frac{1}{A'(\kappa)}\f$ and \f$r_j = \frac{A^{(j)}(\kappa)}{A'(\kappa)}\f$. Evaluated at \f$\kappa\f$ rather than \f$\rho = A(\kappa)\f$ to preserve precision near \f$\rho = 1\f$.
+ * Computes \f$K^{(5)}(\rho) = \frac{\mathrm{d}^5K}{\mathrm{d}\rho^5} = (105 r_2^4 - 105 r_2^2 r_3 + 15 r_2 r_4 + 10 r_3^2 - r_5) w^5\f$.
  *
- * \param kappa Point \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
- * \return The value of \f$K^{(5)}(\rho)\f$ at \f$\rho = A(\kappa)\f$.
- *
- * \par Domain and special values
- * - \f$\kappa \ge 0\f$: standard domain.
- * - \f$\kappa < 0\f$ or \f$\kappa\f$ is NaN: returns quiet NaN.
+ * \param kappa Argument \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
+ * \return The value \f$K^{(5)}(A(\kappa))\f$, equal to \f$100.0\f$ at \f$\kappa = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 2.54 ulp (gcc and CUDA); test bound 4.0 ulp.
@@ -923,19 +797,10 @@ LAPLACE_HD double bessel_i_ratio_inv_d5(double kappa) { return detail_bessel::ra
  * \ingroup bessel_i
  * \brief Sixth derivative of the inverse ratio, \f$K^{(6)}(\rho)\f$, evaluated at \f$\rho = A(\kappa)\f$.
  *
- * Computes the sixth derivative:
- * \f[
- * K^{(6)}(\rho) = \frac{\mathrm{d}^6K}{\mathrm{d}\rho^6} = (-945 r_2^5 + 1260 r_2^3 r_3 - 210 r_2^2 r_4 - 280 r_2 r_3^2 + 21 r_2 r_5 + 35 r_3 r_4 - r_6) w^6
- * \f]
- * where \f$w = \frac{1}{A'(\kappa)}\f$ and \f$r_j = \frac{A^{(j)}(\kappa)}{A'(\kappa)}\f$. Evaluated at \f$\kappa\f$ rather than \f$\rho = A(\kappa)\f$ to preserve precision near \f$\rho = 1\f$.
+ * Computes \f$K^{(6)}(\rho) = \frac{\mathrm{d}^6K}{\mathrm{d}\rho^6} = (-945 r_2^5 + 1260 r_2^3 r_3 - 210 r_2^2 r_4 - 280 r_2 r_3^2 + 21 r_2 r_5 + 35 r_3 r_4 - r_6) w^6\f$.
  *
- * \param kappa Point \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
- * \return The value of \f$K^{(6)}(\rho)\f$ at \f$\rho = A(\kappa)\f$.
- *
- * \par Domain and special values
- * - \f$\kappa \ge 0\f$: standard domain.
- * - \f$\kappa = 0\f$: returns \f$0.0\f$.
- * - \f$\kappa < 0\f$ or \f$\kappa\f$ is NaN: returns quiet NaN.
+ * \param kappa Argument \f$\kappa \in [0, \infty)\f$ corresponding to \f$\rho = A(\kappa)\f$.
+ * \return The value \f$K^{(6)}(A(\kappa))\f$, equal to \f$0.0\f$ at \f$\kappa = 0\f$.
  *
  * \par Measured accuracy
  * Maximum error 2.92 ulp (gcc and CUDA); test bound 4.5 ulp.
@@ -948,27 +813,16 @@ LAPLACE_HD double bessel_i_ratio_inv_d6(double kappa) { return detail_bessel::ra
 // the coefficients of the series of the von Mises distribution function
 /**
  * \ingroup bessel_i
- * \brief Ratios of modified Bessel functions of the first kind of orders \f$j = 1, \dots, m\f$ to order 0, \f$R_j(k) = I_j(k) / I_0(k)\f$.
+ * \brief Ratios of modified Bessel functions of orders \f$j = 1, \dots, m\f$ to order 0, \f$R_j(k) = I_j(k) / I_0(k)\f$.
  *
- * Computes the sequence of \f$m\f$ ratios:
- * \f[
- * R_j(k) = \frac{I_j(k)}{I_0(k)}, \quad j = 1, \dots, m,
- * \f]
- * into \f$\mathrm{out}[0 \dots m-1]\f$ using Miller's backward recurrence.
+ * Writes \f$R_j(k) = I_j(k) / I_0(k)\f$ for \f$j = 1, \dots, m\f$ into `out[0..m-1]`.
  *
  * \param k Non-negative argument \f$k \in [0, \infty)\f$.
- * \param m Number of ratios to compute, \f$m \ge 1\f$.
- * \param out Output array with storage for at least \f$m\f$ double-precision values.
- *
- * \par Domain and special values
- * - \f$k \ge 0, m \ge 1\f$: standard domain.
- * - \f$m < 1\f$: returns immediately without writing.
- * - \f$k = 0\f$: writes \f$0.0\f$ to all \f$m\f$ entries.
- * - \f$k < 0\f$ or \f$k\f$ is NaN: writes quiet NaN to all \f$m\f$ entries.
- * - \f$k \ge 10^{308}\f$ (\f$k \to +\infty\f$): writes \f$1.0\f$ to all \f$m\f$ entries.
+ * \param m Number of ratios to compute, \f$m \ge 1\f$; if \f$m < 1\f$, returns without writing.
+ * \param out Output array with storage for at least \f$m\f$ double-precision values (writes \f$0.0\f$ at \f$k = 0\f$ and \f$1.0\f$ for \f$k \ge 10^{308}\f$).
  *
  * \par Measured accuracy
- * Maximum error 13.8 ulp (4.7 ulp for \f$R_j > 10^{-3}\f$), 2.3 ulp1 on gcc and CUDA; test bounds 23.0 ulp and 3.0 ulp1.
+ * Maximum error 13.8 ulp (4.7 ulp for \f$R_j > 10^{-3}\f$) and 2.3 ulp1 on gcc and CUDA; test bounds 23.0 ulp and 3.0 ulp1.
  *
  * \see bessel_i, bessel_i_ratio()
  */

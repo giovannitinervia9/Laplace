@@ -165,8 +165,6 @@ struct fourier_basis {
    * \ingroup basis_fourier
    * \brief Total number of basis functions \f$K = 2H + 1\f$.
    * \return Basis dimension \f$K\f$.
-   * \par Domain and special values
-   * Non-negative integer for \f$H \ge 0\f$.
    * \par Measured accuracy
    * Exact integer.
    * \see basis_fourier, row_width()
@@ -176,8 +174,6 @@ struct fourier_basis {
    * \ingroup basis_fourier
    * \brief Number of columns in each evaluated row, \f$K = 2H + 1\f$.
    * \return Row width \f$K\f$ (dense row).
-   * \par Domain and special values
-   * Equals dimension().
    * \par Measured accuracy
    * Exact integer.
    * \see basis_fourier, dimension(), row()
@@ -186,7 +182,7 @@ struct fourier_basis {
   /**
    * \ingroup basis_fourier
    * \brief Scratch buffer size needed for evaluation.
-   * \return Zero (the Fourier basis requires no scratch memory).
+   * \return Zero (no scratch memory required).
    * \par Measured accuracy
    * Exact integer.
    * \see basis_fourier
@@ -195,12 +191,7 @@ struct fourier_basis {
   /**
    * \ingroup basis_fourier
    * \brief Semi-bandwidth of cross Gram matrices.
-   *
-   * On a full period, cross Gram matrices are block diagonal with \f$2 \times 2\f$ blocks
-   * (semi-bandwidth \f$\min(1, 2H)\f$). Otherwise, they are dense (semi-bandwidth \f$2H\f$).
-   * \return Semi-bandwidth as an integer.
-   * \par Domain and special values
-   * Returns 0 for \f$H = 0\f$, 1 for \f$H \ge 1\f$ on a full period, and \f$2H\f$ on non-full periods.
+   * \return \f$\min(1, 2H)\f$ when \c full_period is true, and \f$2H\f$ otherwise.
    * \par Measured accuracy
    * Exact integer.
    * \see basis_fourier, cross_gram()
@@ -210,271 +201,225 @@ struct fourier_basis {
 
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the basis functions at point \f$x\f$ (derivative order 0).
+   * \brief Evaluates the basis functions at \f$x\f$ (derivative order 0).
    *
    * Writes \f$b_0(x) = 1\f$, \f$b_{2j-1}(x) = \sin(j \nu x')\f$, and \f$b_{2j}(x) = \cos(j \nu x')\f$
    * for \f$j = 1, \dots, H\f$ into \c out, with \f$x' = x - \text{lower}\f$ and \f$\nu = 2\pi / \omega\f$.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ is NaN, \c out[0] is 1.0 and subsequent entries are NaN.
+   * \return First non-zero column index (always 0).
+   * \par Special values
+   * If \f$x\f$ is NaN, \c out[0] is 1.0 and subsequent entries are NaN.
    * \par Measured accuracy
-   * Bounded by 37.0 ulp (\f$H \le 1\f$), 140.0 ulp (\f$H \le 4\f$), 660.0 ulp (\f$H \le 20\f$),
-   * and 3300.0 ulp (\f$H \le 100\f$), within 2.5 times the angle conditioning \f$\max(1, 2\pi j |x'|/\omega)\f$.
+   * Within 2.5 times the conditioning scale \f$\max(1, 2\pi j |x'|/\omega)\f$ (test bound 3.75; see \ref basis_fourier).
    * \see basis_fourier, row_d1(), expansion()
    */
   template <class T> LAPLACE_HD int row(T x, T* out) const { return row_order<0>(x, out); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the first derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates the first derivatives of the basis functions at \f$x\f$.
    *
    * Writes \f$b_0^{(1)}(x) = 0\f$, \f$b_{2j-1}^{(1)}(x) = j \nu \cos(j \nu x')\f$, and
    * \f$b_{2j}^{(1)}(x) = -j \nu \sin(j \nu x')\f$ for \f$j = 1, \dots, H\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
+   * \return First non-zero column index (always 0).
+   * \par Special values
+   * If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
    * \par Measured accuracy
-   * Bounded by 37.0 ulp (\f$H \le 1\f$), 140.0 ulp (\f$H \le 4\f$), 660.0 ulp (\f$H \le 20\f$),
-   * and 3300.0 ulp (\f$H \le 100\f$), within 2.5 times the angle conditioning \f$\max(1, 2\pi j |x'|/\omega) + 1\f$.
+   * Within 2.5 times the conditioning scale \f$\max(1, 2\pi j |x'|/\omega) + 1\f$ (test bound 3.75; see \ref basis_fourier).
    * \see basis_fourier, row(), row_d2(), expansion_d1()
    */
   template <class T> LAPLACE_HD int row_d1(T x, T* out) const { return row_order<1>(x, out); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the second derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates the second derivatives of the basis functions at \f$x\f$.
    *
    * Writes \f$b_0^{(2)}(x) = 0\f$, \f$b_{2j-1}^{(2)}(x) = -(j \nu)^2 \sin(j \nu x')\f$, and
    * \f$b_{2j}^{(2)}(x) = -(j \nu)^2 \cos(j \nu x')\f$ for \f$j = 1, \dots, H\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
+   * \return First non-zero column index (always 0).
+   * \par Special values
+   * If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
    * \par Measured accuracy
-   * Bounded by 37.0 ulp (\f$H \le 1\f$), 140.0 ulp (\f$H \le 4\f$), 660.0 ulp (\f$H \le 20\f$),
-   * and 3300.0 ulp (\f$H \le 100\f$), within 2.5 times the angle conditioning \f$\max(1, 2\pi j |x'|/\omega) + 2\f$.
+   * Within 2.5 times the conditioning scale \f$\max(1, 2\pi j |x'|/\omega) + 2\f$ (test bound 3.75; see \ref basis_fourier).
    * \see basis_fourier, row_d1(), row_d3(), expansion_d2()
    */
   template <class T> LAPLACE_HD int row_d2(T x, T* out) const { return row_order<2>(x, out); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the third derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates the third derivatives of the basis functions at \f$x\f$.
    *
    * Writes \f$b_0^{(3)}(x) = 0\f$, \f$b_{2j-1}^{(3)}(x) = -(j \nu)^3 \cos(j \nu x')\f$, and
    * \f$b_{2j}^{(3)}(x) = (j \nu)^3 \sin(j \nu x')\f$ for \f$j = 1, \dots, H\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
+   * \return First non-zero column index (always 0).
+   * \par Special values
+   * If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
    * \par Measured accuracy
-   * Bounded by 37.0 ulp (\f$H \le 1\f$), 140.0 ulp (\f$H \le 4\f$), 660.0 ulp (\f$H \le 20\f$),
-   * and 3300.0 ulp (\f$H \le 100\f$), within 2.5 times the angle conditioning \f$\max(1, 2\pi j |x'|/\omega) + 3\f$.
+   * Within 2.5 times the conditioning scale \f$\max(1, 2\pi j |x'|/\omega) + 3\f$ (test bound 3.75; see \ref basis_fourier).
    * \see basis_fourier, row_d2(), row_d4(), expansion_d3()
    */
   template <class T> LAPLACE_HD int row_d3(T x, T* out) const { return row_order<3>(x, out); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the fourth derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates the fourth derivatives of the basis functions at \f$x\f$.
    *
    * Writes \f$b_0^{(4)}(x) = 0\f$, \f$b_{2j-1}^{(4)}(x) = (j \nu)^4 \sin(j \nu x')\f$, and
    * \f$b_{2j}^{(4)}(x) = (j \nu)^4 \cos(j \nu x')\f$ for \f$j = 1, \dots, H\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
+   * \return First non-zero column index (always 0).
+   * \par Special values
+   * If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
    * \par Measured accuracy
-   * Bounded by 37.0 ulp (\f$H \le 1\f$), 140.0 ulp (\f$H \le 4\f$), 660.0 ulp (\f$H \le 20\f$),
-   * and 3300.0 ulp (\f$H \le 100\f$), within 2.5 times the angle conditioning \f$\max(1, 2\pi j |x'|/\omega) + 4\f$.
+   * Within 2.5 times the conditioning scale \f$\max(1, 2\pi j |x'|/\omega) + 4\f$ (test bound 3.75; see \ref basis_fourier).
    * \see basis_fourier, row_d3(), row_d5(), expansion_d4()
    */
   template <class T> LAPLACE_HD int row_d4(T x, T* out) const { return row_order<4>(x, out); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the fifth derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates the fifth derivatives of the basis functions at \f$x\f$.
    *
    * Writes \f$b_0^{(5)}(x) = 0\f$, \f$b_{2j-1}^{(5)}(x) = (j \nu)^5 \cos(j \nu x')\f$, and
    * \f$b_{2j}^{(5)}(x) = -(j \nu)^5 \sin(j \nu x')\f$ for \f$j = 1, \dots, H\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
+   * \return First non-zero column index (always 0).
+   * \par Special values
+   * If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
    * \par Measured accuracy
-   * Bounded by 37.0 ulp (\f$H \le 1\f$), 140.0 ulp (\f$H \le 4\f$), 660.0 ulp (\f$H \le 20\f$),
-   * and 3300.0 ulp (\f$H \le 100\f$), within 2.5 times the angle conditioning \f$\max(1, 2\pi j |x'|/\omega) + 5\f$.
+   * Within 2.5 times the conditioning scale \f$\max(1, 2\pi j |x'|/\omega) + 5\f$ (test bound 3.75; see \ref basis_fourier).
    * \see basis_fourier, row_d4(), row_d6(), expansion_d5()
    */
   template <class T> LAPLACE_HD int row_d5(T x, T* out) const { return row_order<5>(x, out); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the sixth derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates the sixth derivatives of the basis functions at \f$x\f$.
    *
    * Writes \f$b_0^{(6)}(x) = 0\f$, \f$b_{2j-1}^{(6)}(x) = -(j \nu)^6 \sin(j \nu x')\f$, and
    * \f$b_{2j}^{(6)}(x) = -(j \nu)^6 \cos(j \nu x')\f$ for \f$j = 1, \dots, H\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
+   * \return First non-zero column index (always 0).
+   * \par Special values
+   * If \f$x\f$ is NaN, \c out[0] is 0.0 and subsequent entries are NaN.
    * \par Measured accuracy
-   * Bounded by 37.0 ulp (\f$H \le 1\f$), 140.0 ulp (\f$H \le 4\f$), 660.0 ulp (\f$H \le 20\f$),
-   * and 3300.0 ulp (\f$H \le 100\f$), within 2.5 times the angle conditioning \f$\max(1, 2\pi j |x'|/\omega) + 6\f$.
+   * Within 2.5 times the conditioning scale \f$\max(1, 2\pi j |x'|/\omega) + 6\f$ (test bound 3.75; see \ref basis_fourier).
    * \see basis_fourier, row_d5(), expansion_d6()
    */
   template <class T> LAPLACE_HD int row_d6(T x, T* out) const { return row_order<6>(x, out); }
 
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the basis expansion \f$\sum_{i=0}^{K-1} \beta_i b_i(x)\f$ at point \f$x\f$ (derivative order 0).
-   *
-   * Accumulates the linear combination of basis functions in a single pass without
-   * allocating an intermediate row buffer.
+   * \brief Evaluates the basis expansion \f$\sum_{i=0}^{K-1} \beta_i b_i(x)\f$ at \f$x\f$.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param beta Array of \f$K\f$ basis coefficients.
-   * \return Expansion value at \f$x\f$.
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ or any \f$\beta_i\f$ is NaN, returns NaN.
+   * \return Expansion value at \f$x\f$, or NaN if \f$x\f$ or any \f$\beta_i\f$ is NaN.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row() to within rounding of the sum.
+   * Agrees with the scalar product of \c beta and row() to within rounding of the sum.
    * \see basis_fourier, row(), expansion_d1()
    */
   // sum_j beta_j b_j^(k)(x)
   template <class T> LAPLACE_HD T expansion(T x, const T* beta) const { return expansion_order<0>(x, beta); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the first derivative of the basis expansion at point \f$x\f$.
-   *
-   * Accumulates \f$\sum_{i=0}^{K-1} \beta_i b_i^{(1)}(x)\f$ in a single pass without
-   * allocating an intermediate row buffer.
+   * \brief Evaluates the first derivative \f$\sum_{i=0}^{K-1} \beta_i b_i^{(1)}(x)\f$.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param beta Array of \f$K\f$ basis coefficients.
-   * \return First derivative of the expansion at \f$x\f$.
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ or any \f$\beta_i\f$ is NaN, returns NaN.
+   * \return First derivative of the expansion at \f$x\f$, or NaN if \f$x\f$ or any \f$\beta_i\f$ is NaN.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d1() to within rounding of the sum.
+   * Agrees with the scalar product of \c beta and row_d1() to within rounding of the sum.
    * \see basis_fourier, row_d1(), expansion(), expansion_d2()
    */
   template <class T> LAPLACE_HD T expansion_d1(T x, const T* beta) const { return expansion_order<1>(x, beta); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the second derivative of the basis expansion at point \f$x\f$.
-   *
-   * Accumulates \f$\sum_{i=0}^{K-1} \beta_i b_i^{(2)}(x)\f$ in a single pass without
-   * allocating an intermediate row buffer.
+   * \brief Evaluates the second derivative \f$\sum_{i=0}^{K-1} \beta_i b_i^{(2)}(x)\f$.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param beta Array of \f$K\f$ basis coefficients.
-   * \return Second derivative of the expansion at \f$x\f$.
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ or any \f$\beta_i\f$ is NaN, returns NaN.
+   * \return Second derivative of the expansion at \f$x\f$, or NaN if \f$x\f$ or any \f$\beta_i\f$ is NaN.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d2() to within rounding of the sum.
+   * Agrees with the scalar product of \c beta and row_d2() to within rounding of the sum.
    * \see basis_fourier, row_d2(), expansion_d1(), expansion_d3()
    */
   template <class T> LAPLACE_HD T expansion_d2(T x, const T* beta) const { return expansion_order<2>(x, beta); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the third derivative of the basis expansion at point \f$x\f$.
-   *
-   * Accumulates \f$\sum_{i=0}^{K-1} \beta_i b_i^{(3)}(x)\f$ in a single pass without
-   * allocating an intermediate row buffer.
+   * \brief Evaluates the third derivative \f$\sum_{i=0}^{K-1} \beta_i b_i^{(3)}(x)\f$.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param beta Array of \f$K\f$ basis coefficients.
-   * \return Third derivative of the expansion at \f$x\f$.
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ or any \f$\beta_i\f$ is NaN, returns NaN.
+   * \return Third derivative of the expansion at \f$x\f$, or NaN if \f$x\f$ or any \f$\beta_i\f$ is NaN.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d3() to within rounding of the sum.
+   * Agrees with the scalar product of \c beta and row_d3() to within rounding of the sum.
    * \see basis_fourier, row_d3(), expansion_d2(), expansion_d4()
    */
   template <class T> LAPLACE_HD T expansion_d3(T x, const T* beta) const { return expansion_order<3>(x, beta); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the fourth derivative of the basis expansion at point \f$x\f$.
-   *
-   * Accumulates \f$\sum_{i=0}^{K-1} \beta_i b_i^{(4)}(x)\f$ in a single pass without
-   * allocating an intermediate row buffer.
+   * \brief Evaluates the fourth derivative \f$\sum_{i=0}^{K-1} \beta_i b_i^{(4)}(x)\f$.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param beta Array of \f$K\f$ basis coefficients.
-   * \return Fourth derivative of the expansion at \f$x\f$.
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ or any \f$\beta_i\f$ is NaN, returns NaN.
+   * \return Fourth derivative of the expansion at \f$x\f$, or NaN if \f$x\f$ or any \f$\beta_i\f$ is NaN.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d4() to within rounding of the sum.
+   * Agrees with the scalar product of \c beta and row_d4() to within rounding of the sum.
    * \see basis_fourier, row_d4(), expansion_d3(), expansion_d5()
    */
   template <class T> LAPLACE_HD T expansion_d4(T x, const T* beta) const { return expansion_order<4>(x, beta); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the fifth derivative of the basis expansion at point \f$x\f$.
-   *
-   * Accumulates \f$\sum_{i=0}^{K-1} \beta_i b_i^{(5)}(x)\f$ in a single pass without
-   * allocating an intermediate row buffer.
+   * \brief Evaluates the fifth derivative \f$\sum_{i=0}^{K-1} \beta_i b_i^{(5)}(x)\f$.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param beta Array of \f$K\f$ basis coefficients.
-   * \return Fifth derivative of the expansion at \f$x\f$.
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ or any \f$\beta_i\f$ is NaN, returns NaN.
+   * \return Fifth derivative of the expansion at \f$x\f$, or NaN if \f$x\f$ or any \f$\beta_i\f$ is NaN.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d5() to within rounding of the sum.
+   * Agrees with the scalar product of \c beta and row_d5() to within rounding of the sum.
    * \see basis_fourier, row_d5(), expansion_d4(), expansion_d6()
    */
   template <class T> LAPLACE_HD T expansion_d5(T x, const T* beta) const { return expansion_order<5>(x, beta); }
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates the sixth derivative of the basis expansion at point \f$x\f$.
-   *
-   * Accumulates \f$\sum_{i=0}^{K-1} \beta_i b_i^{(6)}(x)\f$ in a single pass without
-   * allocating an intermediate row buffer.
+   * \brief Evaluates the sixth derivative \f$\sum_{i=0}^{K-1} \beta_i b_i^{(6)}(x)\f$.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point \f$x \in \mathbb{R}\f$.
    * \param beta Array of \f$K\f$ basis coefficients.
-   * \return Sixth derivative of the expansion at \f$x\f$.
-   * \par Domain and special values
-   * Periodic on \f$\mathbb{R}\f$. If \f$x\f$ or any \f$\beta_i\f$ is NaN, returns NaN.
+   * \return Sixth derivative of the expansion at \f$x\f$, or NaN if \f$x\f$ or any \f$\beta_i\f$ is NaN.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d6() to within rounding of the sum.
+   * Agrees with the scalar product of \c beta and row_d6() to within rounding of the sum.
    * \see basis_fourier, row_d6(), expansion_d5()
    */
   template <class T> LAPLACE_HD T expansion_d6(T x, const T* beta) const { return expansion_order<6>(x, beta); }
 
   /**
    * \ingroup basis_fourier
-   * \brief Evaluates column integrals from the lower boundary to \f$x\f$.
+   * \brief Evaluates column integrals from \c lower to \f$x\f$.
    *
-   * Evaluates \f$\int_{\text{lower}}^x b_0(t) \, \mathrm{d}t = x - \text{lower}\f$, and for \f$j = 1, \dots, H\f$ with \f$w = j \nu\f$:
+   * Evaluates \f$\int_{\text{lower}}^x b_0(t) \, \mathrm{d}t = x - \text{lower}\f$, and for \f$j = 1, \dots, H\f$:
    * \f[
-   * \int_{\text{lower}}^x \sin(j \nu (t - \text{lower})) \, \mathrm{d}t = \frac{2 \sin^2(j \nu x' / 2)}{j \nu}
+   * \int_{\text{lower}}^x \sin(j \nu (t - \text{lower})) \, \mathrm{d}t = \frac{2 \sin^2(j \nu x' / 2)}{j \nu}, \quad
+   * \int_{\text{lower}}^x \cos(j \nu (t - \text{lower})) \, \mathrm{d}t = \frac{2 \sin(j \nu x' / 2) \cos(j \nu x' / 2)}{j \nu}.
    * \f]
-   * \f[
-   * \int_{\text{lower}}^x \cos(j \nu (t - \text{lower})) \, \mathrm{d}t = \frac{2 \sin(j \nu x' / 2) \cos(j \nu x' / 2)}{j \nu}
-   * \f]
-   * evaluated in a single pass along the recurrence chain over the half angle without forming \f$1 - \cos\f$.
    * \tparam T Floating-point scalar type.
    * \param x Upper integration limit \f$x \in \mathbb{R}\f$.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
-   * \par Domain and special values
-   * Defined for all \f$x \in \mathbb{R}\f$. Returns 0 at \f$x = \text{lower}\f$.
-   * If \f$x\f$ is NaN, \c out[0] is NaN.
+   * \return First non-zero column index (always 0).
+   * \par Special values
+   * Returns 0 at \f$x = \text{lower}\f$; sets \c out[0] to NaN if \f$x\f$ is NaN.
    * \par Measured accuracy
    * Maximum error 2.0 ulp on gcc and CUDA; test bound 3.0 ulp.
    * \see basis_fourier, integral_expansion(), row()
@@ -500,16 +445,12 @@ struct fourier_basis {
   /**
    * \ingroup basis_fourier
    * \brief Evaluates the integrated basis expansion \f$\int_{\text{lower}}^x \left(\sum_{i=0}^{K-1} \beta_i b_i(t)\right) \mathrm{d}t\f$.
-   *
-   * Accumulates the integrated basis functions scaled by \c beta in a single pass over the half angle.
    * \tparam T Floating-point scalar type.
    * \param x Upper integration limit \f$x \in \mathbb{R}\f$.
    * \param beta Array of \f$K\f$ basis coefficients.
-   * \return Integrated expansion value.
-   * \par Domain and special values
-   * Defined for all \f$x \in \mathbb{R}\f$. Returns 0 at \f$x = \text{lower}\f$. If \f$x\f$ is NaN, returns NaN.
+   * \return Integrated expansion value, 0 at \f$x = \text{lower}\f$, or NaN if \f$x\f$ is NaN.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and integral_row() to within rounding of the sum.
+   * Agrees with the scalar product of \c beta and integral_row() to within rounding of the sum.
    * \see basis_fourier, integral_row(), expansion()
    */
   template <class T>
@@ -536,16 +477,13 @@ struct fourier_basis {
    * \ingroup basis_fourier
    * \brief Evaluates the cross Gram matrix \f$G_{kl} = \int_{\text{lower}}^{\text{upper}} b^{(k)}(x) (b^{(l)}(x))^\top \mathrm{d}x\f$ in closed form.
    *
-   * Evaluates the \f$K \times K\f$ cross Gram matrix in closed form using product-to-sum trigonometric
-   * identities. The result is written into \c out in column-major order: \c out[i + j * K] holds
-   * \f$\int_{\text{lower}}^{\text{upper}} b_i^{(k)}(x) b_j^{(l)}(x) \, \mathrm{d}x\f$.
-   * On a full period, \f$G_{kl}\f$ is block diagonal with \f$2 \times 2\f$ blocks.
+   * Writes the \f$K \times K\f$ matrix into \c out in column-major order, with
+   * \c out[i + j * K] holding \f$\int_{\text{lower}}^{\text{upper}} b_i^{(k)}(x) b_j^{(l)}(x) \, \mathrm{d}x\f$.
    * \param k Derivative order of the left factor (\f$0 \le k \le 6\f$).
    * \param l Derivative order of the right factor (\f$0 \le l \le 6\f$).
    * \param out Output array of size at least \f$K \times K\f$.
-   * \par Domain and special values
-   * \f$k, l \in \{0, 1, 2, 3, 4, 5, 6\}\f$. Throws \c std::invalid_argument if \f$k < 0\f$, \f$k > 6\f$,
-   * \f$l < 0\f$, or \f$l > 6\f$.
+   * \par Special values
+   * Throws \c std::invalid_argument if \f$k < 0\f$, \f$k > 6\f$, \f$l < 0\f$, or \f$l > 6\f$.
    * \par Measured accuracy
    * Maximum error 18 ulp against mpmath references; test bound 27.0 ulp.
    * \see basis_fourier, gram_bandwidth()
@@ -659,20 +597,18 @@ struct fourier_basis {
 
 /**
  * \ingroup basis_fourier
- * \brief Constructs a Fourier basis on a specified interval \f$[\text{lower}, \text{upper}]\f$.
+ * \brief Constructs a Fourier basis on \f$[\text{lower}, \text{upper}]\f$.
  *
- * Sets \c full_period to \c true if \f$\text{upper} - \text{lower} = \text{period}\f$ (or \f$\text{upper} = \text{lower} + \text{period}\f$),
- * and to \c false otherwise.
+ * Sets \c full_period to \c true when \f$\text{upper} - \text{lower} = \text{period}\f$ or
+ * \f$\text{upper} = \text{lower} + \text{period}\f$, and \c false otherwise.
  * \param lower Lower bound of the domain.
  * \param period Fundamental period \f$\omega > 0\f$.
  * \param harmonics Number of harmonics \f$H \ge 0\f$.
  * \param upper Upper bound of the domain (\f$\text{upper} > \text{lower}\f$).
  * \return Configured \ref fourier_basis structure.
- * \par Domain and special values
- * Throws \c std::invalid_argument if \c lower, \c upper, or \c period is not finite, if \c period <= 0.0,
- * if \c harmonics < 0, or if \c lower >= upper.
- * \par Measured accuracy
- * Exact arithmetic setup.
+ * \par Special values
+ * Throws \c std::invalid_argument if \c lower, \c upper, or \c period is not finite,
+ * if \c period <= 0.0, if \c harmonics < 0, or if \c lower >= \c upper.
  * \see basis_fourier, fourier_basis
  */
 // Checks its arguments (finite; period > 0; harmonics >= 0; lower < upper) and
@@ -694,18 +630,14 @@ inline fourier_basis make_fourier_basis(double lower, double period, int harmoni
 
 /**
  * \ingroup basis_fourier
- * \brief Constructs a Fourier basis on one full period, \f$[\text{lower}, \text{lower} + \text{period}]\f$.
- *
- * Sets \c upper = \c lower + \c period and \c full_period = \c true.
+ * \brief Constructs a Fourier basis on one full period \f$[\text{lower}, \text{lower} + \text{period}]\f$.
  * \param lower Lower bound of the domain.
  * \param period Fundamental period \f$\omega > 0\f$.
  * \param harmonics Number of harmonics \f$H \ge 0\f$.
- * \return Configured \ref fourier_basis structure with \c full_period = \c true.
- * \par Domain and special values
- * Throws \c std::invalid_argument if \c lower or \c period is not finite, if \c period <= 0.0,
- * or if \c harmonics < 0.
- * \par Measured accuracy
- * Exact arithmetic setup.
+ * \return Configured \ref fourier_basis structure with \c full_period set to \c true.
+ * \par Special values
+ * Throws \c std::invalid_argument if \c lower or \c period is not finite,
+ * if \c period <= 0.0, or if \c harmonics < 0.
  * \see basis_fourier, fourier_basis
  */
 // the domain is one full period: upper = lower + period

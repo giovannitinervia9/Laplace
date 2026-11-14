@@ -16,15 +16,8 @@ namespace laplace::pdmat {
  * \ingroup pdmat
  * \brief Structured positive definite matrix with diagonal structure \f$M(\theta) = \operatorname{diag}(e^{2\theta_i})\f$.
  *
- * Maps \f$p\f$ unconstrained real parameters \f$\theta_i = \log \sigma_i\f$ to a diagonal matrix
+ * Maps \f$p \ge 1\f$ unconstrained real parameters \f$\theta_i = \log \sigma_i\f$ to a diagonal matrix
  * with entries \f$M_{ii} = \sigma_i^2 = e^{2\theta_i} > 0\f$.
- *
- * \par Measured accuracy
- * Maximum error over orders 0–6 on gcc/OpenMP and CUDA (RTX 4070 SUPER):
- * - \f$M\f$: 0.52 ulpN (gcc) / 0.52 ulpN (CUDA)
- * - \f$M^{-1}\f$: 0.89 ulpN (gcc) / 0.66 ulpN (CUDA)
- * - \f$L\f$: 0.59 ulpN (gcc) / 0.59 ulpN (CUDA)
- * - \f$\log \det M\f$: 0.45 ulp (gcc) / 0.45 ulp (CUDA)
  *
  * \see pdmat, pdmat_orders, pdmat_structure
  */
@@ -72,14 +65,11 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \brief Evaluates the packed diagonal matrix \f$M(\theta)\f$.
    *
    * Computes \f$M_{ii} = e^{2\theta_i}\f$ on the diagonal and \f$M_{ij} = 0\f$ for \f$i \ne j\f$.
+   * Maximum error 0.52 ulpN (gcc and CUDA); test bound 1 ulpN.
    *
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
-   *
-   * \par Measured accuracy
-   * Maximum error 0.52 ulpN (gcc) / 0.52 ulpN (CUDA); test bound 1.0 ulpN.
-   *
    * \see inverse(), cholesky(), log_det(), matrix_dk()
    */
   LAPLACE_HD void matrix(const double* theta, double* m, [[maybe_unused]] double* w) const { fill(theta, 2.0, m); }
@@ -88,14 +78,11 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \brief Evaluates the packed inverse matrix \f$M^{-1}(\theta)\f$.
    *
    * Computes \f$M^{-1}_{ii} = e^{-2\theta_i}\f$ on the diagonal and \f$M^{-1}_{ij} = 0\f$ for \f$i \ne j\f$.
+   * Maximum error 0.89 ulpN on gcc and 0.66 ulpN on CUDA; test bound 1 ulpN.
    *
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
-   *
-   * \par Measured accuracy
-   * Maximum error 0.89 ulpN (gcc) / 0.66 ulpN (CUDA); test bound 1.0 ulpN.
-   *
    * \see matrix(), cholesky(), log_det(), inverse_dk()
    */
   LAPLACE_HD void inverse(const double* theta, double* m, [[maybe_unused]] double* w) const { fill(theta, -2.0, m); }
@@ -104,14 +91,11 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \brief Evaluates the packed lower Cholesky factor \f$L(\theta)\f$.
    *
    * Computes \f$L_{ii} = e^{\theta_i}\f$ on the diagonal and \f$L_{ij} = 0\f$ for \f$i \ne j\f$, satisfying \f$M = L L^\top\f$.
+   * Maximum error 0.59 ulpN (gcc and CUDA); test bound 1 ulpN.
    *
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
-   *
-   * \par Measured accuracy
-   * Maximum error 0.59 ulpN (gcc) / 0.59 ulpN (CUDA); test bound 1.0 ulpN.
-   *
    * \see matrix(), inverse(), log_det(), cholesky_dk()
    */
   LAPLACE_HD void cholesky(const double* theta, double* l, [[maybe_unused]] double* w) const { fill(theta, 1.0, l); }
@@ -120,18 +104,12 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \ingroup pdmat
    * \brief Evaluates the log-determinant \f$\log \det M(\theta)\f$.
    *
-   * Computes:
-   * \f[
-   * \log \det M(\theta) = 2 \sum_{i=0}^{p-1} \theta_i
-   * \f]
+   * Computes \f$\log \det M(\theta) = 2 \sum_{i=0}^{p-1} \theta_i\f$.
+   * Maximum error 0.45 ulp (gcc and CUDA); test bound 1 ulp.
    *
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return Log-determinant of \f$M(\theta)\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error 0.45 ulp (gcc) / 0.45 ulp (CUDA); test bound 1.0 ulp.
-   *
    * \see matrix(), log_det_dk()
    */
   LAPLACE_HD double log_det(const double* theta, [[maybe_unused]] double* w) const {
@@ -144,11 +122,9 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$M(\theta)\f$ of order \f$K\f$ along parameter index tuple \c idx.
    *
-   * For a pure tuple with \f$i_1 = \dots = i_K = i\f$:
-   * \f[
-   * \frac{\partial^K M_{ii}}{\partial\theta_i^K} = 2^K e^{2\theta_i}
-   * \f]
-   * and all other entries are zero.
+   * For a pure tuple \f$i_1 = \dots = i_K = i\f$, writes \f$\frac{\partial^K M_{ii}}{\partial\theta_i^K} = 2^K e^{2\theta_i}\f$
+   * and zero elsewhere; mixed tuples leave \p m untouched and return \c false.
+   * Maximum error over orders 1–6: 0.52 ulpN (gcc and CUDA); test bound 1 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
@@ -156,10 +132,6 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if computed; \c false and buffer left untouched if \c idx contains mixed indices.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 0.52 ulpN (gcc) / 0.52 ulpN (CUDA); test bound 1.0 ulpN.
-   *
    * \see matrix(), pdmat_orders::matrix_d1()
    */
   template <int K>
@@ -170,17 +142,14 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$\log \det M(\theta)\f$ of order \f$K\f$ along parameter index tuple \c idx.
    *
-   * For \f$K = 1\f$, returns \f$2.0\f$; for \f$K \ge 2\f$, returns \f$0.0\f$.
+   * Returns \f$2.0\f$ for \f$K = 1\f$ and \f$0.0\f$ for \f$K \ge 2\f$.
+   * Maximum error over orders 1–6: 0.45 ulp (gcc and CUDA); test bound 1 ulp.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return Value of the derivative, or \f$0.0\f$ if \f$K \ge 2\f$ or \c idx is mixed.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 0.45 ulp (gcc) / 0.45 ulp (CUDA); test bound 1.0 ulp.
-   *
    * \see log_det(), pdmat_orders::log_det_d1()
    */
   template <int K>
@@ -191,11 +160,9 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$M^{-1}(\theta)\f$ of order \f$K\f$ along parameter index tuple \c idx.
    *
-   * For a pure tuple with \f$i_1 = \dots = i_K = i\f$:
-   * \f[
-   * \frac{\partial^K M^{-1}_{ii}}{\partial\theta_i^K} = (-2)^K e^{-2\theta_i}
-   * \f]
-   * and all other entries are zero.
+   * For a pure tuple \f$i_1 = \dots = i_K = i\f$, writes \f$\frac{\partial^K M^{-1}_{ii}}{\partial\theta_i^K} = (-2)^K e^{-2\theta_i}\f$
+   * and zero elsewhere; mixed tuples leave \p m untouched and return \c false.
+   * Maximum error over orders 1–6: 0.89 ulpN on gcc and 0.66 ulpN on CUDA; test bound 2 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
@@ -203,10 +170,6 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if computed; \c false and buffer left untouched if \c idx contains mixed indices.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 0.89 ulpN (gcc) / 0.66 ulpN (CUDA); test bounds 1.0 to 2.0 ulpN.
-   *
    * \see inverse(), pdmat_orders::inverse_d1()
    */
   template <int K>
@@ -217,11 +180,9 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order \f$K\f$ along parameter index tuple \c idx.
    *
-   * For a pure tuple with \f$i_1 = \dots = i_K = i\f$:
-   * \f[
-   * \frac{\partial^K L_{ii}}{\partial\theta_i^K} = e^{\theta_i}
-   * \f]
-   * and all other entries are zero.
+   * For a pure tuple \f$i_1 = \dots = i_K = i\f$, writes \f$\frac{\partial^K L_{ii}}{\partial\theta_i^K} = e^{\theta_i}\f$
+   * and zero elsewhere; mixed tuples leave \p l untouched and return \c false.
+   * Maximum error over orders 1–6: 0.59 ulpN (gcc and CUDA); test bound 1 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p\f$ parameters \f$\theta_i\f$.
@@ -229,10 +190,6 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if computed; \c false and buffer left untouched if \c idx contains mixed indices.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 0.59 ulpN (gcc) / 0.59 ulpN (CUDA); test bound 1.0 ulpN.
-   *
    * \see cholesky(), pdmat_orders::cholesky_d1()
    */
   template <int K>

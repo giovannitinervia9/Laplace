@@ -31,6 +31,8 @@ Unless stated otherwise, timings are in ns per call. The builds are the CPU
 build (Kokkos Serial + OpenMP, gcc 14.2 of Rtools45), an MSVC 14.44 host build,
 and the CUDA build (MSVC + nvcc, CUDA 13.1, sm_89) on an RTX 4070 SUPER.
 
+**Reference files and measuring tools.** The reference scripts under `tools/reference/` are run in isolated mode with `python -I` (Python 3.13 and mpmath 1.3.0 as of 2026-11-11; mpmath by Johansson and others), and a reference file has the layout of, for example, `tests/data/reference/Phi.csv`. The function under test is evaluated over a reference file by `bench::eval_kernel` in `benchmarks/measure.hpp`, inside a Kokkos kernel. The same header defines `bench::ulp_of(a)`, the unit in the last place of a, and `bench::error_in(y, hi, lo, s)`, the error ((y - hi) - lo) in units of the scale s; points that cannot be scored are counted in `n_bad`, and a summary metric such as `max_ulp` or `max_ulp1` is taken over the N - n_bad points, where N - n_bad > 0. The tests also check the boundary and special values: arguments outside the domain (such as x <= 0 for functions defined on (0, inf)) and the limits (for instance log K_nu(x) tends to -inf and the derivative of log K_nu(x) in x tends to -1.0 as x tends to inf).
+
 ## exp and log: fdlibm-style own versions against the platforms
 
 **What was compared.** `laplace::math::platform::{exp,log}` (Kokkos, which
@@ -112,6 +114,8 @@ costs about 28 ns per exp or log on one thread, more than a whole Gaussian
 log-density; if profiling of the CPU kernels shows exp and log dominating, the
 own versions (4-6 ns, error up to 1.0 ulp) or another libm come back into
 question.
+
+**Details of the own exp and log.** In exp, ln 2 is split into a high part with trailing zeros, ln2_hi = 6.93147180369123816490e-1, and a low part, ln2_lo = 1.90821492927058770002e-10, and the reduced argument is r = (x - k ln2_hi) - k ln2_lo, so that forming x - k ln 2 does not cancel. On |r| <= ln(2)/2, with t = r^2, R(t) = 2 + t (P1 + P2 t + ... + P5 t^4) and c = r - t (P1 + t (P2 + t (P3 + t (P4 + t P5)))), the exponential is e^r = 1 + 2r/(2 - c), with P1 = 1.66666666666666019037e-1, P2 = -2.77777777770155933842e-3, P3 = 6.61375632143793436117e-5, P4 = -1.65339022054652515390e-6 and P5 = 4.13813679705723846039e-8. For k = 0, exp(r) = 1 - ((r c)/(c - 2) - r). For k != 0 the result is scaled by 2^k, built directly in the IEEE 754 exponent field: for k >= -1021 by 2^k itself (k = 1024 is handled separately), and for k < -1021 in two steps, 2^(k+1000) times 2^-1000, so that subnormal results are evaluated without premature underflow. In log, a subnormal input (x < 2^-1022) is multiplied by 2^54 and k is adjusted by -54. For -2^-20 <= f < 2^-20, log(1 + f) = f - R(f) with R(f) = f^2 (1/2 - f/3). Otherwise, with s = f/(2 + f), log(1 + f) = 2s + s R(s^2), where R(s^2) is a minimax polynomial of degree 7 in z = s^2 with coefficients Lg1, ..., Lg7, evaluated by separating the even powers (w = z^2) from the odd ones.
 
 ## lgamma, digamma, trigamma: platform against Boost.Math
 
@@ -200,6 +204,8 @@ Boost; polygamma of order 2 to 6 own; lgamma from Boost on every backend until
 the per-backend question is settled. `tests/math/test_special.cpp` checks each
 against mpmath inside a kernel, with the measured error plus a margin as bound
 (passes on the gcc/OpenMP and CUDA builds).
+
+**Constants and points.** The even Bernoulli numbers used in the asymptotic expansion are B_2 = 1/6, B_4 = -1/30, B_6 = 1/42, B_8 = -1/30, B_10 = 5/66, B_12 = -691/2730, B_14 = 7/6, B_16 = -3617/510, B_18 = 43867/798 and B_20 = -174611/330. The accuracy of the gamma functions in the manual is measured across log-uniform points from 2^-60 to 2^1000 and uniform values in [0, 30].
 
 ## Incomplete gamma and beta, their inverses, erfc, normal quantile
 
@@ -491,6 +497,8 @@ would bring the central region to a few ulps. The classical Mills ratio
 M(x) = (1 - Phi(x))/phi(x) = sqrt(pi/2) erfcx(x/sqrt 2) is not in the wrapper
 until something needs it.
 
+**Further details of the normal block.** The rational approximations of erfcx are used as follows. On [0, 0.5): erfcx(z) = e^(z^2) (1 - erf(z)) with erf(z) = z (Y + P(z^2)/Q(z^2)). On [0.5, 1.5), with u = z - 0.5, on [1.5, 2.5), with u = z - 1.5, and on [2.5, 4.5), with u = z - 3.5: (Y + P(u)/Q(u))/z. On [4.5, 28.0), with u = 1/z: (Y + P(u)/Q(u))/z. The ninth term of the asymptotic series is below 1e-19 for z >= 28. For x < 0, e^(x^2) is computed from the exact product a^2 = h + l (Dekker's product on the host, the FMA on the device), with a = -x, as 2 (e^h + e^h l) - erfcx(a) for a >= 0.5 and as 2 e^(a^2) - erfcx(a) for a < 0.5. In the derivatives of log Phi below t = -1, the Newton iteration starts from the asymptotic root rho = 2 (K + 1)/(1 + sqrt(1 + 4 (K + 1) w)), with K = k + 20 + min(ceil(300/x^2), 20000) steps (the cap applies to the ceil term, so K <= k + 20 + 20000; w and k are those of `include/laplace/math/normal.hpp`). The normal references agree to 2^-120 relative; the quantile references are `tests/data/reference/qnorm.csv` and `tests/data/reference/Phi_inv_logp.csv`, the latter with -l log-uniform in [2^-60, 2^1000].
+
 ## Shape derivatives of log P(a, x) and log Q(a, x), orders 1 to 6
 
 **What.** `include/laplace/math/incomplete_gamma_deriv.hpp`;
@@ -699,6 +707,8 @@ double-exponential ray remain on curvature-dominated rays; on CUDA, divergence
 between series and quadrature. own::exp/log in the quadrature: 15-20 per cent
 on gcc, open with the choice of elementary functions.
 
+**Quadrature nodes of the shape derivatives.** The nodes are tabulated in constant memory on the device, with spacing h = 1/5 on the double-exponential line and 43 or 56 positive quadrature points for inner points, 15 for the right-tail split and 65 for Gauss-Laguerre when x = 1.
+
 ## Owen's T and log F of the standard skew normal, with derivatives in (z, alpha) to order 5
 
 **What.** `include/laplace/math/owen.hpp`:
@@ -755,6 +765,8 @@ own::exp would cut the gcc cost (the choice of elementary functions is open);
 log_sn_cdf on CUDA (121 ns against 25 for owens_t) is probably divergence
 between regions, not profiled.
 
+**Lower tail quadrature.** In the representation of the lower tail the interval length is at most y + D, the increase of t is at most 20 per step, up to t = 60, and the rule uses up to 96 nodes.
+
 ## Student t distribution function with real nu: log T_nu(z) and its derivatives in (z, nu) to order 5
 
 **What.** `include/laplace/math/student.hpp`:
@@ -808,6 +820,8 @@ builds.
 **Open.** Speed (about 35 nodes per call, each with about 4 transcendentals and
 a 21-coefficient polynomial exp and log; the region switch calls beta_inc,
 0.5 us); nu below 2^-4 is not covered by the references.
+
+**Nodes and conditioning.** The nodes and weights of the quadrature rules are written by mpmath at 200 bits. One double-exponential rule has step h = 0.25, scale sigma = 2/(nu + 1) and alpha = 0.75 (node table written by mpmath at 200 bits); a second has h = 0.25, sigma = 1/(nu + 1) and alpha = 0.75, from the same node table. At large nu the fifth derivative of log T_nu(z) in z at z = 0 is about 2000 times smaller than its terms, and the third derivative has a zero near nu = 6.
 
 ## Von Mises Bessel functions: log I0, A = I1/I0 and its inverse, derivatives to order 6
 
@@ -895,6 +909,8 @@ double-double code on the device must use the intrinsics of
 `detail/double_double.hpp`; the `two_prod` in `normal.hpp` is still the
 contractible form.
 
+**Degrees and term counts.** log I0 is evaluated in three ranges. For k < 7.75, I0(k) = 1 + a P(a) with a = k^2/4 and P a polynomial of degree 14. For 7.75 <= k < 500.0, I0(k) = e^k P(u)/sqrt(k) with u = 1/k and P a polynomial of degree 21 in u. For 500.0 <= k < 1e308 the same asymptotic form is used with a polynomial of degree 4 in u = 1/k. The power series of the ratio for k < 0.25 is A(k) = sum_(n=0..25) a_n k^(2n+1). The compensated asymptotic series for k >= 30.0 is A(k) ~ sum_(n=0..59) q_n k^-n, with the derivative sums S_M(u) = sum_(n=1..59) q_n n (n + 1) ... (n + M - 1) u^n. For the inverse ratio, below kappa = 0.25 the power series is K^(n)(A(kappa)) = kappa^p sum_(m=0..23) g_(n,m) kappa^(2m), and from kappa = 30.0 the normalized asymptotic series is K^(n)(A(kappa)) = n! 2^n kappa^(n+1) (1 + sum_(m=1..45) e_(n,m) kappa^-m).
+
 ## The ratios I_j(k)/I_0(k) of the von Mises distribution function
 
 **What.** `bessel_i_ratios(k, m, out)` in `include/laplace/math/bessel_i.hpp`:
@@ -970,6 +986,8 @@ contraction would cost at most an ulp. `lambda_of` in `ibeta_expansions.hpp`
 does rely on the exact identity, but ibeta_hard on CUDA matches the CPU to the
 digit (1325 ulp, ulpL 18.83 on both), and the general set has the same mean
 and ulpL (12.9 against 12.7). Left as they are.
+
+**Starting value.** The backward recurrence starts from y_(n0+1) = 0 and y_(n0) = 1e-280.
 
 ## log K_nu(x) for real order and its derivatives in x to order 7
 
@@ -1060,6 +1078,8 @@ the double-double region (Steed's fraction needs about 200/x steps) is the
 price of the one-ulp derivatives at moderate x; the pseudo-Huber families sit
 there (nu = 0..4, x = sqrt(nu_ph)).
 
+**Scaling in the recurrences.** The running product of the value is kept in a single double precision accumulator and rescaled when it exceeds 1e280, to prevent overflow. In the derivatives in the argument, the recurrence of 2n + 4 steps (n being the step count, in double precision) is rescaled by 2^-500 when |Q_1| > 2^500.
+
 ## Faa di Bruno's formula and the partial Bell polynomials to order 7
 
 **What.** `include/laplace/math/faa_di_bruno.hpp`: `bell_partial(n, k, g)`, the
@@ -1104,6 +1124,17 @@ builds.
 
 **Open.** The multivariate assembly (mixed derivatives through several links)
 is written with the link layer, where its shape is known.
+
+**Explicit formulas.** Writing f_k = f^(k)(g(x)) and g_m = g^(m)(x), the derivatives of f(g(x)) of orders 1 to 7 are:
+- N = 1: f_1 g_1.
+- N = 2: f_1 g_2 + f_2 g_1^2.
+- N = 3: f_1 g_3 + 3 f_2 g_1 g_2 + f_3 g_1^3.
+- N = 4: f_1 g_4 + f_2 (4 g_1 g_3 + 3 g_2^2) + 6 f_3 g_1^2 g_2 + f_4 g_1^4.
+- N = 5: f_1 g_5 + f_2 (5 g_1 g_4 + 10 g_2 g_3) + f_3 (10 g_1^2 g_3 + 15 g_1 g_2^2) + 10 f_4 g_1^3 g_2 + f_5 g_1^5.
+- N = 6: f_1 g_6 + f_2 (6 g_1 g_5 + 15 g_2 g_4 + 10 g_3^2) + f_3 (15 g_1^2 g_4 + 60 g_1 g_2 g_3 + 15 g_2^3) + f_4 (20 g_1^3 g_3 + 45 g_1^2 g_2^2) + 15 f_5 g_1^4 g_2 + f_6 g_1^6.
+- N = 7: f_1 g_7 + f_2 (7 g_1 g_6 + 21 g_2 g_5 + 35 g_3 g_4) + f_3 (21 g_1^2 g_5 + 105 g_1 g_2 g_4 + 70 g_1 g_3^2 + 105 g_2^2 g_3) + f_4 (35 g_1^3 g_4 + 210 g_1^2 g_2 g_3 + 105 g_1 g_2^3) + f_5 (35 g_1^4 g_3 + 105 g_1^3 g_2^2) + 21 f_6 g_1^5 g_2 + f_7 g_1^7.
+
+Outside the triangular range of valid pairs the Bell polynomial returns 0.0; this is tested on the out-of-range pairs (3, 4) with B_(3,4) = 0.0, (1, 9), (2, -7), (0, 9), (8, 1) and (0, 0). The expected values of the composition test are exact on the double-precision inputs, generated by composing the truncated Taylor series F(t) = sum_(k=1..N) f_k t^k/k! and G(e) = sum_(j=1..N) g_j e^j/j!: the coefficient of e^N in F(G(e)), multiplied by N!, is the exact composite derivative of order N, independently of the library's Bell polynomials.
 
 ## Quadrature rules for kernels: double-exponential, Gauss-Kronrod, panels, fixed Gauss
 
@@ -1182,6 +1213,8 @@ on both builds.
 to a singular end (beta with a small exponent goes to tanh-sinh); the choice of
 rule, centre and scale for each integral is the caller's, decided when the
 distributions are written.
+
+**Details of the rules.** Beyond |t| > 6.8 the transformed nodes leave the IEEE 754 double-precision range. The first estimate is evaluated at step h = 1/2 over k in [-K, K] with K = floor(6.8/0.5) = 13 (27 nodes), keeping one step beyond the last significant node; each halving (at most 8, so down to h = 2^-9 = 1/512) evaluates only the odd multiples of h. Gauss-Kronrod uses Boost's constants (`boost/math/quadrature/gauss_kronrod_quad.hpp`): on each subinterval [u, v] a 15-point Kronrod estimate K and an embedded 7-point Gauss-Legendre estimate G are formed with 15 function evaluations, the local error estimate is |(K - G) (v - u)/2|, the subintervals are stored in flat arrays capped at 64 intervals, and at each iteration the subinterval with the largest error is bisected at its midpoint m = (u + v)/2. The nodes of the fixed Gauss rules are written by `tools/reference/quadrature.py nodes`. In `tests/math/test_quadrature.cpp` the values 4e-16 and 1e-14 are test tolerances (`doctest::Approx` epsilon), not measured errors: Gauss-Legendre with N = 16 and 64 (N = 32 is untested) is tested on the monomials x^k on [0, 1] for k in {0, 1, 7, 31} with 4e-16, Gauss-Hermite 32 on x^(2j) e^(-x^2) for j in {0, 1, 2, 3} with 1e-14, and Gauss-Laguerre 32 on x^k e^(-x) for k in {0, ..., 9} with 1e-14.
 
 ## Piecewise Chebyshev expansions of the derivatives of log Phi on [-1, 4)
 
@@ -1569,6 +1602,16 @@ errors are in the derivatives of order 5-6 near their zeros.
 builds, with bounds of half again the measured errors per map, and exactly
 for the constant derivatives, the identity, inversion and the domain.
 
+**Closed forms of the derivatives.** U, D, T, S, s, r, t and w in the lists below are the intermediate quantities of the corresponding function in `include/laplace/bijector/scalar.hpp`.
+- Logit: h^(k)(u) = U (A_k(U) + D B_k(U)), with h'(u) = U, h''(u) = U D, h^(3)(u) = U (1 - 6U), h^(4)(u) = U D (1 - 12U), h^(5)(u) = U (1 - 30U + 120U^2) and h^(6)(u) = U D (1 - 60U + 360U^2).
+- Probit: Q_1(z) = 1, Q_2(z) = z, Q_3(z) = 1 + 2z^2, Q_4(z) = z (7 + 6z^2), Q_5(z) = 7 + 46z^2 + 24z^4, Q_6(z) = z (127 + 326z^2 + 120z^4); R_1(z) = z, R_2(z) = 1 + z^2, R_3(z) = z (4 + 2z^2), R_4(z) = 4 + 18z^2 + 6z^4, R_5(z) = z (52 + 96z^2 + 24z^4), R_6(z) = 52 + 548z^2 + 600z^4 + 120z^6. The derivatives of the inverse probit are h'(u) = phi(u), h''(u) = -u phi(u), h^(3)(u) = (u^2 - 1) phi(u), h^(4)(u) = u (3 - u^2) phi(u), h^(5)(u) = (3 - 6u^2 + u^4) phi(u) and h^(6)(u) = u (-15 + 10u^2 - u^4) phi(u).
+- Cauchit: T_1(z) = 1 + z^2, T_2(z) = 2z (1 + z^2), T_3(z) = 2 + 8z^2 + 6z^4, T_4(z) = z (16 + 40z^2 + 24z^4), T_5(z) = 16 + 136z^2 + 240z^4 + 120z^6, T_6(z) = z (272 + 1232z^2 + 1680z^4 + 720z^6); W_0(s) = 1, W_1(s) = -2s, W_2(s) = 8s^2 - 2 = 6 - 8r^2, W_3(s) = s (24 - 48s^2) = s (48r^2 - 24), W_4(s) = 24 - 288s^2 + 384s^4 = 120 - 480r^2 + 384r^4, W_5(s) = s (-720 + 3840s^2 - 3840s^4) = s (-720 + 3840r^2 - 3840r^4); X_0(s) = s, X_1(s) = 1 - 2s^2 = 2r^2 - 1, X_2(s) = s (8s^2 - 6) = s (2 - 8r^2), X_3(s) = -6 + 48s^2 - 48s^4 = -6 + 48r^2 - 48r^4, X_4(s) = s (120 - 480s^2 + 384s^4) = s (24 - 288r^2 + 384r^4), X_5(s) = 120 - 2160s^2 + 5760s^4 - 3840s^6 = -120 + 2160r^2 - 5760r^4 + 3840r^6.
+- Inverse and inverse square: c_0 = 1, c_1 = -1/2, c_2 = 3/4, c_3 = -15/8, c_4 = 105/16, c_5 = -945/32, c_6 = 10395/64.
+- Square root: d_0 = 1, d_1 = 1/2, d_2 = -1/4, d_3 = 3/8, d_4 = -15/16, d_5 = 105/32, d_6 = -945/64.
+- Inverse hyperbolic tangent: P_1 = 1, P_2 = -2T, P_3 = 6T^2 - 2 = 4 - 6S, P_4 = T (16 - 24T^2) = T (24S - 8), P_5 = 16 - 120T^2 + 120T^4 = 16 - 120S + 120S^2, P_6 = T (-272 + 960T^2 - 720T^4) = T (-32 + 480S - 720S^2).
+- Inverse hyperbolic sine: V_0 = 1, V_1 = -s, V_2 = 3s^2 - 1 = 2 - 3r^2, V_3 = s (9 - 15s^2) = s (15r^2 - 6), V_4 = 9 - 90s^2 + 105s^4 = 24 - 120r^2 + 105r^4, V_5 = s (-225 + 1050s^2 - 945s^4) = s (-120 + 840r^2 - 945r^4).
+- Complementary log-log: C_1(t) = 1, C_2(t) = -(1 + t), C_3(t) = 2 + 3t + 2t^2, C_4(t) = -(6 + 12t + 11t^2 + 6t^3), C_5(t) = 24 + 60t + 70t^2 + 50t^3 + 24t^4, C_6(t) = -(120 + 360t + 510t^2 + 450t^3 + 274t^4 + 120t^5); E_1(t) = -(1 + t), E_2(t) = 1 + t + t^2, E_3(t) = -(2 + 3t + 2t^2 + 2t^3), E_4(t) = 6 + 12t + 11t^2 + 6t^3 + 6t^4, E_5(t) = -(24 + 60t + 70t^2 + 50t^3 + 24t^4 + 24t^5), E_6(t) = 120 + 360t + 510t^2 + 450t^3 + 274t^4 + 120t^5 + 120t^6; P_1(w) = 1, P_2(w) = 1 - w = -expm1(u) (evaluated through expm1 to avoid the cancellation near u = 0), P_3(w) = 1 - 3w + w^2, P_4(w) = 1 - 7w + 6w^2 - w^3, P_5(w) = 1 - 15w + 25w^2 - 10w^3 + w^4, P_6(w) = 1 - 31w + 90w^2 - 65w^3 + 15w^4 - w^5.
+
 ## The derivative of order 6 of log Phi
 
 **What.** `log_Phi_d6(t)` = d^6 log Phi(t) / dt^6, for the truncation term
@@ -1677,6 +1720,8 @@ builds, at a few tens of ns per call.
 `tests/math/test_log1prel.cpp` on both builds, with bounds of half again the
 measured errors and exact checks at 0 (phi^(k)(0) = 1/(k + 1),
 psi^(k)(0) = (-1)^k k!/(k + 1)), at the limits and outside the domain.
+
+**Stopping rules and reference construction.** The series of exprel are summed until a term is at most 4 eps of the partial sum, with iteration cap 200 and eps = 2^-52 = 2.22e-16; the second series of exprel uses the same criterion and cap. For x >= 700.0 the recurrence evaluates the scaled quantities phi^(j)(x) e^-700 with e^(x - 700), where x - 700 is exact by Sterbenz's lemma and e^(x - 700) does not overflow; the final multiplication by e^700 overflows only when the exact result exceeds `DBL_MAX`, from x = 716.5 (approximately) onward. The series of log1prel terminates when |tau_m| <= 4 eps |sum|, with iteration cap 300. The exprel references use the integral of t^k e^(x t) over [0, 1] evaluated by `mpmath.quad` (tanh-sinh quadrature on subintervals of [0, 1] with clustered breakpoints at both ends) at 200 and 300 bits, and agree to 2^-100 relative. The log1prel references use the closed form psi^(k)(x) = (-1)^k k! x^-(k+1) B_k(1 + x), with B_k(a) = log a + sum_(j=0..k-1) C(k, j) (-1)^(k-j) (a^(j-k) - 1)/(j - k), evaluated at P = 200 and P + 100 bits with extra precision (k + 1) log2(1/|x|) + 64 bits near x = 0 to overcome the cancellation, verified to agree to 2^-100 relative and checked against `mpmath.quad`.
 
 ## Scalar bijectors with parameters, and the speed of every scalar bijector
 
@@ -1824,6 +1869,8 @@ inversion, the distances, the construction functions and the kinks.
 **Open.** The order-6 partials of Yeo-Johnson (359 ns on gcc, 99 on CUDA) could
 share the derivatives of log1prel as Box-Cox now does; the largest errors
 listed above were not reduced. (Both taken up in the next section.)
+
+**Bounded map.** Evaluating g(v) as log(p/q) rather than log p - log q avoids a cancellation of 18 eps near the midpoint.
 
 ## Refinements of the Box-Cox, Yeo-Johnson and softplus bijectors
 
@@ -2012,6 +2059,8 @@ build) with bounds of half again the measured maxima, exact values at a = 1
 a = 1 and 10, NaN for a <= 0 and 0 at infinity. On the CUDA build (RTX 4070 SUPER)
 the maxima are 12.0, 13.4, 10.8, 13.4, 11.7, 14.8, 16.1 ulp (orders 0-6), all
 below a = 1, within the test bounds.
+
+**Stopping tolerance of the recurrence.** The summation in m terminates when a term is at most 2^-54 of the partial sum (iteration cap 80).
 
 ## Mixed partial derivatives of log P(a, x) and log Q(a, x), total orders 1 to 6
 
@@ -2374,6 +2423,8 @@ and the generic lookup gave wrong positions at run time on the device (the
 expected information came out 0 and a sum ran for minutes); found by this
 test and repaired (LAPLACE_HD).
 
+**Stopping rules of the generic routes.** The bracket of a continuous quantile is bounded in at most 64 steps, which allows roots within 1e-300 of a boundary to converge in tens of steps. The iteration terminates when Newton's step or the bracket width falls below 4 eps |y| or when the bracket closes, with an iteration cap of 200 steps. The error of a continuous quantile is measured in units of the change of the quantile caused by one ulp of y or of p: with y the exact quantile (the distribution's closed form), q the computed one, f the density and eps = 2^-52, the measure is |q - y| / max(|y| eps, min(p, 1 - p) eps / f(y)). The summation of a discrete cdf stops when it reaches a support boundary, or when the geometric tail bound t r/(1 - r) (r < 1 the ratio of consecutive terms, t the current term) drops below 2^-60 of the partial sum; the bound holds for distributions with log-concave probability masses, and the summation ends after at most 2^26 terms per direction if convergence is not attained. In the expectations, once the sweep is more than 2 scale() + 2 away from the centre and the mass decreases (r = p(y)/p(y - 1) < 1), the summation stops when the geometric bound on the remaining terms, (|t_y| + |t_(y-1)|)/(1 - r), is at most 2^-60 of the sum of |t|; two successive terms are used so that a zero of h does not trigger a premature stop. The sum ends after at most 2^26 terms per direction.
+
 ## Partial derivatives of log P(a, a c) and log Q(a, a c) at fixed ratio, and the Poisson cdf
 
 2026-11-12 (evening). `include/laplace/math/incomplete_gamma_ratio.hpp`: for
@@ -2532,6 +2583,8 @@ composition is the fallback below a = 2 and the candidate `fallback` of the
 bench). For the Poisson cdf, the exponential form of the density ratio for
 a >= 2, x >= a/2 and Temme from a = 50, by the measurements above; to confirm
 on the CUDA build.
+
+**Earlier measurements at fixed ratio.** On the points at integer a (from 10 to 1000, x within 4 sqrt(a) of a, 213 points; error in ulp of the component's largest value over the x of the same a), the order 6 error is at most 1.4e3 ulp for log P and 1.5e3 ulp for log Q; the test bounds for orders 1 to 6 were 7.1, 19, 170, 700, 2310, 6200 for P and 6.0, 21.5, 109, 480, 1080, 2180 for Q. Before the repair, the maximum errors of `log_gamma_p_ratio_mixed_d5`, `log_gamma_p_ratio_mixed_d6`, `log_gamma_q_ratio_mixed_d5` and `log_gamma_q_ratio_mixed_d6` (gcc/OpenMP; CUDA not yet measured), in max_j |a^(n-j) c^j v_j| / (a^(n-j) c^j) with n the order, were 9.0e3, 7.3e4, 5.8e4 and 6.2e4 ulp, with test bounds of 13500, 110000, 87000 and 94000 ulp. They were replaced by the post-repair figures 2050 / 6300, 2638 / 3960, 1701 / 2560 and 1892 / 2840 ulp.
 
 ## Tails of the log F derivatives of gaussian1 and laplace1
 
@@ -2975,6 +3028,8 @@ are not written yet.
 **Chosen.** This version. Tested in `tests/distrib/test_pilot.cpp` on gcc and
 CUDA.
 
+**Regularity of the Laplace log-density.** The log-density log f(y; mu, sigma) = -log(2 sigma) - |y - mu|/sigma is C^0 in mu at mu = y; its first derivative in mu has a step discontinuity and its pointwise second derivative is zero almost everywhere. The second derivative in mu carries a Dirac point mass at the kink mu = y, so the pointwise expectation -E[d^2/dmu^2 log f] vanishes and does not equal the Fisher information, which is defined by the variance of the score: I_mumu = E[(d/dmu log f)^2] = 1/sigma^2. The distribution function log F(y) integrates the density, so it is one order smoother: it is C^1 at mu = y, and its second derivative in mu jumps by 2/sigma^2 at that point.
+
 ## Derivatives of the log-density in y and mixed (y, theta)
 
 **What.** For the continuous distributions of the pilot (gaussian1, laplace1,
@@ -3131,6 +3186,8 @@ and CUDA (references, differences of order K - 1 within 0.3 of their
 tolerance, the structural zero counts), bounds 1.5 times the larger measured
 error.
 
+**Derivatives of the partial correlations.** The derivatives of sech u are sech^(k) u = sech(u) P_k with T = tanh u and S = 1 - T^2 = sech^2 u (evaluated in T^2 for T^2 < 1/2 and in S beyond): P_1 = -T; P_2 = 2T^2 - 1 = 1 - 2S; P_3 = T (5 - 6T^2) = T (6S - 1); P_4 = 5 - 28T^2 + 24T^4 = 1 - 20S + 24S^2; P_5 = T (-61 + 180T^2 - 120T^4) = T (-1 + 60S - 120S^2); P_6 = -61 + 662T^2 - 1320T^4 + 720T^6 = 1 - 182S + 840S^2 - 720S^3.
+
 ## The matrix logarithm bijector
 
 **What.** `include/laplace/bijector/matrix_log.hpp` (2026-11-13,
@@ -3222,6 +3279,8 @@ the scratch grows like p^4 (23360 doubles at p = 4).
 
 **Chosen.** This version; tested in `tests/bijector/test_coupled.cpp` on gcc
 and CUDA, bounds 1.5 times the larger measured error.
+
+**Layout of the truncated Taylor arithmetic.** An element represents one p x p matrix per monomial prod_v e_v^(t_v) with t_v <= m_v, indexed in mixed radix, so that its total size is prod_v (m_v + 1).
 
 ## Univariate distributions, batch 1: the location-scale families in closed form
 
@@ -3340,6 +3399,8 @@ central branch at |z| between 13 and 22, not in the tail route; whether that is
 `log_Phi_dK` at a large positive argument or the composition is not located.
 The gumbel's log(1 - F) at 394 ulp is twenty times its log F at 19.1, and the
 choice between the Laguerre route and the z-polynomials there was never
+**Logistic expected information.** The identity used in `expected_info` of `include/laplace/distrib/logistic.hpp` is verified symbolically against finite differences in `tools/reference/cauchy_logistic_forms.py`.
+
 ## The chain rule for two variables in two variables, to order 6
 
 **What.** `include/laplace/math/chain_pair.hpp`:
@@ -3414,6 +3475,8 @@ its counters do not collide today.
 
 **Chosen.** The six distributions as written, with the bounds of each test at
 about 1.5 times the measured maximum, on gcc and on CUDA.
+
+**State size and reference.** For total order K the required state is sum_(n=0..K) (n + 1) C(K - n + 2, 2) doubles, which is 210 doubles at K = 6. The reference values are computed at 300 bits of precision with mpmath (`tools/reference/chain_pair.py`, written to `tests/data/reference/chain_pair.csv`). The order 6 maximum of 26.2 ulp comes from a single point of one of the two maps, at which the arguments of the outer function span a very wide range; that same point is the worst at orders 1 to 4.
 
 ## Where the log F derivatives of the gaussians and of the gumbel lose their digits
 
@@ -4388,6 +4451,8 @@ more product per row.
 
 **Chosen.** As written; test bounds 1.5 times the measured maxima.
 
+**Exact reduction of the argument.** For harmonic j, the exact reduction route computes the product j u as an exact double-double split p = p_hi + p_lo, using `Kokkos::fma` on the device and Dekker's two-product split on the host. Rounding to the nearest integer is done by adding and subtracting the constant C = 1.5 x 2^52 = 6755399441055744.0 (ties to even, exact for |p| < 2^51): round(p_hi) = (p_hi + C) - C. The reduced turns r = j u - round(j u) and half-turns r_h = (j u/2) - round(j u/2) are formed as r = (p_hi - round(p_hi)) + p_lo and r_h = (0.5 p_hi - round(0.5 p_hi)) + 0.5 p_lo.
+
 ## The Legendre basis
 
 **What.** `legendre_basis` and `make_legendre_basis`
@@ -4451,6 +4516,8 @@ D^2 (D^2 + nu^2), (D + 1)^3 and D^2 + D + 4.25.
 roots.
 
 **Chosen.** As written.
+
+**Details of the root finding and of the tests.** The Aberth-Ehrlich iteration finds the m roots simultaneously in complex arithmetic, initialized on a circle of radius s and updated by simultaneous Newton steps with a repulsion between the approximations, dz_k = (P(z_k)/P'(z_k)) / (1 - (P(z_k)/P'(z_k)) sum_(j != k) 1/(z_k - z_j)). It stops when the maximum step satisfies max_k |dz_k| <= 4 eps s (eps = 2.22e-16) or after 500 sweeps. A multiple root of multiplicity mu is conditioned to eps^(1/mu) s only (about 6e-6 s for mu = 3), which requires a grouping tolerance such as 1e-4 s to recover the true multiplicity. The coefficients c_j reconstructed from the grouped roots are checked against w_j: `differential_operator_from_weights` throws `std::invalid_argument` if the order does not match m (conjugate roots could not be paired) or if, for any j in {0, ..., m - 1}, |c_j - w_j| > 1e-6 max(max_k |w_k|, s^(m-j)). In the tests, D^m with m in {1, 2, 3} on a uniform clamped cubic B-spline basis gives `operator_penalty` equal bit for bit to `basis.cross_gram(m, m, ...)` (S[i] == G[i]). On a full Fourier period [0, omega] with omega = 366.0, nu = 2 pi/omega and 6 harmonics (K = 13), the penalty matrix of the harmonic operator L = D prod_(h=1..H) (D^2 + (h nu)^2), H in {1, 2}, is diagonal; for a column i > 0 of harmonic j = floor((i + 1)/2) the entry is |P(i j nu)|^2 omega/2 = (j nu)^2 prod_(h=1..H) ((h nu)^2 - (j nu)^2)^2 omega/2, and the computed matrix agrees with it within 64 eps max_(a,b) |S_ab|. On a Legendre basis of degree 8, D^2 applied to the polynomials of degree < 2 (columns 0 and 1) gives entries bounded by |S_ij| <= 1e-13 max |S|. On a clamped cubic B-spline basis, D^3 applied to the quadratics written by Marsden's identity gives quadratic penalties below 1e-13 of a random vector's penalty for the constant and linear functions, and below 1e-12 for the quadratic functions. For the root finding from weights: a D + D^2 with a = log(2)/3 has root 0 exact, root -a within 1e-14 and coefficients reproduced within 1e-12 max(|w|, 1); D^2 (D^2 + nu^2) = D^4 + nu^2 D^2 has the double root 0 exact and the complex pair +-i nu with real part zero and imaginary part within relative error 1e-10; (D + 1)^3 has the triple root -1 grouped with real part within relative error 1e-5; (D + 0.5)^2 + 4 = D^2 + D + 4.25 has the complex pair -0.5 +- 2i within relative error 1e-13.
 
 ## Dense linear algebra: laplace::dense
 
@@ -4587,6 +4654,8 @@ a NaN in the lower triangle, a zero on a triangular diagonal; a NaN in the
 upper triangle of a symmetric input is not read) and the exceptions for
 wrong dimensions.
 
+**Cases of the dense accuracy table.** For the symmetric kind, T is the Cholesky factor of a positive definite case (or its transpose for the upper triangle) and the right-hand sides B are the matrix A of that case, evaluated over all four combinations of triangle and operation. The six symmetric cases have dimensions n in {5, ..., 60}: the Cholesky factor and the triangular solve are evaluated on the four positive definite ones, and the others are an indefinite matrix, a matrix with condition number 1e12, a matrix with a cluster of ten eigenvalues within 9e-9 and a semidefinite matrix with four zero eigenvalues. The eight rectangular cases have shapes from 1 x 20 to 40 x 25 and expected ranks 5, 5, 18, 10, 30, 1, 3 and 2 (three of them below min(m, n), and the 30 x 30 case of full rank with condition 1e12), among them a single row of ones and three rows of integers whose third row is the sum of the other two.
+
 ## Toeplitz correlation matrices: toeplitz_pdmat
 
 **What.** `toeplitz_pdmat` (`include/laplace/pdmat/toeplitz.hpp`): the p x p
@@ -4704,6 +4773,8 @@ p >= 10.
 `tests/pdmat/test_toeplitz.cpp` on gcc and CUDA, bounds 1.5 times the larger
 measured error.
 
+**Test bounds.** The bounds of `tests/pdmat/test_toeplitz.cpp` are 1.5 times the larger of the measured errors on gcc/OpenMP and CUDA, rounded up; for orders 0 to 6 they are 2, 12, 12, 190, 169, 228, 244 ulpN for M; 15, 14, 15, 14, 15, 14, 21 ulpN for M^-1; 3, 7, 8, 10, 12, 17, 17 ulpN for L; and 3, 2, 2, 4, 19, 6, 35 ulp for log det M.
+
 ## Factor-analytic matrices: factor_analytic_pdmat
 
 **What.** `factor_analytic_pdmat` (`include/laplace/pdmat/factor_analytic.hpp`):
@@ -4817,6 +4888,7 @@ derivatives of M^-1 (Giovanni, 2026-11-14). Tested in
 larger measured error, log det at d = p in a row of its own; twins: d = 0 is
 `diagonal_pdmat` bit for bit, at d = p M - Psi is `log_cholesky`'s M.
 
+**Test bounds.** The bounds of `tests/pdmat/test_factor_analytic.cpp` are 1.5 times the larger of the measured errors on gcc/OpenMP and CUDA, rounded up, for orders 0 to 6: for M, 2, 1, 1, 1, 1, 1, 1 ulpN; for M^-1, 136, 275, 543626, 13123, 545236, 23109, 545993 ulpN; for log det M with d < p, 4, 5, 6, 21, 110, 539, 1390 ulp; for log det M at d = p, 5, 161, 4970, 284872, 314404, 1507089, 983602 ulp. The difference check against the derivative of order K - 1 uses tolerance 1e-6 (1e-5 for log det M at d = p) relative to the sum of the scales of orders K and K - 1.
 
 ## Reduced-rank matrices: reduced_rank_psdmat
 

@@ -230,24 +230,15 @@ LAPLACE_HD void derivs_upto(int n, double x, double* out) {
  * \ingroup log1prel
  * \brief Relative logarithm function, \f$\psi(x) = \log(1 + x)/x\f$.
  *
- * Computes the relative logarithm function:
- * \f[
- * \psi(x) = \frac{\log(1 + x)}{x} = \int_0^1 \frac{\mathrm{d}t}{1 + x t}
- * \f]
- * with \f$\psi(0) = 1\f$.
+ * Computes \f$\psi(x) = \log(1 + x) / x\f$ for \f$x \ne 0\f$ with \f$\psi(0) = 1\f$.
  *
  * \param x Real argument \f$x > -1\f$.
  * \return The value of \f$\psi(x)\f$.
  *
- * \par Domain and special values
- * - \f$x > -1\f$: standard domain.
- * - \f$x = 0\f$: returns \f$1.0\f$.
- * - \f$x = -1\f$: returns \f$+\infty\f$.
- * - \f$x < -1\f$, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ * Returns \f$1.0\f$ at \f$x = 0\f$ and \f$+\infty\f$ at \f$x = -1\f$; returns \f$0.0\f$ at \f$+\infty\f$ and quiet NaN for \f$x < -1\f$ or NaN (shared by all functions in \ref log1prel "Relative logarithm").
  *
- * \par Measured accuracy
- * Maximum error 1.28 ulp (gcc) / 1.28 ulp (CUDA); test bound 2.0 ulp.
+ * \par Accuracy
+ * Maximum error 1.28 ulp (gcc) and 1.28 ulp (CUDA); test bound 2.0 ulp.
  *
  * \see log1prel, log1prel_d1()
  */
@@ -263,24 +254,15 @@ LAPLACE_HD double log1prel(double x) {
  * \ingroup log1prel
  * \brief First derivative in \f$x\f$ of \f$\psi(x) = \log(1 + x)/x\f$.
  *
- * Computes the first derivative:
- * \f[
- * \psi'(x) = \frac{\mathrm{d}}{\mathrm{d}x} \psi(x) = -\int_0^1 \frac{t}{(1 + x t)^2} \, \mathrm{d}t = \frac{\frac{1}{1 + x} - \psi(x)}{x}
- * \f]
- * with \f$\psi'(0) = -1/2\f$.
+ * Computes \f$\psi'(x) = \frac{\frac{1}{1 + x} - \psi(x)}{x}\f$ for \f$x \ne 0\f$ with \f$\psi'(0) = -1/2\f$.
  *
  * \param x Real argument \f$x > -1\f$.
  * \return The value of \f$\psi'(x)\f$.
  *
- * \par Domain and special values
- * - \f$x > -1\f$: standard domain.
- * - \f$x = 0\f$: returns \f$-0.5\f$.
- * - \f$x = -1\f$: returns \f$-\infty\f$.
- * - \f$x < -1\f$, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ * Returns \f$-0.5\f$ at \f$x = 0\f$ and \f$-\infty\f$ at \f$x = -1\f$; see \ref log1prel "Relative logarithm" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 3.94 ulp (gcc) / 3.94 ulp (CUDA); test bound 6.0 ulp.
+ * \par Accuracy
+ * Maximum error 3.94 ulp (gcc) and 3.94 ulp (CUDA); test bound 6.0 ulp.
  *
  * \see log1prel, log1prel(), log1prel_d2()
  */
@@ -290,24 +272,15 @@ LAPLACE_HD double log1prel_d1(double x) { return detail_log1prel::deriv<1>(x); }
  * \ingroup log1prel
  * \brief Second derivative in \f$x\f$ of \f$\psi(x) = \log(1 + x)/x\f$.
  *
- * Computes the second derivative:
- * \f[
- * \psi''(x) = \frac{\mathrm{d}^2}{\mathrm{d}x^2} \psi(x) = 2 \int_0^1 \frac{t^2}{(1 + x t)^3} \, \mathrm{d}t = \frac{-\frac{1}{(1 + x)^2} - 2\psi'(x)}{x}
- * \f]
- * with \f$\psi''(0) = 2/3\f$.
+ * Computes \f$\psi''(x) = \frac{-\frac{1}{(1 + x)^2} - 2\psi'(x)}{x}\f$ for \f$x \ne 0\f$ with \f$\psi''(0) = 2/3\f$.
  *
  * \param x Real argument \f$x > -1\f$.
  * \return The value of \f$\psi''(x)\f$.
  *
- * \par Domain and special values
- * - \f$x > -1\f$: standard domain.
- * - \f$x = 0\f$: returns \f$2/3\f$.
- * - \f$x = -1\f$: returns \f$+\infty\f$.
- * - \f$x < -1\f$, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ * Returns \f$2/3\f$ at \f$x = 0\f$ and \f$+\infty\f$ at \f$x = -1\f$; see \ref log1prel "Relative logarithm" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 5.03 ulp (gcc) / 5.03 ulp (CUDA); test bound 7.6 ulp.
+ * \par Accuracy
+ * Maximum error 5.03 ulp (gcc) and 5.03 ulp (CUDA); test bound 7.6 ulp.
  *
  * \see log1prel, log1prel(), log1prel_d1(), log1prel_d3()
  */
@@ -317,24 +290,15 @@ LAPLACE_HD double log1prel_d2(double x) { return detail_log1prel::deriv<2>(x); }
  * \ingroup log1prel
  * \brief Third derivative in \f$x\f$ of \f$\psi(x) = \log(1 + x)/x\f$.
  *
- * Computes the third derivative:
- * \f[
- * \psi^{(3)}(x) = \frac{\mathrm{d}^3}{\mathrm{d}x^3} \psi(x) = -6 \int_0^1 \frac{t^3}{(1 + x t)^4} \, \mathrm{d}t = \frac{\frac{2}{(1 + x)^3} - 3\psi''(x)}{x}
- * \f]
- * with \f$\psi^{(3)}(0) = -3/2\f$.
+ * Computes \f$\psi^{(3)}(x) = \frac{\frac{2}{(1 + x)^3} - 3\psi''(x)}{x}\f$ for \f$x \ne 0\f$ with \f$\psi^{(3)}(0) = -3/2\f$.
  *
  * \param x Real argument \f$x > -1\f$.
  * \return The value of \f$\psi^{(3)}(x)\f$.
  *
- * \par Domain and special values
- * - \f$x > -1\f$: standard domain.
- * - \f$x = 0\f$: returns \f$-1.5\f$.
- * - \f$x = -1\f$: returns \f$-\infty\f$.
- * - \f$x < -1\f$, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ * Returns \f$-1.5\f$ at \f$x = 0\f$ and \f$-\infty\f$ at \f$x = -1\f$; see \ref log1prel "Relative logarithm" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 6.39 ulp (gcc) / 6.39 ulp (CUDA); test bound 9.6 ulp.
+ * \par Accuracy
+ * Maximum error 6.39 ulp (gcc) and 6.39 ulp (CUDA); test bound 9.6 ulp.
  *
  * \see log1prel, log1prel(), log1prel_d2(), log1prel_d4()
  */
@@ -344,24 +308,15 @@ LAPLACE_HD double log1prel_d3(double x) { return detail_log1prel::deriv<3>(x); }
  * \ingroup log1prel
  * \brief Fourth derivative in \f$x\f$ of \f$\psi(x) = \log(1 + x)/x\f$.
  *
- * Computes the fourth derivative:
- * \f[
- * \psi^{(4)}(x) = \frac{\mathrm{d}^4}{\mathrm{d}x^4} \psi(x) = 24 \int_0^1 \frac{t^4}{(1 + x t)^5} \, \mathrm{d}t = \frac{-\frac{6}{(1 + x)^4} - 4\psi^{(3)}(x)}{x}
- * \f]
- * with \f$\psi^{(4)}(0) = 24/5 = 4.8\f$.
+ * Computes \f$\psi^{(4)}(x) = \frac{-\frac{6}{(1 + x)^4} - 4\psi^{(3)}(x)}{x}\f$ for \f$x \ne 0\f$ with \f$\psi^{(4)}(0) = 24/5 = 4.8\f$.
  *
  * \param x Real argument \f$x > -1\f$.
  * \return The value of \f$\psi^{(4)}(x)\f$.
  *
- * \par Domain and special values
- * - \f$x > -1\f$: standard domain.
- * - \f$x = 0\f$: returns \f$4.8\f$.
- * - \f$x = -1\f$: returns \f$+\infty\f$.
- * - \f$x < -1\f$, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ * Returns \f$4.8\f$ at \f$x = 0\f$ and \f$+\infty\f$ at \f$x = -1\f$; see \ref log1prel "Relative logarithm" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 7.06 ulp (gcc) / 7.06 ulp (CUDA); test bound 10.6 ulp.
+ * \par Accuracy
+ * Maximum error 7.06 ulp (gcc) and 7.06 ulp (CUDA); test bound 10.6 ulp.
  *
  * \see log1prel, log1prel(), log1prel_d3(), log1prel_d5()
  */
@@ -371,24 +326,15 @@ LAPLACE_HD double log1prel_d4(double x) { return detail_log1prel::deriv<4>(x); }
  * \ingroup log1prel
  * \brief Fifth derivative in \f$x\f$ of \f$\psi(x) = \log(1 + x)/x\f$.
  *
- * Computes the fifth derivative:
- * \f[
- * \psi^{(5)}(x) = \frac{\mathrm{d}^5}{\mathrm{d}x^5} \psi(x) = -120 \int_0^1 \frac{t^5}{(1 + x t)^6} \, \mathrm{d}t = \frac{\frac{24}{(1 + x)^5} - 5\psi^{(4)}(x)}{x}
- * \f]
- * with \f$\psi^{(5)}(0) = -20.0\f$.
+ * Computes \f$\psi^{(5)}(x) = \frac{\frac{24}{(1 + x)^5} - 5\psi^{(4)}(x)}{x}\f$ for \f$x \ne 0\f$ with \f$\psi^{(5)}(0) = -20.0\f$.
  *
  * \param x Real argument \f$x > -1\f$.
  * \return The value of \f$\psi^{(5)}(x)\f$.
  *
- * \par Domain and special values
- * - \f$x > -1\f$: standard domain.
- * - \f$x = 0\f$: returns \f$-20.0\f$.
- * - \f$x = -1\f$: returns \f$-\infty\f$.
- * - \f$x < -1\f$, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ * Returns \f$-20.0\f$ at \f$x = 0\f$ and \f$-\infty\f$ at \f$x = -1\f$; see \ref log1prel "Relative logarithm" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 8.27 ulp (gcc) / 8.27 ulp (CUDA); test bound 12.4 ulp.
+ * \par Accuracy
+ * Maximum error 8.27 ulp (gcc) and 8.27 ulp (CUDA); test bound 12.4 ulp.
  *
  * \see log1prel, log1prel(), log1prel_d4(), log1prel_d6()
  */
@@ -398,24 +344,15 @@ LAPLACE_HD double log1prel_d5(double x) { return detail_log1prel::deriv<5>(x); }
  * \ingroup log1prel
  * \brief Sixth derivative in \f$x\f$ of \f$\psi(x) = \log(1 + x)/x\f$.
  *
- * Computes the sixth derivative:
- * \f[
- * \psi^{(6)}(x) = \frac{\mathrm{d}^6}{\mathrm{d}x^6} \psi(x) = 720 \int_0^1 \frac{t^6}{(1 + x t)^7} \, \mathrm{d}t = \frac{-\frac{120}{(1 + x)^6} - 6\psi^{(5)}(x)}{x}
- * \f]
- * with \f$\psi^{(6)}(0) = 720/7\f$.
+ * Computes \f$\psi^{(6)}(x) = \frac{-\frac{120}{(1 + x)^6} - 6\psi^{(5)}(x)}{x}\f$ for \f$x \ne 0\f$ with \f$\psi^{(6)}(0) = 720/7\f$.
  *
  * \param x Real argument \f$x > -1\f$.
  * \return The value of \f$\psi^{(6)}(x)\f$.
  *
- * \par Domain and special values
- * - \f$x > -1\f$: standard domain.
- * - \f$x = 0\f$: returns \f$720/7 \approx 102.857\f$.
- * - \f$x = -1\f$: returns \f$+\infty\f$.
- * - \f$x < -1\f$, or \f$x\f$ is NaN: returns quiet NaN.
- * - \f$x = +\infty\f$: returns \f$0.0\f$.
+ * Returns \f$720/7 \approx 102.857\f$ at \f$x = 0\f$ and \f$+\infty\f$ at \f$x = -1\f$; see \ref log1prel "Relative logarithm" for shared boundaries.
  *
- * \par Measured accuracy
- * Maximum error 9.60 ulp (gcc) / 9.60 ulp (CUDA); test bound 14.4 ulp.
+ * \par Accuracy
+ * Maximum error 9.60 ulp (gcc) and 9.60 ulp (CUDA); test bound 14.4 ulp.
  *
  * \see log1prel, log1prel(), log1prel_d5()
  */

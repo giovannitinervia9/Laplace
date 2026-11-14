@@ -72,8 +72,11 @@ struct poisson_distrib {
   /**
    * \ingroup distrib_poisson
    * \brief Evaluates the log-mass \f$\log p(y; \mu)\f$ using the saddle-point representation.
+   *
+   * Returns \f$-\mu\f$ at \f$y = 0\f$.
    * \param y Integer observation point \f$y \ge 0\f$.
    * \return Log-mass value.
+   * \see distrib_poisson, logpmf_dk()
    */
   LAPLACE_HD double logpmf(double y) const {
     if (y == 0.0) return -mu;
@@ -181,8 +184,11 @@ struct poisson_distrib {
   /**
    * \ingroup distrib_poisson
    * \brief Evaluates the logarithm of the cumulative distribution function, \f$\log F(y)\f$.
+   *
+   * Returns \f$-\infty\f$ when \f$y < 0\f$.
    * \param y Observation point \f$y\f$.
    * \return Log-probability \f$\log F(y)\f$.
+   * \see distrib_poisson, cdf(), log_cdf_dk()
    */
   LAPLACE_HD double log_cdf(double y) const {
     return y < 0.0 ? -distrib_infinity : math::log_gamma_q(Kokkos::floor(y) + 1.0, mu);
@@ -190,8 +196,11 @@ struct poisson_distrib {
   /**
    * \ingroup distrib_poisson
    * \brief Evaluates the logarithm of the complementary cumulative distribution function, \f$\log(1 - F(y))\f$.
+   *
+   * Returns \f$0\f$ when \f$y < 0\f$.
    * \param y Observation point \f$y\f$.
    * \return Log-probability \f$\log(1 - F(y))\f$.
+   * \see distrib_poisson, ccdf(), log_ccdf_dk()
    */
   LAPLACE_HD double log_ccdf(double y) const {
     return y < 0.0 ? 0.0 : math::log_gamma_p(Kokkos::floor(y) + 1.0, mu);
@@ -202,9 +211,12 @@ struct poisson_distrib {
   /**
    * \ingroup distrib_poisson
    * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log F(y)\f$ with respect to \f$\mu\f$.
+   *
+   * Fills quiet NaN when \f$y < 0\f$.
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param y Observation point \f$y\f$.
    * \return Packed symmetric tensor \c sym_tensor<1, K> of derivatives.
+   * \see distrib_poisson, log_cdf()
    */
   template <int K>
   LAPLACE_HD sym_tensor<1, K> log_cdf_dk(double y) const {
@@ -221,9 +233,12 @@ struct poisson_distrib {
   /**
    * \ingroup distrib_poisson
    * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log(1 - F(y))\f$ with respect to \f$\mu\f$.
+   *
+   * Returns \f$0\f$ when \f$y < 0\f$.
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param y Observation point \f$y\f$.
    * \return Packed symmetric tensor \c sym_tensor<1, K> of derivatives.
+   * \see distrib_poisson, log_ccdf()
    */
   template <int K>
   LAPLACE_HD sym_tensor<1, K> log_ccdf_dk(double y) const {
@@ -271,15 +286,20 @@ struct poisson_distrib {
   LAPLACE_HD sym_tensor<1, 6> log_ccdf_d6(double y) const { return log_ccdf_dk<6>(y); }
   /** @} */
 
-  /// Lower bound of discrete support (0.0).
+  /// \ingroup distrib_poisson
+  /// \brief Lower bound of discrete support (0.0).
   LAPLACE_HD double support_lower() const { return 0.0; }
-  /// Upper bound of discrete support (\f$+\infty\f$).
+  /// \ingroup distrib_poisson
+  /// \brief Upper bound of discrete support (\f$+\infty\f$).
   LAPLACE_HD double support_upper() const { return distrib_infinity; }
-  /// Central location (\f$\mu\f$).
+  /// \ingroup distrib_poisson
+  /// \brief Central location (\f$\mu\f$).
   LAPLACE_HD double center() const { return mu; }
-  /// Typical spread (\f$\sqrt{\mu}\f$).
+  /// \ingroup distrib_poisson
+  /// \brief Typical spread (\f$\sqrt{\mu}\f$).
   LAPLACE_HD double scale() const { return Kokkos::sqrt(mu); }
-  /// Non-smooth points in parameter \f$\mu\f$ (none).
+  /// \ingroup distrib_poisson
+  /// \brief Non-smooth points in parameter \f$\mu\f$ (none).
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
 };
 

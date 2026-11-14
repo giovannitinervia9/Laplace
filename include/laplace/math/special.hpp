@@ -33,21 +33,19 @@ using boost_policy = bp::policy<bp::domain_error<bp::ignore_error>, bp::pole_err
  * \ingroup gamma
  * \brief Natural logarithm of the gamma function, \f$\log \Gamma(x)\f$.
  *
- * Computes the logarithm of the gamma function:
- * \f[
- * \operatorname{lgamma}(x) = \log \Gamma(x)
- * \f]
- * where \f$x \in (0, \infty)\f$ is the positive real argument, evaluated via Boost.Math
- * (`boost::math::lgamma`) with `laplace::math::detail::boost_policy`.
+ * Evaluates \f$\operatorname{lgamma}(x) = \log \Gamma(x)\f$ for \f$x > 0\f$ via
+ * Boost.Math (`boost::math::lgamma`) with a non-throwing policy that disables
+ * `double` to `long double` promotion.
  *
  * \param x Positive argument \f$x \in (0, \infty)\f$.
  * \return The value of \f$\log \Gamma(x)\f$.
  *
  * \par Domain and special values
- * - Defined for \f$x > 0\f$.
+ * Defined for \f$x > 0\f$, with zeros at \f$x = 1.0\f$ and \f$x = 2.0\f$.
  *
  * \par Measured accuracy
- * Maximum error 2.42 ulp on gcc, MSVC, and CUDA (test bound 4.0 ulp); correctly rounded share 0.72 (gcc) / 0.74 (CUDA).
+ * Maximum error is 2.42 ulp on gcc, MSVC host, and CUDA (test bound 4.0 ulp);
+ * the correctly rounded share is 0.72 on gcc and 0.74 on CUDA.
  *
  * \see gamma, digamma(), trigamma(), polygamma()
  */
@@ -57,22 +55,20 @@ LAPLACE_HD_FORCEINLINE double lgamma(double x) { return boost::math::lgamma(x, d
  * \ingroup gamma
  * \brief Digamma function \f$\psi(x) = \frac{\mathrm{d}}{\mathrm{d}x} \log \Gamma(x)\f$.
  *
- * Computes the logarithmic derivative of the gamma function:
- * \f[
- * \psi(x) = \frac{\mathrm{d}}{\mathrm{d}x} \log \Gamma(x) = \frac{\Gamma'(x)}{\Gamma(x)}
- * \f]
- * where \f$x \in (0, \infty)\f$ is the positive real argument, evaluated via Boost.Math
- * (`boost::math::digamma`) with `laplace::math::detail::boost_policy`.
+ * Evaluates \f$\psi(x) = \Gamma'(x)/\Gamma(x)\f$ for \f$x > 0\f$ via Boost.Math
+ * (`boost::math::digamma`) with a non-throwing policy that disables `double` to
+ * `long double` promotion.
  *
  * \param x Positive argument \f$x \in (0, \infty)\f$.
  * \return The value of \f$\psi(x)\f$.
  *
  * \par Domain and special values
- * - Defined for \f$x > 0\f$.
- * - At the positive root \f$x_0 \approx 1.4616321449683623\f$: \f$\psi(x_0) = 0\f$; relative error is unbounded near \f$x_0\f$ while absolute error remains small.
+ * Defined for \f$x > 0\f$; vanishes at \f$x_0 \approx 1.4616321449683623\f$, where
+ * relative error is unbounded while absolute error remains small.
  *
  * \par Measured accuracy
- * Maximum error 2.14 ulp (2.14 ulp1) on gcc and CUDA (test bound 3.5 ulp1); correctly rounded share 0.82 (gcc) / 0.84 (CUDA).
+ * Maximum error is 2.14 ulp and 2.14 ulp1 on gcc and CUDA (test bound 3.5 ulp1);
+ * the correctly rounded share is 0.82 on gcc and 0.84 on CUDA.
  *
  * \see gamma, lgamma(), trigamma(), polygamma()
  */
@@ -82,22 +78,20 @@ LAPLACE_HD_FORCEINLINE double digamma(double x) { return boost::math::digamma(x,
  * \ingroup gamma
  * \brief Trigamma function \f$\psi'(x) = \frac{\mathrm{d}^2}{\mathrm{d}x^2} \log \Gamma(x)\f$.
  *
- * Computes the first derivative of the digamma function:
- * \f[
- * \psi_1(x) = \psi'(x) = \frac{\mathrm{d}^2}{\mathrm{d}x^2} \log \Gamma(x)
- * \f]
- * where \f$x \in (0, \infty)\f$ is the positive real argument, evaluated via Boost.Math
- * (`boost::math::trigamma`) with `laplace::math::detail::boost_policy`.
+ * Evaluates \f$\psi_1(x) = \psi'(x) = \frac{\mathrm{d}}{\mathrm{d}x}\psi(x)\f$ for
+ * \f$x > 0\f$ via Boost.Math (`boost::math::trigamma`) with a non-throwing
+ * policy that disables `double` to `long double` promotion.
  *
  * \param x Positive argument \f$x \in (0, \infty)\f$.
  * \return The value of \f$\psi'(x)\f$.
  *
  * \par Domain and special values
- * - Defined for \f$x > 0\f$.
- * - As \f$x \to 0^+\f$: \f$\psi'(x) \to +\infty\f$.
+ * Defined for \f$x > 0\f$; strictly positive and diverges to \f$+\infty\f$ as
+ * \f$x \to 0^+\f$.
  *
  * \par Measured accuracy
- * Maximum error 1.82 ulp (gcc) / 2.03 ulp (CUDA), max error 1.57 ulp1 (gcc) / 2.03 ulp1 (CUDA), test bound 3.0 ulp; correctly rounded share 0.82.
+ * Maximum error is 1.82 ulp (1.57 ulp1) on gcc and 2.03 ulp (2.03 ulp1) on CUDA
+ * (test bound 3.0 ulp); the correctly rounded share is 0.82.
  *
  * \see gamma, lgamma(), digamma(), polygamma()
  */
@@ -106,35 +100,26 @@ LAPLACE_HD_FORCEINLINE double trigamma(double x) { return boost::math::trigamma(
 // psi^(n)(x), n = 0..6, x > 0
 /**
  * \ingroup gamma
- * \brief Polygamma function \f$\psi^{(n)}(x) = \frac{\mathrm{d}^{n+1}}{\mathrm{d}x^{n+1}} \log \Gamma(x)\f$ of order \f$n \in \{0, \dots, 6\}\f$.
+ * \brief Polygamma function \f$\psi^{(n)}(x) = \frac{\mathrm{d}^{n+1}}{\mathrm{d}x^{n+1}} \log \Gamma(x)\f$ for \f$n \in \{0, \dots, 6\}\f$.
  *
- * Computes the \f$n\f$-th derivative of the digamma function:
- * \f[
- * \psi^{(n)}(x) = \frac{\mathrm{d}^n}{\mathrm{d}x^n} \psi(x) = \frac{\mathrm{d}^{n+1}}{\mathrm{d}x^{n+1}} \log \Gamma(x)
- * \f]
- * where \f$n \in \{0, \dots, 6\}\f$ is the derivative order and \f$x \in (0, \infty)\f$ is the positive real argument.
- * Dispatches to digamma() for \f$n = 0\f$, to trigamma() for \f$n = 1\f$, and to own::polygamma() for \f$n \in \{2, \dots, 6\}\f$.
+ * Evaluates \f$\psi^{(n)}(x) = \frac{\mathrm{d}^n}{\mathrm{d}x^n}\psi(x)\f$ by
+ * dispatching \f$n = 0\f$ to digamma(), \f$n = 1\f$ to trigamma(), and
+ * \f$n \in \{2, \dots, 6\}\f$ to own::polygamma().
  *
  * \param n Derivative order \f$n \in \{0, \dots, 6\}\f$.
  * \param x Positive argument \f$x \in (0, \infty)\f$.
  * \return The value of \f$\psi^{(n)}(x)\f$.
  *
  * \par Domain and special values
- * - Defined for \f$x > 0\f$ with \f$n \in \{0, \dots, 6\}\f$.
- * - Returns quiet NaN for \f$n < 0\f$ or \f$n > 6\f$, and for \f$x \le 0\f$ when \f$n \ge 2\f$.
- * - For small \f$x\f$ and higher orders \f$n\f$, overflows to \f$\pm\infty\f$.
+ * Returns quiet NaN for \f$n < 0\f$ or \f$n > 6\f$, and for \f$x \le 0\f$ or NaN
+ * when \f$n \ge 2\f$. Overflows to \f$\pm\infty\f$ as \f$x \to 0^+\f$ for higher orders.
  *
  * \par Measured accuracy
- * Maximum error by order \f$n\f$:
- * - \f$n = 0\f$: 2.14 ulp1 (test bound 3.5 ulp1).
- * - \f$n = 1\f$: 1.82 ulp gcc / 2.03 ulp CUDA (test bound 3.0 ulp).
- * - \f$n = 2\f$: 3.36 ulp (test bound 5.0 ulp).
- * - \f$n = 3\f$: 5.26 ulp (test bound 8.0 ulp).
- * - \f$n = 4\f$: 6.34 ulp (test bound 9.5 ulp).
- * - \f$n = 5\f$: 7.90 ulp (test bound 12.0 ulp).
- * - \f$n = 6\f$: 9.44 ulp (test bound 14.0 ulp).
+ * Maximum error is 2.14 ulp1 for \f$n = 0\f$ (bound 3.5 ulp1), 1.82 ulp on gcc and
+ * 2.03 ulp on CUDA for \f$n = 1\f$ (bound 3.0 ulp), and 3.36 to 9.44 ulp for
+ * \f$n \in \{2, \dots, 6\}\f$ (bounds 5.0 to 14.0 ulp); see \ref gamma for per-order figures.
  *
- * \see gamma, lgamma(), digamma(), trigamma()
+ * \see gamma, lgamma(), digamma(), trigamma(), own::polygamma()
  */
 LAPLACE_HD_FORCEINLINE double polygamma(int n, double x) {
   if (n == 0) return digamma(x);

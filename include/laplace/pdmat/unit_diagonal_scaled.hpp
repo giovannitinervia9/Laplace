@@ -93,21 +93,6 @@ LAPLACE_HD double scaled_part_runtime(const R& r, scaled_part q, int b, const do
  * The underlying structure \f$R\f$ writes its quantity directly into the caller's output buffer, which this
  * composition rescales in place; caller scratch required is therefore exactly `scratch_size()` of \f$R\f$.
  *
- * \par Measured accuracy
- * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
- * - Compound symmetry (compound_symmetry_pdmat):
- *   \f$M\f$: 83.4 / 76.3 ulpN (\f$K=6\f$), \f$M^{-1}\f$: 2.8 / 2.8 ulpN, \f$L\f$: 5.1 / 4.8 ulpN, \f$\log\det M\f$: 3.4 / 3.1 ulp
- * - Autoregressive AR(1) (ar1_pdmat):
- *   \f$M\f$: 7.4 / 6.3 ulpN, \f$M^{-1}\f$: 1.1 / 0.73 ulpN, \f$L\f$: 5.2 / 5.8 ulpN, \f$\log\det M\f$: 5.3 / 6.1 ulp
- * - Unstructured correlation (unstructured_corr_pdmat):
- *   \f$M\f$: 40.2 / 17.3 ulpN (\f$K=6\f$), \f$M^{-1}\f$: 16250 / 27504 ulpN (\f$K=6\f$; 31 / 28 ulpN with scaling undone),
- *   \f$L\f$: 16.0 / 16.0 ulpN, \f$\log\det M\f$: 9.4 / 7.4 ulp, \f$\log\lvert\det J\rvert\f$: 14.1 / 11.1 ulp
- *
- * The 16250 / 27504 ulpN error on \f$M^{-1}\f$ with unstructured correlation and heterogeneous scales comes from
- * the normwise measure, not from a loss in the code: with scaling undone the error is at most 31 / 28 ulpN (the error of \f$R^{-1}\f$ itself),
- * magnified by \f$e^{-s_i - s_j}\f$ in the normwise measure. Reference values were computed from the mathematical
- * definition in mpmath at 640 bits (13906 values).
- *
  * \tparam R An underlying structure satisfying \ref pdmat_structure with \c unit_diagonal == \c true.
  *
  * \see pdmat, pdmat_orders, pdmat_structure
@@ -180,9 +165,7 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
-   * 83.4 / 76.3 ulpN (\f$K=6\f$) for compound symmetry, 7.4 / 6.3 ulpN for AR(1), 40.2 / 17.3 ulpN (\f$K=6\f$) for unstructured correlation; test bounds 1.5 times the errors with the scaling undone.
+   * Accuracy over orders 0–6: up to 83.4 on gcc and 76.3 on CUDA ulpN for compound symmetry, 7.4 and 6.3 ulpN for AR(1), and 40.2 and 17.3 ulpN for unstructured correlation (order-0 unscaled test bounds 1, 2, and 2 ulpN).
    *
    * \see inverse(), cholesky(), log_det(), matrix_dk()
    */
@@ -204,9 +187,7 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Log-determinant of \f$M(\theta)\f$.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
-   * 3.4 / 3.1 ulp for compound symmetry, 5.3 / 6.1 ulp for AR(1), 9.4 / 7.4 ulp for unstructured correlation; test bounds 1.5 times measured errors.
+   * Accuracy over orders 0–6: up to 3.4 on gcc and 3.1 on CUDA ulp for compound symmetry, 5.3 and 6.1 ulp for AR(1), and 9.4 and 7.4 ulp for unstructured correlation (order-0 test bounds 2, 4, and 3 ulp).
    *
    * \see matrix(), log_det_dk()
    */
@@ -223,9 +204,7 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
-   * 2.8 / 2.8 ulpN for compound symmetry, 1.1 / 0.73 ulpN for AR(1), 16250 / 27504 ulpN (\f$K=6\f$; 31 / 28 ulpN with scaling undone) for unstructured correlation; test bounds 1.5 times the errors with the scaling undone.
+   * Accuracy over orders 0–6: up to 2.8 ulpN on gcc and CUDA for compound symmetry, 1.1 on gcc and 0.73 on CUDA ulpN for AR(1), and 16250 on gcc and 27504 on CUDA ulpN for unstructured correlation (31 and 28 ulpN unscaled; order-0 unscaled test bounds 2, 2, and 3 ulpN).
    *
    * \see matrix(), cholesky(), log_det(), inverse_dk()
    */
@@ -244,9 +223,7 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
-   * 5.1 / 4.8 ulpN for compound symmetry, 5.2 / 5.8 ulpN for AR(1), 16.0 / 16.0 ulpN for unstructured correlation; test bounds 1.5 times the errors with the scaling undone.
+   * Accuracy over orders 0–6: up to 5.1 on gcc and 4.8 on CUDA ulpN for compound symmetry, 5.2 and 5.8 ulpN for AR(1), and 16.0 ulpN on gcc and CUDA for unstructured correlation (order-0 unscaled test bounds 2, 2, and 1 ulpN).
    *
    * \see matrix(), inverse(), log_det(), cholesky_dk()
    */
@@ -273,9 +250,7 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Log-Jacobian determinant, or NaN if \c common_scale is \c true.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
-   * 14.1 / 11.1 ulp for unstructured correlation; test bounds 1.5 times measured errors.
+   * Accuracy over orders 0–6 for unstructured correlation: up to 14.1 ulp on gcc and 11.1 ulp on CUDA (order-0 test bound 1 ulp).
    *
    * \see log_jacobian_dk()
    */
@@ -307,9 +282,7 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if structurally zero.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
-   * 83.4 / 76.3 ulpN (\f$K=6\f$) for compound symmetry, 7.4 / 6.3 ulpN for AR(1), 40.2 / 17.3 ulpN (\f$K=6\f$) for unstructured correlation; test bounds 1.5 times the errors with the scaling undone.
+   * Accuracy over orders 0–6: up to 83.4 on gcc and 76.3 on CUDA ulpN for compound symmetry, 7.4 and 6.3 ulpN for AR(1), and 40.2 and 17.3 ulpN for unstructured correlation (unscaled order 1–6 test bounds 2 to 126, 3 to 12, and 3 to 61 ulpN).
    *
    * \see matrix(), pdmat_orders::matrix_d1()
    */
@@ -338,9 +311,7 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if structurally zero.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
-   * 2.8 / 2.8 ulpN for compound symmetry, 1.1 / 0.73 ulpN for AR(1), 16250 / 27504 ulpN (\f$K=6\f$; 31 / 28 ulpN with scaling undone) for unstructured correlation; test bounds 1.5 times the errors with the scaling undone.
+   * Accuracy over orders 0–6: up to 2.8 ulpN on gcc and CUDA for compound symmetry, 1.1 on gcc and 0.73 on CUDA ulpN for AR(1), and 16250 on gcc and 27504 on CUDA ulpN for unstructured correlation (31 and 28 ulpN unscaled; unscaled order 1–6 test bounds 3 to 5, 2, and 4 to 47 ulpN).
    *
    * \see inverse(), pdmat_orders::inverse_d1()
    */
@@ -368,9 +339,7 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if structurally zero.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
-   * 5.1 / 4.8 ulpN for compound symmetry, 5.2 / 5.8 ulpN for AR(1), 16.0 / 16.0 ulpN for unstructured correlation; test bounds 1.5 times the errors with the scaling undone.
+   * Accuracy over orders 0–6: up to 5.1 on gcc and 4.8 on CUDA ulpN for compound symmetry, 5.2 and 5.8 ulpN for AR(1), and 16.0 ulpN on gcc and CUDA for unstructured correlation (unscaled order 1–6 test bounds 3 to 11, 3 to 9, and 3 to 24 ulpN).
    *
    * \see cholesky(), pdmat_orders::cholesky_d1()
    */
@@ -394,9 +363,7 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Value of the derivative, or \f$0.0\f$ if identically zero.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
-   * 3.4 / 3.1 ulp for compound symmetry, 5.3 / 6.1 ulp for AR(1), 9.4 / 7.4 ulp for unstructured correlation; test bounds 1.5 times measured errors.
+   * Accuracy over orders 0–6: up to 3.4 on gcc and 3.1 on CUDA ulp for compound symmetry, 5.3 and 6.1 ulp for AR(1), and 9.4 and 7.4 ulp for unstructured correlation (order 1–6 test bounds 1 to 6, 1 to 8, and 1 to 15 ulp).
    *
    * \see log_det(), pdmat_orders::log_det_d1()
    */
@@ -419,9 +386,7 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Value of the derivative, \f$0.0\f$ if identically zero, or NaN if \c common_scale is \c true.
    *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP / CUDA (RTX 4070 SUPER):
-   * 14.1 / 11.1 ulp for unstructured correlation; test bounds 1.5 times measured errors.
+   * Accuracy over orders 0–6 for unstructured correlation: up to 14.1 ulp on gcc and 11.1 ulp on CUDA (order 1–6 test bounds 1 to 22 ulp).
    *
    * \see log_jacobian(), pdmat_orders::log_jacobian_d1()
    */

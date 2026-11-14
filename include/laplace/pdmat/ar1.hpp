@@ -19,15 +19,8 @@ namespace laplace::pdmat {
  * \ingroup pdmat
  * \brief Structured positive definite matrix with first-order autoregressive AR(1) structure.
  *
- * Maps 1 unconstrained real parameter \f$\theta_0\f$ to a correlation matrix \f$M(\theta)\f$ with
- * entries \f$M_{ij}(\theta) = \rho^{|i - j|}\f$ and natural correlation parameter \f$\rho = \tanh\theta_0 \in (-1, 1)\f$.
- *
- * \par Measured accuracy
- * Maximum error over orders 0–6 on gcc/OpenMP and CUDA (RTX 4070 SUPER):
- * - \f$M\f$: 13.0 ulpN (\f$K=6\f$, gcc) / 11.1 ulpN (\f$K=6\f$, CUDA)
- * - \f$M^{-1}\f$: 0.52 ulpN (gcc) / 0.58 ulpN (CUDA)
- * - \f$L\f$: 8.22 ulpN (\f$K=4\f$, gcc) / 8.22 ulpN (\f$K=4\f$, CUDA)
- * - \f$\log \det M\f$: 3.92 ulp (\f$K=6\f$, gcc) / 4.83 ulp (\f$K=6\f$, CUDA)
+ * Maps 1 unconstrained parameter \f$\theta_0\f$ to correlation matrix \f$M_{ij}(\theta) = \rho^{|i - j|}\f$
+ * (\f$p \ge 1\f$, \f$\rho = \tanh\theta_0 \in (-1, 1)\f$; \f$M = [1]\f$ at \f$p = 1\f$).
  *
  * \see pdmat, pdmat_orders, pdmat_structure
  */
@@ -74,15 +67,12 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \ingroup pdmat
    * \brief Evaluates the packed AR(1) correlation matrix \f$M(\theta)\f$.
    *
-   * Computes \f$M_{ij} = (\tanh\theta_0)^{|i - j|}\f$ (or \f$M = [1]\f$ for \f$p = 1\f$).
+   * Computes \f$M_{ij} = (\tanh\theta_0)^{|i - j|}\f$ (\f$M = [1]\f$ for \f$p = 1\f$).
+   * Maximum error 13.0 ulpN on gcc and 11.1 ulpN on CUDA; test bounds 5 to 20 ulpN.
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
-   *
-   * \par Measured accuracy
-   * Maximum error 13.0 ulpN (\f$K=6\f$, gcc) / 11.1 ulpN (\f$K=6\f$, CUDA); test bounds 5 to 20 ulpN.
-   *
    * \see inverse(), cholesky(), log_det(), matrix_dk()
    */
   LAPLACE_HD void matrix(const double* theta, double* m, [[maybe_unused]] double* w) const {
@@ -97,18 +87,12 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \ingroup pdmat
    * \brief Evaluates the log-determinant \f$\log \det M(\theta)\f$.
    *
-   * For \f$p = 1\f$, returns \f$0.0\f$. For \f$p \ge 2\f$, computes:
-   * \f[
-   * \log \det M(\theta) = -2(p - 1)\log\cosh\theta_0
-   * \f]
+   * Computes \f$\log \det M(\theta) = -2(p - 1)\log\cosh\theta_0\f$ (\f$0.0\f$ for \f$p = 1\f$).
+   * Maximum error 3.92 ulp on gcc and 4.83 ulp on CUDA; test bounds 2 to 8 ulp.
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return Log-determinant of \f$M(\theta)\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error 3.92 ulp (\f$K=6\f$, gcc) / 4.83 ulp (\f$K=6\f$, CUDA); test bounds 2 to 8 ulp.
-   *
    * \see matrix(), log_det_dk()
    */
   LAPLACE_HD double log_det(const double* theta, [[maybe_unused]] double* w) const {
@@ -121,17 +105,13 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \ingroup pdmat
    * \brief Evaluates the packed tridiagonal inverse matrix \f$M^{-1}(\theta)\f$.
    *
-   * Computes \f$\cosh^2\theta_0\f$ at \f$(0, 0)\f$ and \f$(p - 1, p - 1)\f$, \f$\cosh(2\theta_0)\f$
-   * on inner diagonal entries, and \f$-\frac{1}{2}\sinh(2\theta_0)\f$ on the subdiagonal.
-   * For \f$p = 1\f$, \f$M^{-1} = [1]\f$.
+   * Computes \f$\cosh^2\theta_0\f$ at endpoints \f$(0, 0)\f$ and \f$(p - 1, p - 1)\f$, \f$\cosh(2\theta_0)\f$
+   * on interior diagonal entries, and \f$-\frac{1}{2}\sinh(2\theta_0)\f$ on the subdiagonal (\f$M^{-1} = [1]\f$ for \f$p = 1\f$).
+   * Maximum error 0.52 ulpN on gcc and 0.58 ulpN on CUDA; test bound 1 ulpN.
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
-   *
-   * \par Measured accuracy
-   * Maximum error 0.52 ulpN (gcc) / 0.58 ulpN (CUDA); test bound 1.0 ulpN.
-   *
    * \see matrix(), cholesky(), log_det(), inverse_dk()
    */
   LAPLACE_HD void inverse(const double* theta, double* m, [[maybe_unused]] double* w) const { inverse_entries(theta[0], 0, m); }
@@ -140,17 +120,12 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \ingroup pdmat
    * \brief Evaluates the packed lower Cholesky factor \f$L(\theta)\f$.
    *
-   * Computes \f$L_{i0} = T^i\f$ for column 0, and \f$L_{ij} = T^{i - j}\operatorname{sech}\theta_0\f$
-   * for \f$j \ge 1\f$, where \f$T = \tanh\theta_0\f$, satisfying \f$M = L L^\top\f$.
-   * For \f$p = 1\f$, \f$L = [1]\f$.
+   * Computes \f$L_{i0} = T^i\f$ and \f$L_{ij} = T^{i - j}\operatorname{sech}\theta_0\f$ (\f$j \ge 1\f$, \f$T = \tanh\theta_0\f$; \f$L = [1]\f$ for \f$p = 1\f$).
+   * Maximum error 8.22 ulpN (gcc and CUDA); test bounds 5 to 13 ulpN.
    *
    * \param theta Array of 1 parameter \f$\theta_0\f$.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
-   *
-   * \par Measured accuracy
-   * Maximum error 8.22 ulpN (\f$K=4\f$, gcc) / 8.22 ulpN (\f$K=4\f$, CUDA); test bounds 5 to 13 ulpN.
-   *
    * \see matrix(), inverse(), log_det(), cholesky_dk()
    */
   LAPLACE_HD void cholesky(const double* theta, double* l, [[maybe_unused]] double* w) const {
@@ -165,19 +140,15 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$M(\theta)\f$ of order \f$K\f$.
    *
-   * Evaluates \f$\frac{\mathrm{d}^K}{\mathrm{d}\theta^K} T^{|i - j|}\f$ band by band
-   * using the recurrence preserving factor \f$S = 1 - T^2\f$. Diagonal entries are 0.
+   * Evaluates \f$\frac{\mathrm{d}^K}{\mathrm{d}\theta^K} T^{|i - j|}\f$ band by band keeping factor \f$S = 1 - T^2\f$
+   * (zero diagonal; returns \c false for \f$p = 1\f$). Maximum error over orders 1–6: 13.0 ulpN on gcc and 11.1 ulpN on CUDA; test bounds 5 to 20 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of 1 parameter \f$\theta_0\f$.
-   * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
+   * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 13.0 ulpN (\f$K=6\f$, gcc) / 11.1 ulpN (\f$K=6\f$, CUDA); test bounds 5 to 20 ulpN.
-   *
    * \see matrix(), pdmat_orders::matrix_d1()
    */
   template <int K>
@@ -196,17 +167,14 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$\log \det M(\theta)\f$ of order \f$K\f$.
    *
-   * Computes \f$-2(p - 1)\tanh^{(K-1)}(\theta_0)\f$.
+   * Computes \f$-2(p - 1)\tanh^{(K-1)}(\theta_0)\f$ (\f$0.0\f$ for \f$p = 1\f$).
+   * Maximum error over orders 1–6: 3.92 ulp on gcc and 4.83 ulp on CUDA; test bounds 2 to 8 ulp.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of 1 parameter \f$\theta_0\f$.
-   * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
+   * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return Value of the derivative, or \f$0.0\f$ if \f$p = 1\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 3.92 ulp (\f$K=6\f$, gcc) / 4.83 ulp (\f$K=6\f$, CUDA); test bounds 2 to 8 ulp.
-   *
    * \see log_det(), pdmat_orders::log_det_d1()
    */
   template <int K>
@@ -219,19 +187,15 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$M^{-1}(\theta)\f$ of order \f$K\f$.
    *
-   * Computes derivatives of the tridiagonal inverse using \f$2^K\cosh(2\theta_0)\f$
-   * and \f$2^K\sinh(2\theta_0)\f$.
+   * Evaluates derivatives of the tridiagonal inverse via \f$2^K\cosh(2\theta_0)\f$ and \f$2^K\sinh(2\theta_0)\f$ (returns \c false for \f$p = 1\f$).
+   * Maximum error over orders 1–6: 0.52 ulpN on gcc and 0.58 ulpN on CUDA; test bound 1 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of 1 parameter \f$\theta_0\f$.
-   * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
+   * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0.
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 0.52 ulpN (gcc) / 0.58 ulpN (CUDA); test bound 1.0 ulpN.
-   *
    * \see inverse(), pdmat_orders::inverse_d1()
    */
   template <int K>
@@ -245,19 +209,15 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order \f$K\f$.
    *
-   * Evaluates derivatives of \f$T^k \operatorname{sech}^h\theta_0\f$ with \f$h = 0\f$ for column 0
-   * and \f$h = 1\f$ for columns \f$j \ge 1\f$ via the recurrence preserving \f$S\f$.
+   * Differentiates \f$T^k \operatorname{sech}^h\theta_0\f$ with \f$h = 0\f$ on column 0 and \f$h = 1\f$ for \f$j \ge 1\f$
+   * (returns \c false for \f$p = 1\f$). Maximum error over orders 1–6: 8.22 ulpN (gcc and CUDA); test bounds 5 to 13 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of 1 parameter \f$\theta_0\f$.
-   * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0 (the structure has one parameter).
+   * \param idx Sorted tuple of \f$K\f$ parameter indices, all 0.
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused: the size is 0).
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 8.22 ulpN (\f$K=4\f$, gcc) / 8.22 ulpN (\f$K=4\f$, CUDA); test bounds 5 to 13 ulpN.
-   *
    * \see cholesky(), pdmat_orders::cholesky_d1()
    */
   template <int K>

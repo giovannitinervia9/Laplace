@@ -77,28 +77,19 @@ vector_ref output_vector_ref(const V& v) {
  * \ingroup dense
  * \brief Cholesky decomposition of a symmetric positive definite matrix.
  *
- * Computes the Cholesky factorization
- * \f[
- * A = L L^\top
- * \f]
- * where \f$A\f$ is an \f$n \times n\f$ symmetric positive definite matrix and
- * \f$L\f$ is an \f$n \times n\f$ lower-triangular matrix.
- * Only the lower triangle of \f$A\f$ is read (its upper triangle is not accessed).
- * The strictly upper triangular part of \f$L\f$ is set to zero.
+ * Computes \f$A = L L^\top\f$ where \f$A\f$ is \f$n \times n\f$ symmetric positive definite and \f$L\f$ is \f$n \times n\f$ lower triangular with its strictly upper part zeroed.
+ * Only the lower triangle of \f$A\f$ is read.
  *
- * \param A Input symmetric matrix of shape \f$n \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory. Only the lower triangle is read.
- * \param L Output lower-triangular matrix of shape \f$n \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
+ * \param A Input \f$n \times n\f$ symmetric matrix (lower triangle read).
+ * \param L Output \f$n \times n\f$ lower-triangular matrix.
  * \return dense_decomposition_status with `rank = n` on success.
  *
- * If \f$A\f$ is not positive definite, returns `success = false` with `reason = dense_failure::not_positive_definite`.
- * If a NaN or an infinity is found in the lower triangle of \f$A\f$, returns `success = false` with `reason = dense_failure::non_finite_input`.
- * Non-finite entries in the strictly upper triangle are not read.
- * If \f$A\f$ is not square or \f$L\f$ does not match \f$A\f$'s shape, throws `std::invalid_argument`.
- * Outputs are unspecified when `success` is \c false.
+ * Fails with `dense_failure::not_positive_definite` if \f$A\f$ is not positive definite, or `dense_failure::non_finite_input` if the lower triangle of \f$A\f$ is non-finite.
+ * Throws `std::invalid_argument` if \f$A\f$ is not square or \f$L\f$ does not match its shape; see \ref dense for View conventions.
  *
- * Measured accuracy: residual \f$\|L L^\top - A\|_F / (\|A\|_F \varepsilon)\f$ is \f$0.56\,\varepsilon\f$ on gcc and \f$0.62\,\varepsilon\f$ on CUDA (test bound 1 \f$\varepsilon\f$).
+ * Measured residual \f$\|L L^\top - A\|_F / (\|A\|_F \varepsilon)\f$ is at most 0.62 \f$\varepsilon\f$ across backends (test bound 1 \f$\varepsilon\f$).
  *
- * \see triangular_solve(), dense_decomposition_status, dense_failure
+ * \see \ref dense, triangular_solve(), dense_decomposition_status, dense_failure
  */
 // A = L L^T with L lower triangular (n x n, its upper part set to zero).
 // Fails with not_positive_definite when A is not positive definite.
@@ -113,30 +104,20 @@ dense_decomposition_status cholesky_decomposition(const AView& A, const LView& L
  * \ingroup dense
  * \brief In-place triangular system solve.
  *
- * Solves the linear system
- * \f[
- * \operatorname{op}(T) X = B
- * \f]
- * in place on \f$B\f$ (\f$n \times k\f$), where \f$T\f$ is an \f$n \times n\f$ triangular matrix.
- * When `triangle` is `dense_triangle::lower`, \f$T\f$ is lower triangular (upper triangle not read).
- * When `triangle` is `dense_triangle::upper`, \f$T\f$ is upper triangular (lower triangle not read).
- * When `operation` is `dense_operation::identity`, \f$\operatorname{op}(T) = T\f$.
- * When `operation` is `dense_operation::transpose`, \f$\operatorname{op}(T) = T^\top\f$.
+ * Solves \f$\operatorname{op}(T) X = B\f$ in place on the \f$n \times k\f$ matrix \f$B\f$, where \f$T\f$ is \f$n \times n\f$ triangular and \f$\operatorname{op}(T)\f$ is \f$T\f$ or \f$T^\top\f$.
  *
- * \param T Input triangular matrix of shape \f$n \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
- * \param B Input/output matrix of shape \f$n \times k\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory, overwritten with solution \f$X\f$.
- * \param triangle Which triangle of \f$T\f$ holds the factor (`dense_triangle::lower` or `dense_triangle::upper`).
- * \param operation Whether to apply \f$T\f$ or its transpose (`dense_operation::identity` or `dense_operation::transpose`).
+ * \param T Input \f$n \times n\f$ triangular matrix (only the triangle chosen by `triangle` is read).
+ * \param B Input and output \f$n \times k\f$ matrix overwritten with \f$X\f$.
+ * \param triangle Triangle of \f$T\f$ holding the factor (`dense_triangle::lower` or `dense_triangle::upper`).
+ * \param operation Whether to apply \f$T\f$ (`dense_operation::identity`) or \f$T^\top\f$ (`dense_operation::transpose`).
  * \return dense_decomposition_status with `rank = n` on success.
  *
- * If any diagonal entry of \f$T\f$ is zero, returns `success = false` with `reason = dense_failure::singular`.
- * If a non-finite entry is found in the referenced triangle of \f$T\f$ or in \f$B\f$, returns `success = false` with `reason = dense_failure::non_finite_input`.
- * If \f$T\f$ is not square or \f$B\f$ does not have \f$n\f$ rows, throws `std::invalid_argument`.
- * Outputs are unspecified when `success` is \c false.
+ * Fails with `dense_failure::singular` if any diagonal entry of \f$T\f$ is zero, or `dense_failure::non_finite_input` if any read entry is non-finite.
+ * Throws `std::invalid_argument` if \f$T\f$ is not square or \f$B\f$ does not have \f$n\f$ rows; see \ref dense for View conventions.
  *
- * Measured accuracy: residual \f$\|\operatorname{op}(T) X - B\|_F / (\|T\|_F \|X\|_F \varepsilon)\f$ across all four triangle and operation combinations is \f$0.33\,\varepsilon\f$ on gcc and \f$0.44\,\varepsilon\f$ on CUDA (test bound 1 \f$\varepsilon\f$).
+ * Measured residual \f$\|\operatorname{op}(T) X - B\|_F / (\|T\|_F \|X\|_F \varepsilon)\f$ is at most 0.44 \f$\varepsilon\f$ across backends (test bound 1 \f$\varepsilon\f$).
  *
- * \see cholesky_decomposition(), dense_decomposition_status, dense_failure, dense_triangle, dense_operation
+ * \see \ref dense, cholesky_decomposition(), dense_decomposition_status, dense_failure, dense_triangle, dense_operation
  */
 // Solves op(T) X = B in place on B (n x k), with T (n x n) lower or upper
 // triangular (the other triangle is not read) and op the identity or the
@@ -153,36 +134,21 @@ dense_decomposition_status triangular_solve(const TView& T, const BView& B, dens
  * \ingroup dense
  * \brief Column-pivoted QR decomposition.
  *
- * Computes the column-pivoted QR decomposition
- * \f[
- * A P = Q R
- * \f]
- * for an \f$m \times n\f$ matrix \f$A\f$, with \f$p = \min(m, n)\f$.
- * Column \f$j\f$ of \f$Q R\f$ equals column \f$\operatorname{perm}[j]\f$ of \f$A\f$.
- * \f$Q\f$ has orthonormal columns and shape \f$m \times p\f$ (thin) or \f$m \times m\f$ (full).
- * \f$R\f$ is upper triangular of shape \f$p \times n\f$ (matching thin \f$Q\f$) or \f$m \times n\f$ (matching full \f$Q\f$).
+ * Computes \f$A P = Q R\f$ for an \f$m \times n\f$ matrix \f$A\f$ with \f$p = \min(m, n)\f$, where column \f$j\f$ of \f$Q R\f$ equals column \f$\operatorname{perm}[j]\f$ of \f$A\f$.
+ * Numerical rank counts \f$|R_{kk}| > \text{tol} \cdot |R_{11}|\f$ (see \ref dense for default tolerance).
  *
- * The numerical rank counts the diagonal entries \f$|R_{kk}|\f$ satisfying
- * \f[
- * |R_{kk}| > \text{tol} \cdot |R_{11}|
- * \f]
- * with \f$\text{tol} = \max(m, n)\,\varepsilon\f$ when `relative_tolerance < 0`, or `relative_tolerance` otherwise.
- *
- * \param A Input matrix of shape \f$m \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
- * \param Q Output orthogonal matrix of shape \f$m \times p\f$ (thin) or \f$m \times m\f$ (full), rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
- * \param R Output upper-triangular matrix of shape \f$p \times n\f$ or \f$m \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
- * \param perm Output column permutation vector of length \f$n\f$, rank-1 View of \c int in host memory.
- * \param relative_tolerance Threshold factor for rank determination; if negative (default -1.0), uses \f$\max(m, n)\,\varepsilon\f$.
+ * \param A Input \f$m \times n\f$ matrix.
+ * \param Q Output orthogonal matrix of shape \f$m \times p\f$ (thin) or \f$m \times m\f$ (full).
+ * \param R Output upper-triangular matrix of shape \f$p \times n\f$ (thin) or \f$m \times n\f$ (full) matching `Q`.
+ * \param perm Output rank-1 View of \c int of length \f$n\f$ receiving the column permutation.
+ * \param relative_tolerance Threshold factor for rank determination; negative values (default `-1.0`) select \f$\max(m, n)\,\varepsilon\f$.
  * \return dense_decomposition_status with `rank` equal to the numerical rank of \f$A\f$.
  *
- * If \f$A\f$ contains non-finite entries, returns `success = false` with `reason = dense_failure::non_finite_input`.
- * A low numerical rank is reported in `rank` and is not a failure.
- * If dimensions do not match the expected thin or full shapes, throws `std::invalid_argument`.
- * Outputs are unspecified when `success` is \c false.
+ * Fails with `dense_failure::non_finite_input` if \f$A\f$ is non-finite; throws `std::invalid_argument` for incompatible shapes.
  *
- * Measured accuracy: residual \f$\|Q R - A P\|_F / (\|A\|_F \varepsilon)\f$ is \f$1.55\,\varepsilon\f$ on gcc and \f$1.56\,\varepsilon\f$ on CUDA (test bound 2.4 \f$\varepsilon\f$). Loss of orthonormality \f$\|Q^\top Q - I\|_F / \varepsilon\f$ is \f$12.33\,\varepsilon\f$ on gcc and \f$14.12\,\varepsilon\f$ on CUDA (test bound 22 \f$\varepsilon\f$).
+ * Measured errors are at most 1.56 \f$\varepsilon\f$ for residual (bound 2.4 \f$\varepsilon\f$) and 14.12 \f$\varepsilon\f$ for orthonormality (bound 22 \f$\varepsilon\f$).
  *
- * \see svd_decomposition(), dense_decomposition_status, dense_failure
+ * \see \ref dense, svd_decomposition(), dense_decomposition_status, dense_failure
  */
 // A P = Q R for A (m x n), p = min(m, n): Q is m x p (thin) or m x m (full),
 // with orthonormal columns; R is upper triangular, p x n or m x n to match Q;
@@ -208,38 +174,21 @@ dense_decomposition_status pivoted_qr_decomposition(const AView& A, const QView&
  * \ingroup dense
  * \brief Singular value decomposition of a rectangular matrix.
  *
- * Computes the singular value decomposition
- * \f[
- * A = U \operatorname{diag}(s) V^\top
- * \f]
- * for an \f$m \times n\f$ matrix \f$A\f$, with \f$p = \min(m, n)\f$.
- * Singular values \f$s\f$ are in decreasing order \f$s_1 \ge s_2 \ge \dots \ge s_p \ge 0\f$.
- * \f$U\f$ has orthonormal columns and shape \f$m \times p\f$ (thin) or \f$m \times m\f$ (full).
- * \f$V\f$ has orthonormal columns and shape \f$n \times p\f$ (thin) or \f$n \times n\f$ (full).
- * Thin and full shapes for \f$U\f$ and \f$V\f$ may be chosen independently.
+ * Computes \f$A = U \operatorname{diag}(s) V^\top\f$ for an \f$m \times n\f$ matrix \f$A\f$ with \f$p = \min(m, n)\f$ and decreasing singular values \f$s_1 \ge s_2 \ge \dots \ge s_p \ge 0\f$.
+ * Numerical rank counts \f$s_i > \text{tol} \cdot s_1\f$ (see \ref dense for default tolerance).
  *
- * The numerical rank counts the singular values satisfying
- * \f[
- * s_i > \text{tol} \cdot s_1
- * \f]
- * with \f$\text{tol} = \max(m, n)\,\varepsilon\f$ when `relative_tolerance < 0`, or `relative_tolerance` otherwise.
- *
- * \param A Input matrix of shape \f$m \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
- * \param U Output left singular vectors of shape \f$m \times p\f$ (thin) or \f$m \times m\f$ (full), rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
- * \param s Output singular values vector of length \f$p\f$, rank-1 View of \c double in host memory.
- * \param V Output right singular vectors of shape \f$n \times p\f$ (thin) or \f$n \times n\f$ (full), rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
- * \param relative_tolerance Threshold factor for rank determination; if negative (default -1.0), uses \f$\max(m, n)\,\varepsilon\f$.
+ * \param A Input \f$m \times n\f$ matrix.
+ * \param U Output left singular vectors of shape \f$m \times p\f$ (thin) or \f$m \times m\f$ (full).
+ * \param s Output rank-1 View of \c double of length \f$p\f$ receiving singular values.
+ * \param V Output right singular vectors of shape \f$n \times p\f$ (thin) or \f$n \times n\f$ (full), independent of `U`.
+ * \param relative_tolerance Threshold factor for rank determination; negative values (default `-1.0`) select \f$\max(m, n)\,\varepsilon\f$.
  * \return dense_decomposition_status with `rank` equal to the numerical rank of \f$A\f$.
  *
- * If \f$A\f$ contains non-finite entries, returns `success = false` with `reason = dense_failure::non_finite_input`.
- * If the SVD algorithm fails to converge, returns `success = false` with `reason = dense_failure::no_convergence`.
- * A low numerical rank is reported in `rank` and is not a failure.
- * If dimensions do not match the expected thin or full shapes, throws `std::invalid_argument`.
- * Outputs are unspecified when `success` is \c false.
+ * Fails with `dense_failure::non_finite_input` or `dense_failure::no_convergence`; throws `std::invalid_argument` for incompatible shapes.
  *
- * Measured accuracy: singular values error \f$\max_i |s_i - s_{i,\text{ref}}| / (\varepsilon \max_i |s_{i,\text{ref}}|)\f$ is \f$7.93\,\varepsilon\f$ on gcc and CUDA (test bound 12 \f$\varepsilon\f$). Residual \f$\|U_p \operatorname{diag}(s) V_p^\top - A\|_F / (\|A\|_F \varepsilon)\f$ is \f$14.38\,\varepsilon\f$ on gcc and \f$14.39\,\varepsilon\f$ on CUDA (test bound 22 \f$\varepsilon\f$). Loss of orthonormality \f$\max(\|U^\top U - I\|_F, \|V^\top V - I\|_F) / \varepsilon\f$ is \f$44.17\,\varepsilon\f$ on gcc and \f$44.53\,\varepsilon\f$ on CUDA (test bound 67 \f$\varepsilon\f$).
+ * Measured errors are at most 7.93 \f$\varepsilon\f$ for singular values (bound 12 \f$\varepsilon\f$), 14.39 \f$\varepsilon\f$ for residual (bound 22 \f$\varepsilon\f$), and 44.53 \f$\varepsilon\f$ for orthonormality (bound 67 \f$\varepsilon\f$).
  *
- * \see pivoted_qr_decomposition(), null_space_basis(), dense_decomposition_status, dense_failure
+ * \see \ref dense, pivoted_qr_decomposition(), null_space_basis(), dense_decomposition_status, dense_failure
  */
 // A = U diag(s) V^T for A (m x n), p = min(m, n): s has p entries in
 // decreasing order; U is m x p or m x m and V is n x p or n x n, with
@@ -260,28 +209,18 @@ dense_decomposition_status svd_decomposition(const AView& A, const UView& U, con
  * \ingroup dense
  * \brief Symmetric eigendecomposition of a square symmetric matrix.
  *
- * Computes the spectral decomposition
- * \f[
- * A = V \operatorname{diag}(w) V^\top
- * \f]
- * for an \f$n \times n\f$ real symmetric matrix \f$A\f$, where eigenvalues \f$w\f$ are in increasing order
- * \f$w_1 \le w_2 \le \dots \le w_n\f$ and \f$V\f$ is an \f$n \times n\f$ orthogonal matrix of eigenvectors (\f$V^\top V = I\f$).
- * Only the lower triangle of \f$A\f$ is read (its upper triangle is not accessed).
+ * Computes \f$A = V \operatorname{diag}(w) V^\top\f$ for an \f$n \times n\f$ symmetric matrix \f$A\f$ (lower triangle read), with increasing eigenvalues \f$w_1 \le w_2 \le \dots \le w_n\f$ and orthogonal \f$V\f$.
  *
- * \param A Input symmetric matrix of shape \f$n \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory. Only the lower triangle is read.
- * \param w Output eigenvalues vector of length \f$n\f$, rank-1 View of \c double in host memory.
- * \param V Output eigenvectors matrix of shape \f$n \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
+ * \param A Input \f$n \times n\f$ symmetric matrix (lower triangle read).
+ * \param w Output rank-1 View of \c double of length \f$n\f$ receiving eigenvalues.
+ * \param V Output \f$n \times n\f$ orthogonal eigenvector matrix.
  * \return dense_decomposition_status with `rank = n` on success.
  *
- * If a non-finite entry is found in the lower triangle of \f$A\f$, returns `success = false` with `reason = dense_failure::non_finite_input`.
- * Non-finite entries in the strictly upper triangle are not read.
- * If the eigensolver fails to converge, returns `success = false` with `reason = dense_failure::no_convergence`.
- * If \f$A\f$ or \f$V\f$ is not square or dimensions do not match, throws `std::invalid_argument`.
- * Outputs are unspecified when `success` is \c false.
+ * Fails with `dense_failure::non_finite_input` if the lower triangle of \f$A\f$ is non-finite, or `dense_failure::no_convergence` if the eigensolver fails to converge; throws `std::invalid_argument` for incompatible shapes.
  *
- * Measured accuracy: eigenvalues error \f$\max_i |w_i - w_{i,\text{ref}}| / (\varepsilon \max_i |w_{i,\text{ref}}|)\f$ is \f$12.2\,\varepsilon\f$ on gcc and CUDA (test bound 19 \f$\varepsilon\f$). Residual \f$\|A V - V \operatorname{diag}(w)\|_F / (\|A\|_F \varepsilon)\f$ is \f$9.85\,\varepsilon\f$ on gcc and \f$9.92\,\varepsilon\f$ on CUDA (test bound 15 \f$\varepsilon\f$). Loss of orthonormality \f$\|V^\top V - I\|_F / \varepsilon\f$ is \f$71.0\,\varepsilon\f$ on gcc and \f$72.2\,\varepsilon\f$ on CUDA at \f$n = 60\f$ (test bound 110 \f$\varepsilon\f$).
+ * Measured errors are at most 12.2 \f$\varepsilon\f$ for eigenvalues (bound 19 \f$\varepsilon\f$), 9.92 \f$\varepsilon\f$ for residual (bound 15 \f$\varepsilon\f$), and 72.2 \f$\varepsilon\f$ for orthonormality at \f$n = 60\f$ (bound 110 \f$\varepsilon\f$).
  *
- * \see generalized_symmetric_eigen_decomposition(), cholesky_decomposition(), dense_decomposition_status, dense_failure
+ * \see \ref dense, generalized_symmetric_eigen_decomposition(), cholesky_decomposition(), dense_decomposition_status, dense_failure
  */
 // A = V diag(w) V^T for symmetric A (n x n), w in increasing order, V
 // orthogonal.
@@ -297,33 +236,19 @@ dense_decomposition_status symmetric_eigen_decomposition(const AView& A, const W
  * \ingroup dense
  * \brief Generalized symmetric-definite eigendecomposition.
  *
- * Solves the generalized symmetric-definite eigenvalue problem
- * \f[
- * A V = B V \operatorname{diag}(w) \quad \text{with} \quad V^\top B V = I
- * \f]
- * for an \f$n \times n\f$ symmetric matrix \f$A\f$ and an \f$n \times n\f$ symmetric positive definite matrix \f$B\f$.
- * Eigenvalues \f$w\f$ are in increasing order \f$w_1 \le w_2 \le \dots \le w_n\f$.
- * Only the lower triangles of \f$A\f$ and \f$B\f$ are read.
+ * Solves \f$A V = B V \operatorname{diag}(w)\f$ with \f$V^\top B V = I\f$ and increasing eigenvalues \f$w\f$ by Cholesky reduction of \f$B\f$; only the lower triangles of \f$A\f$ and \f$B\f$ are read.
  *
- * The problem is solved by Cholesky reduction using \f$B = L L^\top\f$, forming \f$\tilde{A} = L^{-1} A L^{-\top}\f$,
- * solving \f$\tilde{A} Y = Y \operatorname{diag}(w)\f$, and computing \f$V = L^{-\top} Y\f$.
- *
- * \param A Input symmetric matrix of shape \f$n \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory. Only the lower triangle is read.
- * \param B Input symmetric positive definite matrix of shape \f$n \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory. Only the lower triangle is read.
- * \param w Output generalized eigenvalues vector of length \f$n\f$, rank-1 View of \c double in host memory.
- * \param V Output \f$B\f$-orthonormal eigenvectors matrix of shape \f$n \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
+ * \param A Input \f$n \times n\f$ symmetric matrix (lower triangle read).
+ * \param B Input \f$n \times n\f$ symmetric positive definite matrix (lower triangle read).
+ * \param w Output rank-1 View of \c double of length \f$n\f$ receiving generalized eigenvalues.
+ * \param V Output \f$n \times n\f$ matrix of \f$B\f$-orthonormal eigenvectors.
  * \return dense_decomposition_status with `rank = n` on success.
  *
- * If \f$B\f$ is not positive definite, returns `success = false` with `reason = dense_failure::not_positive_definite`.
- * If a non-finite entry is found in the lower triangle of \f$A\f$ or \f$B\f$, returns `success = false` with `reason = dense_failure::non_finite_input`.
- * Non-finite entries in upper triangles are not read.
- * If the eigensolver fails to converge, returns `success = false` with `reason = dense_failure::no_convergence`.
- * If any matrix is not square or dimensions do not match, throws `std::invalid_argument`.
- * Outputs are unspecified when `success` is \c false.
+ * Fails with `dense_failure::not_positive_definite` if \f$B\f$ is not positive definite, `dense_failure::non_finite_input` if either lower triangle is non-finite, or `dense_failure::no_convergence`; throws `std::invalid_argument` for incompatible shapes.
  *
- * Measured accuracy: in units of \f$\varepsilon \kappa_i\f$, eigenvalues error is within \f$1.4\,\varepsilon \kappa_i\f$ when \f$B\f$ has condition number \f$10^2\f$ or \f$10^3\f$, and reaches \f$1270.3\,\varepsilon \kappa_i\f$ on gcc and CUDA at zero eigenvalues when \f$B\f$ has condition number \f$10^6\f$ (test bound 1910 \f$\varepsilon \kappa_i\f$). Residual \f$\|A V - B V \operatorname{diag}(w)\|_F / ((\|A\|_F + \|B\|_F \max_i |w_i|) \|V\|_F \varepsilon)\f$ is \f$0.16\,\varepsilon\f$ on gcc and \f$0.19\,\varepsilon\f$ on CUDA (test bound 0.3 \f$\varepsilon\f$). Generalized orthonormality \f$\|V^\top B V - I\|_F / (\|V\|_F^2 \|B\|_F \varepsilon)\f$ is \f$0.07\,\varepsilon\f$ on gcc and \f$0.10\,\varepsilon\f$ on CUDA (test bound 0.15 \f$\varepsilon\f$).
+ * Measured eigenvalue error reaches 1270.3 \f$\varepsilon \kappa_i\f$ at condition \f$10^6\f$ (bound 1910 \f$\varepsilon \kappa_i\f$), with residual at most 0.19 \f$\varepsilon\f$ (bound 0.3 \f$\varepsilon\f$) and orthonormality at most 0.10 \f$\varepsilon\f$ (bound 0.15 \f$\varepsilon\f$); see \ref dense.
  *
- * \see symmetric_eigen_decomposition(), cholesky_decomposition(), dense_decomposition_status, dense_failure
+ * \see \ref dense, symmetric_eigen_decomposition(), cholesky_decomposition(), dense_decomposition_status, dense_failure
  */
 // A V = B V diag(w) with V^T B V = I, for symmetric A and symmetric positive
 // definite B (n x n), w in increasing order. Fails with
@@ -343,30 +268,19 @@ dense_decomposition_status generalized_symmetric_eigen_decomposition(const AView
  * \ingroup dense
  * \brief Orthonormal basis of the null space of a rectangular matrix.
  *
- * Computes an orthonormal basis \f$T\f$ of the null space of an \f$m \times n\f$ matrix \f$C\f$, satisfying
- * \f[
- * C T = 0 \quad \text{with} \quad T^\top T = I
- * \f]
- * The basis is formed from the right singular vectors of \f$C\f$ via Jacobi SVD.
- * The numerical rank \f$r\f$ of \f$C\f$ counts singular values satisfying \f$s_i > \text{tol} \cdot s_1\f$,
- * with \f$\text{tol} = \max(m, n)\,\varepsilon\f$ when `relative_tolerance < 0`, or `relative_tolerance` otherwise.
- * The output View \f$T\f$ is reallocated to shape \f$n \times (n - r)\f$.
- * \c T must be a managed View. When \f$m = 0\f$, \f$T\f$ is set to the \f$n \times n\f$ identity matrix and rank is 0.
+ * Computes an orthonormal basis \f$T\f$ satisfying \f$C T = 0\f$ and \f$T^\top T = I\f$ via Jacobi SVD of \f$C\f$ (\f$m \times n\f$), reallocating the managed View `T` to \f$n \times (n - r)\f$.
+ * When \f$m = 0\f$, sets \f$T = I_{n \times n}\f$ and returns `rank = 0`; unmanaged `T` fails at compile time.
  *
- * \param C Input constraint matrix of shape \f$m \times n\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory.
- * \param T Output managed View of shape \f$n \times (n - r)\f$, rank-2 View of \c double with layout `Kokkos::LayoutLeft` in host memory, reallocated by this function.
- * \param relative_tolerance Threshold factor for rank determination; if negative (default -1.0), uses \f$\max(m, n)\,\varepsilon\f$.
- * \return dense_decomposition_status with `rank` equal to the numerical rank \f$r\f$ of \f$C\f$.
+ * \param C Input \f$m \times n\f$ constraint matrix.
+ * \param T Output managed matrix View reallocated to shape \f$n \times (n - r)\f$.
+ * \param relative_tolerance Threshold factor for rank determination; negative values (default `-1.0`) select \f$\max(m, n)\,\varepsilon\f$.
+ * \return dense_decomposition_status with `rank` equal to the numerical rank \f$r\f$.
  *
- * If \f$C\f$ contains non-finite entries, returns `success = false` with `reason = dense_failure::non_finite_input`.
- * If the SVD fails to converge, returns `success = false` with `reason = dense_failure::no_convergence`.
- * If \c TView is an unmanaged View, fails at compile time via static assertion.
- * When \f$m = 0\f$, returns `success = true` with `rank = 0` and \f$T = I_{n \times n}\f$.
- * Outputs are unspecified when `success` is \c false.
+ * Fails with `dense_failure::non_finite_input` or `dense_failure::no_convergence`; see \ref dense for View and rank conventions.
  *
- * Measured accuracy: residual \f$\|C T\|_F / (\|C\|_F \varepsilon)\f$ is \f$0.94\,\varepsilon\f$ on gcc and \f$1.74\,\varepsilon\f$ on CUDA (test bound 2.7 \f$\varepsilon\f$). Orthonormality \f$\|T^\top T - I\|_F / \varepsilon\f$ is \f$12.09\,\varepsilon\f$ on gcc and \f$13.07\,\varepsilon\f$ on CUDA (test bound 20 \f$\varepsilon\f$). Null space column count matched \f$n - r\f$ exactly in all test cases.
+ * Measured errors are at most 1.74 \f$\varepsilon\f$ for residual (bound 2.7 \f$\varepsilon\f$) and 13.07 \f$\varepsilon\f$ for orthonormality (bound 20 \f$\varepsilon\f$).
  *
- * \see svd_decomposition(), dense_decomposition_status, dense_failure
+ * \see \ref dense, svd_decomposition(), dense_decomposition_status, dense_failure
  */
 // An orthonormal basis T of the null space of C (m x n): C T = 0, T^T T = I.
 // T is reallocated to n x (n - r), with r the rank of C (returned in the

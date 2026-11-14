@@ -108,18 +108,13 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
    * \ingroup pdmat
    * \brief Evaluates the packed positive definite matrix \f$M(\theta)\f$.
    *
-   * Evaluates the bijector's inverse map \f$M(\theta) = h(\theta)\f$:
-   * - log_cholesky: \f$M = L L^\top\f$, \f$L_{ii} = e^{\theta_{ii}}\f$, \f$L_{ij} = \theta_{ij}\f$ (\f$i > j\f$).
-   * - matrix_log: \f$M = \exp(S)\f$, \f$S_{ij} = S_{ji} = \theta_{ij}\f$.
-   * - partial_corr: \f$M = L L^\top\f$, \f$L_{ab} = \tanh(\theta_{ab})\prod_{l<b}\operatorname{sech}(\theta_{al})\f$ (\f$a > b\f$), \f$L_{aa} = \prod_{l<a}\operatorname{sech}(\theta_{al})\f$.
+   * Evaluates the bijector's inverse map \f$M(\theta) = h(\theta)\f$ bit for bit identically (see \ref bijector_coupled):
+   * \c log_cholesky uses \f$L_{ii} = e^{\theta_{ii}}\f$, \f$L_{ij} = \theta_{ij}\f$;
+   * \c matrix_log uses \f$\exp(S)\f$; \c partial_corr uses \f$L_{ab} = \tanh(\theta_{ab})\prod_{l<b}\operatorname{sech}(\theta_{al})\f$.
    *
    * \param theta Array of \c n_params() unconstrained parameters.
    * \param m Output buffer of at least \f$p(p+1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
-   *
-   * \par Measured accuracy
-   * Bit for bit identical to the bijector's inverse map; see \ref bijector_coupled.
-   *
    * \see inverse(), cholesky(), log_det(), matrix_dk()
    */
   LAPLACE_HD void matrix(const double* theta, double* m, double* w) const { b.inverse(theta, m, w); }
@@ -128,21 +123,13 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
    * \ingroup pdmat
    * \brief Evaluates the log-determinant \f$\log \det M(\theta)\f$.
    *
-   * Evaluated in closed form:
-   * - log_cholesky: \f$\log \det M = 2\sum_{i=0}^{p-1} \theta_{ii}\f$.
-   * - matrix_log: \f$\log \det M = \operatorname{tr} S = \sum_{i=0}^{p-1} \theta_{ii}\f$.
-   * - partial_corr: \f$\log \det M = -2\sum_{a>b} \log\cosh\theta_{ab}\f$.
+   * Closed form: \f$2\sum \theta_{ii}\f$ (`log_cholesky`), \f$\sum \theta_{ii}\f$ (`matrix_log`),
+   * or \f$-2\sum_{a>b} \log\cosh\theta_{ab}\f$ (`partial_corr`). Maximum error at order 0: 0.28 ulp (`log_cholesky`),
+   * 0.06 ulp (`matrix_log`), and 28.4 ulp on gcc, 7.38 ulp on CUDA (`partial_corr`, max over orders 0–6); test bounds 1, 1, and 5 ulp at order 0.
    *
    * \param theta Array of \c n_params() unconstrained parameters.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles (unused).
    * \return Log-determinant of \f$M(\theta)\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP and CUDA (RTX 4070 SUPER):
-   * - log_cholesky: 0.28 ulp (\f$K=0\f$, gcc) / 0.28 ulp (\f$K=0\f$, CUDA)
-   * - matrix_log: 0.06 ulp (\f$K=0\f$, gcc) / 0.06 ulp (\f$K=0\f$, CUDA)
-   * - partial_corr: 28.4 ulp (\f$K=6\f$, gcc) / 7.38 ulp (\f$K=6\f$, CUDA)
-   *
    * \see matrix(), log_det_dk()
    */
   LAPLACE_HD double log_det(const double* theta, [[maybe_unused]] double* w) const {
@@ -160,19 +147,13 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
    * \ingroup pdmat
    * \brief Evaluates the packed inverse matrix \f$M^{-1}(\theta)\f$.
    *
-   * - matrix_log: evaluated in closed form as \f$M^{-1} = \exp(-S)\f$ via the bijector at \f$-\theta\f$.
-   * - log_cholesky and partial_corr: evaluated via forward substitution \f$Y = L^{-1}\f$ and Gram summation \f$M^{-1} = Y^\top Y\f$.
+   * Uses closed \f$\exp(-S)\f$ at \f$-\theta\f$ (`matrix_log`) or forward substitution \f$Y = L^{-1}\f$, \f$M^{-1} = Y^\top Y\f$.
+   * Maximum error over orders 0–6: 28.2 ulpN on gcc and 23.9 ulpN on CUDA (`log_cholesky`, test bound 6 ulpN at order 0),
+   * 24.2 and 21.7 ulpN (`matrix_log`, bound 23 ulpN), 59.7 and 52.2 ulpN (`partial_corr`, bound 3 ulpN).
    *
    * \param theta Array of \c n_params() unconstrained parameters.
    * \param m Output buffer of at least \f$p(p+1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP and CUDA (RTX 4070 SUPER):
-   * - log_cholesky: 28.2 ulpN (\f$K=4\f$, gcc) / 23.9 ulpN (\f$K=4\f$, CUDA)
-   * - matrix_log: 24.2 ulpN (\f$K=1\f$, gcc) / 21.7 ulpN (\f$K=1\f$, CUDA)
-   * - partial_corr: 59.7 ulpN (\f$K=6\f$, gcc) / 52.2 ulpN (\f$K=6\f$, CUDA)
-   *
    * \see matrix(), cholesky(), log_det(), inverse_dk()
    */
   LAPLACE_HD void inverse(const double* theta, double* m, double* w) const {
@@ -187,18 +168,13 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
 
   /**
    * \ingroup pdmat
-   * \brief Evaluates the packed lower Cholesky factor \f$L(\theta)\f$.
+   * \brief Evaluates the packed lower Cholesky factor \f$L(\theta)\f$ (available when \c closed_factor is \c true).
    *
-   * Evaluates the lower-triangular factor \f$L\f$ satisfying \f$M = L L^\top\f$.
-   * Available only when \c closed_factor is \c true (log_cholesky and partial_corr).
+   * Evaluates \f$L\f$ satisfying \f$M = L L^\top\f$ bit for bit identically to the bijector's inverse Cholesky factor; see \ref bijector_coupled.
    *
    * \param theta Array of \c n_params() unconstrained parameters.
    * \param l Output buffer of at least \f$p(p+1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
-   *
-   * \par Measured accuracy
-   * Bit for bit identical to the bijector's inverse Cholesky factor; see \ref bijector_coupled.
-   *
    * \see matrix(), inverse(), log_det(), cholesky_dk()
    */
   LAPLACE_HD void cholesky(const double* theta, double* l, double* w) const
@@ -209,18 +185,13 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
 
   /**
    * \ingroup pdmat
-   * \brief Evaluates the log-Jacobian determinant of \f$\theta \mapsto M(\theta)\f$.
+   * \brief Evaluates the log-Jacobian determinant of \f$\theta \mapsto M(\theta)\f$ bit for bit identically to \c B; see \ref bijector_coupled.
    *
-   * Returns \f$\log\lvert\det J\rvert\f$ of \f$\theta \mapsto M\f$ in reference coordinates: the lower triangle
-   * with the diagonal for log_cholesky and matrix_log, and the strict lower triangle for partial_corr.
+   * Evaluated in reference coordinates (lower triangle with diagonal for \c log_cholesky and \c matrix_log; strict lower triangle for \c partial_corr).
    *
    * \param theta Array of \c n_params() unconstrained parameters.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Log-Jacobian determinant.
-   *
-   * \par Measured accuracy
-   * Bit for bit identical to the bijector's inverse log-Jacobian; see \ref bijector_coupled.
-   *
    * \see log_jacobian_dk(), pdmat_orders::log_jacobian_d1()
    */
   // log |det J| of theta -> M, in the bijector's reference coordinates
@@ -228,21 +199,14 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
 
   /**
    * \ingroup pdmat
-   * \brief Partial derivative of \f$M(\theta)\f$ of order \f$K\f$.
-   *
-   * Evaluates \f$\frac{\partial^K M}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}}\f$
-   * via the bijector's inverse derivative.
+   * \brief Partial derivative of \f$M(\theta)\f$ of order \f$K\f$, bit for bit identical to \c B; see \ref bijector_coupled.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \c n_params() unconstrained parameters.
    * \param idx Sorted tuple of \f$K\f$ parameter indices.
    * \param m Output buffer of at least \f$p(p+1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
-   * \return \c true if computed; \c false and buffer left untouched if structurally zero for that tuple.
-   *
-   * \par Measured accuracy
-   * Bit for bit identical to the bijector's inverse derivative; see \ref bijector_coupled.
-   *
+   * \return \c true if computed; \c false and buffer left untouched if structurally zero.
    * \see matrix(), pdmat_orders::matrix_d1()
    */
   template <int K>
@@ -254,21 +218,15 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$\log \det M(\theta)\f$ of order \f$K\f$.
    *
-   * Evaluated in closed form:
-   * - log_cholesky: at \f$K = 1\f$, 2 on diagonal coordinates \f$(i, i)\f$, 0 otherwise; 0 for \f$K \ge 2\f$.
-   * - matrix_log: at \f$K = 1\f$, 1 on diagonal coordinates \f$(i, i)\f$, 0 otherwise; 0 for \f$K \ge 2\f$.
-   * - partial_corr: \f$-2\tanh^{(K-1)}(\theta_{ab})\f$ if every index in \c idx is that of the one coordinate \f$\theta_{ab}\f$, and 0 on mixed tuples.
+   * Closed form: \f$2\f$ (`log_cholesky`) or \f$1\f$ (`matrix_log`) for \f$K = 1\f$ on a diagonal coordinate and \f$0\f$ otherwise;
+   * \f$-2\tanh^{(K-1)}(\theta_{ab})\f$ on pure tuples for `partial_corr` and \f$0\f$ on mixed tuples. Exact (0 ulp) for `log_cholesky` and `matrix_log`;
+   * max error for `partial_corr` 28.4 ulp on gcc and 7.38 ulp on CUDA (test bounds 2 to 43 ulp).
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \c n_params() unconstrained parameters.
    * \param idx Sorted tuple of \f$K\f$ parameter indices.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles (unused).
-   * \return Value of the derivative, or \f$0.0\f$ if structurally zero for that tuple.
-   *
-   * \par Measured accuracy
-   * Exact (0 ulp) for log_cholesky and matrix_log. For partial_corr, maximum error over orders 0–6:
-   * 28.4 ulp (\f$K=6\f$, gcc) / 7.38 ulp (\f$K=6\f$, CUDA).
-   *
+   * \return Value of the derivative, or \f$0.0\f$ if structurally zero.
    * \see log_det(), pdmat_orders::log_det_d1()
    */
   template <int K>
@@ -290,22 +248,16 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$M^{-1}(\theta)\f$ of order \f$K\f$.
    *
-   * - matrix_log: \f$(-1)^K\f$ times the bijector's derivative \f$\partial^K \exp(-S)\f$ evaluated at \f$-\theta\f$.
-   * - log_cholesky and partial_corr: evaluated by the generic subset recursion on \f$Y = L^{-1}\f$ and Leibniz's rule for \f$M^{-1} = Y^\top Y\f$ (described on the module page, \ref pdmat).
+   * Evaluates \f$(-1)^K \partial^K \exp(-S)\f$ at \f$-\theta\f$ (`matrix_log`) or subset recursion on \f$Y = L^{-1}\f$ and \f$M^{-1} = Y^\top Y\f$ (\ref pdmat).
+   * Max error over orders 1–6: `log_cholesky` 28.2 ulpN gcc, 23.9 CUDA (bounds 6 to 43); `matrix_log` 24.2 gcc, 21.7 CUDA (bounds 30 to 37);
+   * `partial_corr` 59.7 gcc, 52.2 CUDA (bounds 6 to 90).
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \c n_params() unconstrained parameters.
    * \param idx Sorted tuple of \f$K\f$ parameter indices.
    * \param m Output buffer of at least \f$p(p+1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
-   * \return \c true if computed; \c false and buffer left untouched if structurally zero for that tuple.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6 on gcc/OpenMP and CUDA (RTX 4070 SUPER):
-   * - log_cholesky: 28.2 ulpN (\f$K=4\f$, gcc) / 23.9 ulpN (\f$K=4\f$, CUDA)
-   * - matrix_log: 24.2 ulpN (\f$K=1\f$, gcc) / 21.7 ulpN (\f$K=1\f$, CUDA)
-   * - partial_corr: 59.7 ulpN (\f$K=6\f$, gcc) / 52.2 ulpN (\f$K=6\f$, CUDA)
-   *
+   * \return \c true if computed; \c false and buffer left untouched if structurally zero.
    * \see inverse(), pdmat_orders::inverse_d1()
    */
   template <int K>
@@ -324,22 +276,16 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
 
   /**
    * \ingroup pdmat
-   * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order \f$K\f$.
+   * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order \f$K\f$ (\c closed_factor only).
    *
-   * Evaluates \f$\frac{\partial^K L}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}}\f$
-   * via the bijector's inverse Cholesky derivative.
-   * Available only when \c closed_factor is \c true (log_cholesky and partial_corr).
+   * Bit for bit identical to the bijector's inverse Cholesky derivative; see \ref bijector_coupled.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \c n_params() unconstrained parameters.
    * \param idx Sorted tuple of \f$K\f$ parameter indices.
    * \param l Output buffer of at least \f$p(p+1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
-   * \return \c true if computed; \c false and buffer left untouched if structurally zero for that tuple.
-   *
-   * \par Measured accuracy
-   * Bit for bit identical to the bijector's inverse Cholesky derivative; see \ref bijector_coupled.
-   *
+   * \return \c true if computed; \c false and buffer left untouched if structurally zero.
    * \see cholesky(), pdmat_orders::cholesky_d1()
    */
   template <int K>
@@ -351,20 +297,13 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
 
   /**
    * \ingroup pdmat
-   * \brief Partial derivative of the log-Jacobian of order \f$K\f$.
-   *
-   * Evaluates \f$\frac{\partial^K \log\lvert\det J\rvert}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}}\f$
-   * in reference coordinates via the bijector's inverse log-Jacobian derivative.
+   * \brief Partial derivative of the log-Jacobian of order \f$K\f$, bit for bit identical to \c B; see \ref bijector_coupled.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \c n_params() unconstrained parameters.
    * \param idx Sorted tuple of \f$K\f$ parameter indices.
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
-   * \return Value of the derivative, or \f$0.0\f$ if identically zero for that tuple.
-   *
-   * \par Measured accuracy
-   * Bit for bit identical to the bijector's inverse log-Jacobian derivative; see \ref bijector_coupled.
-   *
+   * \return Value of the derivative, or \f$0.0\f$ if identically zero.
    * \see log_jacobian(), pdmat_orders::log_jacobian_d1()
    */
   template <int K>

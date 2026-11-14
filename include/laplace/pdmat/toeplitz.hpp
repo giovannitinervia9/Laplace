@@ -246,16 +246,9 @@ LAPLACE_HD void cholesky_masks(int p, const double* theta, const int* idx, doubl
  * \ingroup pdmat
  * \brief Structured positive definite matrix with Toeplitz correlation structure.
  *
- * Maps \f$q = p - 1\f$ unconstrained real parameters \f$\theta_0, \dots, \theta_{p-2}\f$ to a \f$p \times p\f$
- * Toeplitz correlation matrix \f$M(\theta)\f$ with entries \f$M_{ij}(\theta) = m_{|i - j|}\f$, \f$m_0 = 1\f$,
- * and partial autocorrelations \f$\varphi_k = \tanh\theta_{k-1} \in (-1, 1)\f$ (\f$k = 1, \dots, p - 1\f$).
- *
- * \par Measured accuracy
- * Maximum error over orders 0–6 on gcc/OpenMP and CUDA (RTX 4070 SUPER):
- * - \f$M\f$: 163 ulpN (\f$K=6\f$, gcc) / 135 ulpN (\f$K=5\f$, CUDA)
- * - \f$M^{-1}\f$: 10.0 ulpN (\f$K=6\f$, gcc) / 13.9 ulpN (\f$K=6\f$, CUDA)
- * - \f$L\f$: 10.9 ulpN (\f$K=5\f$, gcc) / 10.3 ulpN (\f$K=5\f$, CUDA)
- * - \f$\log \det M\f$: 22.8 ulp (\f$K=6\f$, gcc) / 19.9 ulp (\f$K=6\f$, CUDA)
+ * Maps \f$q = p - 1\f$ unconstrained parameters \f$\theta_0, \dots, \theta_{p-2}\f$ (\f$p \ge 1\f$) to a \f$p \times p\f$
+ * Toeplitz correlation matrix \f$M_{ij}(\theta) = m_{|i - j|}\f$ (\f$m_0 = 1\f$) with partial autocorrelations
+ * \f$\varphi_k = \tanh\theta_{k-1} \in (-1, 1)\f$ for \f$k = 1, \dots, p - 1\f$ (\f$M = [1]\f$ at \f$p = 1\f$).
  *
  * \see pdmat, pdmat_orders, pdmat_structure, ar1_pdmat
  */
@@ -304,16 +297,12 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \ingroup pdmat
    * \brief Evaluates the packed Toeplitz correlation matrix \f$M(\theta)\f$.
    *
-   * Computes \f$M_{ij} = m_{|i - j|}\f$ with \f$m_t = L_{t0}\f$ evaluated via the normalized lattice rotation.
-   * For \f$p = 1\f$, writes \f$M = [1]\f$.
+   * Computes \f$M_{ij} = m_{|i - j|}\f$ with \f$m_t = L_{t0}\f$ via normalized lattice rotations (\f$M = [1]\f$ for \f$p = 1\f$).
+   * Maximum error over orders 0–6: 163 ulpN on gcc and 135 ulpN on CUDA; test bound 2 ulpN at order 0.
    *
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$ (unused for \f$p = 1\f$).
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused for \f$p = 1\f$).
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 163 ulpN (\f$K=6\f$, gcc) / 135 ulpN (\f$K=5\f$, CUDA); test bounds 2 to 244 ulpN.
-   *
    * \see inverse(), cholesky(), log_det(), matrix_dk()
    */
   LAPLACE_HD void matrix(const double* theta, double* m, double* w) const {
@@ -328,18 +317,12 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \ingroup pdmat
    * \brief Evaluates the log-determinant \f$\log \det M(\theta)\f$.
    *
-   * For \f$p = 1\f$, returns \f$0.0\f$. For \f$p \ge 2\f$, computes:
-   * \f[
-   * \log \det M(\theta) = -2 \sum_{a=0}^{p-2} (p - 1 - a)\log\cosh\theta_a
-   * \f]
+   * Computes \f$\log \det M(\theta) = -2 \sum_{a=0}^{p-2} (p - 1 - a)\log\cosh\theta_a\f$ (\f$0.0\f$ for \f$p = 1\f$).
+   * Maximum error over orders 0–6: 22.8 ulp on gcc and 19.9 ulp on CUDA; test bound 3 ulp at order 0.
    *
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$ (unused for \f$p = 1\f$).
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused).
    * \return Log-determinant of \f$M(\theta)\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 22.8 ulp (\f$K=6\f$, gcc) / 19.9 ulp (\f$K=6\f$, CUDA); test bounds 2 to 35 ulp.
-   *
    * \see matrix(), log_det_dk()
    */
   LAPLACE_HD double log_det(const double* theta, [[maybe_unused]] double* w) const {
@@ -356,16 +339,13 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \ingroup pdmat
    * \brief Evaluates the packed inverse matrix \f$M^{-1}(\theta)\f$.
    *
-   * Evaluates \f$M^{-1} = A^\top V^{-1} A\f$ from Durbin-Levinson autoregressive coefficients \f$\varphi_{t, j}\f$
-   * and \f$1/v_t = \prod_{a < t} \cosh^2\theta_a\f$. For \f$p = 1\f$, writes \f$M^{-1} = [1]\f$.
+   * Evaluates \f$M^{-1} = A^\top V^{-1} A\f$ from Durbin-Levinson coefficients \f$\varphi_{t, j}\f$
+   * and \f$1/v_t = \prod_{a < t} \cosh^2\theta_a\f$ (\f$M^{-1} = [1]\f$ for \f$p = 1\f$).
+   * Maximum error over orders 0–6: 10.0 ulpN on gcc and 13.9 ulpN on CUDA; test bound 15 ulpN at order 0.
    *
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$ (unused for \f$p = 1\f$).
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused for \f$p = 1\f$).
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 10.0 ulpN (\f$K=6\f$, gcc) / 13.9 ulpN (\f$K=6\f$, CUDA); test bounds 14 to 21 ulpN.
-   *
    * \see matrix(), cholesky(), log_det(), inverse_dk()
    */
   LAPLACE_HD void inverse(const double* theta, double* m, double* w) const {
@@ -380,16 +360,12 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \ingroup pdmat
    * \brief Evaluates the packed lower Cholesky factor \f$L(\theta)\f$.
    *
-   * Evaluates \f$L\f$ satisfying \f$M = L L^\top\f$ column by column via the normalized lattice rotation.
-   * For \f$p = 1\f$, writes \f$L = [1]\f$.
+   * Evaluates \f$L\f$ satisfying \f$M = L L^\top\f$ column by column via normalized lattice rotations (\f$L = [1]\f$ for \f$p = 1\f$).
+   * Maximum error over orders 0–6: 10.9 ulpN on gcc and 10.3 ulpN on CUDA; test bound 3 ulpN at order 0.
    *
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$ (unused for \f$p = 1\f$).
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused for \f$p = 1\f$).
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 10.9 ulpN (\f$K=5\f$, gcc) / 10.3 ulpN (\f$K=5\f$, CUDA); test bounds 3 to 17 ulpN.
-   *
    * \see matrix(), inverse(), log_det(), cholesky_dk()
    */
   LAPLACE_HD void cholesky(const double* theta, double* l, double* w) const {
@@ -404,8 +380,8 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$M(\theta)\f$ of order \f$K\f$.
    *
-   * Evaluates the partial derivative along sorted index tuple \c idx using column 0 of the
-   * normalized lattice differentiated by Leibniz's rule over sub-masks.
+   * Differentiates column 0 of the normalized lattice by Leibniz's rule over sub-masks; returns \c false for \f$p = 1\f$.
+   * Maximum error over orders 1–6: 163 ulpN on gcc and 135 ulpN on CUDA; test bounds 12 to 244 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$.
@@ -413,10 +389,6 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles.
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 163 ulpN (\f$K=6\f$, gcc) / 135 ulpN (\f$K=5\f$, CUDA); test bounds 2 to 244 ulpN.
-   *
    * \see matrix(), pdmat_orders::matrix_d1()
    */
   template <int K>
@@ -430,21 +402,15 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$\log \det M(\theta)\f$ of order \f$K\f$.
    *
-   * For \f$p \ge 2\f$ on a pure tuple where all indices equal \f$a\f$, computes:
-   * \f[
-   * \frac{\partial^K \log \det M}{\partial\theta_a^K} = -2(p - 1 - a)\tanh^{(K-1)}(\theta_a)
-   * \f]
-   * Returns \f$0.0\f$ if \f$p = 1\f$ or on any mixed tuple with distinct indices.
+   * For \f$p \ge 2\f$ and a pure tuple of index \f$a\f$, computes \f$-2(p - 1 - a)\tanh^{(K-1)}(\theta_a)\f$;
+   * returns \f$0.0\f$ for \f$p = 1\f$ or on mixed tuples.
+   * Maximum error over orders 1–6: 22.8 ulp on gcc and 19.9 ulp on CUDA; test bounds 2 to 35 ulp.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$.
    * \param idx Sorted tuple of \f$K\f$ parameter indices in \f$\{0, \dots, p - 2\}\f$.
    * \param w Caller scratch buffer of \c scratch_size() doubles (unused).
    * \return Value of the derivative, or \f$0.0\f$ if \f$p = 1\f$ or on a mixed tuple.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 22.8 ulp (\f$K=6\f$, gcc) / 19.9 ulp (\f$K=6\f$, CUDA); test bounds 2 to 35 ulp.
-   *
    * \see log_det(), pdmat_orders::log_det_d1()
    */
   template <int K>
@@ -458,8 +424,8 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$M^{-1}(\theta)\f$ of order \f$K\f$.
    *
-   * Evaluates derivatives of \f$M^{-1} = A^\top V^{-1} A\f$ along sorted index tuple \c idx
-   * via Leibniz differentiation over sub-masks.
+   * Differentiates \f$M^{-1} = A^\top V^{-1} A\f$ over sub-masks; returns \c false for \f$p = 1\f$.
+   * Maximum error over orders 1–6: 10.0 ulpN on gcc and 13.9 ulpN on CUDA; test bounds 14 to 21 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$.
@@ -467,10 +433,6 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles.
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 10.0 ulpN (\f$K=6\f$, gcc) / 13.9 ulpN (\f$K=6\f$, CUDA); test bounds 14 to 21 ulpN.
-   *
    * \see inverse(), pdmat_orders::inverse_d1()
    */
   template <int K>
@@ -484,8 +446,8 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order \f$K\f$.
    *
-   * Evaluates derivatives of \f$L\f$ along sorted index tuple \c idx column by column
-   * via the normalized lattice rotation differentiated by Leibniz's rule over sub-masks.
+   * Differentiates the normalized lattice column by column over sub-masks; returns \c false for \f$p = 1\f$.
+   * Maximum error over orders 1–6: 10.9 ulpN on gcc and 10.3 ulpN on CUDA; test bounds 7 to 17 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$.
@@ -493,10 +455,6 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
    * \param w Caller scratch buffer of \c scratch_size() doubles.
    * \return \c true if \f$p \ge 2\f$; \c false and buffer left untouched if \f$p = 1\f$.
-   *
-   * \par Measured accuracy
-   * Maximum error over orders 0–6: 10.9 ulpN (\f$K=5\f$, gcc) / 10.3 ulpN (\f$K=5\f$, CUDA); test bounds 3 to 17 ulpN.
-   *
    * \see cholesky(), pdmat_orders::cholesky_d1()
    */
   template <int K>

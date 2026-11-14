@@ -95,27 +95,11 @@ namespace laplace::bijector {
  * \ingroup bijector_scalar
  * \brief Enumeration of scalar bijector maps with and without parameters.
  *
- * Defines twenty bijections \f$g: V \to U\f$ between open intervals:
- * - \c identity : \f$g(v) = v\f$, mapping \f$(-\infty, \infty) \to (-\infty, \infty)\f$.
- * - \c log : \f$g(v) = \log v\f$, mapping \f$(0, \infty) \to (-\infty, \infty)\f$.
- * - \c logit : \f$g(v) = \log(v / (1 - v))\f$, mapping \f$(0, 1) \to (-\infty, \infty)\f$.
- * - \c probit : \f$g(v) = \Phi^{-1}(v)\f$, mapping \f$(0, 1) \to (-\infty, \infty)\f$.
- * - \c cauchit : \f$g(v) = \tan(\pi(v - 1/2))\f$, mapping \f$(0, 1) \to (-\infty, \infty)\f$.
- * - \c cloglog : \f$g(v) = \log(-\log(1 - v))\f$, mapping \f$(0, 1) \to (-\infty, \infty)\f$.
- * - \c loglog : \f$g(v) = -\log(-\log v)\f$, mapping \f$(0, 1) \to (-\infty, \infty)\f$.
- * - \c inverse : \f$g(v) = 1 / v\f$, mapping \f$(0, \infty) \to (0, \infty)\f$.
- * - \c inverse_sq : \f$g(v) = 1 / v^2\f$, mapping \f$(0, \infty) \to (0, \infty)\f$.
- * - \c sqrt : \f$g(v) = \sqrt{v}\f$, mapping \f$(0, \infty) \to (0, \infty)\f$.
- * - \c atanh : \f$g(v) = \operatorname{atanh}(v) = \frac{1}{2}(\log(1+v) - \log(1-v))\f$, mapping \f$(-1, 1) \to (-\infty, \infty)\f$.
- * - \c asinh : \f$g(v) = \operatorname{asinh}(v)\f$, mapping \f$(-\infty, \infty) \to (-\infty, \infty)\f$.
- * - \c affine : \f$g(v) = (v - \mu)/\sigma\f$, mapping \f$(-\infty, \infty) \to (-\infty, \infty)\f$, parameters \f$\mu\f$ (\c location) and \f$\sigma \neq 0\f$ (\c scale).
- * - \c power : \f$g(v) = v^\lambda\f$, mapping \f$(0, \infty) \to (0, \infty)\f$, parameter \f$\lambda \neq 0\f$ (\c exponent).
- * - \c softplus : \f$g(v) = \frac{1}{a}\log(e^{a v} - 1)\f$, mapping \f$(0, \infty) \to (-\infty, \infty)\f$, parameter \f$a > 0\f$ (\c sharpness).
- * - \c bounded : \f$g(v) = \log(v - a) - \log(b - v)\f$, mapping \f$(a, b) \to (-\infty, \infty)\f$, parameters \f$a\f$ (\c lower) and \f$b\f$ (\c upper) with \f$a < b\f$.
- * - \c lower_bounded : \f$g(v) = \log(v - a)\f$, mapping \f$(a, \infty) \to (-\infty, \infty)\f$, parameter \f$a\f$ (\c lower).
- * - \c upper_bounded : \f$g(v) = -\log(b - v)\f$, mapping \f$(-\infty, b) \to (-\infty, \infty)\f$, parameter \f$b\f$ (\c upper).
- * - \c box_cox : \f$g(v) = (v^\lambda - 1)/\lambda\f$ (\f$\log v\f$ at \f$\lambda = 0\f$), mapping \f$(0, \infty)\f$ to \f$(-1/\lambda, \infty)\f$ for \f$\lambda > 0\f$, \f$(-\infty, -1/\lambda)\f$ for \f$\lambda < 0\f$, and \f$(-\infty, \infty)\f$ for \f$\lambda = 0\f$, parameter \f$\lambda\f$ (\c exponent).
- * - \c yeo_johnson : \f$g(v) = ((1 + v)^\lambda - 1)/\lambda\f$ for \f$v \ge 0\f$ and \f$-((1 - v)^{2 - \lambda} - 1)/(2 - \lambda)\f$ for \f$v < 0\f$, mapping \f$(-\infty, \infty)\f$ to \f$(-\infty, \infty)\f$ for \f$0 \le \lambda \le 2\f$, \f$(-\infty, -1/\lambda)\f$ for \f$\lambda < 0\f$, and \f$(1/(2 - \lambda), \infty)\f$ for \f$\lambda > 2\f$, parameter \f$\lambda\f$ (\c exponent).
+ * Identifies twelve parameter-free maps (`identity`, `log`, `logit`, `probit`, `cauchit`,
+ * `cloglog`, `loglog`, `inverse`, `inverse_sq`, `sqrt`, `atanh`, `asinh`) and eight
+ * parameterized maps (`affine`, `power`, `softplus`, `bounded`, `lower_bounded`,
+ * `upper_bounded`, `box_cox`, `yeo_johnson`). See \ref bijector_scalar for definitions,
+ * domains, images, and numerical details.
  *
  * \see bijector_scalar, scalar_bijector
  */
@@ -894,15 +878,9 @@ LAPLACE_BIJ_NOINLINE LAPLACE_HD double inv_to_lower(scalar_bijector_map k, doubl
  * \ingroup bijector_scalar
  * \brief Partial derivatives of total order \f$K\f$ of a bijector quantity in argument and parameters.
  *
- * Holds the derivatives \f$\frac{\partial^K}{\partial x^{n_0} \partial p_1^{n_1} \partial p_2^{n_2}} f\f$
- * with \f$n_0 + n_1 + n_2 = K\f$ in an array of size \f$(K + 1)(K + 2) / 2\f$. Components are ordered
- * by \f$n_2\f$ and then by \f$n_1\f$, accessible via index() as
- * \f$\mathrm{index}(n_1, n_2) = n_2 (K + 1) - n_2 (n_2 - 1) / 2 + n_1\f$.
- *
- * Component \c c[0] (\f$n_1 = n_2 = 0\f$) is the pure derivative in the argument. A map with one
- * parameter fills the first \f$K + 1\f$ components (\f$n_2 = 0\f$) and leaves the rest zero.
- * Maps without parameters have component \c c[0] equal to the pure derivative and the remaining
- * components zero. For \c power, components involving the exponent are NaN.
+ * Stores all derivatives of total order \f$n_0 + n_1 + n_2 = K\f$ (ordered by \f$n_2\f$, then \f$n_1\f$;
+ * accessed via index()), with the pure argument derivative at \c c[0]. Absent parameter components
+ * are 0.0; for \c power, parameter components are quiet NaN. See \ref bijector_scalar.
  *
  * \tparam K Total derivative order, \f$1 \le K \le 6\f$.
  * \see scalar_bijector, bijector_scalar
@@ -928,12 +906,8 @@ struct bijector_partials {
  * \ingroup bijector_scalar
  * \brief Information about points where a scalar bijector is not smooth.
  *
- * Declares the non-smooth points: \c count (0 or 1),
- * \c point (their positions), and \c continuous_order (the order
- * up to which the map remains continuous). For Yeo-Johnson, \c count is 1 at
- * \f$v = 0\f$ (\f$u = 0\f$) with \c continuous_order equal to 2 (its third
- * derivative jumps across zero unless \f$\lambda = 1\f$). At the kink itself,
- * derivatives follow the right-hand convention.
+ * Reports \c count (0 or 1), kink positions in \c point, and \c continuous_order.
+ * Non-smooth evaluations follow the right-hand branch. See \ref bijector_scalar.
  *
  * \see scalar_bijector::forward_kinks(), scalar_bijector::inverse_kinks(), bijector_scalar
  */
@@ -951,18 +925,9 @@ struct bijector_kinks {
  * \ingroup bijector_scalar
  * \brief Configuration and evaluation structure for scalar bijectors.
  *
- * Holds the map selection (\c map), an inversion flag (\c inverted), and parameters:
- * - \c location : location parameter \f$\mu\f$ for \c affine.
- * - \c scale : scale parameter \f$\sigma \neq 0\f$ for \c affine.
- * - \c exponent : power or shape parameter \f$\lambda\f$ for \c power (\f$\lambda \neq 0\f$),
- *   \c box_cox, and \c yeo_johnson.
- * - \c sharpness : sharpness parameter \f$a > 0\f$ for \c softplus.
- * - \c lower : lower bound \f$a\f$ for \c bounded and \c lower_bounded.
- * - \c upper : upper bound \f$b\f$ for \c bounded and \c upper_bounded.
- *
- * Each map reads only its own fields; other fields are ignored. Every mathematical quantity
- * is evaluated via member functions. An inverted bijector (\c inverted == true) swaps the forward
- * and inverse directions for every member function.
+ * Holds the map selection (\c map), inversion flag (\c inverted), and map-specific parameter fields
+ * (\c location, \c scale, \c exponent, \c sharpness, \c lower, \c upper); unused fields are ignored.
+ * Setting \c inverted to true swaps forward and inverse directions for every member function.
  *
  * \see scalar_bijector_map, bijector_partials, bijector_kinks, bijector_scalar
  */
@@ -1156,14 +1121,10 @@ struct scalar_bijector {
    * \ingroup bijector_scalar
    * \brief Evaluates the forward map \f$g(v)\f$.
    *
-   * Maps an argument \f$v\f$ from the domain \f$V\f$ to \f$u = g(v) \in U\f$.
-   * When inverted is true, evaluates the inverse map \f$h(v)\f$.
+   * When inverted is true, evaluates the inverse map \f$h(v)\f$. See \ref bijector_scalar.
    *
-   * \param v Point in the domain of the forward map.
-   * \return Value \f$g(v)\f$. Outside the closed domain or for invalid parameters, returns quiet NaN.
-   *         On domain boundaries, returns the mathematical limit.
-   *
-   * Measured accuracy: within 10.9 ulpC for parameter-free maps and within 26 ulpC for maps with parameters.
+   * \param v Point in the domain of forward().
+   * \return Value \f$g(v)\f$; mathematical limit on closed boundaries, or quiet NaN outside the closed domain or for invalid parameters.
    * \see inverse(), forward_d1(), forward_log_jacobian(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward(double v) const {
@@ -1252,14 +1213,10 @@ struct scalar_bijector {
    * \ingroup bijector_scalar
    * \brief Evaluates the inverse map \f$h(u) = g^{-1}(u)\f$.
    *
-   * Maps an argument \f$u\f$ from the image \f$U\f$ back to \f$v = h(u) \in V\f$.
-   * When inverted is true, evaluates the forward map \f$g(u)\f$.
+   * When inverted is true, evaluates the forward map \f$g(u)\f$. See \ref bijector_scalar.
    *
-   * \param u Point in the domain of the inverse map.
-   * \return Value \f$h(u)\f$. Outside the closed domain or for invalid parameters, returns quiet NaN.
-   *         On domain boundaries, returns the mathematical limit.
-   *
-   * Measured accuracy: within 11 ulpC for parameter-free maps and within 42.8 ulpC (gcc) / 46.3 ulpC (CUDA) for maps with parameters.
+   * \param u Point in the domain of inverse().
+   * \return Value \f$h(u)\f$; mathematical limit on closed boundaries, or quiet NaN outside the closed domain or for invalid parameters.
    * \see forward(), inverse_d1(), inverse_log_jacobian(), inverse_distance_upper(), inverse_distance_lower(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse(double u) const {
@@ -1350,12 +1307,10 @@ struct scalar_bijector {
    * \ingroup bijector_scalar
    * \brief Evaluates the forward log-Jacobian, \f$\log|g'(v)|\f$.
    *
-   * When inverted is true, evaluates the inverse log-Jacobian \f$\log|h'(v)|\f$.
+   * When inverted is true, evaluates the inverse log-Jacobian \f$\log|h'(v)|\f$. See \ref bijector_scalar.
    *
    * \param v Point in the domain of forward().
-   * \return Value \f$\log|g'(v)|\f$. Outside the closed domain or for invalid parameters, returns quiet NaN.
-   *
-   * Measured accuracy: within 6.57 ulpC for parameter-free maps and within 18.4 ulpC for maps with parameters.
+   * \return Value \f$\log|g'(v)|\f$, or quiet NaN outside the closed domain or for invalid parameters.
    * \see forward(), forward_log_jacobian_d1(), inverse_log_jacobian(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double forward_log_jacobian(double v) const {
@@ -1444,12 +1399,10 @@ struct scalar_bijector {
    * \ingroup bijector_scalar
    * \brief Evaluates the inverse log-Jacobian, \f$\log|h'(u)|\f$.
    *
-   * When inverted is true, evaluates the forward log-Jacobian \f$\log|g'(u)|\f$.
+   * When inverted is true, evaluates the forward log-Jacobian \f$\log|g'(u)|\f$. See \ref bijector_scalar.
    *
    * \param u Point in the domain of inverse().
-   * \return Value \f$\log|h'(u)|\f$. Outside the closed domain or for invalid parameters, returns quiet NaN.
-   *
-   * Measured accuracy: within 10.5 ulpC for parameter-free maps and within 49.4 ulpC (gcc) / 43 ulpC (CUDA) for maps with parameters.
+   * \return Value \f$\log|h'(u)|\f$, or quiet NaN outside the closed domain or for invalid parameters.
    * \see inverse(), inverse_log_jacobian_d1(), forward_log_jacobian(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_log_jacobian(double u) const {

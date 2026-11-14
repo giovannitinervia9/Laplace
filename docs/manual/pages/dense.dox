@@ -1,243 +1,113 @@
 /**
 \addtogroup dense
 
-The functions of `laplace::dense` are not header-only and are not `LAPLACE_HD`.
-They run on the host only, take Kokkos Views that the host can read, and do their work with Eigen in a static library, `laplace_dense` (CMake target `Laplace::dense`), which a program that uses them must link.
+The `laplace::dense` module provides host-only dense matrix decompositions, triangular system solves, symmetric and generalized eigendecompositions, and null-space bases in `<laplace/dense/dense.hpp>`. Unlike header-only `LAPLACE_HD` modules, these functions are compiled with Eigen into the static library `laplace_dense` (CMake target `Laplace::dense`) and run on one host thread per call over host-accessible Kokkos Views. Against 200-bit mpmath references on 17 cases, eigenvalues and singular values stay within 12.2 \f$\varepsilon\f$ for symmetric and rectangular problems, while Cholesky and triangular solve residuals stay within 0.62 \f$\varepsilon\f$.
 
-## Overview
+## Decompositions and types
 
-This module provides dense matrix decompositions, linear system solves, spectral problems, and null space computations on the host:
-- \ref laplace::dense::cholesky_decomposition "cholesky_decomposition()": Cholesky factorization of a symmetric positive definite matrix.
-- \ref laplace::dense::triangular_solve "triangular_solve()": in-place triangular system solve \f$\operatorname{op}(T) X = B\f$.
-- \ref laplace::dense::pivoted_qr_decomposition "pivoted_qr_decomposition()": column-pivoted QR decomposition \f$A P = Q R\f$.
-- \ref laplace::dense::svd_decomposition "svd_decomposition()": singular value decomposition \f$A = U \operatorname{diag}(s) V^\top\f$.
-- \ref laplace::dense::symmetric_eigen_decomposition "symmetric_eigen_decomposition()": spectral decomposition of a real symmetric matrix \f$A = V \operatorname{diag}(w) V^\top\f$.
-- \ref laplace::dense::generalized_symmetric_eigen_decomposition "generalized_symmetric_eigen_decomposition()": generalized symmetric-definite eigenvalue problem \f$A V = B V \operatorname{diag}(w)\f$ with \f$V^\top B V = I\f$.
-- \ref laplace::dense::null_space_basis "null_space_basis()": orthonormal basis \f$T\f$ of the null space of a matrix \f$C\f$ (\f$C T = 0\f$, \f$T^\top T = I\f$).
+This section defines the seven operations of `laplace::dense` and its status and option types.
 
-The status types and option enums:
-- \ref laplace::dense::dense_decomposition_status "dense_decomposition_status": status struct containing success indicator, numerical rank, and failure reason.
-- \ref laplace::dense::dense_failure "dense_failure": failure codes for numerical conditions.
-- \ref laplace::dense::dense_triangle "dense_triangle": selector for lower or upper triangular storage.
-- \ref laplace::dense::dense_operation "dense_operation": selector for identity or transpose operations.
+### Cholesky decomposition and triangular solve
 
-## Conventions
+For an \f$n \times n\f$ symmetric positive definite matrix \f$A\f$, \ref laplace::dense::cholesky_decomposition "cholesky_decomposition(A, L)" computes the lower-triangular factor \f$L\f$ satisfying \f$A = L L^\top\f$, setting the strictly upper triangle of \f$L\f$ to zero.
 
-### Views and memory layout
+For an \f$n \times n\f$ triangular matrix \f$T\f$ and an \f$n \times k\f$ matrix \f$B\f$ with \f$k\f$ right-hand sides, \ref laplace::dense::triangular_solve "triangular_solve(T, B, triangle, operation)" solves \f$\operatorname{op}(T) X = B\f$ in place on \f$B\f$. Here `triangle` selects the lower or upper triangle of \f$T\f$, and `operation` selects \f$\operatorname{op}(T) = T\f$ (`dense_operation::identity`) or \f$T^\top\f$ (`dense_operation::transpose`).
 
-Matrices are passed as rank-2 Kokkos Views of \c double with column-major storage layout (`Kokkos::LayoutLeft`), residing in a memory space accessible from the host (such as `Kokkos::HostSpace`).
-A View in device memory (such as `Kokkos::CudaSpace`) is rejected at compile time by a static assertion.
-Vectors are passed as rank-1 Kokkos Views of \c double, and the permutation vector `perm` is passed as a rank-1 Kokkos View of \c int.
-Output Views must not have a const value type.
+### Pivoted QR and singular value decompositions
 
-### Symmetric matrices and triangular storage
+For an \f$m \times n\f$ matrix \f$A\f$ with \f$p = \min(m, n)\f$, \ref laplace::dense::pivoted_qr_decomposition "pivoted_qr_decomposition(A, Q, R, perm, relative_tolerance)" computes \f$A P = Q R\f$, where \f$Q\f$ has orthonormal columns, \f$R\f$ is upper triangular, and \f$P\f$ is the permutation in `perm` such that column \f$j\f$ of \f$Q R\f$ equals column \f$\operatorname{perm}[j]\f$ of \f$A\f$.
 
-For symmetric inputs (\f$A\f$ in \ref laplace::dense::cholesky_decomposition "cholesky_decomposition()", \ref laplace::dense::symmetric_eigen_decomposition "symmetric_eigen_decomposition()", and \ref laplace::dense::generalized_symmetric_eigen_decomposition "generalized_symmetric_eigen_decomposition()", and \f$B\f$ in \ref laplace::dense::generalized_symmetric_eigen_decomposition "generalized_symmetric_eigen_decomposition()"), only the lower triangle is read.
-The strictly upper triangle is not read; a NaN or an infinity located in the upper triangle is not seen and does not affect the calculation.
+Under the same dimensions, \ref laplace::dense::svd_decomposition "svd_decomposition(A, U, s, V, relative_tolerance)" computes \f$A = U \operatorname{diag}(s) V^\top\f$, where \f$U\f$ and \f$V\f$ have orthonormal columns and \f$s\f$ holds the \f$p\f$ singular values in decreasing order \f$s_1 \ge s_2 \ge \dots \ge s_p \ge 0\f$. Both functions return the numerical rank of \f$A\f$ in `rank`.
 
-### Status reporting and exceptions
+### Symmetric and generalized eigendecompositions
 
-Every decomposition function returns a \ref laplace::dense::dense_decomposition_status "dense_decomposition_status" struct with fields:
-- `success`: boolean indicating whether the decomposition succeeded.
-- `rank`: numerical rank for \ref laplace::dense::pivoted_qr_decomposition "pivoted_qr_decomposition()", \ref laplace::dense::svd_decomposition "svd_decomposition()", and \ref laplace::dense::null_space_basis "null_space_basis()", or dimension \f$n\f$ otherwise.
-- `reason`: a \ref laplace::dense::dense_failure "dense_failure" code indicating the cause when `success` is \c false.
+For an \f$n \times n\f$ symmetric matrix \f$A\f$, \ref laplace::dense::symmetric_eigen_decomposition "symmetric_eigen_decomposition(A, w, V)" computes \f$A = V \operatorname{diag}(w) V^\top\f$, with orthogonal \f$V\f$ (\f$V^\top V = I\f$) and eigenvalues \f$w\f$ in increasing order \f$w_1 \le w_2 \le \dots \le w_n\f$.
 
-Numerical outcomes are reported through the status struct and are never thrown as exceptions:
-- `dense_failure::not_positive_definite`: \f$A\f$ in Cholesky decomposition, or \f$B\f$ in the generalized problem, is not positive definite.
-- `dense_failure::singular`: a diagonal entry of the triangular matrix \f$T\f$ is zero during a triangular solve.
-- `dense_failure::no_convergence`: an iterative SVD or eigensolver failed to converge.
-- `dense_failure::non_finite_input`: a NaN or an infinity was encountered among the entries read.
-
-A low numerical rank is not a failure; it is reported in the `rank` field.
-When `success` is \c false, the outputs are unspecified.
-Invalid dimensions or incompatible View shapes throw `std::invalid_argument`.
-
-### Rank determination
-
-The numerical rank \f$r\f$ counts the singular values \f$s_i\f$ satisfying
-\f[
-s_i > \text{tol} \cdot s_1
-\f]
-for \ref laplace::dense::svd_decomposition "svd_decomposition()" and \ref laplace::dense::null_space_basis "null_space_basis()" (with \f$s_1\f$ the largest singular value), or the diagonal entries of \f$R\f$ satisfying
-\f[
-|R_{kk}| > \text{tol} \cdot |R_{11}|
-\f]
-for \ref laplace::dense::pivoted_qr_decomposition "pivoted_qr_decomposition()".
-By default, the relative tolerance is
-\f[
-\text{tol} = \max(m, n)\,\varepsilon
-\f]
-where \f$m\f$ is the row count, \f$n\f$ is the column count, and \f$\varepsilon = 2^{-52}\f$ is machine precision of double precision, matching the rank rule of NumPy's `matrix_rank` and MATLAB's `rank`.
-When the caller provides a non-negative `relative_tolerance`, that value is used as \f$\text{tol}\f$.
-The null space computation in \ref laplace::dense::null_space_basis "null_space_basis()" uses the singular value decomposition.
-
-### Output shapes
-
-For an \f$m \times n\f$ matrix with \f$p = \min(m, n)\f$, thin or full factorizations are selected by the shapes of the output Views:
-- In \ref laplace::dense::pivoted_qr_decomposition "pivoted_qr_decomposition()", \f$Q\f$ may be \f$m \times p\f$ (thin) or \f$m \times m\f$ (full); \f$R\f$ must have shape \f$p \times n\f$ when \f$Q\f$ is thin, or \f$m \times n\f$ when \f$Q\f$ is full.
-- In \ref laplace::dense::svd_decomposition "svd_decomposition()", \f$U\f$ may be \f$m \times p\f$ (thin) or \f$m \times m\f$ (full), and \f$V\f$ may be \f$n \times p\f$ (thin) or \f$n \times n\f$ (full), chosen independently. Singular values \f$s\f$ always have length \f$p\f$.
-- In \ref laplace::dense::null_space_basis "null_space_basis()", \f$T\f$ is reallocated to shape \f$n \times (n - r)\f$, where \f$r\f$ is the numerical rank of \f$C\f$. The output View \f$T\f$ must be a managed View. When \f$m = 0\f$, \f$T\f$ is the \f$n \times n\f$ identity matrix and \f$r = 0\f$.
-
-### Threading
-
-One thread per call; several decompositions in parallel are the caller's to arrange.
-
-## Decompositions
-
-### Cholesky decomposition
-
-Evaluated by \ref laplace::dense::cholesky_decomposition "cholesky_decomposition(A, L)":
-\f[
-A = L L^\top
-\f]
-where \f$A\f$ is \f$n \times n\f$ symmetric positive definite and \f$L\f$ is \f$n \times n\f$ lower triangular.
-The strictly upper triangular part of \f$L\f$ is set to zero.
-If \f$A\f$ is not positive definite, returns `dense_failure::not_positive_definite`.
-
-### Triangular solve
-
-Evaluated by \ref laplace::dense::triangular_solve "triangular_solve(T, B, triangle, operation)":
-\f[
-\operatorname{op}(T) X = B
-\f]
-solved in place on \f$B\f$ (\f$n \times k\f$), with \f$T\f$ (\f$n \times n\f$) lower or upper triangular.
-\f$\operatorname{op}(T)\f$ is \f$T\f$ when `operation` is `dense_operation::identity`, and \f$T^\top\f$ when `operation` is `dense_operation::transpose`.
-If any diagonal entry of \f$T\f$ is zero, returns `dense_failure::singular`.
-
-### Pivoted QR decomposition
-
-Evaluated by \ref laplace::dense::pivoted_qr_decomposition "pivoted_qr_decomposition(A, Q, R, perm, relative_tolerance)":
-\f[
-A P = Q R
-\f]
-where \f$A\f$ is \f$m \times n\f$, \f$Q\f$ has orthonormal columns, and \f$R\f$ is upper triangular.
-Column \f$j\f$ of \f$Q R\f$ equals column \f$\operatorname{perm}[j]\f$ of \f$A\f$.
-The numerical rank of \f$A\f$ is returned in the status.
-
-### Singular value decomposition
-
-Evaluated by \ref laplace::dense::svd_decomposition "svd_decomposition(A, U, s, V, relative_tolerance)":
-\f[
-A = U \operatorname{diag}(s) V^\top
-\f]
-where \f$s\f$ has \f$p = \min(m, n)\f$ singular values in decreasing order \f$s_1 \ge s_2 \ge \dots \ge s_p \ge 0\f$, and \f$U\f$ and \f$V\f$ have orthonormal columns.
-The numerical rank of \f$A\f$ is returned in the status.
-
-### Symmetric eigendecomposition
-
-Evaluated by \ref laplace::dense::symmetric_eigen_decomposition "symmetric_eigen_decomposition(A, w, V)":
-\f[
-A = V \operatorname{diag}(w) V^\top
-\f]
-for symmetric \f$A\f$ (\f$n \times n\f$), where eigenvalues \f$w\f$ are in increasing order \f$w_1 \le w_2 \le \dots \le w_n\f$ and \f$V\f$ is orthogonal (\f$V^\top V = I\f$).
-
-### Generalized symmetric eigendecomposition
-
-Evaluated by \ref laplace::dense::generalized_symmetric_eigen_decomposition "generalized_symmetric_eigen_decomposition(A, B, w, V)":
-\f[
-A V = B V \operatorname{diag}(w) \quad \text{with} \quad V^\top B V = I
-\f]
-for symmetric \f$A\f$ and symmetric positive definite \f$B\f$ (\f$n \times n\f$), with eigenvalues \f$w\f$ in increasing order.
-If \f$B\f$ is not positive definite, returns `dense_failure::not_positive_definite`.
+For symmetric \f$A\f$ and symmetric positive definite \f$B\f$ of shape \f$n \times n\f$, \ref laplace::dense::generalized_symmetric_eigen_decomposition "generalized_symmetric_eigen_decomposition(A, B, w, V)" solves \f$A V = B V \operatorname{diag}(w)\f$ with \f$V^\top B V = I\f$ and increasing eigenvalues \f$w\f$.
 
 ### Null space basis
 
-Evaluated by \ref laplace::dense::null_space_basis "null_space_basis(C, T, relative_tolerance)":
-\f[
-C T = 0 \quad \text{with} \quad T^\top T = I
-\f]
-providing an orthonormal basis \f$T\f$ of the null space of \f$C\f$ (\f$m \times n\f$).
-The output View \f$T\f$ is reallocated to \f$n \times (n - r)\f$, with \f$r\f$ the rank of \f$C\f$ computed via SVD.
+For an \f$m \times n\f$ constraint matrix \f$C\f$, \ref laplace::dense::null_space_basis "null_space_basis(C, T, relative_tolerance)" computes an orthonormal basis \f$T\f$ satisfying \f$C T = 0\f$ and \f$T^\top T = I\f$. It reallocates \f$T\f$ to shape \f$n \times (n - r)\f$, where \f$r\f$ is the numerical rank of \f$C\f$ returned in `rank`.
 
-## Reduction of the generalized problem
+### Status and option types
 
-The generalized symmetric eigenvalue problem \f$A V = B V \operatorname{diag}(w)\f$ with \f$V^\top B V = I\f$ is reduced to a standard symmetric eigenvalue problem with the Cholesky factor \f$L\f$ of \f$B\f$ (\f$B = L L^\top\f$):
-1. Compute the Cholesky factorization \f$B = L L^\top\f$.
+Every function returns a \ref laplace::dense::dense_decomposition_status "dense_decomposition_status" struct containing `success`, `rank`, and a \ref laplace::dense::dense_failure "dense_failure" code in `reason`. Triangular solves take \ref laplace::dense::dense_triangle "dense_triangle" (`lower` or `upper`) and \ref laplace::dense::dense_operation "dense_operation" (`identity` or `transpose`).
+
+## Domain and shared conventions
+
+All functions share the same View layout rules, triangular storage convention, status reporting, rank threshold, and threading model.
+
+### Views and triangular storage
+
+Matrices are rank-2 Kokkos Views of \c double with `Kokkos::LayoutLeft` in a host-accessible memory space such as `Kokkos::HostSpace`. Device-memory Views such as `Kokkos::CudaSpace` fail at compile time via static assertion. Vectors are rank-1 Kokkos Views of \c double, except `perm`, which is a rank-1 View of \c int; output Views must not have a \c const value type.
+
+Symmetric inputs read only the lower triangle, covering \f$A\f$ in `cholesky_decomposition()`, `symmetric_eigen_decomposition()`, and `generalized_symmetric_eigen_decomposition()`, plus \f$B\f$ in the generalized eigenproblem. Strictly upper-triangular entries are unread, so non-finite values there have no effect.
+
+### Status reporting and exceptions
+
+Numerical outcomes appear in `dense_decomposition_status` rather than exceptions. On success, `success` is \c true, `reason` is `dense_failure::none`, and `rank` holds the numerical rank for `pivoted_qr_decomposition()`, `svd_decomposition()`, and `null_space_basis()`, or \f$n\f$ otherwise. Low numerical rank is not a failure. When `success` is \c false, outputs are unspecified and `reason` is one of:
+- `dense_failure::not_positive_definite`: \f$A\f$ in Cholesky or \f$B\f$ in the generalized problem is not positive definite.
+- `dense_failure::singular`: a diagonal entry of \f$T\f$ in a triangular solve is zero.
+- `dense_failure::no_convergence`: an iterative SVD or eigensolver failed to converge.
+- `dense_failure::non_finite_input`: a NaN or an infinity appeared among the entries read.
+
+Invalid dimensions or incompatible View shapes throw `std::invalid_argument`.
+
+### Rank determination and output shapes
+
+Numerical rank \f$r\f$ counts singular values \f$s_i > \text{tol} \cdot s_1\f$ in `svd_decomposition()` and `null_space_basis()`, or diagonal entries \f$|R_{kk}| > \text{tol} \cdot |R_{11}|\f$ in `pivoted_qr_decomposition()`. When `relative_tolerance < 0` (default `-1.0`), \f$\text{tol} = \max(m, n)\,\varepsilon\f$ with \f$\varepsilon = 2^{-52}\f$, matching NumPy's `matrix_rank` and MATLAB's `rank`; non-negative values override \f$\text{tol}\f$.
+
+With \f$p = \min(m, n)\f$, output shapes choose thin or full factors. In `pivoted_qr_decomposition()`, \f$Q\f$ is \f$m \times p\f$ or \f$m \times m\f$, and \f$R\f$ is \f$p \times n\f$ or \f$m \times n\f$ to match. In `svd_decomposition()`, \f$U\f$ is \f$m \times p\f$ or \f$m \times m\f$ and \f$V\f$ is \f$n \times p\f$ or \f$n \times n\f$ independently, while \f$s\f$ has length \f$p\f$. In `null_space_basis()`, \f$T\f$ must be managed and is reallocated to \f$n \times (n - r)\f$; when \f$m = 0\f$, \f$r = 0\f$ and \f$T\f$ becomes the \f$n \times n\f$ identity.
+
+Each call runs on one thread, so callers schedule parallel decompositions.
+
+## Method
+
+All routines call Eigen 3.4 on the host, with dedicated reductions for the generalized eigenproblem and null-space basis.
+
+For \f$A V = B V \operatorname{diag}(w)\f$ with \f$V^\top B V = I\f$, `generalized_symmetric_eigen_decomposition()` reduces the pair using the Cholesky factor \f$L\f$ of \f$B\f$:
+1. Factorize \f$B = L L^\top\f$.
 2. Form \f$\tilde{A} = L^{-1} A L^{-\top}\f$.
-3. Compute the standard symmetric eigendecomposition \f$\tilde{A} Y = Y \operatorname{diag}(w)\f$.
-4. Compute \f$V = L^{-\top} Y\f$, so that \f$V^\top B V = Y^\top L^{-1} B L^{-\top} Y = Y^\top Y = I\f$.
+3. Solve \f$\tilde{A} Y = Y \operatorname{diag}(w)\f$.
+4. Recover \f$V = L^{-\top} Y\f$, giving \f$V^\top B V = Y^\top L^{-1} B L^{-\top} Y = Y^\top Y = I\f$.
 
-The reduction with the Cholesky factor of \f$B\f$ is not backward stable when \f$B\f$ is ill-conditioned: its error on an eigenvalue near zero is of the order of \f$\varepsilon \|A\| \|B^{-1}\|\f$ (the error of eigenvalues near zero grows with the condition of \f$B\f$).
+This Cholesky reduction is not backward stable when \f$B\f$ is ill-conditioned: eigenvalues near zero incur error of order \f$\varepsilon \|A\| \|B^{-1}\|\f$. For `null_space_basis()`, \f$T\f$ comes from the right singular vectors of \f$C\f$ via Jacobi SVD.
 
 ## Accuracy
 
-The general method of accuracy verification is described on the page \ref accuracy "How accuracy is measured".
-Reference values for `laplace::dense` were generated by `tools/reference/dense.py` using mpmath at 200 bits on 17 test cases: matrices built from chosen spectra and random orthogonal factors at 200 bits, then rounded to double precision.
-The reference values are the eigenvalues or singular values of the rounded double-precision matrices, computed in mpmath at 200 bits.
+See \ref accuracy "How accuracy is measured" for reference conventions, backend comparisons, and test bounds. Reference values were generated by `tools/reference/dense.py` with mpmath at 200 bits on 17 rounded double-precision cases: 6 symmetric (\f$n \in \{5, \dots, 60\}\f$), 3 generalized (\f$n \in \{5, 20, 40\}\f$ with condition numbers of \f$B\f$ equal to \f$10^2\f$, \f$10^6\f$, and \f$10^3\f$), and 8 rectangular (\f$1 \times 20\f$ to \f$40 \times 25\f$).
 
-### Error measures
+All metrics use \f$\varepsilon = 2^{-52}\f$. Symmetric eigenvalues and singular values \f$v\f$ use \f$\max_i |v_i - v_{i,\text{ref}}| / (\varepsilon \max_i |v_{i,\text{ref}}|)\f$. Generalized eigenvalues \f$w_i\f$ with \f$B\f$-normalized \f$v_i\f$ use \f$|w_i - w_{i,\text{ref}}| / (\varepsilon \kappa_i)\f$ where \f$\kappa_i = (\|A\|_F + |w_i| \|B\|_F) \|v_i\|_2^2\f$. Residuals and orthonormality errors use the Frobenius norm \f$\|\cdot\|_F\f$:
+- Cholesky and triangular solve: \f$\|L L^\top - A\|_F / (\|A\|_F \varepsilon)\f$ and \f$\|\operatorname{op}(T) X - B\|_F / (\|T\|_F \|X\|_F \varepsilon)\f$.
+- Pivoted QR: \f$\|Q R - A P\|_F / (\|A\|_F \varepsilon)\f$ and \f$\|Q^\top Q - I\|_F / \varepsilon\f$.
+- SVD (with first \f$p\f$ columns \f$U_p, V_p\f$): \f$\|U_p \operatorname{diag}(s) V_p^\top - A\|_F / (\|A\|_F \varepsilon)\f$ and \f$\max(\|U^\top U - I\|_F, \|V^\top V - I\|_F) / \varepsilon\f$.
+- Symmetric eigenproblem: \f$\|A V - V \operatorname{diag}(w)\|_F / (\|A\|_F \varepsilon)\f$ and \f$\|V^\top V - I\|_F / \varepsilon\f$.
+- Generalized eigenproblem: \f$\|A V - B V \operatorname{diag}(w)\|_F / ((\|A\|_F + \|B\|_F \max_i |w_i|) \|V\|_F \varepsilon)\f$ and \f$\|V^\top B V - I\|_F / (\|V\|_F^2 \|B\|_F \varepsilon)\f$.
+- Null space: \f$\|C T\|_F / (\|C\|_F \varepsilon)\f$ and \f$\|T^\top T - I\|_F / \varepsilon\f$.
 
-Error measures are defined in `benchmarks/dense_cases.hpp` and evaluated in units of machine precision \f$\varepsilon = 2^{-52}\f$:
-- **Eigenvalues and singular values.** For symmetric and rectangular matrices, the error of computed values \f$v\f$ against reference values \f$v_{\text{ref}}\f$ is measured in units of \f$\varepsilon\f$ times the largest reference value:
-  \f[
-  \frac{\max_i |v_i - v_{i,\text{ref}}|}{\varepsilon \max_i |v_{i,\text{ref}}|}
-  \f]
-- **Generalized eigenvalues.** For the generalized problem, the error of each eigenvalue \f$w_i\f$ is scaled by its condition number \f$\kappa_i\f$:
-  \f[
-  \frac{|w_i - w_{i,\text{ref}}|}{\varepsilon \kappa_i}, \quad \kappa_i = (\|A\|_F + |w_i| \|B\|_F) \|v_i\|_2^2
-  \f]
-  where \f$v_i\f$ is the \f$i\f$-th column of \f$V\f$ (\f$B\f$-normalized, so \f$v_i^\top B v_i = 1\f$).
-- **Residuals and loss of orthonormality.** All residuals and departures from orthonormality are measured using the Frobenius norm \f$\|\cdot\|_F\f$ in units of \f$\varepsilon\f$:
-  - Symmetric eigenproblem residual: \f$\|A V - V \operatorname{diag}(w)\|_F / (\|A\|_F \varepsilon)\f$.
-  - Symmetric eigenvector orthonormality: \f$\|V^\top V - I\|_F / \varepsilon\f$.
-  - Cholesky decomposition residual: \f$\|L L^\top - A\|_F / (\|A\|_F \varepsilon)\f$.
-  - Triangular solve residual: \f$\|\operatorname{op}(T) X - B\|_F / (\|T\|_F \|X\|_F \varepsilon)\f$, with \f$T\f$ the Cholesky factor of a positive definite case (or its transpose for the upper triangle) and the right-hand sides \f$B\f$ the matrix \f$A\f$ of that case, evaluated over all four combinations of triangle and operation.
-  - Generalized eigenproblem residual: \f$\|A V - B V \operatorname{diag}(w)\|_F / ((\|A\|_F + \|B\|_F \max_i |w_i|) \|V\|_F \varepsilon)\f$.
-  - Generalized orthonormality: \f$\|V^\top B V - I\|_F / (\|V\|_F^2 \|B\|_F \varepsilon)\f$.
-  - SVD reconstruction residual: \f$\|U_p \operatorname{diag}(s) V_p^\top - A\|_F / (\|A\|_F \varepsilon)\f$, where \f$p = \min(m, n)\f$ and \f$U_p, V_p\f$ are the first \f$p\f$ columns.
-  - SVD orthonormality: \f$\max(\|U^\top U - I\|_F, \|V^\top V - I\|_F) / \varepsilon\f$.
-  - Pivoted QR residual: \f$\|Q R - A P\|_F / (\|A\|_F \varepsilon)\f$, where column \f$j\f$ of \f$A P\f$ is column \f$\operatorname{perm}[j]\f$ of \f$A\f$.
-  - Pivoted QR orthonormality: \f$\|Q^\top Q - I\|_F / \varepsilon\f$.
-  - Null space constraint residual: \f$\|C T\|_F / (\|C\|_F \varepsilon)\f$.
-  - Null space basis orthonormality: \f$\|T^\top T - I\|_F / \varepsilon\f$.
+| Class | Quantity | gcc | CUDA | Test bound |
+|---|---|---|---|---|
+| Symmetric | Eigenvalues \f$w\f$ | 12.2 \f$\varepsilon\f$ | 12.2 \f$\varepsilon\f$ | 19 \f$\varepsilon\f$ |
+| Symmetric | Eigenproblem residual | 9.85 \f$\varepsilon\f$ | 9.92 \f$\varepsilon\f$ | 15 \f$\varepsilon\f$ |
+| Symmetric | Orthonormality | 71.0 \f$\varepsilon\f$ | 72.2 \f$\varepsilon\f$ | 110 \f$\varepsilon\f$ |
+| Symmetric | Cholesky residual | 0.56 \f$\varepsilon\f$ | 0.62 \f$\varepsilon\f$ | 1 \f$\varepsilon\f$ |
+| Symmetric | Triangular solve residual | 0.33 \f$\varepsilon\f$ | 0.44 \f$\varepsilon\f$ | 1 \f$\varepsilon\f$ |
+| Generalized | Eigenvalues \f$w\f$ | 1270.3 \f$\varepsilon \kappa_i\f$ | 1270.3 \f$\varepsilon \kappa_i\f$ | 1910 \f$\varepsilon \kappa_i\f$ |
+| Generalized | Eigenproblem residual | 0.16 \f$\varepsilon\f$ | 0.19 \f$\varepsilon\f$ | 0.3 \f$\varepsilon\f$ |
+| Generalized | Orthonormality | 0.07 \f$\varepsilon\f$ | 0.10 \f$\varepsilon\f$ | 0.15 \f$\varepsilon\f$ |
+| Rectangular | Singular values \f$s\f$ | 7.93 \f$\varepsilon\f$ | 7.93 \f$\varepsilon\f$ | 12 \f$\varepsilon\f$ |
+| Rectangular | SVD residual | 14.38 \f$\varepsilon\f$ | 14.39 \f$\varepsilon\f$ | 22 \f$\varepsilon\f$ |
+| Rectangular | SVD orthonormality | 44.17 \f$\varepsilon\f$ | 44.53 \f$\varepsilon\f$ | 67 \f$\varepsilon\f$ |
+| Rectangular | Pivoted QR residual | 1.55 \f$\varepsilon\f$ | 1.56 \f$\varepsilon\f$ | 2.4 \f$\varepsilon\f$ |
+| Rectangular | Pivoted QR orthonormality | 12.33 \f$\varepsilon\f$ | 14.12 \f$\varepsilon\f$ | 22 \f$\varepsilon\f$ |
+| Rectangular | Null space residual | 0.94 \f$\varepsilon\f$ | 1.74 \f$\varepsilon\f$ | 2.7 \f$\varepsilon\f$ |
+| Rectangular | Null space orthonormality | 12.09 \f$\varepsilon\f$ | 13.07 \f$\varepsilon\f$ | 20 \f$\varepsilon\f$ |
 
-### Symmetric matrices
-
-Evaluated on 6 test cases (the Cholesky factor and the triangular solve on the four positive definite ones) with dimensions \f$n \in \{5, \dots, 60\}\f$, including positive definite matrices, an indefinite matrix, a matrix with condition number \f$10^{12}\f$, a matrix with a cluster of ten eigenvalues within \f$9 \times 10^{-9}\f$, and a semidefinite matrix with four zero eigenvalues:
-
-| Quantity | Measured error (gcc) | Measured error (CUDA) | Test bound |
-|---|---|---|---|
-| Eigenvalues \f$w\f$ | 12.2 \f$\varepsilon\f$ | 12.2 \f$\varepsilon\f$ | 19 \f$\varepsilon\f$ |
-| Residual \f$\|A V - V \operatorname{diag}(w)\|_F\f$ | 9.85 \f$\varepsilon\f$ | 9.92 \f$\varepsilon\f$ | 15 \f$\varepsilon\f$ |
-| Orthonormality \f$\|V^\top V - I\|_F\f$ | 71.0 \f$\varepsilon\f$ | 72.2 \f$\varepsilon\f$ | 110 \f$\varepsilon\f$ |
-| Cholesky residual \f$\|L L^\top - A\|_F\f$ | 0.56 \f$\varepsilon\f$ | 0.62 \f$\varepsilon\f$ | 1 \f$\varepsilon\f$ |
-| Triangular solve residual \f$\|\operatorname{op}(T) X - B\|_F\f$ | 0.33 \f$\varepsilon\f$ | 0.44 \f$\varepsilon\f$ | 1 \f$\varepsilon\f$ |
-
-The maximum orthonormality error of 72.2 \f$\varepsilon\f$ occurs at \f$n = 60\f$.
-Test bounds in automated regression tests (`tests/dense/test_dense.cpp`) are set to about 1.5 times the larger of the measured errors on gcc and CUDA.
-
-### Generalized symmetric pairs
-
-Evaluated on 3 test cases with dimensions \f$n \in \{5, 20, 40\}\f$, with condition numbers of \f$B\f$ equal to \f$10^2\f$, \f$10^6\f$, and \f$10^3\f$:
-
-| Quantity | Measured error (gcc) | Measured error (CUDA) | Test bound |
-|---|---|---|---|
-| Eigenvalues \f$w\f$ | 1270.3 \f$\varepsilon \kappa_i\f$ | 1270.3 \f$\varepsilon \kappa_i\f$ | 1910 \f$\varepsilon \kappa_i\f$ |
-| Residual \f$\|A V - B V \operatorname{diag}(w)\|_F\f$ | 0.16 \f$\varepsilon\f$ | 0.19 \f$\varepsilon\f$ | 0.3 \f$\varepsilon\f$ |
-| Orthonormality \f$\|V^\top B V - I\|_F\f$ | 0.07 \f$\varepsilon\f$ | 0.10 \f$\varepsilon\f$ | 0.15 \f$\varepsilon\f$ |
-
-In the generalized problem with condition number of \f$B\f$ equal to \f$10^6\f$ (case 8, where \f$A\f$ is a second-difference penalty of rank \f$n - 2\f$), the error reaches 1270.3 \f$\varepsilon \kappa_i\f$ at the two zero eigenvalues (absolute error \f$3.6 \times 10^{-10}\f$ against \f$\varepsilon \kappa_i = 4 \times 10^{-14}\f$), reflecting the condition limit of the Cholesky reduction.
-For the other cases (condition of \f$B\f$ equal to \f$10^2\f$ and \f$10^3\f$), the error is within 1.4 \f$\varepsilon \kappa_i\f$.
-
-### Rectangular matrices
-
-Evaluated on 8 test cases with shapes from \f$1 \times 20\f$ to \f$40 \times 25\f$, with expected ranks 5, 5, 18, 10, 30, 1, 3 and 2 (three of them below \f$\min(m, n)\f$, and the \f$30 \times 30\f$ case of full rank with condition \f$10^{12}\f$), among them a single row of ones and three rows of integers whose third row is the sum of the other two:
-
-| Quantity | Measured error (gcc) | Measured error (CUDA) | Test bound |
-|---|---|---|---|
-| Singular values \f$s\f$ | 7.93 \f$\varepsilon\f$ | 7.93 \f$\varepsilon\f$ | 12 \f$\varepsilon\f$ |
-| SVD residual \f$\|U_p \operatorname{diag}(s) V_p^\top - A\|_F\f$ | 14.38 \f$\varepsilon\f$ | 14.39 \f$\varepsilon\f$ | 22 \f$\varepsilon\f$ |
-| SVD orthonormality \f$\max(\|U^\top U - I\|_F, \|V^\top V - I\|_F)\f$ | 44.17 \f$\varepsilon\f$ | 44.53 \f$\varepsilon\f$ | 67 \f$\varepsilon\f$ |
-| Pivoted QR residual \f$\|Q R - A P\|_F\f$ | 1.55 \f$\varepsilon\f$ | 1.56 \f$\varepsilon\f$ | 2.4 \f$\varepsilon\f$ |
-| Pivoted QR orthonormality \f$\|Q^\top Q - I\|_F\f$ | 12.33 \f$\varepsilon\f$ | 14.12 \f$\varepsilon\f$ | 22 \f$\varepsilon\f$ |
-| Null space residual \f$\|C T\|_F\f$ | 0.94 \f$\varepsilon\f$ | 1.74 \f$\varepsilon\f$ | 2.7 \f$\varepsilon\f$ |
-| Null space orthonormality \f$\|T^\top T - I\|_F\f$ | 12.09 \f$\varepsilon\f$ | 13.07 \f$\varepsilon\f$ | 20 \f$\varepsilon\f$ |
-
-The SVD and pivoted QR ranks matched the expected ranks across all eight cases, and the number of null-space basis columns matched \f$n - r\f$ exactly in all cases with \f$m < n\f$.
+On the generalized pair with condition of \f$B\f$ equal to \f$10^6\f$, error reaches \f$1270.3\,\varepsilon \kappa_i\f$ at two zero eigenvalues from the Cholesky reduction, while pairs with condition \f$10^2\f$ and \f$10^3\f$ stay within \f$1.4\,\varepsilon \kappa_i\f$. Across all 8 rectangular cases, SVD and pivoted QR matched the expected ranks and null-space columns matched \f$n - r\f$ whenever \f$m < n\f$; see `docs/numerics.md` for full logs.
 
 ## Execution times
 
-Timings measured in `benchmarks/dense.cpp` on one gcc thread, in milliseconds (ms) per call, across matrix dimensions \f$K \in \{20, 50, 200, 1000\}\f$:
+Timings measured in `benchmarks/dense.cpp` on one gcc thread are in milliseconds per call across dimensions \f$K \in \{20, 50, 200, 1000\}\f$:
 
 | \f$K\f$ | Cholesky | Triangular solve | Pivoted QR | SVD | Symmetric eigen | Generalized eigen | Null space (\f$3 \times K\f$) |
 |---|---|---|---|---|---|---|---|
@@ -246,43 +116,45 @@ Timings measured in `benchmarks/dense.cpp` on one gcc thread, in milliseconds (m
 | 200 | 0.16 ms | 0.52 ms | 2.18 ms | 10.4 ms | 5.97 ms | 6.53 ms | 0.070 ms |
 | 1000 | 15.6 ms | 44.3 ms | 194 ms | 608 ms | 459 ms | 736 ms | 3.3 ms |
 
-Triangular solve was measured with \f$K\f$ right-hand sides.
-Pivoted QR includes the formation of \f$Q\f$, and SVD includes the formation of \f$U\f$ and \f$V\f$.
+Triangular solves used \f$K\f$ right-hand sides; pivoted QR formed \f$Q\f$, and SVD formed \f$U\f$ and \f$V\f$.
 
 ## Example
 
-The following example computes an orthonormal basis for the null space of a \f$2 \times 4\f$ matrix of constraints:
+The following example computes an orthonormal null-space basis for a \f$2 \times 4\f$ constraint matrix:
 
 ```cpp
+#include <laplace/dense/dense.hpp>
+
 constexpr int m = 2;
 constexpr int n = 4;
 Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace> C("C", m, n);
 
-// Constraint 1: sum to zero
-C(0, 0) = 1.0;
-C(0, 1) = 1.0;
-C(0, 2) = 1.0;
-C(0, 3) = 1.0;
+C(0, 0) = 1.0;  C(0, 1) = 1.0;  C(0, 2) = 1.0;  C(0, 3) = 1.0;
+C(1, 0) = -3.0; C(1, 1) = -1.0; C(1, 2) = 1.0;  C(1, 3) = 3.0;
 
-// Constraint 2: linear contrast
-C(1, 0) = -3.0;
-C(1, 1) = -1.0;
-C(1, 2) = 1.0;
-C(1, 3) = 3.0;
-
-// Output View T is reallocated to n x (n - rank)
 Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace> T("T", 1, 1);
 const laplace::dense::dense_decomposition_status status =
     laplace::dense::null_space_basis(C, T);
 
 if (status.success) {
-  // status.rank is 2; T has shape 4 x 2 and satisfies C * T = 0 and T^T * T = I
-  const int null_dim = n - status.rank;
-  // Columns of T provide the orthonormal null space basis
-} else {
-  // Handle numerical failure reported in status.reason
+  const int null_dim = n - status.rank;  // rank is 2; T has shape 4 x 2
 }
 ```
+
+## Module functions and types
+
+All public functions and types live in `<laplace/dense/dense.hpp>` and `<laplace/dense/dense_status.hpp>`:
+- \ref laplace::dense::cholesky_decomposition "cholesky_decomposition()"
+- \ref laplace::dense::triangular_solve "triangular_solve()"
+- \ref laplace::dense::pivoted_qr_decomposition "pivoted_qr_decomposition()"
+- \ref laplace::dense::svd_decomposition "svd_decomposition()"
+- \ref laplace::dense::symmetric_eigen_decomposition "symmetric_eigen_decomposition()"
+- \ref laplace::dense::generalized_symmetric_eigen_decomposition "generalized_symmetric_eigen_decomposition()"
+- \ref laplace::dense::null_space_basis "null_space_basis()"
+- \ref laplace::dense::dense_decomposition_status "dense_decomposition_status"
+- \ref laplace::dense::dense_failure "dense_failure"
+- \ref laplace::dense::dense_triangle "dense_triangle"
+- \ref laplace::dense::dense_operation "dense_operation"
 
 ## References
 

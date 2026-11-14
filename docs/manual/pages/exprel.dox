@@ -3,83 +3,51 @@
 \ingroup math
 \brief Relative exponential function \f$\varphi(x) = (e^x - 1)/x\f$ and its derivatives in \f$x\f$ to order 6.
 
-Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.
+This module provides the relative exponential function \f$\varphi(x)\f$ and its first six derivatives in `<laplace/math/exprel.hpp>`. Functions are marked `LAPLACE_HD`, run on the host and inside Kokkos kernels on the device, and are called as `laplace::math::exprel` and `laplace::math::exprel_d1` through `laplace::math::exprel_d6`. The name `exprel` matches GSL (`gsl_sf_exprel`) and SciPy (`scipy.special.exprel`). Across all seven functions, the largest measured error is 5.92 ulp on gcc and 6.57 ulp on CUDA, both at `exprel_d6()`.
 
-The name `exprel` is the name of this function in GSL (`gsl_sf_exprel`) and in SciPy (`scipy.special.exprel`).
+## Definitions
 
-## Mathematical definition
-
-The relative exponential function \f$\varphi(x)\f$ is defined for real argument \f$x \ne 0\f$ by
+For a real argument \f$x \in \mathbb{R}\f$, the relative exponential function \f$\varphi(x)\f$ is defined by \f$\varphi(0) = 1\f$ and
 \f[
-\varphi(x) = \frac{e^x - 1}{x}
+\varphi(x) = \frac{e^x - 1}{x}, \qquad x \ne 0.
 \f]
-with \f$\varphi(0) = 1\f$.
-
-Its derivatives of order \f$k\f$ (\f$k = 1, \dots, 6\f$) with respect to \f$x\f$ are represented by the integral
+Its derivatives of order \f$k \in \{1, \dots, 6\}\f$ with respect to \f$x\f$ are given by the integral
 \f[
-\varphi^{(k)}(x) = \frac{\mathrm{d}^k}{\mathrm{d}x^k} \varphi(x) = \int_0^1 t^k e^{x t} \, \mathrm{d}t
+\varphi^{(k)}(x) = \frac{\mathrm{d}^k}{\mathrm{d}x^k} \varphi(x) = \int_0^1 t^k e^{x t} \, \mathrm{d}t,
 \f]
-where:
-- \f$x \in \mathbb{R}\f$ is the real argument,
-- \f$k \in \{1, \dots, 6\}\f$ is the derivative order,
-- \f$t \in [0, 1]\f$ is the real integration variable.
-
-For \f$k = 0\f$, the integral yields \f$\varphi(x)\f$ itself. At \f$x = 0\f$, the integral evaluates to
-\f[
-\varphi^{(k)}(0) = \frac{1}{k + 1}.
-\f]
+where \f$t \in [0, 1]\f$ is the integration variable. Setting \f$k = 0\f$ in the integral recovers \f$\varphi(x)\f$. At the origin, the integral evaluates to \f$\varphi^{(k)}(0) = 1 / (k + 1)\f$ for every order \f$k\f$.
 
 ## Domain and special values
 
-- **Domain:** Defined for all \f$x \in \mathbb{R}\f$.
-- **Sign:** Because the integrand \f$t^k e^{x t}\f$ is strictly positive for \f$t \in (0, 1]\f$ and every real \f$x\f$, the function value \f$\varphi(x)\f$ and all its derivatives \f$\varphi^{(k)}(x)\f$ are strictly positive for every real \f$x\f$.
-- **Special values and boundaries:**
-  - At \f$x = 0\f$: \f$\varphi(0) = 1.0\f$ and \f$\varphi^{(k)}(0) = \frac{1}{k + 1}\f$ for \f$k = 1, \dots, 6\f$.
-  - If \f$x\f$ is NaN: returns quiet NaN.
-  - At \f$x \to -\infty\f$: \f$\varphi(-\infty) = 0.0\f$ and \f$\varphi^{(k)}(-\infty) = 0.0\f$.
-  - At \f$x \to +\infty\f$: \f$\varphi(+\infty) = +\infty\f$ and \f$\varphi^{(k)}(+\infty) = +\infty\f$.
-  - Overflow: the exact value exceeds the largest finite double (overflowing to \f$+\infty\f$) for every \f$k\f$ from about \f$x \approx 716.5\f$ onward; for \f$x > 740.0\f$, the functions return \f$+\infty\f$.
+Every function in this module is defined on all of \f$\mathbb{R}\f$. Because the integrand \f$t^k e^{x t}\f$ is strictly positive on \f$(0, 1]\f$ for every real \f$x\f$, both \f$\varphi(x)\f$ and all derivatives \f$\varphi^{(k)}(x)\f$ are strictly positive everywhere on \f$\mathbb{R}\f$.
 
-## Numerical methods and regimes
+At \f$x = 0\f$, \f$\varphi(0) = 1.0\f$ and \f$\varphi^{(k)}(0) = 1 / (k + 1)\f$ for \f$k = 1, \dots, 6\f$. Passing NaN returns quiet NaN. As \f$x \to -\infty\f$, every function approaches \f$0.0\f$ and returns \f$0.0\f$ at \f$x = -\infty\f$. As \f$x \to +\infty\f$, every function diverges to \f$+\infty\f$, returning \f$+\infty\f$ at \f$x = +\infty\f$. For every order \f$k\f$, the exact value exceeds the largest finite double from about \f$x \approx 716.5\f$ onward, and inputs with \f$x > 740.0\f$ return \f$+\infty\f$.
 
-For \f$x \ne 0\f$, the function value \f$\varphi(x)\f$ is computed directly as `Kokkos::expm1(x) / x` for \f$x < 700.0\f$, and via scaled forward recurrence for \f$x \ge 700.0\f$.
+## Method
 
-The derivatives \f$\varphi^{(k)}(x)\f$ are evaluated across three regimes depending on \f$x\f$ and the order \f$k\f$:
+For \f$x \ne 0\f$, \ref laplace::math::exprel "exprel()" evaluates `Kokkos::expm1(x) / x` when \f$x < 700.0\f$ and uses the scaled forward recurrence below when \f$x \ge 700.0\f$. The derivatives \f$\varphi^{(k)}(x)\f$ select among three regimes according to \f$x\f$ and order-dependent thresholds \f$T_k^+\f$ and \f$T_k^-\f$:
 
-1. **Power series** (\f$0 < x < T_k^+\f$):
+1. **Power series** for \f$0 < x < T_k^+\f$. Direct series expansion gives
    \f[
-   \varphi^{(k)}(x) = \sum_{n=0}^\infty \frac{x^n}{n! (n + k + 1)}
+   \varphi^{(k)}(x) = \sum_{n=0}^\infty \frac{x^n}{n! (n + k + 1)},
    \f]
-   where \f$n \in \mathbb{Z}_{\ge 0}\f$ is the summation index. Summation terminates when a term is \f$\le 4 \varepsilon\f$ of the partial sum (iteration cap 200), where \f$\varepsilon = 2^{-52} \approx 2.22 \times 10^{-16}\f$. Because \f$x > 0\f$, every term is positive and the series has no cancellation. For \f$x < 0\f$ its terms alternate in sign, and the form below is used instead.
-2. **Kummer's transformation** (\f$-T_k^- < x < 0\f$):
-   Substituting \f$t = 1 - s\f$ in the integral representation yields
+   where \f$n \in \mathbb{Z}_{\ge 0}\f$ is the summation index. Because \f$x > 0\f$, every term is positive and no cancellation occurs; for \f$x < 0\f$, the terms alternate in sign, so the form below is used instead.
+2. **Kummer's transformation** for \f$-T_k^- < x < 0\f$. Substituting \f$t = 1 - s\f$ with integration variable \f$s \in [0, 1]\f$ yields
    \f[
-   \varphi^{(k)}(x) = e^x \sum_{n=0}^\infty \frac{(-x)^n k!}{(n + k + 1)!}
+   \varphi^{(k)}(x) = e^x \sum_{n=0}^\infty \frac{(-x)^n k!}{(n + k + 1)!}.
    \f]
-   where \f$n \in \mathbb{Z}_{\ge 0}\f$ is the summation index. Summed with the same stopping criterion and iteration cap. For \f$x < 0\f$, \f$-x > 0\f$, so every term in the sum is strictly positive and no cancellation occurs.
-3. **Forward recurrence** (\f$x \le -T_k^-\f$ and \f$x \ge T_k^+\f$):
-   Integrating by parts yields the recurrence
+   Because \f$-x > 0\f$, every term in the sum is strictly positive and free of cancellation.
+3. **Forward recurrence** for \f$x \le -T_k^-\f$ and \f$x \ge T_k^+\f$. Integrating by parts gives
    \f[
-   \varphi^{(j)}(x) = \frac{e^x - j \varphi^{(j-1)}(x)}{x}, \quad j = 1, \dots, k,
+   \varphi^{(j)}(x) = \frac{e^x - j \varphi^{(j-1)}(x)}{x}, \qquad j = 1, \dots, k,
    \f]
-   started from \f$\varphi^{(0)}(x) = \varphi(x)\f$. While this recurrence loses accuracy as \f$x \to 0\f$ due to cancellation in \f$e^x - j \varphi^{(j-1)}(x)\f$ (which cancels to order \f$x\f$), it is accurate away from zero.
-   For \f$x \ge 700.0\f$, the recurrence evaluates the scaled quantities \f$\varphi^{(j)}(x) e^{-700}\f$ using \f$e^{x - 700}\f$ (where \f$x - 700\f$ is exact by Sterbenz's lemma and \f$e^{x - 700}\f$ does not overflow). The final multiplication by \f$e^{700}\f$ overflows only when the exact result exceeds `DBL_MAX` (from \f$x \approx 716.5\f$ onward).
+   started from \f$\varphi^{(0)}(x) = \varphi(x)\f$, where \f$j\f$ is the recurrence index. Although cancellation of order \f$x\f$ degrades accuracy as \f$x \to 0\f$, the recurrence is accurate outside the small-\f$|x|\f$ thresholds. For \f$x \ge 700.0\f$, it operates on scaled intermediate quantities to avoid premature overflow before `DBL_MAX`.
 
-The thresholds \f$(T_k^+, T_k^-)\f$ per order \f$k = 1, \dots, 6\f$ are:
-- \f$k = 1\f$: \f$T_1^+ = 1.0\f$, \f$T_1^- = 2.0\f$
-- \f$k = 2\f$: \f$T_2^+ = 2.0\f$, \f$T_2^- = 2.0\f$
-- \f$k = 3\f$: \f$T_3^+ = 2.0\f$, \f$T_3^- = 4.0\f$
-- \f$k = 4\f$: \f$T_4^+ = 4.0\f$, \f$T_4^- = 4.0\f$
-- \f$k = 5\f$: \f$T_5^+ = 4.0\f$, \f$T_5^- = 8.0\f$
-- \f$k = 6\f$: \f$T_6^+ = 4.0\f$, \f$T_6^- = 8.0\f$
+The thresholds \f$(T_k^+, T_k^-)\f$ are \f$(1.0, 2.0)\f$ for \f$k = 1\f$, \f$(2.0, 2.0)\f$ for \f$k = 2\f$, \f$(2.0, 4.0)\f$ for \f$k = 3\f$, \f$(4.0, 4.0)\f$ for \f$k = 4\f$, and \f$(4.0, 8.0)\f$ for \f$k = 5\f$ and \f$k = 6\f$.
 
-## Measured accuracy
+## Accuracy
 
-See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
-
-Because \f$\varphi(x)\f$ and its derivatives \f$\varphi^{(k)}(x)\f$ are strictly positive everywhere, there are no zeros and the error measure is plain relative ulp.
-
-Reference values in `tests/data/reference/exprel*.csv` are generated by `tools/reference/exprel.py` evaluating the integral \f$\int_0^1 t^k e^{x t} \, \mathrm{d}t\f$ with `mpmath.quad` (tanh-sinh quadrature on subintervals of \f$[0, 1]\f$ with clustered breakpoints at both ends) at 200 and 300 bits, verified to agree to \f$2^{-100}\f$ relative. 1721 points per order are sampled across \f$|x|\f$ log-uniformly from \f$2^{-60}\f$ to 745, around all thresholds, and in the overflow region.
+See \ref accuracy "How accuracy is measured" for error metrics, reference precision, and test bounds. Because \f$\varphi(x)\f$ and its derivatives are strictly positive everywhere on \f$\mathbb{R}\f$, they have no zeros and the error measure is plain relative ulp. Reference values in `tests/data/reference/exprel*.csv` are computed by `tools/reference/exprel.py` using `mpmath.quad` on the defining integral.
 
 | Function | Order \f$k\f$ | Measured max error gcc (ulp) | Measured max error CUDA (ulp) | Test bound (ulp) |
 |---|---|---|---|---|
@@ -91,13 +59,11 @@ Reference values in `tests/data/reference/exprel*.csv` are generated by `tools/r
 | \ref laplace::math::exprel_d5 "exprel_d5()" | 5 | 5.85 | 5.85 | 8.8 |
 | \ref laplace::math::exprel_d6 "exprel_d6()" | 6 | 5.92 | 6.57 | 8.9 |
 
-## Timings
+See `docs/numerics.md` for sampling details, precision checks, and comparisons across regimes.
 
-Measured in nanoseconds per call on one gcc thread (`benchmarks/math_rel.cpp`):
-- Value `exprel()`: 16–31 ns/call.
-- Derivatives `exprel_d1()` to `exprel_d6()`: 30–44 ns/call.
+## Speed
 
-On CUDA (RTX 4070 SUPER): 0.44 ns/call for the value, 0.5–3.3 ns/call for the derivatives.
+Timings were measured on one gcc thread and on CUDA (RTX 4070 SUPER). On one gcc thread, `exprel()` takes 16–31 ns/call and `exprel_d1()`–`exprel_d6()` take 30–44 ns/call. On CUDA, `exprel()` takes 0.44 ns/call and the derivatives take 0.5–3.3 ns/call.
 
 ## Example
 

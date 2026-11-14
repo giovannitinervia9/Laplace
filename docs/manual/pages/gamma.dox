@@ -3,172 +3,71 @@
 \ingroup special
 \brief Logarithm of the gamma function, \f$\log \Gamma(x)\f$, digamma, trigamma, and polygamma functions to order 6.
 
-Functions in this module are marked `LAPLACE_HD` (or `LAPLACE_HD_FORCEINLINE`) and can be called on the host and inside Kokkos kernels on the device.
+This module evaluates \f$\log \Gamma(x)\f$ along with digamma, trigamma, and polygamma functions up to order 6. Include `<laplace/math/special.hpp>` for the primary `laplace::math` functions, or `<laplace/math/polygamma.hpp>` (included by `special.hpp`) for Laplace's own `laplace::math::own` routines. All functions are marked `LAPLACE_HD` or `LAPLACE_HD_FORCEINLINE` and run on the host and inside Kokkos kernels on the device. In tests, `lgamma()`, `digamma()`, and `trigamma()` stay within 2.42 ulp on gcc and CUDA, while `polygamma()` for orders 2 to 6 stays within 3.36 to 9.44 ulp.
 
 ## Mathematical definitions
 
-### Logarithm of the gamma function
-
-For a positive real argument \f$x \in (0, \infty)\f$, the logarithm of the gamma function is defined as
+The module defines the log-gamma function and polygamma derivatives on the positive real line. For \f$x \in (0, \infty)\f$, the logarithm of the gamma function is
 \f[
-\operatorname{lgamma}(x) = \log \Gamma(x)
+\operatorname{lgamma}(x) = \log \Gamma(x).
 \f]
-where \f$x \in (0, \infty)\f$ is the positive real argument. The function has zeros at \f$x = 1.0\f$ and \f$x = 2.0\f$.
-
-### Digamma function
-
-The digamma function \f$\psi(x)\f$ is the logarithmic derivative of the gamma function:
+For integer order \f$n \in \{0, \dots, 6\}\f$ and argument \f$x \in (0, \infty)\f$, the polygamma function is
 \f[
-\psi(x) = \frac{\mathrm{d}}{\mathrm{d}x} \log \Gamma(x) = \frac{\Gamma'(x)}{\Gamma(x)}
+\psi^{(n)}(x) = \frac{\mathrm{d}^n}{\mathrm{d}x^n} \psi(x) = \frac{\mathrm{d}^{n+1}}{\mathrm{d}x^{n+1}} \log \Gamma(x).
 \f]
-where \f$x \in (0, \infty)\f$ is the positive real argument. The function is strictly increasing on \f$(0, \infty)\f$ and has a unique positive root at \f$x_0 \approx 1.4616321449683623\f$ where \f$\psi(x_0) = 0\f$.
-
-### Trigamma function
-
-The trigamma function \f$\psi'(x)\f$ is the first derivative of the digamma function, corresponding to the second derivative of the log-gamma function:
-\f[
-\psi_1(x) = \psi'(x) = \frac{\mathrm{d}^2}{\mathrm{d}x^2} \log \Gamma(x)
-\f]
-where \f$x \in (0, \infty)\f$ is the positive real argument. It is strictly positive and decreasing on \f$(0, \infty)\f$.
-
-### Polygamma functions
-
-The polygamma function of non-negative integer order \f$n \in \{0, \dots, 6\}\f$ is defined as
-\f[
-\psi^{(n)}(x) = \frac{\mathrm{d}^n}{\mathrm{d}x^n} \psi(x) = \frac{\mathrm{d}^{n+1}}{\mathrm{d}x^{n+1}} \log \Gamma(x)
-\f]
-where:
-- \f$n \in \{0, \dots, 6\}\f$ is the non-negative integer derivative order,
-- \f$x \in (0, \infty)\f$ is the positive real argument.
-
-Special cases include:
-- \f$\psi^{(0)}(x) = \psi(x)\f$ (the digamma function),
-- \f$\psi^{(1)}(x) = \psi'(x)\f$ (the trigamma function).
+The case \f$n = 0\f$ is the digamma function \f$\psi(x) = \Gamma'(x)/\Gamma(x)\f$, and \f$n = 1\f$ is the trigamma function \f$\psi'(x) = \psi_1(x)\f$.
 
 ## Domain and special values
 
-- **Domain:** Defined for \f$x > 0\f$. Polygamma orders supported are integers \f$n \in \{0, \dots, 6\}\f$.
-- **Zeros:** \f$\log \Gamma(1.0) = 0\f$, \f$\log \Gamma(2.0) = 0\f$, and \f$\psi(x_0) = 0\f$ at \f$x_0 \approx 1.4616321449683623\f$.
-- **Special values and boundaries:**
-  - \ref laplace::math::lgamma "lgamma()", \ref laplace::math::digamma "digamma()", \ref laplace::math::trigamma "trigamma()", and \ref laplace::math::polygamma "polygamma()" for \f$n \in \{0, 1\}\f$ call Boost.Math directly and are defined for \f$x > 0\f$.
-  - For \ref laplace::math::polygamma "polygamma()", orders \f$n < 0\f$ or \f$n > 6\f$, and \f$x \le 0\f$ for orders \f$n \ge 2\f$ return quiet NaN.
-  - In \ref laplace::math::own::polygamma "own::polygamma()", if \f$x \le 0\f$, \f$x\f$ is NaN, \f$n < 0\f$, or \f$n > 6\f$: returns quiet NaN.
-  - As \f$x \to 0^+\f$: \f$\log \Gamma(x) \to +\infty\f$, \f$\psi(x) \to -\infty\f$, \f$\psi'(x) \to +\infty\f$, and higher polygamma functions \f$\psi^{(n)}(x) \sim (-1)^{n+1} n! x^{-(n+1)}\f$ overflow to \f$\pm\infty\f$ like the mathematical function.
+All functions require \f$x > 0\f$, and `polygamma()` supports integer orders \f$n \in \{0, \dots, 6\}\f$. Log-gamma vanishes at \f$x = 1.0\f$ and \f$x = 2.0\f$. Digamma is strictly increasing on \f$(0, \infty)\f$ and vanishes at \f$x_0 \approx 1.4616321449683623\f$, while trigamma is strictly positive and decreasing.
 
-## Numerical methods and regimes
+For \f$n < 0\f$, \f$n > 6\f$, or NaN inputs, \ref laplace::math::polygamma "polygamma()" and \ref laplace::math::own::polygamma "own::polygamma()" return quiet NaN. When \f$x \le 0\f$, `own::polygamma()` (and `polygamma()` for \f$n \ge 2\f$) returns quiet NaN, while `lgamma()`, `digamma()`, `trigamma()`, and `polygamma()` for \f$n \in \{0, 1\}\f$ call Boost.Math directly. As \f$x \to 0^+\f$, \f$\log \Gamma(x) \to +\infty\f$, \f$\psi(x) \to -\infty\f$, \f$\psi'(x) \to +\infty\f$, and \f$\psi^{(n)}(x) \sim (-1)^{n+1} n!\, x^{-(n+1)}\f$ overflows to \f$\pm\infty\f$.
 
-### Log-gamma function
+## Numerical methods
 
-The function \ref laplace::math::lgamma "lgamma()" is evaluated via Boost.Math (`boost::math::lgamma`) configured with `laplace::math::detail::boost_policy`, which disables exception throwing and avoids promoting `double` to `long double`. Boost.Math was measured on the gcc, MSVC host, and CUDA builds, remaining accurate near the zeros at \f$x = 1.0\f$ and \f$x = 2.0\f$, preventing the catastrophic cancellation observed in the Rtools libm, which loses relative accuracy near \f$x = 1.0\f$ (reaching \f$1.9 \times 10^{15}\f$ ulp error) and produces erroneous infinities for subnormal arguments.
+The wrappers in `<laplace/math/special.hpp>` combine Boost.Math for orders up to 1 with Laplace's own routine for higher orders. Specifically, \ref laplace::math::lgamma "lgamma()", \ref laplace::math::digamma "digamma()", and \ref laplace::math::trigamma "trigamma()" forward to Boost.Math under a policy that disables exceptions and `double` to `long double` promotion, compiling on host and CUDA (`BOOST_MATH_GPU_ENABLED`). The dispatch function \ref laplace::math::polygamma "polygamma()" forwards \f$n = 0\f$ to `digamma()`, \f$n = 1\f$ to `trigamma()`, and \f$n \in \{2, \dots, 6\}\f$ to \ref laplace::math::own::polygamma "own::polygamma()", as Boost.Math provides no GPU implementation for \f$n \ge 2\f$.
 
-### Digamma and trigamma functions
+The routine `own::polygamma()` evaluates in two stages:
 
-The functions \ref laplace::math::digamma "digamma()" and \ref laplace::math::trigamma "trigamma()" in `laplace::math` are evaluated via Boost.Math (`boost::math::digamma` and `boost::math::trigamma`) with `laplace::math::detail::boost_policy`. Boost.Math compiles both routines for CUDA device execution spaces under `BOOST_MATH_GPU_ENABLED`.
-
-### Polygamma functions
-
-The dispatch function \ref laplace::math::polygamma "polygamma()" routes evaluation based on the order \f$n\f$:
-- For \f$n = 0\f$: forwards to \ref laplace::math::digamma "digamma(x)" (Boost.Math).
-- For \f$n = 1\f$: forwards to \ref laplace::math::trigamma "trigamma(x)" (Boost.Math).
-- For \f$n \in \{2, \dots, 6\}\f$: forwards to Laplace's own routine \ref laplace::math::own::polygamma "own::polygamma(n, x)", because Boost.Math provides no GPU implementation for polygamma orders \f$n \ge 2\f$, and on the host Boost reaches errors of 72 to 830 ulp while running approximately six times slower (`docs/numerics.md`).
-
-The routine \ref laplace::math::own::polygamma "own::polygamma(n, x)" operates across two numerical stages:
-
-1. **Upward recurrence:** For arguments below the threshold \f$X_0 = 15.0\f$, the argument is shifted up to \f$z = x + m \ge X_0\f$ with \f$m = \lfloor X_0 - x \rfloor + 1\f$ using the recurrence
+1. For \f$x < 15.0\f$, the argument shifts to \f$z = x + m \ge 15.0\f$ with integer shift count \f$m = \lfloor 15.0 - x \rfloor + 1\f$ (and \f$m = 0\f$ for \f$x \ge 15.0\f$) via
    \f[
-   \psi^{(n)}(x) = \psi^{(n)}(x + m) + (-1)^{n+1} n! \sum_{j=0}^{m-1} (x + j)^{-(n+1)}
+   \psi^{(n)}(x) = \psi^{(n)}(x + m) + (-1)^{n+1} n! \sum_{j=0}^{m-1} (x + j)^{-(n+1)},
    \f]
-   where:
-   - \f$m \in \mathbb{Z}_{\ge 0}\f$ is the shift count (\f$m = 0\f$ when \f$x \ge X_0\f$),
-   - \f$z = x + m \in [X_0, \infty)\f$ is the shifted argument,
-   - \f$j \in \{0, \dots, m-1\}\f$ is the integer summation index.
-2. **Asymptotic expansion:** At the shifted argument \f$z \ge X_0 = 15.0\f$, the asymptotic expansion is evaluated:
-   For \f$n = 0\f$:
+   where \f$j \in \{0, \dots, m-1\}\f$ is the summation index.
+2. At \f$z \ge 15.0\f$, the asymptotic expansion in even Bernoulli numbers \f$B_2, \dots, B_{20}\f$ is evaluated in \f$z^{-2}\f$ by Horner's rule from highest to lowest index:
    \f[
-   \psi(z) \sim \log z - \frac{1}{2z} - \sum_{k=1}^K \frac{B_{2k}}{2k z^{2k}}
+   \psi(z) \sim \log z - \frac{1}{2z} - \sum_{k=1}^{10} \frac{B_{2k}}{2k\, z^{2k}}, \qquad
+   \psi^{(n)}(z) \sim (-1)^{n+1} z^{-n} \left[ (n-1)! + \frac{n!}{2z} + \sum_{k=1}^{10} \frac{B_{2k} (2k+n-1)!}{(2k)!}\, z^{-2k} \right] \quad (n \ge 1).
    \f]
-   For \f$n \ge 1\f$:
-   \f[
-   \psi^{(n)}(z) \sim (-1)^{n+1} z^{-n} \left[ (n-1)! + \frac{n!}{2z} + \sum_{k=1}^K \frac{B_{2k} (2k+n-1)!}{(2k)!} z^{-2k} \right]
-   \f]
-   where:
-   - \f$B_{2k}\f$ are the even Bernoulli numbers for \f$k = 1, \dots, K\f$ with \f$K = 10\f$,
-   - \f$w = z^{-2} \in (0, X_0^{-2}]\f$ is the squared reciprocal shifted argument.
 
-   The even Bernoulli numbers used are:
-   \f$B_2 = 1/6\f$, \f$B_4 = -1/30\f$, \f$B_6 = 1/42\f$, \f$B_8 = -1/30\f$, \f$B_{10} = 5/66\f$,
-   \f$B_{12} = -691/2730\f$, \f$B_{14} = 7/6\f$, \f$B_{16} = -3617/510\f$, \f$B_{18} = 43867/798\f$,
-   \f$B_{20} = -174611/330\f$.
+For \f$n \ge 1\f$, every term shares the sign of the result, so accumulation runs from the asymptotic part to \f$j = 0\f$ without cancellation. For \f$n = 0\f$, the recurrence sum and \f$\log z\f$ have opposite signs near \f$x_0\f$, so relative error diverges while absolute error stays at a few ulps. When \f$z > 10^{30}\f$, \f$z^{-n}\f$ can be subnormal. The bracket is therefore scaled by \f$2^{600}\f$ before multiplying powers of \f$z^{-1}\f$ and descaled by \f$2^{-600}\f$ afterward, so only the final product rounds as a subnormal.
 
-   The series is summed by Horner's rule from highest to lowest index \f$k\f$.
+## Accuracy
 
-Two additional techniques ensure numerical stability:
+Accuracy is measured against 200-bit `mpmath` references over approximately 20000 positive arguments per function, with dense sampling near \f$x = 1.0\f$, \f$x = 2.0\f$, and \f$x_0\f$. See \ref accuracy "How accuracy is measured" for the definitions of \ref accuracy_ulp "ulp", \ref accuracy_ulp1 "ulp1", correctly rounded share, and \ref accuracy_bounds "test bounds".
 
-- **Summation order:** For \f$n \ge 1\f$, the leading terms and the recurrence terms have the sign of the result, and the series terms are small. The sum is accumulated from the smallest term (the asymptotic part) to the largest (\f$j = 0\f$), preventing subtractive cancellation. For \f$n = 0\f$, the recurrence sum and the logarithm have opposite signs near the positive root \f$x_0 \approx 1.4616321449683623\f$: at this point the relative error diverges while the absolute error stays at a few ulps (8.1 ulp1).
-- **Subnormal scaling:** For large \f$z\f$ the factor \f$z^{-n}\f$ is subnormal; when \f$z > 10^{30}\f$ (the switch for the scaling), the bracket is scaled by \f$2^{600}\f$ before powers of \f$z^{-1}\f$ are multiplied, and subsequently descaled by \f$2^{-600}\f$, ensuring that only the final product rounds in the subnormal range.
-
-## Measured accuracy
-
-See \ref accuracy "How accuracy is measured" for how accuracy figures, error metrics, and test bounds in this manual are defined and obtained.
-
-Reference values were computed using `mpmath` at 200 bits of working precision (`tools/reference/special.py`), covering approximately 20000 positive arguments per function across log-uniform points from \f$2^{-60}\f$ to \f$2^{1000}\f$ and uniform values in \f$[0, 30]\f$, with dense sampling concentrated near the zeros at \f$x = 1.0\f$ and \f$x = 2.0\f$ for `lgamma`, and near \f$x_0 \approx 1.4616321449683623\f$ for `digamma`.
-
-### Log-gamma, digamma, and trigamma accuracy
-
-| Function | Implementation | Backend | Measured max error (ulp) | Measured max error (ulp1) | Correctly rounded share | Test bound (ulp) |
-|---|---|---|---|---|---|---|
-| \ref laplace::math::lgamma "lgamma()" | Boost | gcc | 2.42 | 2.42 | 0.72 | 4.0 |
-| \ref laplace::math::lgamma "lgamma()" | Boost | MSVC host | 2.42 | — | — | 4.0 |
-| \ref laplace::math::lgamma "lgamma()" | Boost | CUDA | 2.42 | 2.42 | 0.74 | 4.0 |
-| \ref laplace::math::digamma "digamma()" | Boost | gcc / CUDA | 2.14 | 2.14 | 0.82 / 0.84 | 3.5 (ulp1) |
-| \ref laplace::math::trigamma "trigamma()" | Boost | gcc | 1.82 | 1.57 | 0.82 | 3.0 |
-| \ref laplace::math::trigamma "trigamma()" | Boost | CUDA | 2.03 | 2.03 | 0.82 | 3.0 |
-
-For comparison, platform implementations measured in `docs/numerics.md`:
-- `lgamma` platform (Rtools libm on gcc): reached \f$1.9 \times 10^{15}\f$ ulp error near \f$x = 1.0\f$ (2.57 ulp1, correctly rounded share 0.50), and produced erroneous infinities at subnormal arguments.
-- `lgamma` platform (MSVC host): 2.82 ulp.
-- `lgamma` platform (CUDA): 2.45 ulp (2.45 ulp1, correctly rounded share 0.60).
-- `digamma` own: relative error unbounded near the root \f$x_0\f$ (8.1 ulp1; no backend named in the source).
-- `trigamma` own: 2.89 ulp (2.11 ulp1; no backend named in the source).
-
-### Polygamma accuracy
-
-For polygamma functions, errors are reported for Laplace's own implementation \ref laplace::math::own::polygamma "own::polygamma()" and compared against Boost.Math on the host:
-
-| Function | Order \f$n\f$ | Implementation | Measured max error (ulp) | Measured max error (ulp1) | Boost max error (ulp) | Test bound (ulp) |
-|---|---|---|---|---|---|---|
-| \ref laplace::math::own::digamma "own::digamma()" | 0 | own | unbounded at root | 8.1 | 2.14 | — |
-| \ref laplace::math::own::trigamma "own::trigamma()" | 1 | own | 2.89 | 2.11 | 1.82–2.03 | — |
-| \ref laplace::math::polygamma "polygamma(2, x)" | 2 | own | 3.36 | — | 72 | 5.0 |
-| \ref laplace::math::polygamma "polygamma(3, x)" | 3 | own | 5.26 | — | 160 | 8.0 |
-| \ref laplace::math::polygamma "polygamma(4, x)" | 4 | own | 6.34 | — | 227 | 9.5 |
-| \ref laplace::math::polygamma "polygamma(5, x)" | 5 | own | 7.90 | — | 563 | 12.0 |
-| \ref laplace::math::polygamma "polygamma(6, x)" | 6 | own | 9.44 | — | 830 | 14.0 |
-
-Errors in the own polygamma implementation grow with order \f$n\f$ near \f$x = 1.0\f$, where up to 15 recurrence terms, each computed as a power through \f$n + 1\f$ products, are summed; for orders \f$n \in \{2, \dots, 6\}\f$ across the reference points (`tests/data/reference/polygamma{2..6}.csv`), errors stay below \f$2.1 \times 10^{-15}\f$ relative.
-
-### Timings
-
-Evaluation times in nanoseconds per call, measured across \f$2^{23}\f$ arguments with exponent uniform in \f$[-5, 15]\f$ (`docs/numerics.md`). The gcc timings of the own routines were measured before the own host log became the default (`docs/numerics.md`, section "Own exp and log in the gcc build", which does not re-measure polygamma):
-
-| Function | Implementation | gcc 1 thread (ns/call) | MSVC host 1 thread (ns/call) | OpenMP 16 threads (ns/call) | CUDA (ns/call) |
+| Function | Backend | Max ulp | Max ulp1 | Correctly rounded share | Test bound |
 |---|---|---|---|---|---|
-| `lgamma` | Boost | 81.2 | 21.9 | 5.5 | 2.86 |
-| `lgamma` | platform | 37.6 (gcc) | 29.1 | 8.4 | 0.63 |
-| `digamma` | Boost | 22.7 | 10.7 | 1.70 | 0.53 |
-| `digamma` | own | 34.0 | — | — | 0.65 |
-| `trigamma` | Boost | 5.4 | 6.7 | 0.54 | 0.37 |
-| `trigamma` | own | 12.7 | — | — | 0.83 |
-| `polygamma(2, x)` | own | 15.8 | — | — | 0.91 |
-| `polygamma(3, x)` | own | 17.8 | — | — | 2.40 |
-| `polygamma(4, x)` | own | 21.0 | — | — | 2.25 |
-| `polygamma(5, x)` | own | 23.9 | — | — | 1.75 |
-| `polygamma(6, x)` | own | 27.6 | — | — | 1.57 |
-| `polygamma(2, x)` | Boost (host only) | 110 | — | — | — |
-| `polygamma(3, x)` | Boost (host only) | 125 | — | — | — |
-| `polygamma(4, x)` | Boost (host only) | 127 | — | — | — |
-| `polygamma(5, x)` | Boost (host only) | 137 | — | — | — |
-| `polygamma(6, x)` | Boost (host only) | 147 | — | — | — |
+| \ref laplace::math::lgamma "lgamma()" | gcc | 2.42 | 2.42 | 0.72 | 4.0 ulp |
+| \ref laplace::math::lgamma "lgamma()" | MSVC host | 2.42 | — | — | 4.0 ulp |
+| \ref laplace::math::lgamma "lgamma()" | CUDA | 2.42 | 2.42 | 0.74 | 4.0 ulp |
+| \ref laplace::math::digamma "digamma()" | gcc | 2.14 | 2.14 | 0.82 | 3.5 ulp1 |
+| \ref laplace::math::digamma "digamma()" | CUDA | 2.14 | 2.14 | 0.84 | 3.5 ulp1 |
+| \ref laplace::math::trigamma "trigamma()" | gcc | 1.82 | 1.57 | 0.82 | 3.0 ulp |
+| \ref laplace::math::trigamma "trigamma()" | CUDA | 2.03 | 2.03 | 0.82 | 3.0 ulp |
+| \ref laplace::math::own::digamma "own::digamma()" | — | unbounded at root | 8.1 | — | — |
+| \ref laplace::math::own::trigamma "own::trigamma()" | — | 2.89 | 2.11 | — | — |
+| \ref laplace::math::polygamma "polygamma(2, x)" | — | 3.36 | — | — | 5.0 ulp |
+| \ref laplace::math::polygamma "polygamma(3, x)" | — | 5.26 | — | — | 8.0 ulp |
+| \ref laplace::math::polygamma "polygamma(4, x)" | — | 6.34 | — | — | 9.5 ulp |
+| \ref laplace::math::polygamma "polygamma(5, x)" | — | 7.90 | — | — | 12.0 ulp |
+| \ref laplace::math::polygamma "polygamma(6, x)" | — | 9.44 | — | — | 14.0 ulp |
+
+For `own::polygamma()` at orders \f$n \in \{2, \dots, 6\}\f$, errors peak near \f$x = 1.0\f$, where up to 15 recurrence terms of \f$n + 1\f$ products are summed. Across the reference set, relative errors stay below \f$2.1 \times 10^{-15}\f$. For comparisons with platform libraries and host-only Boost polygamma, see `docs/numerics.md`.
+
+## Speed
+
+Evaluation times in nanoseconds per call were measured across \f$2^{23}\f$ arguments with exponents uniform in \f$[-5, 15]\f$. On one gcc thread, one MSVC host thread, 16 OpenMP threads, and CUDA, `lgamma()` takes 81.2, 21.9, 5.5, and 2.86 ns. On the same backends, `digamma()` takes 22.7, 10.7, 1.70, and 0.53 ns, and `trigamma()` takes 5.4, 6.7, 0.54, and 0.37 ns. Across orders \f$n = 2\f$ to \f$6\f$, `polygamma()` takes 15.8, 17.8, 21.0, 23.9, and 27.6 ns on one gcc thread, and 0.91, 2.40, 2.25, 1.75, and 1.57 ns on CUDA. For `own::digamma()` and `own::trigamma()`, times are 34.0 and 12.7 ns on one gcc thread, and 0.65 and 0.83 ns on CUDA.
 
 ## Example
 
@@ -194,13 +93,13 @@ void compute_gamma_functions(const Kokkos::View<const double*>& x,
 
 ## Module functions
 
-Functions in this module are called as `laplace::math::NAME`.
+Functions in `<laplace/math/special.hpp>` are called in `laplace::math`, and Laplace's fallback routines in `<laplace/math/polygamma.hpp>` are defined in `laplace::math::own`.
 
 - \ref laplace::math::lgamma "lgamma()" — \f$\log \Gamma(x)\f$ via Boost.Math
 - \ref laplace::math::digamma "digamma()" — \f$\psi(x)\f$ via Boost.Math
 - \ref laplace::math::trigamma "trigamma()" — \f$\psi'(x)\f$ via Boost.Math
-- \ref laplace::math::polygamma "polygamma()" — \f$\psi^{(n)}(x)\f$, \f$n \in \{0, \dots, 6\}\f$ (dispatches to `digamma()` for \f$n = 0\f$, `trigamma()` for \f$n = 1\f$, `own::polygamma()` for \f$n \ge 2\f$)
-- \ref laplace::math::own::polygamma "own::polygamma()" — \f$\psi^{(n)}(x)\f$, \f$n \in \{0, \dots, 6\}\f$ via recurrence and asymptotic expansion
+- \ref laplace::math::polygamma "polygamma()" — \f$\psi^{(n)}(x)\f$ for \f$n \in \{0, \dots, 6\}\f$, dispatching to `digamma()`, `trigamma()`, or `own::polygamma()`
+- \ref laplace::math::own::polygamma "own::polygamma()" — \f$\psi^{(n)}(x)\f$ for \f$n \in \{0, \dots, 6\}\f$ via recurrence and asymptotic expansion
 - \ref laplace::math::own::digamma "own::digamma()" — \f$\psi(x)\f$ via `own::polygamma(0, x)`
 - \ref laplace::math::own::trigamma "own::trigamma()" — \f$\psi'(x)\f$ via `own::polygamma(1, x)`
 */

@@ -57,13 +57,14 @@ namespace laplace::basis {
  * \ingroup basis_legendre
  * \brief Orthonormal Legendre polynomial basis on a 1D interval.
  *
- * Implements the orthonormal Legendre polynomial basis of maximum degree \f$n\f$
- * and dimension \f$K = n + 1\f$ on \f$[lower, upper]\f$ with columns
+ * Implements the orthonormal Legendre basis of maximum degree \f$n \ge 0\f$
+ * and dimension \f$K = n + 1\f$ on \f$[lower, upper]\f$:
  * \f[
- * b_m(x) = \sqrt{\frac{2m + 1}{w}} P_m(t), \quad m = 0, \dots, n
+ * b_m(x) = \sqrt{\frac{2m + 1}{w}} P_m(t), \quad m = 0, \dots, n,
  * \f]
  * where \f$w = upper - lower\f$, \f$t = 2(x - lower)/w - 1\f$, and \f$P_m\f$ is
- * the standard Legendre polynomial.
+ * the Legendre polynomial of degree \f$m\f$. Construct with make_legendre_basis()
+ * and pass by value into Kokkos kernels.
  *
  * \see basis_legendre, make_legendre_basis()
  */
@@ -86,38 +87,28 @@ struct legendre_basis {
   int max_degree = 5;  // n
   /**
    * \ingroup basis_legendre
-   * \brief Rule for evaluating the basis outside \f$[lower, upper]\f$.
+   * \brief Rule for evaluating the basis outside \f$[lower, upper]\f$ (\ref outside_domain_rule).
    */
   outside_domain_rule outside = outside_domain_rule::linear;
 
   /**
    * \ingroup basis_legendre
    * \brief Total number of basis functions \f$K = n + 1\f$.
-   * \return Basis dimension \f$K\f$.
-   * \par Domain and special values
-   * Non-negative integer for \f$n \ge 0\f$.
-   * \par Measured accuracy
-   * Exact integer.
+   * \return Basis dimension \f$K\f$ (non-negative integer for \f$n \ge 0\f$).
    * \see basis_legendre, row_width()
    */
   LAPLACE_HD int dimension() const { return max_degree + 1; }
   /**
    * \ingroup basis_legendre
    * \brief Number of columns in each evaluated row, \f$K = n + 1\f$.
-   * \return Row width \f$K\f$ (dense row).
-   * \par Domain and special values
-   * Equals dimension().
-   * \par Measured accuracy
-   * Exact integer.
+   * \return Row width \f$K\f$, equal to dimension() (dense row).
    * \see basis_legendre, dimension(), row()
    */
   LAPLACE_HD int row_width() const { return max_degree + 1; }
   /**
    * \ingroup basis_legendre
    * \brief Scratch buffer size needed for evaluation.
-   * \return Zero (the Legendre basis requires no scratch memory).
-   * \par Measured accuracy
-   * Exact integer.
+   * \return Zero (no scratch memory required).
    * \see basis_legendre
    */
   LAPLACE_HD int scratch_size() const { return 0; }
@@ -125,265 +116,243 @@ struct legendre_basis {
    * \ingroup basis_legendre
    * \brief Semi-bandwidth of cross Gram matrices.
    * \return Maximum degree \f$n\f$ (dense matrix).
-   * \par Domain and special values
-   * Equals \c max_degree for \f$n \ge 0\f$.
-   * \par Measured accuracy
-   * Exact integer.
    * \see basis_legendre, cross_gram()
    */
   LAPLACE_HD int gram_bandwidth() const { return max_degree; }  // dense
 
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the basis functions at point \f$x\f$ (derivative order 0).
+   * \brief Evaluates the basis functions at \f$x\f$ (derivative order 0).
    *
    * Writes \f$b_m(x) = \sqrt{(2m + 1)/w} P_m(t)\f$ for \f$m = 0, \dots, n\f$ into \c out,
-   * where \f$w = upper - lower\f$, \f$t\f$ is formed from the nearer endpoint, and \f$P_m(t)\f$
-   * is evaluated using Bonnet's recurrence.
+   * where \f$w = upper - lower\f$, \f$t\f$ is computed from the nearer endpoint, and \f$P_m(t)\f$
+   * uses Bonnet's recurrence.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
+   * \return First non-zero column index (0, dense row).
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ is NaN, writes NaN to all entries.
+   * Outside \f$[lower, upper]\f$, follows \ref outside. Writes NaN to all entries if \f$x\f$ is NaN.
    * \par Measured accuracy
-   * Bounded by 175 ulp for \f$n \le 20\f$ and 830 ulp for \f$n = 50\f$, within 20 times the conditioning scale.
+   * Max error 115 ulp (gcc) / 88 ulp (CUDA) for \f$n \le 20\f$ (bound 175 ulp), and 551 ulp (gcc) / 474 ulp (CUDA) at \f$n = 50\f$ (bound 830 ulp); within 20 times the conditioning scale.
    * \see basis_legendre, row_d1(), expansion()
    */
   // rows: values of b_m^(k)(x), m = 0..n; return the first column, 0
   template <class T> LAPLACE_HD int row(T x, T* out) const { return row_order<0>(x, out); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the first derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates first derivatives at \f$x\f$.
    *
-   * Writes \f$b_m^{(1)}(x) = (2/w) \sqrt{(2m + 1)/w} C_{m-1}^{(3/2)}(t)\f$ for \f$m \ge 1\f$,
-   * and \f$0\f$ for \f$m = 0\f$, into \c out.
+   * Writes \f$b_m^{(1)}(x) = (2/w) \sqrt{(2m + 1)/w} C_{m-1}^{(3/2)}(t)\f$ for \f$m \ge 1\f$
+   * and \f$0\f$ for \f$m = 0\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
+   * \return First non-zero column index (0, dense row).
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ is NaN, writes NaN to all entries.
-   * Returns exact zeros for \f$n < 1\f$.
+   * Same \ref outside and NaN rules as row(); writes exact zeros for \f$n < 1\f$.
    * \par Measured accuracy
-   * Bounded by 60 ulp for \f$n \le 20\f$ and 440 ulp for \f$n = 50\f$, within 20 times the conditioning scale.
+   * Max error 38 ulp (gcc) / 34 ulp (CUDA) for \f$n \le 20\f$ (bound 60 ulp), and 292 ulp (gcc) / 258 ulp (CUDA) at \f$n = 50\f$ (bound 440 ulp); within 20 times the conditioning scale.
    * \see basis_legendre, row(), row_d2(), expansion_d1()
    */
   template <class T> LAPLACE_HD int row_d1(T x, T* out) const { return row_order<1>(x, out); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the second derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates second derivatives at \f$x\f$.
    *
-   * Writes \f$b_m^{(2)}(x) = 3 (2/w)^2 \sqrt{(2m + 1)/w} C_{m-2}^{(5/2)}(t)\f$ for \f$m \ge 2\f$,
-   * and \f$0\f$ for \f$m < 2\f$, into \c out.
+   * Writes \f$b_m^{(2)}(x) = 3 (2/w)^2 \sqrt{(2m + 1)/w} C_{m-2}^{(5/2)}(t)\f$ for \f$m \ge 2\f$
+   * and \f$0\f$ for \f$m < 2\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
+   * \return First non-zero column index (0, dense row).
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ is NaN, writes NaN to all entries.
-   * Returns exact zeros for \f$n < 2\f$.
+   * Same \ref outside and NaN rules as row(); writes exact zeros for \f$n < 2\f$.
    * \par Measured accuracy
-   * Bounded by 50 ulp for \f$n \le 20\f$ and 300 ulp for \f$n = 50\f$, within 20 times the conditioning scale.
+   * Max error 32 ulp (gcc) / 39 ulp (CUDA) for \f$n \le 20\f$ (bound 50 ulp), and 194 ulp (gcc and CUDA) at \f$n = 50\f$ (bound 300 ulp); within 20 times the conditioning scale.
    * \see basis_legendre, row_d1(), row_d3(), expansion_d2()
    */
   template <class T> LAPLACE_HD int row_d2(T x, T* out) const { return row_order<2>(x, out); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the third derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates third derivatives at \f$x\f$.
    *
-   * Writes \f$b_m^{(3)}(x) = 15 (2/w)^3 \sqrt{(2m + 1)/w} C_{m-3}^{(7/2)}(t)\f$ for \f$m \ge 3\f$,
-   * and \f$0\f$ for \f$m < 3\f$, into \c out.
+   * Writes \f$b_m^{(3)}(x) = 15 (2/w)^3 \sqrt{(2m + 1)/w} C_{m-3}^{(7/2)}(t)\f$ for \f$m \ge 3\f$
+   * and \f$0\f$ for \f$m < 3\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
+   * \return First non-zero column index (0, dense row).
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ is NaN, writes NaN to all entries.
-   * Returns exact zeros for \f$n < 3\f$.
+   * Same \ref outside and NaN rules as row(); writes exact zeros for \f$n < 3\f$.
    * \par Measured accuracy
-   * Bounded by 45 ulp for \f$n \le 20\f$ and 175 ulp for \f$n = 50\f$, within 20 times the conditioning scale.
+   * Max error 28 ulp (gcc) / 23 ulp (CUDA) for \f$n \le 20\f$ (bound 45 ulp), and 116 ulp (gcc) / 111 ulp (CUDA) at \f$n = 50\f$ (bound 175 ulp); within 20 times the conditioning scale.
    * \see basis_legendre, row_d2(), row_d4(), expansion_d3()
    */
   template <class T> LAPLACE_HD int row_d3(T x, T* out) const { return row_order<3>(x, out); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the fourth derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates fourth derivatives at \f$x\f$.
    *
-   * Writes \f$b_m^{(4)}(x) = 105 (2/w)^4 \sqrt{(2m + 1)/w} C_{m-4}^{(9/2)}(t)\f$ for \f$m \ge 4\f$,
-   * and \f$0\f$ for \f$m < 4\f$, into \c out.
+   * Writes \f$b_m^{(4)}(x) = 105 (2/w)^4 \sqrt{(2m + 1)/w} C_{m-4}^{(9/2)}(t)\f$ for \f$m \ge 4\f$
+   * and \f$0\f$ for \f$m < 4\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
+   * \return First non-zero column index (0, dense row).
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ is NaN, writes NaN to all entries.
-   * Returns exact zeros for \f$n < 4\f$.
+   * Same \ref outside and NaN rules as row(); writes exact zeros for \f$n < 4\f$.
    * \par Measured accuracy
-   * Bounded by 52 ulp for \f$n \le 20\f$ and 220 ulp for \f$n = 50\f$, within 20 times the conditioning scale.
+   * Max error 34 ulp (gcc) / 25 ulp (CUDA) for \f$n \le 20\f$ (bound 52 ulp), and 145 ulp (gcc) / 149 ulp (CUDA) at \f$n = 50\f$ (bound 220 ulp); within 20 times the conditioning scale.
    * \see basis_legendre, row_d3(), row_d5(), expansion_d4()
    */
   template <class T> LAPLACE_HD int row_d4(T x, T* out) const { return row_order<4>(x, out); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the fifth derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates fifth derivatives at \f$x\f$.
    *
-   * Writes \f$b_m^{(5)}(x) = 945 (2/w)^5 \sqrt{(2m + 1)/w} C_{m-5}^{(11/2)}(t)\f$ for \f$m \ge 5\f$,
-   * and \f$0\f$ for \f$m < 5\f$, into \c out.
+   * Writes \f$b_m^{(5)}(x) = 945 (2/w)^5 \sqrt{(2m + 1)/w} C_{m-5}^{(11/2)}(t)\f$ for \f$m \ge 5\f$
+   * and \f$0\f$ for \f$m < 5\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
+   * \return First non-zero column index (0, dense row).
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ is NaN, writes NaN to all entries.
-   * Returns exact zeros for \f$n < 5\f$.
+   * Same \ref outside and NaN rules as row(); writes exact zeros for \f$n < 5\f$.
    * \par Measured accuracy
-   * Bounded by 30 ulp for \f$n \le 20\f$ and 205 ulp for \f$n = 50\f$, within 20 times the conditioning scale.
+   * Max error 19 ulp (gcc) / 20 ulp (CUDA) for \f$n \le 20\f$ (bound 30 ulp), and 136 ulp (gcc) / 104 ulp (CUDA) at \f$n = 50\f$ (bound 205 ulp); within 20 times the conditioning scale.
    * \see basis_legendre, row_d4(), row_d6(), expansion_d5()
    */
   template <class T> LAPLACE_HD int row_d5(T x, T* out) const { return row_order<5>(x, out); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the sixth derivatives of the basis functions at point \f$x\f$.
+   * \brief Evaluates sixth derivatives at \f$x\f$.
    *
-   * Writes \f$b_m^{(6)}(x) = 10395 (2/w)^6 \sqrt{(2m + 1)/w} C_{m-6}^{(13/2)}(t)\f$ for \f$m \ge 6\f$,
-   * and \f$0\f$ for \f$m < 6\f$, into \c out.
+   * Writes \f$b_m^{(6)}(x) = 10395 (2/w)^6 \sqrt{(2m + 1)/w} C_{m-6}^{(13/2)}(t)\f$ for \f$m \ge 6\f$
+   * and \f$0\f$ for \f$m < 6\f$ into \c out.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
+   * \return First non-zero column index (0, dense row).
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ is NaN, writes NaN to all entries.
-   * Returns exact zeros for \f$n < 6\f$.
+   * Same \ref outside and NaN rules as row(); writes exact zeros for \f$n < 6\f$.
    * \par Measured accuracy
-   * Bounded by 36 ulp for \f$n \le 20\f$ and 160 ulp for \f$n = 50\f$, within 20 times the conditioning scale.
+   * Max error 24 ulp (gcc) / 26 ulp (CUDA) for \f$n \le 20\f$ (bound 36 ulp), and 104 ulp (gcc) / 116 ulp (CUDA) at \f$n = 50\f$ (bound 160 ulp); within 20 times the conditioning scale.
    * \see basis_legendre, row_d5(), expansion_d6()
    */
   template <class T> LAPLACE_HD int row_d6(T x, T* out) const { return row_order<6>(x, out); }
 
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the linear expansion \f$\sum_{m=0}^n \beta_m b_m(x)\f$ at point \f$x\f$.
+   * \brief Evaluates the linear expansion \f$\sum_{m=0}^n \beta_m b_m(x)\f$ at \f$x\f$.
    *
-   * Accumulates the linear combination of basis values in a single pass during Bonnet's recurrence
-   * without allocating an intermediate row buffer.
+   * Accumulates the weighted sum in a single pass during Bonnet's recurrence without allocating
+   * an intermediate row buffer.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param beta Array of \f$K = n + 1\f$ basis coefficients.
-   * \return Value of the expansion at \f$x\f$.
+   * \return Expansion value at \f$x\f$.
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ or any \f$\beta_m\f$ is NaN, returns NaN.
+   * Outside \f$[lower, upper]\f$, follows \ref outside. Returns NaN if \f$x\f$ or any \f$\beta_m\f$ is NaN.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row() within 64 ulp of \f$\sum |\beta_m b_m(x)|\f$.
+   * Agrees with the inner product of \c beta and row() within 64 ulp of \f$\sum_{m=0}^n |\beta_m b_m(x)|\f$.
    * \see basis_legendre, row(), expansion_d1()
    */
   // sum_m beta_m b_m^(k)(x)
   template <class T> LAPLACE_HD T expansion(T x, const T* beta) const { return expansion_order<0>(x, beta); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the first derivative of the basis expansion at point \f$x\f$.
+   * \brief Evaluates the first derivative \f$\sum_{m=0}^n \beta_m b_m^{(1)}(x)\f$ at \f$x\f$.
    *
-   * Accumulates \f$\sum_{m=0}^n \beta_m b_m^{(1)}(x)\f$ in a single pass during the Gegenbauer
-   * recurrence without allocating an intermediate row buffer.
+   * Single-pass accumulation during the Gegenbauer recurrence without an intermediate row buffer.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param beta Array of \f$K = n + 1\f$ basis coefficients.
    * \return First derivative of the expansion at \f$x\f$.
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ or any \f$\beta_m\f$ is NaN, returns NaN.
-   * Returns exact 0 for \f$n < 1\f$.
+   * Same \ref outside and NaN rules as expansion(); returns exact 0 for \f$n < 1\f$.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d1() within 64 ulp of \f$\sum |\beta_m b_m^{(1)}(x)|\f$.
+   * Agrees with the inner product of \c beta and row_d1() within 64 ulp of \f$\sum_{m=0}^n |\beta_m b_m^{(1)}(x)|\f$.
    * \see basis_legendre, row_d1(), expansion(), expansion_d2()
    */
   template <class T> LAPLACE_HD T expansion_d1(T x, const T* beta) const { return expansion_order<1>(x, beta); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the second derivative of the basis expansion at point \f$x\f$.
+   * \brief Evaluates the second derivative \f$\sum_{m=0}^n \beta_m b_m^{(2)}(x)\f$ at \f$x\f$.
    *
-   * Accumulates \f$\sum_{m=0}^n \beta_m b_m^{(2)}(x)\f$ in a single pass during the Gegenbauer
-   * recurrence without allocating an intermediate row buffer.
+   * Single-pass accumulation during the Gegenbauer recurrence without an intermediate row buffer.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param beta Array of \f$K = n + 1\f$ basis coefficients.
    * \return Second derivative of the expansion at \f$x\f$.
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ or any \f$\beta_m\f$ is NaN, returns NaN.
-   * Returns exact 0 for \f$n < 2\f$.
+   * Same \ref outside and NaN rules as expansion(); returns exact 0 for \f$n < 2\f$.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d2() within 64 ulp of \f$\sum |\beta_m b_m^{(2)}(x)|\f$.
+   * Agrees with the inner product of \c beta and row_d2() within 64 ulp of \f$\sum_{m=0}^n |\beta_m b_m^{(2)}(x)|\f$.
    * \see basis_legendre, row_d2(), expansion_d1(), expansion_d3()
    */
   template <class T> LAPLACE_HD T expansion_d2(T x, const T* beta) const { return expansion_order<2>(x, beta); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the third derivative of the basis expansion at point \f$x\f$.
+   * \brief Evaluates the third derivative \f$\sum_{m=0}^n \beta_m b_m^{(3)}(x)\f$ at \f$x\f$.
    *
-   * Accumulates \f$\sum_{m=0}^n \beta_m b_m^{(3)}(x)\f$ in a single pass during the Gegenbauer
-   * recurrence without allocating an intermediate row buffer.
+   * Single-pass accumulation during the Gegenbauer recurrence without an intermediate row buffer.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param beta Array of \f$K = n + 1\f$ basis coefficients.
    * \return Third derivative of the expansion at \f$x\f$.
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ or any \f$\beta_m\f$ is NaN, returns NaN.
-   * Returns exact 0 for \f$n < 3\f$.
+   * Same \ref outside and NaN rules as expansion(); returns exact 0 for \f$n < 3\f$.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d3() within 64 ulp of \f$\sum |\beta_m b_m^{(3)}(x)|\f$.
+   * Agrees with the inner product of \c beta and row_d3() within 64 ulp of \f$\sum_{m=0}^n |\beta_m b_m^{(3)}(x)|\f$.
    * \see basis_legendre, row_d3(), expansion_d2(), expansion_d4()
    */
   template <class T> LAPLACE_HD T expansion_d3(T x, const T* beta) const { return expansion_order<3>(x, beta); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the fourth derivative of the basis expansion at point \f$x\f$.
+   * \brief Evaluates the fourth derivative \f$\sum_{m=0}^n \beta_m b_m^{(4)}(x)\f$ at \f$x\f$.
    *
-   * Accumulates \f$\sum_{m=0}^n \beta_m b_m^{(4)}(x)\f$ in a single pass during the Gegenbauer
-   * recurrence without allocating an intermediate row buffer.
+   * Single-pass accumulation during the Gegenbauer recurrence without an intermediate row buffer.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param beta Array of \f$K = n + 1\f$ basis coefficients.
    * \return Fourth derivative of the expansion at \f$x\f$.
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ or any \f$\beta_m\f$ is NaN, returns NaN.
-   * Returns exact 0 for \f$n < 4\f$.
+   * Same \ref outside and NaN rules as expansion(); returns exact 0 for \f$n < 4\f$.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d4() within 64 ulp of \f$\sum |\beta_m b_m^{(4)}(x)|\f$.
+   * Agrees with the inner product of \c beta and row_d4() within 64 ulp of \f$\sum_{m=0}^n |\beta_m b_m^{(4)}(x)|\f$.
    * \see basis_legendre, row_d4(), expansion_d3(), expansion_d5()
    */
   template <class T> LAPLACE_HD T expansion_d4(T x, const T* beta) const { return expansion_order<4>(x, beta); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the fifth derivative of the basis expansion at point \f$x\f$.
+   * \brief Evaluates the fifth derivative \f$\sum_{m=0}^n \beta_m b_m^{(5)}(x)\f$ at \f$x\f$.
    *
-   * Accumulates \f$\sum_{m=0}^n \beta_m b_m^{(5)}(x)\f$ in a single pass during the Gegenbauer
-   * recurrence without allocating an intermediate row buffer.
+   * Single-pass accumulation during the Gegenbauer recurrence without an intermediate row buffer.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param beta Array of \f$K = n + 1\f$ basis coefficients.
    * \return Fifth derivative of the expansion at \f$x\f$.
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ or any \f$\beta_m\f$ is NaN, returns NaN.
-   * Returns exact 0 for \f$n < 5\f$.
+   * Same \ref outside and NaN rules as expansion(); returns exact 0 for \f$n < 5\f$.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d5() within 64 ulp of \f$\sum |\beta_m b_m^{(5)}(x)|\f$.
+   * Agrees with the inner product of \c beta and row_d5() within 64 ulp of \f$\sum_{m=0}^n |\beta_m b_m^{(5)}(x)|\f$.
    * \see basis_legendre, row_d5(), expansion_d4(), expansion_d6()
    */
   template <class T> LAPLACE_HD T expansion_d5(T x, const T* beta) const { return expansion_order<5>(x, beta); }
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the sixth derivative of the basis expansion at point \f$x\f$.
+   * \brief Evaluates the sixth derivative \f$\sum_{m=0}^n \beta_m b_m^{(6)}(x)\f$ at \f$x\f$.
    *
-   * Accumulates \f$\sum_{m=0}^n \beta_m b_m^{(6)}(x)\f$ in a single pass during the Gegenbauer
-   * recurrence without allocating an intermediate row buffer.
+   * Single-pass accumulation during the Gegenbauer recurrence without an intermediate row buffer.
    * \tparam T Floating-point scalar type.
    * \param x Evaluation point.
    * \param beta Array of \f$K = n + 1\f$ basis coefficients.
    * \return Sixth derivative of the expansion at \f$x\f$.
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. If \f$x\f$ or any \f$\beta_m\f$ is NaN, returns NaN.
-   * Returns exact 0 for \f$n < 6\f$.
+   * Same \ref outside and NaN rules as expansion(); returns exact 0 for \f$n < 6\f$.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and row_d6() within 64 ulp of \f$\sum |\beta_m b_m^{(6)}(x)|\f$.
+   * Agrees with the inner product of \c beta and row_d6() within 64 ulp of \f$\sum_{m=0}^n |\beta_m b_m^{(6)}(x)|\f$.
    * \see basis_legendre, row_d6(), expansion_d5()
    */
   template <class T> LAPLACE_HD T expansion_d6(T x, const T* beta) const { return expansion_order<6>(x, beta); }
@@ -392,21 +361,21 @@ struct legendre_basis {
    * \ingroup basis_legendre
    * \brief Evaluates column integrals from the lower boundary to \f$x\f$.
    *
-   * Evaluates \f$\int_{lower}^x b_0(t) \, \mathrm{d}t = (x - lower) / \sqrt{w}\f$, and for \f$m \ge 1\f$:
+   * Evaluates \f$\int_{lower}^x b_0(\tau) \, \mathrm{d}\tau = (x - lower) / \sqrt{w}\f$, and for \f$m \ge 1\f$:
    * \f[
-   * \int_{lower}^x b_m(t) \, \mathrm{d}t = -\frac{2}{w} (upper - x)(x - lower) \sqrt{\frac{2m + 1}{w}} \frac{C_{m-1}^{(3/2)}(t)}{m (m + 1)}
+   * \int_{lower}^x b_m(\tau) \, \mathrm{d}\tau = -\frac{2}{w} (upper - x)(x - lower) \sqrt{\frac{2m + 1}{w}} \frac{C_{m-1}^{(3/2)}(t)}{m (m + 1)}
    * \f]
-   * written as a product that avoids catastrophic cancellation near the boundaries.
+   * in a product form that avoids cancellation near both boundaries.
    * \tparam T Floating-point scalar type.
    * \param x Upper integration limit.
    * \param out Output buffer of size at least row_width().
-   * \return Index of the first non-zero column (always 0, dense row).
+   * \return First non-zero column index (0, dense row).
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. At \f$x = lower\f$, returns all zeros.
-   * At \f$x = upper\f$, returns \f$\sqrt{w}\f$ for column 0 and exact zeros for \f$m \ge 1\f$.
-   * If \f$x\f$ is NaN, writes NaN to all entries.
+   * Outside \f$[lower, upper]\f$, follows \ref outside. At \f$x = lower\f$, returns all zeros;
+   * at \f$x = upper\f$, returns \f$\sqrt{w}\f$ for column 0 and exact zeros for \f$m \ge 1\f$.
+   * Writes NaN to all entries if \f$x\f$ is NaN.
    * \par Measured accuracy
-   * Bounded by 53 ulp for \f$n \le 20\f$ and 300 ulp for \f$n = 50\f$.
+   * Max error 35 ulp (gcc) / 41 ulp (CUDA) for \f$n \le 20\f$ (bound 53 ulp), and 197 ulp (gcc) / 193 ulp (CUDA) at \f$n = 50\f$ (bound 300 ulp).
    * \see basis_legendre, integral_expansion(), row()
    */
   // int_lower^x b_m, m = 0..n (dense, first column 0)
@@ -434,19 +403,17 @@ struct legendre_basis {
 
   /**
    * \ingroup basis_legendre
-   * \brief Evaluates the integrated basis expansion \f$\int_{lower}^x \left(\sum_{m=0}^n \beta_m b_m(t)\right) \mathrm{d}t\f$.
+   * \brief Evaluates the integrated basis expansion \f$\int_{lower}^x \left(\sum_{m=0}^n \beta_m b_m(\tau)\right) \mathrm{d}\tau\f$.
    *
-   * Accumulates the integrated basis functions scaled by \c beta in a single pass without allocating
-   * an intermediate row buffer.
+   * Single-pass accumulation without allocating an intermediate row buffer.
    * \tparam T Floating-point scalar type.
    * \param x Upper integration limit.
    * \param beta Array of \f$K = n + 1\f$ basis coefficients.
    * \return Integrated expansion value.
    * \par Domain and special values
-   * Outside \f$[lower, upper]\f$, follows \ref outside. Returns 0 at \f$x = lower\f$.
-   * If \f$x\f$ or any \f$\beta_m\f$ is NaN, returns NaN.
+   * Same \ref outside and NaN rules as expansion(); returns 0 at \f$x = lower\f$.
    * \par Measured accuracy
-   * Agrees with the scalar product of beta and integral_row() within 64 ulp of \f$\sum |\beta_m \int b_m|\f$.
+   * Agrees with the inner product of \c beta and integral_row() within 64 ulp of \f$\sum_{m=0}^n |\beta_m \int_{lower}^x b_m(\tau) \, \mathrm{d}\tau|\f$.
    * \see basis_legendre, integral_row(), expansion()
    */
   template <class T>
@@ -470,21 +437,18 @@ struct legendre_basis {
    * \ingroup basis_legendre
    * \brief Evaluates the cross Gram matrix \f$G_{kl} = \int_{lower}^{upper} b^{(k)}(x) (b^{(l)}(x))^\top \mathrm{d}x\f$.
    *
-   * Evaluates the dense \f$K \times K\f$ cross Gram matrix in column-major order:
-   * \c out[i + j * K] holds \f$\int_{lower}^{upper} b_i^{(k)}(x) b_j^{(l)}(x) \, \mathrm{d}x\f$.
-   * For \f$k = 0, l = 0\f$, writes the exact identity matrix \f$I\f$ by orthonormality.
-   * For other orders with \f$k \le n\f$ and \f$l \le n\f$, evaluates the integral by Gauss-Legendre
-   * quadrature in \f$t\f$ (exact for the polynomial integrand of degree \f$2n - k - l\f$):
-   * uses the 64-node rule for degrees up to 127, and a rule of \f$\lfloor\text{degree}/2\rfloor + 1\f$
-   * Newton nodes above it. If \f$k > n\f$ or \f$l > n\f$, writes zeros.
-   * \param k Derivative order of the left factor (\f$k \ge 0\f$).
-   * \param l Derivative order of the right factor (\f$l \ge 0\f$).
-   * \param out Output array of size at least \f$K \times K\f$.
+   * Host-only. Writes the dense \f$K \times K\f$ matrix in column-major order (\c out[i + j * K]).
+   * For \f$k = l = 0\f$, writes the exact identity \f$I\f$. Otherwise integrates on \f$t \in [-1, 1]\f$
+   * (polynomial integrand of degree \f$2n - k - l\f$) using the 64-node rule for \f$2n - k - l \le 127\f$
+   * and \f$\lfloor(2n - k - l)/2\rfloor + 1\f$ nodes from gauss_legendre_nodes() above.
+   * \param k Left derivative order (\f$k \ge 0\f$).
+   * \param l Right derivative order (\f$l \ge 0\f$).
+   * \param out Output buffer of size at least \f$K \times K\f$.
    * \par Domain and special values
-   * If \f$k > n\f$ or \f$l > n\f$, returns an all-zero matrix.
+   * Returns an all-zero matrix if \f$k > n\f$ or \f$l > n\f$.
    * \par Measured accuracy
-   * Exact identity for \f$G_{00}\f$; bounded by 126 ulp for \f$n \le 20\f$ and 580 ulp for \f$n = 50\f$.
-   * \see basis_legendre, gram_bandwidth()
+   * Exact identity for \f$G_{00}\f$. Max error 84 ulp for \f$n \le 20\f$ (bound 126 ulp) and 384 ulp at \f$n = 50\f$ (bound 580 ulp) on gcc; at \f$n = 100\f$, \f$G_{10} + G_{01}\f$ satisfies integration by parts within \f$5 \times 10^{-13}\f$ relative error and \f$G_{11}\f$ is symmetric within \f$10^{-13}\f$.
+   * \see basis_legendre, gram_bandwidth(), gauss_legendre_nodes()
    */
   // G_kl = int_lower^upper b^(k) b^(l)' dx, written dense K x K, column-major
   // (out[i + j K] = int b_i^(k) b_j^(l)); G_00 is the identity, written exactly
@@ -519,14 +483,14 @@ struct legendre_basis {
 
   /**
    * \ingroup basis_legendre
-   * \brief Computes the \f$N\f$ nodes and weights of Gauss-Legendre quadrature on \f$[-1, 1]\f$.
+   * \brief Computes \f$N\f$ Gauss-Legendre quadrature nodes and weights on \f$[-1, 1]\f$.
    *
-   * Computes the roots of \f$P_N\f$ using Newton's method from initial guesses
-   * \f$\cos(\pi (i + 3/4) / (N + 1/2))\f$, and weights \f$2 / ((1 - t^2) (P_N'(t))^2)\f$.
+   * Host-only. Finds the roots of \f$P_N(t)\f$ via Newton's method from initial guesses
+   * \f$\cos(\pi (i + 3/4) / (N + 1/2))\f$ and computes weights \f$2 / ((1 - t^2) (P_N'(t))^2)\f$.
    * Used by cross_gram() for integrand degrees above 127.
    * \param N Number of quadrature nodes (\f$N \ge 1\f$).
-   * \param nodes Output vector populated with the \f$N\f$ quadrature nodes.
-   * \param weights Output vector populated with the \f$N\f$ quadrature weights.
+   * \param nodes Output vector of \f$N\f$ quadrature nodes.
+   * \param weights Output vector of \f$N\f$ quadrature weights.
    * \par Stopping rule
    * Each Newton iteration stops when its step is at most \f$4 \varepsilon |t|\f$, or after 100 steps.
    * \see basis_legendre, cross_gram()
@@ -733,13 +697,11 @@ struct legendre_basis {
  * \param lower Lower bound of the domain.
  * \param upper Upper bound of the domain (\f$upper > lower\f$).
  * \param max_degree Maximum polynomial degree \f$n \ge 0\f$.
- * \param outside Rule for evaluating the basis outside \f$[lower, upper]\f$ (defaults to linear extrapolation).
+ * \param outside Evaluation rule outside \f$[lower, upper]\f$ (defaults to \c outside_domain_rule::linear).
  * \return Configured \ref legendre_basis structure.
  * \par Domain and special values
- * Throws \c std::invalid_argument if \c lower or \c upper is not finite, if \c lower >= upper,
- * or if \c max_degree < 0.
- * \par Measured accuracy
- * Exact arithmetic setup.
+ * Throws \c std::invalid_argument if \c lower or \c upper is non-finite, \c lower >= upper,
+ * or \c max_degree < 0.
  * \see basis_legendre, legendre_basis
  */
 // Checks its arguments (finite, lower < upper, max_degree >= 0) and throws
