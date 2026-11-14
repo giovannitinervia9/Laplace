@@ -128,6 +128,18 @@ void host_each(const TB& b, F&& f) {
 
 }  // namespace detail_tensor
 
+/**
+ * \ingroup basis_tensor
+ * \brief Concept defining the kernel evaluation interface of a multivariate basis.
+ *
+ * Requires compile-time `margin_count`, total dimension `dimension()`, active row
+ * width `row_width(k)`, scratch requirement `scratch_size(k)`, row evaluators
+ * `row()` and `row_partial()`, expansion evaluators `expansion()` and
+ * `expansion_partial()`, and column index mapping `column()`.
+ *
+ * \tparam B Multivariate basis type modeling the concept.
+ * \see \ref basis_tensor, tensor_product_basis, fill_tensor_basis_rows()
+ */
 // The concept of a basis of several variables (P1). x, first and k hold one
 // entry per margin.
 template <class B>
@@ -144,52 +156,134 @@ concept multivariate_basis = requires(const B& b, const double* x, const int* k,
   { b.column(k, first, 0) } -> std::convertible_to<int>;
 };
 
+/**
+ * \ingroup basis_tensor
+ * \brief Tensor product of \f$D \ge 2\f$ univariate bases modeling \ref multivariate_basis.
+ *
+ * Combines margins \f$j = 1, \dots, D\f$ into \f$K = \prod_{j=1}^D K_j\f$ product functions
+ * \f$B_c(x) = \prod_{j=1}^D b_{j,i_j}(x_j)\f$ with the last margin varying fastest.
+ * Copied by value into Kokkos kernels; underlying margin memory remains with the margin
+ * owners (`owner.device()` for device kernels, `owner.host()` for host functions).
+ *
+ * \tparam B Univariate basis types modeling `univariate_basis` (at least two).
+ * \see \ref basis_tensor, multivariate_basis, tensor_operator_penalty(), marginal_operator_penalty()
+ */
 // The tensor product of D >= 2 univariate bases, a small struct copied by
 // value into kernels; it holds copies of the margins' structs, whose memory
 // stays with their owners (pass owner.device() for device kernels and
 // owner.host() for the host functions).
 template <univariate_basis... B>
 struct tensor_product_basis {
+  /**
+   * \ingroup basis_tensor
+   * \brief Number of univariate margins \f$D \ge 2\f$.
+   */
   static constexpr int margin_count = sizeof...(B);
   static_assert(margin_count >= 2, "tensor_product_basis: at least two margins");
 
+  /**
+   * \ingroup basis_tensor
+   * \brief Storage of the margins; read them with margin().
+   */
   detail_tensor::margin_pack<std::index_sequence_for<B...>, B...> margins;
 
   tensor_product_basis() = default;
   explicit tensor_product_basis(const B&... b) : margins(b...) {}
 
+  /**
+   * \ingroup basis_tensor
+   * \brief Returns a const reference to margin \f$I + 1\f$.
+   * \tparam I Zero-based compile-time margin index (\f$0 \le I < D\f$).
+   * \return Const reference to the stored margin struct.
+   * \see \ref basis_tensor, for_each_margin()
+   */
   template <std::size_t I>
   LAPLACE_HD const auto& margin() const {
     using M = std::tuple_element_t<I, std::tuple<B...>>;
     return static_cast<const detail_tensor::margin_leaf<I, M>&>(margins).b;
   }
 
+  /**
+   * \ingroup basis_tensor
+   * \brief Invokes a callable on every margin in order from \f$I = 0\f$ to \f$D - 1\f$.
+   * \tparam F Callable accepting `(std::integral_constant<std::size_t, I>, const Margin&)`.
+   * \param f Functor invoked once per margin with its 0-based compile-time index and struct.
+   * \see \ref basis_tensor, margin()
+   */
   // f(index constant, margin) for every margin, in order
   template <class F>
   LAPLACE_HD void for_each_margin(F&& f) const {
     each(f, std::index_sequence_for<B...>{});
   }
 
+  /**
+   * \ingroup basis_tensor
+   * \brief Total number of tensor product basis functions \f$K = \prod_{j=1}^D K_j\f$.
+   * \return Product dimension \f$K\f$.
+   * \see \ref basis_tensor, row_width()
+   */
   LAPLACE_HD int dimension() const {
     int K = 1;
     for_each_margin([&](auto, const auto& m) { K *= m.dimension(); });
     return K;
   }
 
+  /**
+   * \ingroup basis_tensor
+   * \brief Active row width \f$W = \prod_{j=1}^D w_j(k_j)\f$ for multi-index `k`.
+   *
+   * Margin \f$j\f$ contributes \f$K_j\f$ when \f$k_j = -1\f$ (integrated) and its `row_width()` otherwise.
+   * \param k Array of \f$D\f$ multi-index orders (\f$k_j \in \{-1, 0, \dots, 6\}\f$).
+   * \return Number of values written to `out` by row_partial().
+   * \see \ref basis_tensor, row_width() const, scratch_size(const int*) const
+   */
   LAPLACE_HD int row_width(const int* k) const {
     int W = 1;
     for_each_margin([&](auto I, const auto& m) { W *= detail_tensor::margin_width(m, k[I]); });
     return W;
   }
+  /**
+   * \ingroup basis_tensor
+   * \brief Active row width \f$W = \prod_{j=1}^D w_j\f$ for function evaluation (\f$k = 0\f$).
+   * \return Number of values written to `out` by row().
+   * \see \ref basis_tensor, row_width(const int*) const, scratch_size() const
+   */
   LAPLACE_HD int row_width() const { return row_width(zero_order().data()); }
 
+  /**
+   * \ingroup basis_tensor
+   * \brief Required scratch buffer length \f$\sum_{j=1}^D w_j(k_j)\f$ for multi-index `k`.
+   *
+   * Counts \f$K_j\f$ for each integrated margin (\f$k_j = -1\f$) and `row_width()` otherwise.
+   * \param k Array of \f$D\f$ multi-index orders (\f$k_j \in \{-1, 0, \dots, 6\}\f$).
+   * \return Number of scalar scratch elements required by row_partial() and expansion_partial().
+   * \see \ref basis_tensor, scratch_size() const, row_width(const int*) const
+   */
   LAPLACE_HD int scratch_size(const int* k) const {
     int S = 0;
     for_each_margin([&](auto I, const auto& m) { S += detail_tensor::margin_width(m, k[I]); });
     return S;
   }
+  /**
+   * \ingroup basis_tensor
+   * \brief Required scratch buffer length \f$\sum_{j=1}^D w_j\f$ for order \f$k = 0\f$.
+   * \return Number of scalar scratch elements required by row() and expansion().
+   * \see \ref basis_tensor, scratch_size(const int*) const
+   */
   LAPLACE_HD int scratch_size() const { return scratch_size(zero_order().data()); }
 
+  /**
+   * \ingroup basis_tensor
+   * \brief Flat column index \f$c \in \{0, \dots, K - 1\}\f$ of entry `flat` in a row of order `k`.
+   *
+   * Maps offset tuple \f$(a_1, \dots, a_D)\f$ to \f$\sum_{j=1}^D s_j ((f_j + a_j) \bmod K_j)\f$,
+   * with the last margin varying fastest.
+   * \param k Array of \f$D\f$ multi-index orders (\f$k_j \in \{-1, 0, \dots, 6\}\f$).
+   * \param first Array of \f$D\f$ marginal first-column indices written by row_partial().
+   * \param flat Zero-based entry offset \f$q\f$ in the row (\f$0 \le q < W\f$, where \f$W\f$ is `row_width(k)`).
+   * \return Flat column index \f$c\f$ in \f$\{0, \dots, K - 1\}\f$.
+   * \see \ref basis_tensor, column(const int*, int) const, row_partial()
+   */
   // The column of value number flat (0 <= flat < row_width(k)) of a row.
   LAPLACE_HD int column(const int* k, const int* first, int flat) const {
     int c = 0, stride = 1;
@@ -204,8 +298,35 @@ struct tensor_product_basis {
     });
     return c;
   }
+  /**
+   * \ingroup basis_tensor
+   * \brief Flat column index of entry `flat` in a zero-order row (\f$k = 0\f$).
+   * \param first Array of \f$D\f$ marginal first-column indices written by row().
+   * \param flat Zero-based entry offset \f$q\f$ in the row (\f$0 \le q < W\f$, where \f$W\f$ is `row_width()`).
+   * \return Flat column index \f$c\f$ in \f$\{0, \dots, K - 1\}\f$.
+   * \see \ref basis_tensor, column(const int*, const int*, int) const, row()
+   */
   LAPLACE_HD int column(const int* first, int flat) const { return column(zero_order().data(), first, flat); }
 
+  /**
+   * \ingroup basis_tensor
+   * \brief Evaluates the active row of \f$\partial^k B_c(x)\f$ for multi-index `k`.
+   *
+   * Evaluates each margin's row of order \f$k_j \in \{-1, 0, \dots, 6\}\f$ into `scratch`
+   * (\f$k_j = -1\f$ integrates from \f$lower_j\f$ to \f$x_j\f$) and writes their Kronecker
+   * product to `out` with the last margin fastest. Any NaN coordinate or `nan` outside-domain
+   * margin sets all outputs to quiet NaN. Accuracy is within \f$11.0\epsilon\f$ of the row's
+   * largest reference value across the tested mixed-margin cases.
+   *
+   * \tparam T Floating-point scalar type.
+   * \param x Evaluation point array of length \f$D\f$.
+   * \param k Multi-index array of length \f$D\f$ (\f$k_j \in \{-1, 0, \dots, 6\}\f$).
+   * \param first Output array of length \f$D\f$ receiving each margin's first column index.
+   * \param out Output buffer of length `row_width(k)` receiving the product row.
+   * \param scratch Caller buffer of length `scratch_size(k)`.
+   * \return Active row width `row_width(k)`.
+   * \see \ref basis_tensor, row(), column(), expansion_partial()
+   */
   // The row of the partial derivative (or integral) of multi-index k at x:
   // first[D] and row_width(k) values in out; returns row_width(k).
   template <class T>
@@ -214,11 +335,43 @@ struct tensor_product_basis {
     marginal_rows(x, k, first, width, offset, scratch);
     return kron_rows(width, offset, scratch, out);
   }
+  /**
+   * \ingroup basis_tensor
+   * \brief Evaluates the active function row \f$B_c(x)\f$ (\f$k = 0\f$) at `x`.
+   *
+   * Equivalent to row_partial() with zero derivative orders; accuracy is within \f$11.0\epsilon\f$
+   * of the row's largest reference value across the tested cases.
+   *
+   * \tparam T Floating-point scalar type.
+   * \param x Evaluation point array of length \f$D\f$.
+   * \param first Output array of length \f$D\f$ receiving each margin's first column index.
+   * \param out Output buffer of length `row_width()` receiving the product row.
+   * \param scratch Caller buffer of length `scratch_size()`.
+   * \return Active row width `row_width()`.
+   * \see \ref basis_tensor, row_partial(), column(), expansion()
+   */
   template <class T>
   LAPLACE_HD int row(const T* x, int* first, T* out, T* scratch) const {
     return row_partial(x, zero_order().data(), first, out, scratch);
   }
 
+  /**
+   * \ingroup basis_tensor
+   * \brief Evaluates the linear expansion \f$\sum_{c=0}^{K-1} \beta_c\, \partial^k B_c(x)\f$.
+   *
+   * Contracts the marginal rows in `scratch` directly against `beta` without forming the
+   * full product row.
+   * Accuracy is within \f$3.00\epsilon\f$ of \f$\sum_c \lvert\beta_c B_c\rvert\f$ across the
+   * tested mixed-margin cases.
+   *
+   * \tparam T Floating-point scalar type.
+   * \param x Evaluation point array of length \f$D\f$.
+   * \param k Multi-index array of length \f$D\f$ (\f$k_j \in \{-1, 0, \dots, 6\}\f$).
+   * \param beta Coefficient array of length `dimension()`, flat with the last margin fastest.
+   * \param scratch Caller buffer of length `scratch_size(k)`.
+   * \return Value of the contracted expansion \f$\sum_c \beta_c\, \partial^k B_c(x)\f$.
+   * \see \ref basis_tensor, expansion(), row_partial()
+   */
   // sum_c beta_c d^k B_c(x), beta flat in the column order above
   template <class T>
   LAPLACE_HD T expansion_partial(const T* x, const int* k, const T* beta, T* scratch) const {
@@ -226,6 +379,20 @@ struct tensor_product_basis {
     marginal_rows(x, k, first, width, offset, scratch);
     return contract(first, width, offset, beta, scratch);
   }
+  /**
+   * \ingroup basis_tensor
+   * \brief Evaluates the zero-order expansion \f$\sum_{c=0}^{K-1} \beta_c B_c(x)\f$ at `x`.
+   *
+   * Equivalent to expansion_partial() with \f$k = 0\f$; accuracy is within \f$3.00\epsilon\f$
+   * of \f$\sum_c \lvert\beta_c B_c\rvert\f$ across the tested cases.
+   *
+   * \tparam T Floating-point scalar type.
+   * \param x Evaluation point array of length \f$D\f$.
+   * \param beta Coefficient array of length `dimension()`, flat with the last margin fastest.
+   * \param scratch Caller buffer of length `scratch_size()`.
+   * \return Value of the contracted expansion \f$\sum_c \beta_c B_c(x)\f$.
+   * \see \ref basis_tensor, expansion_partial(), row()
+   */
   template <class T>
   LAPLACE_HD T expansion(const T* x, const T* beta, T* scratch) const {
     return expansion_partial(x, zero_order().data(), beta, scratch);
@@ -233,6 +400,21 @@ struct tensor_product_basis {
 
   // ---- host functions (call them on a product of host() margins)
 
+  /**
+   * \ingroup basis_tensor
+   * \brief Computes the dense \f$K \times K\f$ cross Gram matrix \f$G_{kl}\f$ on the host.
+   *
+   * Writes \f$G_{kl} = G^{(1)}_{k_1 l_1} \otimes \dots \otimes G^{(D)}_{k_D l_D}\f$ in
+   * column-major order over the box \f$\prod_{j=1}^D [lower_j, upper_j]\f$ (one period for
+   * periodic margins). Accuracy is within \f$3.26\epsilon\f$ of the largest entry across the
+   * tested cases. Must be called on a product of `owner.host()` margins.
+   *
+   * \param k First multi-index array of length \f$D\f$ with entries in \f$\{0, \dots, 6\}\f$.
+   * \param l Second multi-index array of length \f$D\f$ with entries in \f$\{0, \dots, 6\}\f$.
+   * \param out Caller output buffer of \f$K^2\f$ doubles.
+   * \throw std::invalid_argument If any entry of `k` or `l` is outside \f$\{0, \dots, 6\}\f$.
+   * \see \ref basis_tensor, kronecker_product(), tensor_operator_penalty()
+   */
   // G_kl = kron_j G_j(k_j, l_j), the Gram matrix of d^k B and d^l B over the
   // box, dense K x K column-major; k_j, l_j in 0..6 (P6)
   void cross_gram(const int* k, const int* l, double* out) const;
@@ -327,12 +509,42 @@ tensor_product_basis(const B&...) -> tensor_product_basis<B...>;
 
 // ---- host: Kronecker products, Gram matrices, penalties, transforms
 
+/**
+ * \ingroup basis_tensor
+ * \brief Dense column-major matrix factor descriptor for kronecker_product().
+ * \see \ref basis_tensor, kronecker_product()
+ */
 // A dense matrix, column-major, rows x cols.
 struct kronecker_factor {
+  /**
+   * \ingroup basis_tensor
+   * \brief Pointer to the column-major dense matrix data of size `rows` by `cols`.
+   */
   const double* data;
+  /**
+   * \ingroup basis_tensor
+   * \var kronecker_factor::rows
+   * \brief Number of rows of the matrix factor.
+   */
+  /**
+   * \ingroup basis_tensor
+   * \var kronecker_factor::cols
+   * \brief Number of columns of the matrix factor.
+   */
   int rows, cols;
 };
 
+/**
+ * \ingroup basis_tensor
+ * \brief Computes the Kronecker product \f$F_1 \otimes \dots \otimes F_n\f$ on the host.
+ *
+ * Writes the dense column-major product matrix of size
+ * \f$(\prod \mathrm{rows}) \times (\prod \mathrm{cols})\f$ into `out`.
+ *
+ * \param factors Ordered list of dense column-major factor descriptors.
+ * \param out Caller buffer of size \f$(\prod \mathrm{rows})(\prod \mathrm{cols})\f$ doubles.
+ * \see \ref basis_tensor, kronecker_factor, tensor_product_basis::cross_gram()
+ */
 // out = F_1 kron F_2 kron ... kron F_n, column-major, (prod rows) x (prod cols).
 inline void kronecker_product(const std::vector<kronecker_factor>& factors, double* out) {
   std::vector<double> acc{1.0}, next;
@@ -371,13 +583,47 @@ void tensor_product_basis<B...>::cross_gram(const int* k, const int* l, double* 
   kronecker_product(f, out);
 }
 
+/**
+ * \ingroup basis_tensor
+ * \brief One term \f$c_a\, \partial^{k^{(a)}}\f$ of a constant-coefficient tensor differential operator.
+ * \see \ref basis_tensor, tensor_operator_penalty()
+ */
 // One term c d^k of a differential operator with constant coefficients on the
 // product, k a multi-index with one order (0..6) per margin.
 struct tensor_operator_term {
+  /**
+   * \ingroup basis_tensor
+   * \brief Scalar coefficient \f$c_a\f$ multiplying the partial derivative term.
+   */
   double coefficient;
+  /**
+   * \ingroup basis_tensor
+   * \brief Multi-index \f$k^{(a)}\f$ of derivative orders in \f$\{0, \dots, 6\}\f$, one entry per margin.
+   */
   std::vector<int> order;
 };
 
+/**
+ * \ingroup basis_tensor
+ * \brief Evaluates the penalty matrix \f$S_L\f$ of a constant-coefficient tensor differential operator on the host.
+ *
+ * For \f$L = \sum_a c_a \partial^{k^{(a)}}\f$, writes the dense \f$K \times K\f$ column-major matrix
+ * \f[
+ * S_L = \sum_{a,b} c_a c_b\, G_{k^{(a)} k^{(b)}},
+ * \f]
+ * representing \f$\int (L f)^2\f$ over the box \f$\prod_{j=1}^D [lower_j, upper_j]\f$ in the
+ * coefficients of \f$f = \sum_c \beta_c B_c\f$. A sum of squares of several operators is obtained by
+ * summing separate calls. In the tested two-dimensional thin plate penalty, the error is within
+ * \f$0.88\epsilon\f$ of the largest entry.
+ *
+ * \tparam B Univariate basis margin types.
+ * \param basis Tensor product basis built from `owner.host()` margins.
+ * \param terms Vector of operator terms forming \f$L\f$.
+ * \param out Caller buffer of \f$K^2\f$ doubles receiving \f$S_L\f$ in column-major order.
+ * \throw std::invalid_argument If any `order` length differs from \f$D\f$, any order is outside
+ *        \f$\{0, \dots, 6\}\f$, or an order exceeds the degree of a polynomial margin (B-spline or Legendre).
+ * \see \ref basis_tensor, tensor_operator_term, marginal_operator_penalty()
+ */
 // S_L = int over the box of (L f)^2 as a quadratic form in the coefficients,
 // L = sum_a c_a d^(k^(a)): S_L = sum_{a,b} c_a c_b G_{k^(a) k^(b)}, dense
 // K x K column-major (P7). A sum of squares of several operators (thin plate)
@@ -410,6 +656,27 @@ void tensor_operator_penalty(const tensor_product_basis<B...>& basis, const std:
     }
 }
 
+/**
+ * \ingroup basis_tensor
+ * \brief Evaluates the penalty matrix of a univariate differential operator acting on one margin on the host.
+ *
+ * Writes the dense \f$K \times K\f$ column-major matrix
+ * \f[
+ * G^{(1)}_{00} \otimes \dots \otimes S_j \otimes \dots \otimes G^{(D)}_{00},
+ * \f]
+ * where `j` counts from 0 (selecting margin \f$j + 1\f$ in 1-based numbering), \f$S_j\f$ is
+ * `operator_penalty()` of `op` on that margin, and every other margin \f$m\f$ contributes \f$G^{(m)}_{00}\f$.
+ * With `op` equal to \f$D^2\f$ on two margins, the result matches `cross_gram()` with both multi-indices \f$(2, 0)\f$ bit for bit.
+ *
+ * \tparam B Univariate basis margin types.
+ * \param basis Tensor product basis built from `owner.host()` margins.
+ * \param j Zero-based margin index (\f$0 \le j < D\f$, selecting margin \f$j + 1\f$).
+ * \param op Univariate differential operator acting on \f$x_{j+1}\f$.
+ * \param out Caller buffer of \f$K^2\f$ doubles receiving the column-major penalty matrix.
+ * \throw std::invalid_argument If `j` is outside \f$\{0, \dots, D - 1\}\f$ or if `operator_penalty()`
+ *        rejects `op` on that margin.
+ * \see \ref basis_tensor, \ref basis_operator, tensor_operator_penalty(), operator_penalty()
+ */
 // G_0 kron ... kron S_j kron ... kron G_0 = int over the box of (L_j f)^2, L_j
 // the univariate operator op acting on x_j (j 0-based), S_j its
 // operator_penalty on margin j and G_0 the Gram matrices of the others (P7).
@@ -430,6 +697,21 @@ void marginal_operator_penalty(const tensor_product_basis<B...>& basis, int j, c
   kronecker_product(f, out);
 }
 
+/**
+ * \ingroup basis_tensor
+ * \brief Builds the dense Kronecker product \f$T = T_1 \otimes \dots \otimes T_D\f$ of per-margin transforms on the host.
+ *
+ * Given one `basis_transform` \f$T_j\f$ of size \f$K_j \times q_j\f$ per margin, constructs the dense
+ * \f$K \times \prod_{j=1}^D q_j\f$ transform via `basis_transform_from_matrix()`, so the returned object
+ * declares no property. Properties of marginal transforms built with `make_basis_transform()` carry over
+ * factor by factor: \f$T^\top G_{00} T = I\f$ within \f$7\epsilon\f$ and off-diagonals of \f$T^\top S_j T\f$
+ * stay within \f$2.2\epsilon\f$ of the largest entry in the Demmler-Reinsch test.
+ *
+ * \param t Vector of at least two non-empty per-margin transforms.
+ * \return Dense Kronecker transform wrapped in a `basis_transform`.
+ * \throw std::invalid_argument If `t` has fewer than two elements or any transform has zero columns.
+ * \see \ref basis_tensor, \ref basis_transform, compose_basis_transforms(), basis_transform_from_matrix()
+ */
 // T = T_1 kron ... kron T_D for the coefficients of the product, from one
 // transform per margin (P8); constraints, T' G T = I and Demmler-Reinsch carry
 // over factor by factor, but basis_transform declares no property.
@@ -450,6 +732,21 @@ inline basis_transform kronecker_transform(const std::vector<basis_transform>& t
   return basis_transform_from_matrix(out);
 }
 
+/**
+ * \ingroup basis_tensor
+ * \brief Composes two coefficient transforms into \f$T = T_a T_b\f$ on the host.
+ *
+ * Applies transform `a` (\f$K \times q\f$) first and transform `b` (\f$q \times p\f$) on `a`'s
+ * coefficients, returning a `basis_transform` with no declared property. Tested with a
+ * zero-integral constraint after marginal transforms (\f$\lvert C T\rvert\f$ within
+ * \f$7.1\epsilon\f$ of \f$\max\lvert C\rvert\f$).
+ *
+ * \param a Outer transform of shape \f$K \times q\f$.
+ * \param b Inner transform of shape \f$q \times p\f$.
+ * \return Composed transform \f$T_a T_b\f$ of shape \f$K \times p\f$.
+ * \throw std::invalid_argument If `a.columns() != b.rows()`.
+ * \see \ref basis_tensor, \ref basis_transform, kronecker_transform()
+ */
 // T = T_a T_b: first a (K x q), then b (q x p) on a's coefficients (P8).
 inline basis_transform compose_basis_transforms(const basis_transform& a, const basis_transform& b) {
   if (a.columns() != b.rows())
@@ -457,6 +754,26 @@ inline basis_transform compose_basis_transforms(const basis_transform& a, const 
   return basis_transform_from_matrix(detail_transform::product(a.matrix(), b.matrix(), false));
 }
 
+/**
+ * \ingroup basis_tensor
+ * \brief Evaluates tensor basis rows of multi-index `k` across all points in `x` in parallel.
+ *
+ * Launches a `Kokkos::parallel_for` kernel on `XView::execution_space`, allocating an internal
+ * scratch View of `x.extent(0)` by `b.scratch_size(k.data())` doubles. Device results match host
+ * `row_partial()` evaluations within the tested bound (\f$16\epsilon\f$, measured \f$1.9\epsilon\f$
+ * on CUDA and \f$0\f$ on gcc).
+ *
+ * \tparam TB Basis type modeling \ref multivariate_basis.
+ * \tparam XView Rank-2 Kokkos View of coordinates with shape \f$n \times D\f$.
+ * \tparam FirstView Rank-2 Kokkos View of integers with shape \f$n \times D\f$.
+ * \tparam ValuesView Rank-2 `Kokkos::LayoutRight` Kokkos View of doubles with shape \f$n\f$ by `b.row_width(k.data())`.
+ * \param b Multivariate basis with margins accessible in `XView::execution_space`.
+ * \param k Multi-index of derivative or integral orders (\f$k_j \in \{-1, 0, \dots, 6\}\f$).
+ * \param x Input coordinates `x(i, 0..D-1)`.
+ * \param first Output first-column indices `first(i, 0..D-1)`.
+ * \param values Output row values `values(i, 0..row_width(k)-1)` (`Kokkos::LayoutRight` required).
+ * \see \ref basis_tensor, multivariate_basis, tensor_product_basis::row_partial()
+ */
 // The rows of multi-index k (k[j], one per margin) at every point of x, in a
 // kernel on the execution space of the Views: x(i, 0..D-1), first(i, 0..D-1),
 // values(i, 0..row_width(k) - 1), values a LayoutRight View of doubles.

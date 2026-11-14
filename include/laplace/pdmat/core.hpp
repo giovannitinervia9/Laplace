@@ -284,6 +284,15 @@ concept pdmat_structure = requires(const S s, const double* t, double* m, double
   { s.log_det_d6(t, i6, w) } -> std::same_as<double>;
 };
 
+/**
+ * \ingroup psdmat
+ * \brief CRTP base providing named derivative functions of orders 1 to 6.
+ *
+ * A derived structure \c S implements `matrix_dk<K>` and `log_pdet_dk<K>`
+ * for \f$K \in \{1, \dots, 6\}\f$.
+ *
+ * \tparam S Derived structured positive semidefinite matrix class modeling \ref psdmat_structure.
+ */
 // The positive semidefinite structures (psdmat, note/pdmat_structures.md
 // section 10): theta -> M(theta) symmetric p x p of rank r, constant in theta,
 // with the storage and the conventions of the pdmat above. In place of
@@ -294,23 +303,82 @@ concept pdmat_structure = requires(const S s, const double* t, double* m, double
 // only the members, so a host-only type satisfies it.
 template <class S>
 struct psdmat_orders {
+  /// \ingroup psdmat
+  /// \brief Order-1 partial derivative \f$\partial M/\partial\theta_{i_1}\f$; forwards to `matrix_dk<1>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted index \f$i_1\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see log_pdet_d1(), psdmat_structure
   LAPLACE_HD bool matrix_d1(const double* t, const int (&i)[1], double* m, double* w) const { return s().template matrix_dk<1>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-2 partial derivative \f$\partial^2 M/\partial\theta_{i_1}\partial\theta_{i_2}\f$; forwards to `matrix_dk<2>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le i_2\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see log_pdet_d2(), psdmat_structure
   LAPLACE_HD bool matrix_d2(const double* t, const int (&i)[2], double* m, double* w) const { return s().template matrix_dk<2>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-3 partial derivative \f$\partial^3 M/\partial\theta_{i_1}\partial\theta_{i_2}\partial\theta_{i_3}\f$; forwards to `matrix_dk<3>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le i_2 \le i_3\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see log_pdet_d3(), psdmat_structure
   LAPLACE_HD bool matrix_d3(const double* t, const int (&i)[3], double* m, double* w) const { return s().template matrix_dk<3>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-4 partial derivative \f$\partial^4 M/(\partial\theta_{i_1}\cdots\partial\theta_{i_4})\f$; forwards to `matrix_dk<4>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_4\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see log_pdet_d4(), psdmat_structure
   LAPLACE_HD bool matrix_d4(const double* t, const int (&i)[4], double* m, double* w) const { return s().template matrix_dk<4>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-5 partial derivative \f$\partial^5 M/(\partial\theta_{i_1}\cdots\partial\theta_{i_5})\f$; forwards to `matrix_dk<5>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_5\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see log_pdet_d5(), psdmat_structure
   LAPLACE_HD bool matrix_d5(const double* t, const int (&i)[5], double* m, double* w) const { return s().template matrix_dk<5>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-6 partial derivative \f$\partial^6 M/(\partial\theta_{i_1}\cdots\partial\theta_{i_6})\f$; forwards to `matrix_dk<6>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_6\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see log_pdet_d6(), psdmat_structure
   LAPLACE_HD bool matrix_d6(const double* t, const int (&i)[6], double* m, double* w) const { return s().template matrix_dk<6>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-1 partial derivative \f$\partial\log\lvert M\rvert_+/\partial\theta_{i_1}\f$; forwards to `log_pdet_dk<1>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted index \f$i_1\f$. \param w Scratch buffer.
+  /// \return Derivative value, or \f$0.0\f$ if identically zero. \see matrix_d1(), psdmat_structure
   LAPLACE_HD double log_pdet_d1(const double* t, const int (&i)[1], double* w) const { return s().template log_pdet_dk<1>(t, i, w); }
+  /// \ingroup psdmat
+  /// \brief Order-2 partial derivative \f$\partial^2\log\lvert M\rvert_+/\partial\theta_{i_1}\partial\theta_{i_2}\f$; forwards to `log_pdet_dk<2>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le i_2\f$. \param w Scratch buffer.
+  /// \return Derivative value, or \f$0.0\f$ if identically zero. \see matrix_d2(), psdmat_structure
   LAPLACE_HD double log_pdet_d2(const double* t, const int (&i)[2], double* w) const { return s().template log_pdet_dk<2>(t, i, w); }
+  /// \ingroup psdmat
+  /// \brief Order-3 partial derivative \f$\partial^3\log\lvert M\rvert_+/\partial\theta_{i_1}\partial\theta_{i_2}\partial\theta_{i_3}\f$; forwards to `log_pdet_dk<3>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le i_2 \le i_3\f$. \param w Scratch buffer.
+  /// \return Derivative value, or \f$0.0\f$ if identically zero. \see matrix_d3(), psdmat_structure
   LAPLACE_HD double log_pdet_d3(const double* t, const int (&i)[3], double* w) const { return s().template log_pdet_dk<3>(t, i, w); }
+  /// \ingroup psdmat
+  /// \brief Order-4 partial derivative \f$\partial^4\log\lvert M\rvert_+/(\partial\theta_{i_1}\cdots\partial\theta_{i_4})\f$; forwards to `log_pdet_dk<4>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_4\f$. \param w Scratch buffer.
+  /// \return Derivative value, or \f$0.0\f$ if identically zero. \see matrix_d4(), psdmat_structure
   LAPLACE_HD double log_pdet_d4(const double* t, const int (&i)[4], double* w) const { return s().template log_pdet_dk<4>(t, i, w); }
+  /// \ingroup psdmat
+  /// \brief Order-5 partial derivative \f$\partial^5\log\lvert M\rvert_+/(\partial\theta_{i_1}\cdots\partial\theta_{i_5})\f$; forwards to `log_pdet_dk<5>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_5\f$. \param w Scratch buffer.
+  /// \return Derivative value, or \f$0.0\f$ if identically zero. \see matrix_d5(), psdmat_structure
   LAPLACE_HD double log_pdet_d5(const double* t, const int (&i)[5], double* w) const { return s().template log_pdet_dk<5>(t, i, w); }
+  /// \ingroup psdmat
+  /// \brief Order-6 partial derivative \f$\partial^6\log\lvert M\rvert_+/(\partial\theta_{i_1}\cdots\partial\theta_{i_6})\f$; forwards to `log_pdet_dk<6>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_6\f$. \param w Scratch buffer.
+  /// \return Derivative value, or \f$0.0\f$ if identically zero. \see matrix_d6(), psdmat_structure
   LAPLACE_HD double log_pdet_d6(const double* t, const int (&i)[6], double* w) const { return s().template log_pdet_dk<6>(t, i, w); }
 
  private:
   LAPLACE_HD const S& s() const { return static_cast<const S&>(*this); }
 };
 
+/**
+ * \ingroup psdmat
+ * \brief Concept defining what every structured positive semidefinite matrix supplies.
+ *
+ * A type \c S models `psdmat_structure` if it provides runtime dimension `dim`,
+ * parameter count `n_params()`, scratch size `scratch_size()`, constant rank
+ * `rank()`, matrix evaluation `matrix()`, log pseudo-determinant `log_pdet()`,
+ * and the named derivative methods `matrix_d1()` to `matrix_d6()` returning
+ * `bool` and `log_pdet_d1()` to `log_pdet_d6()` returning `double`. The concept
+ * checks nothing about execution space, so a host-only structure satisfies it.
+ */
 template <class S>
 concept psdmat_structure = requires(const S s, const double* t, double* m, double* w, const int (&i1)[1], const int (&i6)[6]) {
   { s.dim } -> std::convertible_to<int>;

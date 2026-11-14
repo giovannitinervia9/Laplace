@@ -172,19 +172,66 @@ double log_det_derivative(const int (&idx)[K], int r, const double* const* B, do
 
 }  // namespace detail_weighted_sum
 
+/**
+ * \ingroup psdmat
+ * \brief Host-only positive semidefinite matrix formed as a weighted sum of fixed penalties.
+ *
+ * Maps \f$q = m\f$ unconstrained real parameters \f$\theta\f$ to
+ * \f[
+ * M(\theta) = \sum_{j=1}^{m} e^{\theta_j} S_j,
+ * \f]
+ * where \f$S_1, \dots, S_m\f$ are fixed \f$p \times p\f$ symmetric positive semidefinite matrices.
+ * The rank \f$r\f$ and the null space do not depend on \f$\theta\f$ and are computed once at
+ * construction. Every operation runs on the host via `laplace::dense` (link `Laplace::dense`).
+ * No pseudo-inverse is supplied.
+ *
+ * \see psdmat, psdmat_structure, reduced_rank_psdmat
+ */
 // See the comment at the top of the file.
 class weighted_sum_psdmat {
  public:
+  /// \brief Host column-major matrix View type (`Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace>`).
   using host_matrix = detail_weighted_sum::host_matrix;
 
+  /// \brief Matrix dimension \f$p\f$.
   int dim = 0;
+  /**
+   * \ingroup psdmat
+   * \brief Relative level-grouping threshold for the graded similarity transform.
+   *
+   * Defaults to \f$\epsilon^{0.05} \approx 0.165\f$, grouping active components whose
+   * \f$\theta_j + \log\max_{ik}\lvert(R_j)_{ik}\rvert\f$ lies within \f$\log\f$ `split_tolerance`
+   * of the level maximum.
+   */
   // the partition threshold of the levels (eps^0.05, about 0.165: a level
   // holds the components within a factor of about 6 of the largest) and the
   // test of a zero component (relative to max|S_j|); both measured in
   // docs/numerics.md, the threshold chosen by Giovanni on 2026-11-14
   double split_tolerance = std::pow(detail_weighted_sum::eps, 0.05);
+  /**
+   * \ingroup psdmat
+   * \brief Relative threshold below which a restricted component is dropped as zero.
+   *
+   * Initialized by the constructor to \f$8p\epsilon\f$ and applied relative to
+   * \f$\max_{ik}\lvert(S_j)_{ik}\rvert\f$.
+   */
   double zero_tolerance = 0.0;  // set by the constructor: 8 p eps
 
+  /**
+   * \ingroup psdmat
+   * \brief Constructs a weighted-sum structure from fixed positive semidefinite matrices.
+   *
+   * Reads the lower triangles of \f$S_1, \dots, S_m\f$, copies the matrices, sets
+   * `zero_tolerance` to \f$8p\epsilon\f$, and computes the constant rank \f$r\f$ and orthonormal
+   * null-space basis via `laplace::dense::null_space_basis()` on
+   * \f$\sum_{j=1}^m S_j / \max_{ik}\lvert(S_j)_{ik}\rvert\f$. Throws `std::invalid_argument` if `S`
+   * is empty, the matrices are not square of one size, any matrix is zero or non-finite, any matrix
+   * has an eigenvalue below \f$-4p\epsilon\max_{ik}\lvert(S_j)_{ik}\rvert\f$, or the null-space
+   * decomposition fails.
+   *
+   * \tparam V Rank-2 `Kokkos::LayoutLeft` host-accessible View type of `double`.
+   * \param S Non-empty vector of \f$p \times p\f$ symmetric positive semidefinite matrices.
+   */
   // S: m >= 1 host Views of double, LayoutLeft, p x p; only their lower
   // triangles are read, and they are copied. Throws std::invalid_argument when
   // they are not square of one size or one of them is not positive
@@ -228,16 +275,57 @@ class weighted_sum_psdmat {
     rank_ = st.rank;
   }
 
+  /**
+   * \ingroup psdmat
+   * \brief Total number of parameters \f$q = m\f$.
+   * \return Number of component matrices \f$m\f$.
+   */
   int n_params() const { return static_cast<int>(S_.size()); }
+  /**
+   * \ingroup psdmat
+   * \brief Constant matrix rank \f$r\f$ of \f$M(\theta)\f$.
+   * \return Rank of \f$\sum_{j=1}^m S_j / \max_{ik}\lvert(S_j)_{ik}\rvert\f$ computed at construction.
+   */
   int rank() const { return rank_; }
+  /**
+   * \ingroup psdmat
+   * \brief Orthonormal basis of the constant null space of \f$M(\theta)\f$.
+   *
+   * Accuracy: tests check orthonormality within \f$64 \times 2.2 \times 10^{-16} p\f$ and
+   * annihilation \f$\lvert S_j N\rvert \le 64 \times 2.2 \times 10^{-16} p \max_{ik}\lvert(S_j)_{ik}\rvert\f$.
+   *
+   * \return Host column-major View of shape \f$p \times (p - r)\f$ spanning the common null space.
+   * \see rank(), psdmat
+   */
   // orthonormal basis of the null space of M, p x (p - r)
   const host_matrix& null_space_basis() const { return null_; }
+  /**
+   * \ingroup psdmat
+   * \brief Doubles of caller scratch buffer required by functions of this structure.
+   *
+   * Returns \f$(2m + 10)p^2 + 4p + 2m\f$ doubles.
+   *
+   * \return Required scratch size in doubles.
+   */
   // the levels, the matrices G_j, B_j and H, and the products of the traces
   int scratch_size() const {
     const int p = dim, m = n_params();
     return (2 * m + 10) * p * p + 4 * p + 2 * m;
   }
 
+  /**
+   * \ingroup psdmat
+   * \brief Evaluates the packed matrix \f$M(\theta) = \sum_{j=1}^m e^{\theta_j} S_j\f$.
+   *
+   * The third scratch argument is unused.
+   *
+   * \param t Array of \f$m\f$ parameters \f$\theta\f$.
+   * \param out Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower-triangular storage.
+   *
+   * Accuracy: checked against the sum within relative tolerance \f$10^{-15}\f$.
+   *
+   * \see matrix_dk(), log_pdet(), psdmat
+   */
   void matrix(const double* t, double* out, double* /*w*/) const {
     const int p = dim;
     for (int i = 0; i < packed_size(p); ++i) out[i] = 0.0;
@@ -248,6 +336,23 @@ class weighted_sum_psdmat {
     }
   }
 
+  /**
+   * \ingroup psdmat
+   * \brief Partial derivative of \f$M(\theta)\f$ of order \f$K\f$.
+   *
+   * Writes \f$e^{\theta_j} S_j\f$ when all \f$K\f$ indices equal \f$j\f$, and returns \c false
+   * without touching `out` along any mixed tuple. The fourth scratch argument is unused.
+   *
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param t Array of \f$m\f$ parameters \f$\theta\f$.
+   * \param idx Sorted tuple of \f$K\f$ 0-based parameter indices in \f$\{0, \dots, m - 1\}\f$.
+   * \param out Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower-triangular storage.
+   * \return \c true if written; \c false and buffer untouched if structurally zero.
+   *
+   * Accuracy: checked exact at order 3 along repeated indices in `tests/pdmat/test_weighted_sum.cpp`.
+   *
+   * \see matrix(), matrix_d1(), psdmat
+   */
   template <int K>
   bool matrix_dk(const double* t, const int (&idx)[K], double* out, double* /*w*/) const {
     for (int q = 1; q < K; ++q)
@@ -259,12 +364,50 @@ class weighted_sum_psdmat {
     return true;
   }
 
+  /**
+   * \ingroup psdmat
+   * \brief Evaluates the log pseudo-determinant \f$\log\lvert M(\theta)\rvert_+\f$.
+   *
+   * Uses the graded similarity transform described on \ref psdmat "the positive semidefinite structures page".
+   * Returns quiet \c NaN if the transform fails to find \f$r\f$ columns or the Cholesky
+   * factorization of the scaled sum fails.
+   *
+   * \param t Array of \f$m\f$ parameters \f$\theta\f$.
+   * \param w Caller host scratch buffer of at least `scratch_size()` doubles.
+   * \return Sum of logarithms of the \f$r\f$ nonzero eigenvalues of \f$M(\theta)\f$, or quiet \c NaN on failure.
+   *
+   * Accuracy: up to 1.96 ulp on the tensor-product cases (test bound 8 ulp), 16.2 ulp on the
+   * single-penalty case (bound 64 ulp), and \f$1.31 \times 10^4\f$ ulp on the ill-conditioned
+   * low-rank case (bound \f$5.5 \times 10^4\f$ ulp) on gcc; the CUDA build gives the same errors.
+   *
+   * \see matrix(), log_pdet_dk(), rank_identity(), psdmat
+   */
   double log_pdet(const double* t, double* w) const {
     double logdet;
     if (!transform(t, w, logdet, false)) return std::numeric_limits<double>::quiet_NaN();
     return logdet;
   }
 
+  /**
+   * \ingroup psdmat
+   * \brief Partial derivative of \f$\log\lvert M(\theta)\rvert_+\f$ of order \f$K\f$.
+   *
+   * Evaluates the partition trace sum over \f$B_j = H^{-1} G_j\f$ described on
+   * \ref psdmat "the positive semidefinite structures page". Returns quiet \c NaN if the graded
+   * transform or Cholesky factorization fails.
+   *
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param t Array of \f$m\f$ parameters \f$\theta\f$.
+   * \param idx Sorted tuple of \f$K\f$ 0-based parameter indices in \f$\{0, \dots, m - 1\}\f$.
+   * \param w Caller host scratch buffer of at least `scratch_size()` doubles.
+   * \return Partial derivative value, or quiet \c NaN on failure.
+   *
+   * Accuracy: over orders 1 to 6, up to \f$1.73 \times 10^4\f$ ulp on the tensor-product cases
+   * (test bounds 4 to 70000 ulp) and \f$2.19 \times 10^4\f$ ulp on the ill-conditioned low-rank
+   * case (test bounds \f$4.4 \times 10^4\f$ to \f$9 \times 10^4\f$ ulp) on gcc; the CUDA build gives the same errors.
+   *
+   * \see log_pdet(), log_pdet_d1(), rank_identity(), psdmat
+   */
   template <int K>
   double log_pdet_dk(const double* t, const int (&idx)[K], double* w) const {
     double logdet;
@@ -272,19 +415,82 @@ class weighted_sum_psdmat {
     return derivative(idx, w);
   }
 
+  /// \ingroup psdmat
+  /// \brief Order-1 partial derivative \f$\partial M/\partial\theta_{i_1}\f$; forwards to `matrix_dk<1>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted index \f$i_1\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see matrix(), matrix_dk(), log_pdet_d1()
   bool matrix_d1(const double* t, const int (&i)[1], double* m, double* w) const { return matrix_dk<1>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-2 partial derivative \f$\partial^2 M/\partial\theta_{i_1}\partial\theta_{i_2}\f$; forwards to `matrix_dk<2>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le i_2\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see matrix(), matrix_dk(), log_pdet_d2()
   bool matrix_d2(const double* t, const int (&i)[2], double* m, double* w) const { return matrix_dk<2>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-3 partial derivative \f$\partial^3 M/\partial\theta_{i_1}\partial\theta_{i_2}\partial\theta_{i_3}\f$; forwards to `matrix_dk<3>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le i_2 \le i_3\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see matrix(), matrix_dk(), log_pdet_d3()
   bool matrix_d3(const double* t, const int (&i)[3], double* m, double* w) const { return matrix_dk<3>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-4 partial derivative \f$\partial^4 M/(\partial\theta_{i_1}\cdots\partial\theta_{i_4})\f$; forwards to `matrix_dk<4>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_4\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see matrix(), matrix_dk(), log_pdet_d4()
   bool matrix_d4(const double* t, const int (&i)[4], double* m, double* w) const { return matrix_dk<4>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-5 partial derivative \f$\partial^5 M/(\partial\theta_{i_1}\cdots\partial\theta_{i_5})\f$; forwards to `matrix_dk<5>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_5\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see matrix(), matrix_dk(), log_pdet_d5()
   bool matrix_d5(const double* t, const int (&i)[5], double* m, double* w) const { return matrix_dk<5>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-6 partial derivative \f$\partial^6 M/(\partial\theta_{i_1}\cdots\partial\theta_{i_6})\f$; forwards to `matrix_dk<6>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_6\f$. \param m Packed output buffer. \param w Scratch buffer.
+  /// \return \c true if written; \c false (buffer untouched) if structurally zero. \see matrix(), matrix_dk(), log_pdet_d6()
   bool matrix_d6(const double* t, const int (&i)[6], double* m, double* w) const { return matrix_dk<6>(t, i, m, w); }
+  /// \ingroup psdmat
+  /// \brief Order-1 partial derivative \f$\partial\log\lvert M\rvert_+/\partial\theta_{i_1}\f$; forwards to `log_pdet_dk<1>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted index \f$i_1\f$. \param w Scratch buffer.
+  /// \return Derivative value, or quiet \c NaN on failure. \see log_pdet(), log_pdet_dk(), matrix_d1()
   double log_pdet_d1(const double* t, const int (&i)[1], double* w) const { return log_pdet_dk<1>(t, i, w); }
+  /// \ingroup psdmat
+  /// \brief Order-2 partial derivative \f$\partial^2\log\lvert M\rvert_+/\partial\theta_{i_1}\partial\theta_{i_2}\f$; forwards to `log_pdet_dk<2>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le i_2\f$. \param w Scratch buffer.
+  /// \return Derivative value, or quiet \c NaN on failure. \see log_pdet(), log_pdet_dk(), matrix_d2()
   double log_pdet_d2(const double* t, const int (&i)[2], double* w) const { return log_pdet_dk<2>(t, i, w); }
+  /// \ingroup psdmat
+  /// \brief Order-3 partial derivative \f$\partial^3\log\lvert M\rvert_+/\partial\theta_{i_1}\partial\theta_{i_2}\partial\theta_{i_3}\f$; forwards to `log_pdet_dk<3>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le i_2 \le i_3\f$. \param w Scratch buffer.
+  /// \return Derivative value, or quiet \c NaN on failure. \see log_pdet(), log_pdet_dk(), matrix_d3()
   double log_pdet_d3(const double* t, const int (&i)[3], double* w) const { return log_pdet_dk<3>(t, i, w); }
+  /// \ingroup psdmat
+  /// \brief Order-4 partial derivative \f$\partial^4\log\lvert M\rvert_+/(\partial\theta_{i_1}\cdots\partial\theta_{i_4})\f$; forwards to `log_pdet_dk<4>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_4\f$. \param w Scratch buffer.
+  /// \return Derivative value, or quiet \c NaN on failure. \see log_pdet(), log_pdet_dk(), matrix_d4()
   double log_pdet_d4(const double* t, const int (&i)[4], double* w) const { return log_pdet_dk<4>(t, i, w); }
+  /// \ingroup psdmat
+  /// \brief Order-5 partial derivative \f$\partial^5\log\lvert M\rvert_+/(\partial\theta_{i_1}\cdots\partial\theta_{i_5})\f$; forwards to `log_pdet_dk<5>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_5\f$. \param w Scratch buffer.
+  /// \return Derivative value, or quiet \c NaN on failure. \see log_pdet(), log_pdet_dk(), matrix_d5()
   double log_pdet_d5(const double* t, const int (&i)[5], double* w) const { return log_pdet_dk<5>(t, i, w); }
+  /// \ingroup psdmat
+  /// \brief Order-6 partial derivative \f$\partial^6\log\lvert M\rvert_+/(\partial\theta_{i_1}\cdots\partial\theta_{i_6})\f$; forwards to `log_pdet_dk<6>()`.
+  /// \param t Parameter array \f$\theta\f$. \param i Sorted indices \f$i_1 \le \dots \le i_6\f$. \param w Scratch buffer.
+  /// \return Derivative value, or quiet \c NaN on failure. \see log_pdet(), log_pdet_dk(), matrix_d6()
   double log_pdet_d6(const double* t, const int (&i)[6], double* w) const { return log_pdet_dk<6>(t, i, w); }
 
+  /**
+   * \ingroup psdmat
+   * \brief Evaluates the trace identity \f$\sum_{j=1}^m \operatorname{tr} B_j\f$.
+   *
+   * Equals `rank()` in exact arithmetic and provides a reference-free accuracy check. Returns
+   * quiet \c NaN where `log_pdet()` returns \c NaN.
+   *
+   * \param t Array of \f$m\f$ parameters \f$\theta\f$.
+   * \param w Caller host scratch buffer of at least `scratch_size()` doubles.
+   * \return Trace sum \f$\sum_{j=1}^m \operatorname{tr} B_j\f$, or quiet \c NaN on failure.
+   *
+   * Accuracy: agrees with `rank()` within \f$6.1 \times 10^{-14}\f$ across reference points (test bound \f$10^{-9} r\f$).
+   *
+   * \see rank(), log_pdet(), log_pdet_dk(), psdmat
+   */
   // sum_j tr(B_j), equal to rank() in exact arithmetic: the check of the
   // derivatives that needs no reference (NaN where log_pdet is NaN)
   double rank_identity(const double* t, double* w) const {

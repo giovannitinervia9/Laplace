@@ -1,0 +1,101 @@
+/**
+\defgroup basis_transform Basis transforms
+\ingroup basis
+\brief Linear coefficient transforms for constraints, Gram orthonormalization, and penalty diagonalization.
+
+The module `<laplace/basis/transform.hpp>` provides linear transforms of the coefficients of a univariate basis in namespace `laplace::basis`. A transform is built on the host by \ref laplace::basis::make_basis_transform "make_basis_transform()" and copied to the default device. Nothing in this module is `LAPLACE_HD`. On eight cubic B-spline cases, the eigenvalues of the penalty agree with mpmath references within \f$54.7\varepsilon\f$ of the largest.
+
+## Definition
+
+A univariate basis of \f$K\f$ functions \f$b(x) = (b_0(x), \dots, b_{K-1}(x))^\top\f$ (see \ref basis "the basis group") is replaced by the \f$q\f$ functions \f$T^\top b(x)\f$, where \f$T\f$ is a real \f$K \times q\f$ matrix. The coefficients \f$\beta \in \mathbb{R}^K\f$ are replaced by \f$\gamma \in \mathbb{R}^q\f$ with \f$\beta = T\gamma\f$, so that \f$\beta^\top b(x) = \gamma^\top T^\top b(x)\f$.
+
+The basis itself is unchanged and keeps its sparse rows, because \f$T\f$ acts on the coefficient side. With \f$T\f$ constant, the rows and derivatives become \f$T^\top b^{(k)}(x)\f$, the cross Gram matrices \f$G_{kl}\f$ become \f$T^\top G_{kl} T\f$, and a penalty \f$S\f$ from \ref basis_operator "the differential operators" becomes \f$T^\top S T\f$. A gradient \f$g_\beta\f$ with respect to \f$\beta\f$ becomes the gradient \f$g_\gamma = T^\top g_\beta\f$ with respect to \f$\gamma\f$.
+
+The class \ref laplace::basis::basis_transform "basis_transform" supplies \f$\beta = T\gamma\f$ through \ref laplace::basis::basis_transform::expand_coefficients "expand_coefficients()", after which the basis's own `expansion()` evaluates the function. It supplies \f$g_\gamma\f$ through \ref laplace::basis::basis_transform::reduce_gradient "reduce_gradient()", and \f$T^\top A T\f$ for a \f$K \times K\f$ matrix \f$A\f$ through \ref laplace::basis::basis_transform::congruence "congruence()". It does not supply rows in \f$\gamma\f$.
+
+## Inputs and errors
+
+The matrices passed to `make_basis_transform()` are host-readable rank-2 Kokkos Views of `double` with `Kokkos::LayoutLeft`. \f$G\f$ and \f$S\f$ are read whole and must be symmetric. Wrong arguments throw `std::invalid_argument`: \f$K < 1\f$, a constraint matrix \f$C\f$ without \f$K\f$ columns, \f$G\f$ or \f$S\f$ not \f$K \times K\f$, or, when \f$S\f$ is given, \f$r\f$ outside \f$[0, q]\f$. Wrong extents in `expand_coefficients()` and `reduce_gradient()` throw the same exception. `congruence()` reads a column-major \f$K \times K\f$ array, as `cross_gram()` and `operator_penalty()` write it, and writes a column-major \f$q \times q\f$ array.
+
+## Method
+
+`make_basis_transform(K, C, G, S, r)` builds \f$T\f$ from up to three inputs, always applied in this order:
+
+1. Constraints \f$C\beta = 0\f$, with \f$C\f$ an \f$m_c \times K\f$ matrix. \f$T_1\f$ is an orthonormal basis of the null space of \f$C\f$ from the singular value decomposition (\ref dense "the dense module"), so that \f$C T_1 = 0\f$ and \f$T_1^\top T_1 = I\f$. An example is the zero-integral constraint \f$\int \beta^\top b(x)\,\mathrm{d}x = 0\f$, whose row the basis gives through `integral_column_total()`.
+2. Orthonormalization with respect to a symmetric positive definite Gram matrix \f$G\f$, such as \f$G_{00}\f$ or an empirical \f$X^\top X / n\f$. With the Cholesky factorization \f$T_1^\top G T_1 = L L^\top\f$, the step sets \f$T_2 = T_1 L^{-\top}\f$, so that \f$T_2^\top G T_2 = I\f$ and \f$C T_2 = 0\f$.
+3. Diagonalization of a symmetric positive semidefinite penalty \f$S\f$. With the symmetric eigendecomposition \f$T_2^\top S T_2 = W \operatorname{diag}(\lambda) W^\top\f$ and eigenvalues \f$\lambda_1 \le \dots \le \lambda_q\f$, the step sets \f$T = T_2 W\f$, so that \f$T^\top S T = \operatorname{diag}(\lambda)\f$ and \f$T^\top G T = I\f$. When \f$G\f$ is given, this is the Demmler-Reinsch basis (Demmler and Reinsch, 1975).
+
+Applied in this order, each step keeps the properties of the steps before it. A caller who needs another order builds \f$T\f$ and passes it to \ref laplace::basis::basis_transform_from_matrix "basis_transform_from_matrix()", which declares no property. A step whose input View has zero rows is skipped; without any input \f$T = I_K\f$, and without \f$G\f$ step 3 diagonalizes \f$S\f$ in Euclidean coordinates. The columns are not rescaled, so \f$T^\top S T = \operatorname{diag}(0, \dots, 0, \lambda_{r+1}, \dots, \lambda_q)\f$, and `penalty_eigenvalues()` returns these \f$q\f$ values.
+
+### Null eigenvalues of the penalty
+
+The caller declares \f$r\f$, the dimension of the null space of \f$S\f$ within the constraints. For the penalty of \f$D^m\f$ on a basis that reproduces the polynomials of degree below \f$m\f$, \f$r = m\f$ without constraints and \f$r = m - 1\f$ with the zero-integral constraint. The \f$r\f$ smallest eigenvalues are set to exactly zero, and the build fails if one of them exceeds \f$10^{-8}\lambda_{\max}\f$, where \f$\lambda_{\max} = \max_j \lvert\lambda_j\rvert\f$.
+
+The caller declares \f$r\f$ because no fixed threshold separates the two groups. The smallest penalized eigenvalue relative to \f$\lambda_{\max}\f$ falls as \f$K^{-2m}\f$, down to about \f$1040\varepsilon\f$ at \f$K = 200\f$ for \f$D^3\f$, with \f$\varepsilon = 2^{-52}\f$. A threshold such as \f$K\varepsilon\lambda_{\max}\f$ would therefore fail for larger \f$K\f$ or \f$m\f$.
+
+### Status and failures
+
+`status()` returns a \ref laplace::basis::basis_transform_status "basis_transform_status". Its field `failed_step` names the step that failed, and `dense_reason` gives the failure reported by `laplace::dense`, or `none` when the declared null dimension did not hold. `null_eigenvalue_ratio` is the largest \f$\lvert\lambda_j\rvert / \lambda_{\max}\f$ over the \f$r\f$ declared null eigenvalues before they are set to zero. On failure the transform is empty, with \f$q = 0\f$.
+
+A singular \f$G\f$ is an error, so that no direction is dropped silently. It arises, for example, from an empirical Gram matrix of data that leave some basis functions without support. The status then reports the step `orthonormalization`, the reason `not_positive_definite` and, in `gram_rank`, the number of eigenvalues of \f$T_1^\top G T_1\f$ above \f$q\varepsilon\f$ times the largest.
+
+## Accuracy
+
+The references are eigenvalues computed with mpmath at 200 bits from exact rational \f$G = G_{00}\f$, \f$S = G_{mm}\f$ and an exact null basis of the zero-integral constraint (see \ref accuracy "How accuracy is measured"). They cover cubic B-splines with uniform clamped knots on \f$[0, 1]\f$ (\ref basis_bspline "B-spline bases"), \f$K = 10\f$ and \f$40\f$, penalties \f$D^2\f$ and \f$D^3\f$, with and without the constraint. The table gives the worst error over these eight cases, in units of \f$\varepsilon\f$:
+
+| Quantity | gcc/OpenMP | CUDA (RTX 4070 SUPER) | Test bound |
+|---|---|---|---|
+| \f$\lvert\lambda_j - \lambda_j^{\mathrm{ref}}\rvert / \lambda_{\max}\f$ | 54.7 | 54.7 | 83 |
+| \f$\max\lvert T^\top G T - I\rvert\f$ | 43.0 | 45.0 | 68 |
+| off-diagonal \f$\lvert(T^\top S T)_{ij}\rvert / \lambda_{\max}\f$ | 5.2 | 6.7 | 10 |
+| \f$\max\lvert C T\rvert / \max\lvert C\rvert\f$ | 75.1 | 71.7 | 113 |
+
+The declared null eigenvalues are exactly zero. With an empirical Gram matrix \f$X^\top X / n\f$ (\f$K = 40\f$, \f$n = 200\f$, \f$D^2\f$, constrained), the worst errors of the two builds are \f$26\varepsilon\f$ for \f$T^\top G T - I\f$, \f$1.2\varepsilon\lambda_{\max}\f$ off the diagonal and \f$55.3\varepsilon\f$ for \f$C T\f$. The tests also check the skipped steps, the two failures, `expand_coefficients()` and `reduce_gradient()` on device and host Views, and `congruence()`. See `docs/numerics.md` for the measurements.
+
+## Speed
+
+\f$T\f$ is built once on the host with dense factorizations of size \f$q\f$. `expand_coefficients()` and `reduce_gradient()` each cost one matrix-vector product of size \f$K \times q\f$.
+
+## Example
+
+A zero-integral, \f$G_{00}\f$-orthonormal transform that diagonalizes the \f$D^2\f$ penalty of a cubic B-spline basis with 20 functions:
+
+\code{.cpp}
+#include <laplace/basis/bspline.hpp>
+#include <laplace/basis/transform.hpp>
+
+void example_basis_transform() {
+  constexpr int K = 20;
+  const auto owner = laplace::basis::bspline_basis_owner::uniform_clamped(0.0, 1.0, K, 3);
+  const auto basis = owner.host();
+
+  using host_view = Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace>;
+  host_view G("G", K, K), S("S", K, K), C("C", 1, K);
+  basis.cross_gram(0, 0, G.data());
+  basis.cross_gram(2, 2, S.data());
+  for (int j = 0; j < K; ++j) C(0, j) = basis.integral_column_total(j);
+
+  const auto bt = laplace::basis::make_basis_transform(K, C, G, S, 1);
+  if (!bt.status().success) return;  // bt.columns() == K - 1
+
+  Kokkos::View<double*> gamma("gamma", K - 1), beta("beta", K);
+  Kokkos::deep_copy(gamma, 1.0);
+  bt.expand_coefficients(gamma, beta);
+}
+\endcode
+
+## Function reference
+
+All types and functions are defined in namespace `laplace::basis`:
+
+- \ref laplace::basis::basis_transform_step "basis_transform_step" — the step of `make_basis_transform()` that failed
+- \ref laplace::basis::basis_transform_status "basis_transform_status" — outcome and diagnostics of the build
+- \ref laplace::basis::basis_transform "basis_transform" — the matrix \f$T\f$ on host and device, coefficient expansion, gradient reduction and congruence
+- \ref laplace::basis::make_basis_transform "make_basis_transform()" — builds \f$T\f$ from constraints, a Gram matrix and a penalty
+- \ref laplace::basis::basis_transform_from_matrix "basis_transform_from_matrix()" — wraps a \f$T\f$ given by the caller
+
+## References
+
+- A. Demmler and C. Reinsch (1975), Oscillation matrices with spline smoothing, Numerische Mathematik 24, 375-382.
+- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/.
+*/

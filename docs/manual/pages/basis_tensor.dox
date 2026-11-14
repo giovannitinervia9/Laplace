@@ -1,0 +1,138 @@
+/**
+\defgroup basis_tensor Tensor product bases
+\ingroup basis
+\brief Tensor products of univariate bases with partial derivatives, integrals, Kronecker Gram matrices, penalties, and transforms.
+
+Header `<laplace/basis/tensor.hpp>` defines \ref laplace::basis::tensor_product_basis "tensor_product_basis", the concept \ref laplace::basis::multivariate_basis "multivariate_basis", and host and device utilities in namespace `laplace::basis`. A `tensor_product_basis` is a lightweight struct copied by value into Kokkos kernels; its evaluation members are marked `LAPLACE_HD` for host and device execution, `cross_gram()` and most free functions run on the host, and \ref laplace::basis::fill_tensor_basis_rows "fill_tensor_basis_rows()" launches a Kokkos kernel. Across four mixed-margin reference cases evaluated at 400 bits, rows stay within \f$11.0\epsilon\f$, expansions within \f$3.00\epsilon\f$, and cross Gram matrices within \f$3.26\epsilon\f$ of their scales.
+
+## Mathematical definition
+
+A tensor product combines \f$D \ge 2\f$ univariate margins indexed by \f$j = 1, \dots, D\f$, fixed at compile time. Margin \f$j\f$ may be any `univariate_basis` (B-spline, cyclic B-spline, Fourier, or Legendre) with \f$K_j\f$ basis functions \f$b_{j,0}, \dots, b_{j,K_j - 1}\f$ and row width \f$w_j\f$ given by `row_width()`. The type `tensor_product_basis<B_1, ..., B_D>` deduces its template parameters from `tensor_product_basis(b_1, ..., b_D)`.
+
+The product basis has \f$K = \prod_{j=1}^D K_j\f$ functions (`dimension()`). For marginal column indices \f$i_j \in \{0, \dots, K_j - 1\}\f$, flat column \f$c = \sum_{j=1}^D s_j i_j\f$ with strides \f$s_D = 1\f$ and \f$s_j = s_{j+1} K_{j+1}\f$ defines the product function
+\f[
+B_c(x) = b_{1,i_1}(x_1)\, b_{2,i_2}(x_2) \cdots b_{D,i_D}(x_D)
+\f]
+at \f$x = (x_1, \dots, x_D)\f$. Because the last margin varies fastest, the full vector of product functions is \f$b_1(x_1) \otimes \dots \otimes b_D(x_D)\f$, and a coefficient vector \f$\beta\f$ of length \f$K\f$ is laid out flat in this column order.
+
+Partial derivatives and integrals are selected at run time by an `int` multi-index \f$k = (k_1, \dots, k_D)\f$. Each entry \f$k_j \in \{0, \dots, 6\}\f$ gives the derivative order in \f$x_j\f$, while \f$k_j = -1\f$ selects the definite integral from \f$lower_j\f$ to \f$x_j\f$, where \f$lower_j\f$ is the lower domain boundary of margin \f$j\f$. This defines the mixed partial \f$\partial^k B_c(x)\f$ and the linear expansion \f$\sum_{c=0}^{K-1} \beta_c\, \partial^k B_c(x)\f$.
+
+Each `tensor_product_basis` holds copies of the margins' structs, while their memory stays with their owners. Pass `owner.device()` margins when calling device kernels and `owner.host()` margins when calling host functions. The member template `margin<I>()` returns margin \f$I + 1\f$, where template parameter \f$I\f$ counts from 0, and `for_each_margin()` applies a functor to every margin in order.
+
+The concept \ref laplace::basis::multivariate_basis "multivariate_basis" captures this kernel interface: `margin_count`, `dimension()`, `row_width(k)`, `scratch_size(k)`, `row()`, `row_partial()`, `expansion()`, `expansion_partial()`, and `column()`. A tensor product does not satisfy `univariate_basis`, because its active columns do not form a single contiguous window.
+
+## Domain and special values
+
+The tensor product defines no outside-domain rule of its own. Outside its domain, each non-periodic margin applies its configured rule as described on \ref basis "the basis group", whereas Fourier and cyclic B-spline margins are periodic.
+
+If any coordinate \f$x_j\f$ is NaN, or if a margin uses `outside_domain_rule::nan` outside its domain, every value of the row becomes quiet NaN. Cross Gram matrices and operator penalties integrate over the domain box \f$\prod_{j=1}^D [lower_j, upper_j]\f$, taking one period for each periodic margin.
+
+## Method
+
+### Rows, expansions, and parallel evaluation
+
+Evaluating a row at \f$x\f$ writes the \f$D\f$ marginal first-column indices \f$f_1, \dots, f_D\f$ into `first` and \f$W = \prod_{j=1}^D w_j\f$ values into `out`. Those values form the Kronecker product of the marginal rows with the last margin varying fastest. Entry \f$q\f$ (\f$0 \le q < W\f$) corresponding to offsets \f$(a_1, \dots, a_D)\f$ with \f$0 \le a_j < w_j\f$ belongs to flat column
+\f[
+\sum_{j=1}^D s_j \big((f_j + a_j) \bmod K_j\big),
+\f]
+where the modulus affects only cyclic margins. Member `column(k, first, q)` computes this column index on demand for multi-index `k`, and `column(first, q)` handles \f$k = 0\f$; column indices are never stored.
+
+Every kernel call requires a caller scratch buffer of `scratch_size(k)` values, equal to \f$\sum_{j=1}^D w_j(k_j)\f$, where \f$w_j(k_j)\f$ is the active width of margin \f$j\f$ for order \f$k_j\f$. The call writes the marginal rows sequentially into `scratch` and then forms their product in `out`. For two cubic B-spline margins at \f$k = 0\f$, the scratch size is \f$8\f$ and the row width is \f$W = 16\f$.
+
+An integrated margin (\f$k_j = -1\f$) contributes all \f$K_j\f$ integrals \f$\int_{lower_j}^{x_j} b_{j,i}(t)\,\mathrm{d}t\f$ with first column \f$0\f$ and width \f$K_j\f$. A B-spline column ending before \f$x_j\f$ still has a nonzero integral, so keeping only the window of \f$d + 1\f$ values of a B-spline margin of degree \f$d\f$ would drop nonzero entries of the product. Consequently, `row_width(k)` and `scratch_size(k)` use \f$w_j(k_j) = K_j\f$ when \f$k_j = -1\f$ and \f$w_j(k_j) = w_j\f$ otherwise. Parameterless `row_width()` and `scratch_size()` correspond to \f$k = 0\f$. When every \f$k_j = -1\f$, the row gives the integral of each \f$B_c\f$ over the box \f$\prod_{j=1}^D [lower_j, x_j]\f$.
+
+Member `row_partial(x, k, first, out, scratch)` computes the row of \f$\partial^k B_c(x)\f$ and returns its width, and `row(x, first, out, scratch)` evaluates \f$k = 0\f$. Member `expansion_partial(x, k, beta, scratch)` returns \f$\sum_{c=0}^{K-1} \beta_c\, \partial^k B_c(x)\f$ by contracting the marginal rows in `scratch` against \f$\beta\f$ without forming the product row. Member `expansion(x, beta, scratch)` is the case \f$k = 0\f$.
+
+The launcher \ref laplace::basis::fill_tensor_basis_rows "fill_tensor_basis_rows(b, k, x, first, values)" evaluates rows of multi-index `k` (a `std::array<int, D>`) across all \f$n\f$ points of `x` on `x`'s execution space. View `x` has \f$n\f$ rows and \f$D\f$ columns, `first` has \f$n\f$ rows and \f$D\f$ columns, and `values` has \f$n\f$ rows and `row_width(k)` columns. View `values` must be a `Kokkos::LayoutRight` View of `double`, enforced by `static_assert`. The margins in `b` must be accessible from that execution space, and the function allocates an internal scratch View of \f$n\f$ by `scratch_size(k)` doubles.
+
+### Gram matrices and penalties
+
+All Gram matrix and penalty functions run on the host. Given multi-indices \f$k\f$ and \f$l\f$ with entries in \f$\{0, \dots, 6\}\f$, `cross_gram(k, l, out)` writes the dense \f$K \times K\f$ column-major matrix
+\f[
+G_{kl} = G^{(1)}_{k_1 l_1} \otimes \dots \otimes G^{(D)}_{k_D l_D}
+\f]
+into a caller buffer of \f$K^2\f$ values, where \f$G^{(j)}_{k_j l_j}\f$ comes from margin \f$j\f$'s `cross_gram()`. Any order outside \f$\{0, \dots, 6\}\f$ throws `std::invalid_argument`. The public function \ref laplace::basis::kronecker_product "kronecker_product(factors, out)", which `cross_gram()` uses, computes \f$F_1 \otimes \dots \otimes F_n\f$ in column-major order of size \f$(\prod \mathrm{rows}) \times (\prod \mathrm{cols})\f$ from a `std::vector<kronecker_factor>`. Each \ref laplace::basis::kronecker_factor "kronecker_factor" describes a dense column-major matrix via `data`, `rows`, and `cols`.
+
+For a constant-coefficient differential operator \f$L = \sum_a c_a \partial^{k^{(a)}}\f$, each term is a \ref laplace::basis::tensor_operator_term "tensor_operator_term" with `coefficient` \f$c_a\f$ and `order` \f$k^{(a)}\f$. The function \ref laplace::basis::tensor_operator_penalty "tensor_operator_penalty(basis, terms, out)" writes the dense \f$K \times K\f$ column-major penalty matrix
+\f[
+S_L = \sum_{a,b} c_a c_b\, G_{k^{(a)} k^{(b)}},
+\f]
+which represents \f$\int (L f)^2\f$ over the box in the coefficients of \f$f = \sum_c \beta_c B_c\f$. A sum of squares of several operators is accumulated by summing separate calls. For example, the two-dimensional thin plate penalty sums three calls with single terms \f$\partial^{(2,0)}\f$, \f$\sqrt{2}\,\partial^{(1,1)}\f$, and \f$\partial^{(0,2)}\f$ to obtain \f$G_{(2,0)(2,0)} + 2 G_{(1,1)(1,1)} + G_{(0,2)(0,2)}\f$. Passing all three terms in one call computes the penalty of their sum instead. The function throws `std::invalid_argument` if any `order` does not have \f$D\f$ entries, has an entry outside \f$\{0, \dots, 6\}\f$, or exceeds the degree of a polynomial margin (B-spline or Legendre), where the resulting matrix would not match \f$L\f$.
+
+For a univariate \ref laplace::basis::differential_operator "differential_operator" `op` (see \ref basis_operator "the differential operators page") acting on one coordinate, \ref laplace::basis::marginal_operator_penalty "marginal_operator_penalty(basis, j, op, out)" writes
+\f[
+G^{(1)}_{00} \otimes \dots \otimes S_j \otimes \dots \otimes G^{(D)}_{00},
+\f]
+representing \f$\int (L_j f)^2\f$ over the box. Its argument `j` counts from 0 (selecting margin \f$j + 1\f$ in this page's numbering), \f$S_j\f$ is the `operator_penalty()` of `op` on that margin, and the remaining margins contribute their Gram matrices \f$G^{(m)}_{00}\f$, \f$m \ne j + 1\f$. Passing `j` outside \f$\{0, \dots, D - 1\}\f$ throws `std::invalid_argument`, and the limits of `operator_penalty()` on that margin apply.
+
+### Kronecker transforms
+
+On the host, \ref laplace::basis::kronecker_transform "kronecker_transform(t)" accepts a `std::vector<basis_transform>` containing one transform \f$T_j\f$ of size \f$K_j \times q_j\f$ per margin (\ref basis_transform "the basis transforms page"). It returns the dense \f$K \times \prod_{j=1}^D q_j\f$ transform \f$T = T_1 \otimes \dots \otimes T_D\f$, constructed with `basis_transform_from_matrix()`, so the returned object declares no property. Marginal properties nevertheless carry over factor by factor: if every \f$T_j\f$ was built by `make_basis_transform()` with \f$G^{(j)}_{00}\f$ and a penalty \f$S_j\f$, then \f$T^\top G_{00} T = I\f$ and \f$T\f$ diagonalizes every penalty produced by `marginal_operator_penalty()`. It throws `std::invalid_argument` for fewer than two transforms or an empty transform.
+
+Also on the host, \ref laplace::basis::compose_basis_transforms "compose_basis_transforms(a, b)" returns the product \f$T_a T_b\f$, applying `a` (\f$K \times q\f$) first and `b` (\f$q \times p\f$) to the coefficients of `a`, again with no declared property. It throws `std::invalid_argument` when the columns of `a` differ from the rows of `b`, allowing product-level constraints such as a zero-integral constraint to be applied after marginal transforms.
+
+## Accuracy
+
+See \ref accuracy "How accuracy is measured" for error definitions and reference conventions. Reference values are computed directly from the definitions of the margins without calling the tensor product code: B-spline and cyclic B-spline margins use exact rational arithmetic, Legendre margins use integer coefficients, Fourier margins use mpmath, and all products are formed at 400 bits.
+
+Four cases are tested: a cubic by quadratic B-spline product, a B-spline by cyclic B-spline product with \f$x_2\f$ spanning several periods, a Legendre by Fourier product, and a three-margin product of B-spline, cyclic B-spline, and Legendre bases. Evaluation points include knots and values one ulp on either side, and multi-indices include integrals. Errors are reported in units of \f$\epsilon = 2^{-52}\f$ times a scale: the largest reference value of the row for rows, \f$\sum_c \lvert\beta_c B_c\rvert\f$ for expansions, and the largest entry for Gram matrices and penalties. Both gcc/OpenMP and CUDA (RTX 4070 SUPER) give the same maxima except where noted, with the test bounds:
+
+| Case | Rows | Expansions | Gram | Test bounds (rows, expansions, Gram) |
+|---|---|---|---|---|
+| B-spline by B-spline | 2.31 | 1.17 | 1.74 | 3.5, 1.8, 2.6 |
+| B-spline by cyclic B-spline | 11.0 | 3.00 | 3.26 | 16.5, 4.5, 4.9 |
+| Legendre by Fourier | 2.10 | 1.70 (CUDA 1.42) | 1.24 | 3.2, 2.6, 1.9 |
+| B-spline, cyclic B-spline, Legendre | 4.01 | 1.14 (CUDA 1.35) | 2.67 | 6.0, 2.1, 4.0 |
+
+In the first case, the thin plate penalty is within \f$0.88\epsilon\f$ of its largest entry (bound \f$1.3\f$). Rows of the cyclic case carry the cyclic margin's own error (\ref basis_cyclic_bspline "the cyclic B-spline page"). The tests also verify that every row equals the product of the marginal rows bit for bit (including outside the domain), that NaN coordinates and `outside_domain_rule::nan` make the row NaN, and that `expansion_partial()` matches the scattered row dot product. With `op` equal to \f$D^2\f$ on two margins, `marginal_operator_penalty()` equals `cross_gram()` with both multi-indices \f$(2, 0)\f$ bit for bit. Kronecker products of two Demmler-Reinsch transforms satisfy \f$T^\top G T - I\f$ within \f$7\epsilon\f$ and penalty off-diagonals within \f$2.2\epsilon\f$ of the largest entry. Composing with a zero-integral constraint keeps \f$\lvert C T\rvert\f$ within \f$7.1\epsilon\f$ of \f$\max\lvert C\rvert\f$. Finally, `fill_tensor_basis_rows()` on the device is verified against the host. See `docs/numerics.md`.
+
+## Speed
+
+For two cubic B-spline margins with \f$K_j = 20\f$ functions at \f$10^5\f$ points on CUDA (RTX 4070 SUPER), sparse row evaluation takes \f$0.15\f$ ms and the expansion takes \f$0.093\f$ ms. A sparse row requires \f$136\f$ bytes, compared with \f$3,200\f$ bytes for the same row stored dense.
+
+## Example
+
+The following example builds a product of two identical cubic B-spline margins on \f$[0, 1]^2\f$ and evaluates its expansion at \f$n = 1000\f$ points inside a Kokkos kernel:
+
+\code{.cpp}
+#include <laplace/basis/bspline.hpp>
+#include <laplace/basis/tensor.hpp>
+#include <Kokkos_Core.hpp>
+
+void example_tensor_expansion() {
+  const auto owner = laplace::basis::bspline_basis_owner::uniform_clamped(0.0, 1.0, 10, 3);
+  const auto m = owner.device();
+  const laplace::basis::tensor_product_basis tb(m, m);
+
+  constexpr int n = 1000;
+  Kokkos::View<double**> x("x", n, 2);
+  Kokkos::View<double*> beta("beta", 100);
+  Kokkos::View<double*> eta("eta", n);
+
+  Kokkos::parallel_for("eval_tensor_expansion", n, KOKKOS_LAMBDA(const int i) {
+    double xi[2] = {x(i, 0), x(i, 1)};
+    double scratch[8];  // tb.scratch_size() is 8 for two cubic margins
+    eta(i) = tb.expansion(xi, beta.data(), scratch);
+  });
+}
+\endcode
+
+## Module types and functions
+
+All public types, concepts, and functions are defined in namespace `laplace::basis`:
+
+- \ref laplace::basis::multivariate_basis "multivariate_basis" — Concept for multivariate kernel bases
+- \ref laplace::basis::tensor_product_basis "tensor_product_basis" — Tensor product of \f$D \ge 2\f$ univariate bases
+- \ref laplace::basis::kronecker_factor "kronecker_factor" — Column-major matrix factor descriptor for Kronecker products
+- \ref laplace::basis::kronecker_product "kronecker_product()" — Column-major Kronecker product of dense matrices
+- \ref laplace::basis::tensor_operator_term "tensor_operator_term" — Weighted partial derivative term in a tensor differential operator
+- \ref laplace::basis::tensor_operator_penalty "tensor_operator_penalty()" — Penalty matrix of a constant-coefficient tensor differential operator
+- \ref laplace::basis::marginal_operator_penalty "marginal_operator_penalty()" — Penalty matrix of a univariate operator acting along one margin
+- \ref laplace::basis::kronecker_transform "kronecker_transform()" — Kronecker product of per-margin coefficient transforms
+- \ref laplace::basis::compose_basis_transforms "compose_basis_transforms()" — Product of two coefficient transforms
+- \ref laplace::basis::fill_tensor_basis_rows "fill_tensor_basis_rows()" — Parallel kernel evaluating tensor basis rows over a View of points
+
+## References
+
+- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/.
+*/

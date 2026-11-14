@@ -1,0 +1,174 @@
+/**
+\defgroup psdmat Positive semidefinite structures
+\brief Structured symmetric positive semidefinite matrices with fixed rank, log pseudo-determinants, and derivatives to order 6.
+
+This module describes positive semidefinite matrices of fixed rank and two structures of this kind in namespace `laplace::pdmat`. The functions of \ref laplace::pdmat::reduced_rank_psdmat "reduced_rank_psdmat" (header `<laplace/pdmat/reduced_rank.hpp>`) are marked `LAPLACE_HD` and run on the host and inside Kokkos kernels. Those of \ref laplace::pdmat::weighted_sum_psdmat "weighted_sum_psdmat" (header `<laplace/pdmat/weighted_sum.hpp>`, linked with `Laplace::dense`) run on the host only. Over orders 0 to 6, `reduced_rank_psdmat` keeps its matrix and factor within 0.63 ulpN and its log pseudo-determinant within 3850 ulp on gcc/OpenMP and 2946 ulp on CUDA. `weighted_sum_psdmat` keeps its log pseudo-determinant within \f$2.19 \times 10^4\f$ ulp over the same orders.
+
+## Concept and interface
+
+A positive semidefinite structure maps \f$q\f$ unconstrained parameters \f$\theta \in \mathbb{R}^q\f$ to a symmetric positive semidefinite \f$p \times p\f$ matrix \f$M(\theta)\f$ whose rank \f$r\f$ does not depend on \f$\theta\f$. In place of \f$\log\det M\f$, the structure supplies the log pseudo-determinant \f$\log\lvert M\rvert_+\f$, defined as the logarithm of the product of the \f$r\f$ nonzero eigenvalues of \f$M\f$. Unlike the positive definite structures on \ref pdmat "the positive definite structures page", a positive semidefinite structure has no inverse, no Cholesky factor, and no descriptor flags (`unit_diagonal`, `closed_inverse`, `closed_factor`, `has_density`).
+
+The concept \ref laplace::pdmat::psdmat_structure "psdmat_structure" requires `dim`, `n_params()`, `scratch_size()`, `rank()`, `matrix()`, `log_pdet()`, the functions `matrix_d1` to `matrix_d6` returning `bool` and `log_pdet_d1` to `log_pdet_d6` returning `double`. It checks nothing about where a function runs, so a host-only structure satisfies it. The CRTP base \ref laplace::pdmat::psdmat_orders "psdmat_orders\<S\>" turns `matrix_dk<K>` and `log_pdet_dk<K>` (\f$1 \le K \le 6\f$) into those twelve named functions, as \ref laplace::pdmat::pdmat_orders "pdmat_orders" does for positive definite structures.
+
+Packed lower-triangular storage, sorted parameter index tuples, caller scratch buffers `w`, and the `false` return of structurally zero matrix derivatives follow \ref pdmat "the positive definite structures page". Scalar derivatives `log_pdet_dk<K>()` return `0.0` when identically zero.
+
+## Reduced-rank structure
+
+The structure \ref laplace::pdmat::reduced_rank_psdmat "reduced_rank_psdmat" represents \f$M(\theta) = \Lambda\Lambda^\top\f$ of rank \f$d\f$, with \f$\Lambda\f$ of size \f$p \times d\f$. The constructor `reduced_rank_psdmat(p, d)` sets the fields `dim` and `n_factors`. The loadings follow the section "Factor-analytic structure" of \ref pdmat "the positive definite structures page": \f$\Lambda\f$ is lower trapezoidal with diagonal entries \f$\Lambda_{jj} = e^{\theta}\f$, and \f$\theta\f$ holds the \f$q = pd - d(d - 1)/2\f$ loadings by rows. With the same loadings, \f$M\f$ equals the factor-analytic \f$M\f$ minus \f$\Psi\f$, which the tests check at seven shapes.
+
+The structure also provides `factor()` and `factor_d1()` to `factor_d6()`, which are not part of the concept. They write \f$\Lambda\f$ and its derivatives as a dense \f$p \times d\f$ row-major array with zeros above the diagonal (not packed). Neither \f$M^+\f$ nor a basis of the null space is supplied.
+
+## Domain and special values
+
+The precondition \f$1 \le d \le p\f$ is not checked. Both `matrix_dk<K>()` and `factor_dk<K>()` return `false` without touching the output buffer when the derivative is zero by structure. At \f$d = p\f$, `log_pdet_dk<K>()` returns `2.0` at order 1 along a diagonal loading and `0.0` along a free loading or at higher orders.
+
+## Method
+
+The functions `matrix()` and `matrix_dk<K>()` evaluate \f$\Lambda\Lambda^\top\f$ and its closed sparse derivatives. The derivative computed by `factor_dk<K>()` is nonzero only along one repeated loading. It equals 1 at order 1 for a free loading and \f$e^\theta\f$ at every order for a diagonal loading.
+
+Because the nonzero eigenvalues of \f$\Lambda\Lambda^\top\f$ are those of the \f$d \times d\f$ matrix \f$C = \Lambda^\top\Lambda\f$, `log_pdet()` computes \f$\log\lvert M\rvert_+ = \log\det C\f$. At \f$d = p\f$, \f$\Lambda\f$ is square and triangular, so \f$\log\lvert M\rvert_+ = 2\sum_j \theta_{jj}\f$ holds directly, where \f$\theta_{jj}\f$ is the parameter of \f$\Lambda_{jj}\f$. For \f$d < p\f$, `log_pdet()` computes \f$\log\det C = 2\sum_k \log R_{kk}\f$ from a Cholesky factorization \f$C = R R^\top\f$.
+
+The derivatives of \f$\log\lvert M\rvert_+\f$ for \f$d < p\f$ along a sorted tuple \f$F\f$ of \f$K\f$ parameter indices come from a recursion over the sub-tuples of \f$F\f$. For a sub-tuple \f$T\f$, write \f$C[T]\f$ for the mixed derivative of \f$C\f$ along \f$T\f$ and \f$X[T]\f$ for that of \f$X = C^{-1}\f$, with \f$X[\emptyset] = C^{-1}\f$. Then
+\f[
+X[S] = -X[\emptyset] \sum_{\emptyset \ne T \subseteq S} C[T]\, X[S \setminus T]
+\f]
+and, with \f$f\f$ the first index of \f$F\f$,
+\f[
+\partial^F \log\det C = \sum_{T \subseteq F \setminus \{f\}} \operatorname{tr}\!\big(X[T]\, C[\{f\} \cup (F \setminus \{f\} \setminus T)]\big).
+\f]
+Here \f$C[T]\f$ is zero unless every index of \f$T\f$ is a loading of one row \f$r\f$ of \f$\Lambda\f$; then it is the Leibniz sum, over the indices of \f$T\f$, of the derivatives of \f$\lambda_r\lambda_r^\top\f$, where \f$\lambda_r\f$ is row \f$r\f$ of \f$\Lambda\f$ written as a column.
+
+## Accuracy
+
+Error metrics are defined on \ref accuracy "How accuracy is measured": errors of \f$M\f$ and \f$\Lambda\f$ are measured in normwise `ulpN`, and errors of \f$\log\lvert M\rvert_+\f$ in relative `ulp` of \f$\max(\lvert\mathrm{ref}\rvert, 1)\f$. References were generated in mpmath at 640 bits, computing \f$\log\lvert M\rvert_+\f$ from the \f$d\f$ largest eigenvalues of \f$M\f$ independently of \f$\Lambda^\top\Lambda\f$, with derivatives by mixed central differences.
+
+Over orders 0 to 6, \f$M\f$ stays within 0.63 ulpN on gcc/OpenMP and 0.55 ulpN on CUDA (both at order 0), and \f$\Lambda\f$ stays within 0.49 ulpN on gcc and 0.43 ulpN on CUDA; the test bound is 1 ulpN at every order for both. At \f$d = p\f$, \f$\log\lvert M\rvert_+\f$ stays within 0.42 ulp at every order. Maximum measured errors and test bounds from `tests/pdmat/test_reduced_rank.cpp` for \f$\log\lvert M\rvert_+\f$ are:
+
+| Order | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| gcc (ulp) | 0.97 | 9.6 | 131 | 742 | 161 | 3850 | 3682 |
+| CUDA (ulp) | 1.6 | 21 | 146 | 219 | 1440 | 2502 | 2946 |
+| Bound (ulp) | 3 | 31 | 220 | 1113 | 2161 | 5776 | 5524 |
+
+The peaks at orders 4 to 6 come from the spread point of \f$(p, d) = (5, 4)\f$ along one repeated diagonal loading. There one ulp of \f$\theta\f$ moves the exact order-5 derivative by 1.1 ulp and the order-6 derivative by 2.2 ulp, so the loss is the recursion's, not the problem's: the Leibniz sums of a repeated \f$e^\theta\f$ grow like \f$2^K\f$ and cancel in the traces. For details, see `docs/numerics.md`.
+
+## Speed
+
+The times below were measured with gcc, per call, on one thread and with OpenMP on 8 threads.
+
+| \f$(p, d)\f$ | `log_pdet()` | `log_pdet_d6()` |
+|---|---|---|
+| \f$(4, 1)\f$ | 127 ns, 23 ns | 1910 ns, 317 ns |
+| \f$(16, 4)\f$ | 2223 ns, 299 ns | 9686 ns, 2171 ns |
+
+## Parallel evaluation in Kokkos
+
+The following kernel allocates one scratch row per work item from a two-dimensional `Kokkos::View` sized by `scratch_size()`, and evaluates \f$M\f$, \f$\log\lvert M\rvert_+\f$, and its first partial derivative:
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/pdmat/core.hpp>
+#include <laplace/pdmat/reduced_rank.hpp>
+
+void eval_psdmat(const Kokkos::View<double* [7]>& theta,
+                 const Kokkos::View<double*>& out_lp,
+                 const Kokkos::View<double*>& out_dlp) {
+  constexpr int p = 4, d = 2, q = p * d - d * (d - 1) / 2;
+  const laplace::pdmat::reduced_rank_psdmat s(p, d);
+  Kokkos::View<double**, Kokkos::LayoutRight> scratch("scratch", theta.extent(0), s.scratch_size());
+  Kokkos::parallel_for(
+      "eval_psdmat", theta.extent(0), KOKKOS_LAMBDA(int i) {
+        double th[q];
+        for (int k = 0; k < q; ++k) th[k] = theta(i, k);
+        double m[laplace::pdmat::packed_size(p)];
+        double* w = &scratch(i, 0);
+        s.matrix(th, m, w);
+        out_lp(i) = s.log_pdet(th, w);
+        const int idx[1] = {0};
+        out_dlp(i) = s.log_pdet_d1(th, idx, w);
+      });
+}
+```
+
+## Weighted sums of penalties
+
+The structure \ref laplace::pdmat::weighted_sum_psdmat "weighted_sum_psdmat" maps \f$q = m\f$ unconstrained parameters \f$\theta \in \mathbb{R}^m\f$ to
+\f[
+M(\theta) = \sum_{j=1}^{m} e^{\theta_j} S_j,
+\f]
+where \f$S_1, \dots, S_m\f$ are fixed symmetric positive semidefinite \f$p \times p\f$ matrices and \f$\lambda_j = e^{\theta_j}\f$. The functions run on the host and call \ref dense "the dense module". The constructor copies a `std::vector` of host Views of the \f$S_j\f$ and throws `std::invalid_argument` when a matrix is not positive semidefinite or the sizes disagree.
+
+The null space of a sum of positive semidefinite matrices is the intersection of theirs, so the rank \f$r\f$ and the null space do not depend on \f$\theta\f$. Both are computed once, at construction, and returned by `rank()` and `null_space_basis()`; no pseudo-inverse is supplied. The derivatives of \f$M\f$ are \f$e^{\theta_j}S_j\f$ along a tuple that repeats one index \f$j\f$ and zero by structure otherwise.
+### Method
+
+When the \f$\lambda_j\f$ spread apart, an eigendecomposition of \f$M\f$ in double resolves the small eigenvalues only to \f$\lambda_{\max}\epsilon\f$, and the derivatives lose one digit per order of magnitude of the spread. Instead, `log_pdet()` and its derivatives use a graded similarity transform after Wood (2011, appendix B), which groups the components by \f$\lambda_j\lVert S_j\rVert\f$, with \f$\lVert S\rVert\f$ the largest absolute entry. Let \f$U\f$ be an orthonormal basis of the subspace not yet resolved, \f$I_p\f$ at first. Each level:
+
+1. drops the components whose restriction \f$R_j = U^\top S_j U\f$ has \f$\lVert R_j\rVert \le\f$ `zero_tolerance` \f$\lVert S_j\rVert\f$;
+2. takes as dominant those whose \f$\theta_j + \log\lVert R_j\rVert\f$ is within \f$\log\f$ `split_tolerance` of the largest such value \f$t\f$;
+3. splits \f$U\f$ by the eigendecomposition of \f$\sum_{\mathrm{dom}} R_j / \lVert R_j\rVert\f$ into its range \f$U_+\f$ and null space \f$U_0\f$, with the rank rule of the dense module;
+4. appends \f$U U_+\f$ to \f$Q\f$ with the scale \f$d_l = e^t\f$ and \f$r_l\f$ columns;
+5. continues on \f$U U_0\f$, where the dominant components are zero.
+
+These structural zeros are set, never computed: a zero computed in floating point would carry an error of order \f$\lambda_{\mathrm{dom}}\epsilon\f$, with \f$\lambda_{\mathrm{dom}}\f$ the weight of a dominant component, and swamp the subordinate terms. Let \f$D\f$ be the diagonal matrix of the scales, each \f$d_l\f$ repeated \f$r_l\f$ times. Let \f$G_j = D^{-1/2} Q^\top (\lambda_j S_j) Q D^{-1/2}\f$ with the zeros set, and \f$H = \sum_j G_j\f$, whose entries are of order one. Then
+\f[
+\log\lvert M\rvert_+ = \log\det H + \sum_l r_l \log d_l,
+\f]
+with \f$\log\det H\f$ from Cholesky.
+
+The matrix \f$B_j = H^{-1} G_j\f$ is similar to \f$\lambda_j M^+ S_j\f$ on the range of \f$M\f$, where \f$M^+\f$ is the pseudo-inverse. Hence \f$\partial\log\lvert M\rvert_+/\partial\theta_j = \operatorname{tr} B_j\f$ and \f$\partial B_j/\partial\theta_k = \delta_{jk}B_j - B_k B_j\f$. Along a sorted tuple of \f$K\f$ positions, the derivative is a sum over the set partitions \f$\pi\f$ of the positions whose blocks each repeat one index. Each partition contributes \f$(-1)^{\lvert\pi\rvert - 1}\f$ times the sum over the \f$(\lvert\pi\rvert - 1)!\f$ cyclic block orders of \f$\operatorname{tr}(B_{j_1}\cdots B_{j_{\lvert\pi\rvert}})\f$, where \f$j_b\f$ is the index of block \f$b\f$. In exact arithmetic \f$\sum_{j=1}^m \operatorname{tr} B_j = r\f$, which `rank_identity()` returns as a check. The default `split_tolerance`, \f$\epsilon^{0.05} \approx 0.165\f$, was the best measured: a level holds the components within a factor of about 6 of the largest. The default `zero_tolerance` is \f$8p\epsilon\f$.
+
+### Accuracy
+
+Errors are in ulp of \f$\max(\lvert\mathrm{ref}\rvert, 1)\f$, as on \ref accuracy "How accuracy is measured". The references come from mpmath at 256 bits on an exact rational basis of the range from SymPy, with spreads of the \f$\lambda_j\f$ up to \f$10^{20}\f$. The table gives the worst gcc errors and test bounds on two tensor-product cases, of sizes 30 and 36. The CUDA build gives the same errors.
+
+| Order | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| Worst, tensor-product cases (ulp) | 1.96 | 0.89 | 48.5 | 92 | 253 | 2100 | \f$1.73 \times 10^4\f$ |
+| Test bound, tensor-product cases (ulp) | 8 | 4 | 200 | 400 | 1000 | 8500 | 70000 |
+
+The loss that grows with the order comes from the alternating signs of the partition sum. A test case with one component of condition number \f$2^{16}\f$ loses \f$1.1 \times 10^4\f$ to \f$2.19 \times 10^4\f$ ulp at every order, also at equal \f$\lambda_j\f$: the loss comes from that component. The rank identity holds within \f$6.1 \times 10^{-14}\f$. See `docs/numerics.md`.
+
+### Speed
+
+Every call recomputes the transform. On one gcc thread, `log_pdet()` takes 8.2 microseconds at \f$p = 8\f$ and 218 at \f$p = 36\f$; `log_pdet_d6()` takes 55.9 and 718.
+
+### Host evaluation
+
+A host example with a second-difference penalty and the identity:
+
+```cpp
+#include <laplace/pdmat/weighted_sum.hpp>
+#include <cstdio>
+#include <vector>
+
+void eval_weighted_sum() {  // inside a Kokkos::ScopeGuard
+  using laplace::pdmat::weighted_sum_psdmat;
+  weighted_sum_psdmat::host_matrix d2("d2", 3, 3), id("id", 3, 3);
+  const double a[3] = {1.0, -2.0, 1.0};
+  for (int i = 0; i < 3; ++i) {
+    for (int k = 0; k < 3; ++k) d2(i, k) = a[i] * a[k];
+    id(i, i) = 1.0;
+  }
+  const weighted_sum_psdmat s(std::vector{d2, id});
+  std::vector<double> w(s.scratch_size());
+  const double theta[2] = {1.0, -2.0};
+  const int idx[2] = {0, 1};
+  std::printf("rank %d, log pdet %g, d2 %g\n", s.rank(), s.log_pdet(theta, w.data()),
+              s.log_pdet_d2(theta, idx, w.data()));
+}
+```
+
+## Public classes and concepts
+
+- \ref laplace::pdmat::psdmat_structure "psdmat_structure": Concept defining structured positive semidefinite matrix requirements.
+- \ref laplace::pdmat::psdmat_orders "psdmat_orders\<S\>": CRTP base providing named derivative member functions.
+- \ref laplace::pdmat::reduced_rank_psdmat "reduced_rank_psdmat": Reduced-rank positive semidefinite matrix structure \f$\Lambda\Lambda^\top\f$.
+- \ref laplace::pdmat::weighted_sum_psdmat "weighted_sum_psdmat": Host-only weighted sum \f$\sum_{j=1}^{m} e^{\theta_j} S_j\f$.
+
+## References
+
+- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science 3:e103 (SymPy 1.14.0).
+- S. N. Wood (2011), Fast stable restricted maximum likelihood and marginal likelihood estimation of semiparametric generalized linear models, Journal of the Royal Statistical Society B 73(1), 3–36 (appendix B).
+
+*/

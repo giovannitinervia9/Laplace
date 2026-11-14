@@ -43,9 +43,46 @@
 
 namespace laplace::basis {
 
+/**
+ * \ingroup basis_transform
+ * \brief Step of make_basis_transform() at which a numerical failure occurred.
+ *
+ * Identifies which stage of the canonical build produced a failure status, or `none` on success.
+ * \see \ref basis_transform, basis_transform_status, make_basis_transform()
+ */
 // The step of make_basis_transform that failed.
 enum class basis_transform_step : int { none = 0, constraint = 1, orthonormalization = 2, demmler_reinsch = 3 };
 
+/**
+ * \ingroup basis_transform
+ * \var basis_transform_step::none
+ * \brief No failure occurred.
+ */
+/**
+ * \ingroup basis_transform
+ * \var basis_transform_step::constraint
+ * \brief Failure in the constraint null-space SVD step.
+ */
+/**
+ * \ingroup basis_transform
+ * \var basis_transform_step::orthonormalization
+ * \brief Failure in the Gram matrix Cholesky orthonormalization step.
+ */
+/**
+ * \ingroup basis_transform
+ * \var basis_transform_step::demmler_reinsch
+ * \brief Failure in penalty eigendecomposition or the declared null-dimension check.
+ */
+
+/**
+ * \ingroup basis_transform
+ * \brief Status and diagnostics returned by basis_transform::status().
+ *
+ * Reports whether building the transform succeeded, which step failed, the underlying
+ * `laplace::dense` failure reason, the numerical Gram rank on Cholesky failure, and the
+ * maximum relative magnitude of the declared null eigenvalues before zeroing.
+ * \see \ref basis_transform, basis_transform_step, make_basis_transform()
+ */
 // Outcome of make_basis_transform. On failure the transform is empty (q = 0).
 //   dense_reason: the failure reported by laplace::dense in the failed step
 //     (none when the declared null dimension did not hold);
@@ -55,10 +92,30 @@ enum class basis_transform_step : int { none = 0, constraint = 1, orthonormaliza
 //   null_eigenvalue_ratio: the largest |lambda_j| / lambda_max over the r
 //     declared null eigenvalues, before they are set to 0 (0 without a penalty).
 struct basis_transform_status {
+  /**
+   * \ingroup basis_transform
+   * \brief Whether building the transform succeeded (`false` leaves an empty transform with \f$q = 0\f$).
+   */
   bool success = true;
+  /**
+   * \ingroup basis_transform
+   * \brief Step of make_basis_transform() at which failure occurred (`basis_transform_step::none` on success).
+   */
   basis_transform_step failed_step = basis_transform_step::none;
+  /**
+   * \ingroup basis_transform
+   * \brief Failure reason reported by `laplace::dense`, or `none` on success or null-dimension mismatch.
+   */
   laplace::dense::dense_failure dense_reason = laplace::dense::dense_failure::none;
+  /**
+   * \ingroup basis_transform
+   * \brief Numerical rank of \f$T_1^\top G T_1\f$ above \f$q\varepsilon\f$ times the largest eigenvalue when Cholesky fails, otherwise \f$-1\f$.
+   */
   int gram_rank = -1;
+  /**
+   * \ingroup basis_transform
+   * \brief Maximum \f$\lvert\lambda_j\rvert / \lambda_{\max}\f$ over the \f$r\f$ declared null eigenvalues before zeroing (0 without a penalty).
+   */
   double null_eigenvalue_ratio = 0.0;
 };
 
@@ -131,22 +188,103 @@ void reduce(const TView& t, const GView& g, const OutView& out) {
 
 }  // namespace detail_transform
 
+/**
+ * \ingroup basis_transform
+ * \brief Linear coefficient transform \f$T \in \mathbb{R}^{K \times q}\f$ for a univariate basis.
+ *
+ * Stores the transformation matrix \f$T\f$ on the host and in the default Kokkos device memory space,
+ * along with build status and penalty eigenvalues when built by make_basis_transform().
+ * Provides coefficient expansion \f$\beta = T\gamma\f$, gradient reduction \f$g_\gamma = T^\top g_\beta\f$,
+ * and host-side congruence \f$T^\top A T\f$.
+ * \see \ref basis_transform, make_basis_transform(), basis_transform_from_matrix()
+ */
 class basis_transform {
  public:
+  /**
+   * \ingroup basis_transform
+   * \brief Default Kokkos device memory space storing the device copy of \f$T\f$.
+   */
   using device_memory = Kokkos::DefaultExecutionSpace::memory_space;
+  /**
+   * \ingroup basis_transform
+   * \brief Host column-major View type (`Kokkos::LayoutLeft`, `Kokkos::HostSpace`) storing \f$T\f$.
+   */
   using host_matrix = detail_transform::host_matrix;
+  /**
+   * \ingroup basis_transform
+   * \brief Device matrix View type in `device_memory` storing \f$T\f$.
+   */
   using device_matrix = Kokkos::View<double**, device_memory>;
 
+  /**
+   * \ingroup basis_transform
+   * \brief Constructs an empty transform with \f$K = 0\f$, \f$q = 0\f$, and default success status.
+   */
   basis_transform() = default;
 
+  /**
+   * \ingroup basis_transform
+   * \brief Number of rows \f$K\f$ of \f$T\f$ (original basis dimension).
+   * \return Row count \f$K\f$ (0 for a default-constructed or failed transform).
+   * \see \ref basis_transform, columns()
+   */
   int rows() const { return static_cast<int>(host_.extent(0)); }     // K
+  /**
+   * \ingroup basis_transform
+   * \brief Number of columns \f$q\f$ of \f$T\f$ (transformed basis dimension).
+   * \return Column count \f$q\f$ (0 for a default-constructed or failed transform).
+   * \see \ref basis_transform, rows()
+   */
   int columns() const { return static_cast<int>(host_.extent(1)); }  // q
+  /**
+   * \ingroup basis_transform
+   * \brief Outcome and diagnostics from constructing the transform.
+   * \return Const reference to the basis_transform_status struct.
+   * \see \ref basis_transform, basis_transform_status
+   */
   const basis_transform_status& status() const { return status_; }
+  /**
+   * \ingroup basis_transform
+   * \brief Penalty eigenvalues \f$\lambda_1 \le \dots \le \lambda_q\f$ from the penalty step.
+   *
+   * The first \f$r\f$ entries are set to exactly zero.
+   * \return Const reference to the vector of \f$q\f$ eigenvalues, or empty when no penalty was given or constructed via basis_transform_from_matrix().
+   * \par Measured accuracy
+   * Matches 200-bit mpmath references within \f$54.7\varepsilon\lambda_{\max}\f$ across eight exact-rational cubic B-spline cases (test bound \f$83\varepsilon\lambda_{\max}\f$); see \ref basis_transform.
+   * \see \ref basis_transform, make_basis_transform()
+   */
   // lambda, increasing, the r first exactly 0; empty when no penalty was given
   const std::vector<double>& penalty_eigenvalues() const { return eigenvalues_; }
+  /**
+   * \ingroup basis_transform
+   * \brief Host copy of the transformation matrix \f$T\f$.
+   * \return Const reference to the \f$K \times q\f$ `host_matrix` View.
+   * \see \ref basis_transform, device_matrix_view()
+   */
   const host_matrix& matrix() const { return host_; }
+  /**
+   * \ingroup basis_transform
+   * \brief Device copy of the transformation matrix \f$T\f$.
+   * \return Const reference to the \f$K \times q\f$ `device_matrix` View.
+   * \see \ref basis_transform, matrix()
+   */
   const device_matrix& device_matrix_view() const { return device_; }
 
+  /**
+   * \ingroup basis_transform
+   * \brief Expands transformed coefficients into original basis coefficients, \f$\beta = T\gamma\f$.
+   *
+   * Computes \f$\beta_i = \sum_{j=0}^{q-1} T_{ij} \gamma_j\f$ for \f$i = 0, \dots, K - 1\f$ via a Kokkos kernel
+   * in the execution space of `beta`, using the device copy of \f$T\f$ when accessible to `beta`'s memory space and the host copy otherwise.
+   * \tparam GammaView Rank-1 Kokkos View type for input coefficients \f$\gamma\f$.
+   * \tparam BetaView Rank-1 Kokkos View type for output coefficients \f$\beta\f$.
+   * \param gamma Input vector of length \f$q\f$.
+   * \param beta Output vector of length \f$K\f$.
+   * \throw std::invalid_argument If `gamma.extent(0) != columns()` or `beta.extent(0) != rows()`.
+   * \par Measured accuracy
+   * Matches long-double reference summation within \f$4 q \varepsilon \sum_j \lvert T_{ij}\gamma_j\rvert\f$ in tests on host and device Views.
+   * \see \ref basis_transform, reduce_gradient()
+   */
   // beta = T gamma (gamma: q, beta: K), in the execution space of beta.
   template <class GammaView, class BetaView>
   void expand_coefficients(const GammaView& gamma, const BetaView& beta) const {
@@ -159,6 +297,21 @@ class basis_transform {
       detail_transform::expand(host_, gamma, beta);
   }
 
+  /**
+   * \ingroup basis_transform
+   * \brief Reduces a gradient with respect to \f$\beta\f$ into the transformed coordinates, \f$g_\gamma = T^\top g_\beta\f$.
+   *
+   * Computes \f$(g_\gamma)_j = \sum_{i=0}^{K-1} T_{ij} (g_\beta)_i\f$ for \f$j = 0, \dots, q - 1\f$ via a Kokkos kernel
+   * in the execution space of `g_gamma`, using the device copy of \f$T\f$ when accessible to `g_gamma`'s memory space and the host copy otherwise.
+   * \tparam GView Rank-1 Kokkos View type for input gradient \f$g_\beta\f$.
+   * \tparam OutView Rank-1 Kokkos View type for output gradient \f$g_\gamma\f$.
+   * \param g_beta Input gradient vector of length \f$K\f$.
+   * \param g_gamma Output gradient vector of length \f$q\f$.
+   * \throw std::invalid_argument If `g_beta.extent(0) != rows()` or `g_gamma.extent(0) != columns()`.
+   * \par Measured accuracy
+   * Matches long-double reference summation within \f$4 K \varepsilon \sum_i \lvert T_{ij}(g_\beta)_i\rvert\f$ in tests on device Views.
+   * \see \ref basis_transform, expand_coefficients()
+   */
   // g_gamma = T' g_beta (g_beta: K, g_gamma: q), in the execution space of g_gamma.
   template <class GView, class OutView>
   void reduce_gradient(const GView& g_beta, const OutView& g_gamma) const {
@@ -171,6 +324,17 @@ class basis_transform {
       detail_transform::reduce(host_, g_beta, g_gamma);
   }
 
+  /**
+   * \ingroup basis_transform
+   * \brief Computes the host congruence transform \f$T^\top A T\f$ of a \f$K \times K\f$ matrix.
+   *
+   * Reads the column-major \f$K \times K\f$ array `a` on the host and writes the column-major \f$q \times q\f$ result \f$T^\top A T\f$ into `out`.
+   * \param a Pointer to the input column-major \f$K \times K\f$ matrix (for example from `cross_gram()` or `operator_penalty()`).
+   * \param out Pointer to the output column-major \f$q \times q\f$ matrix.
+   * \par Measured accuracy
+   * In tests, \f$T^\top G T\f$ matches \f$I_q\f$ within \f$68\varepsilon\f$ and \f$T^\top S T\f$ matches \f$\operatorname{diag}(\lambda)\f$ within \f$64\varepsilon\lambda_{\max}\f$.
+   * \see \ref basis_transform, make_basis_transform()
+   */
   // out = T' A T on the host: A is K x K (a Gram matrix G_kl, a penalty S),
   // out is q x q, column-major (as cross_gram and operator_penalty write).
   void congruence(const double* a, double* out) const {
@@ -213,11 +377,33 @@ class basis_transform {
   }
 };
 
+/**
+ * \ingroup basis_transform
+ * \brief Constructs a basis_transform on the host in canonical order from constraints, Gram matrix, and penalty.
+ *
+ * Applies up to three steps in fixed canonical order: (1) null space \f$T_1\f$ of \f$C\f$ via SVD (\f$C T_1 = 0\f$),
+ * (2) Gram orthonormalization \f$T_2 = T_1 L^{-\top}\f$ from \f$T_1^\top G T_1 = L L^\top\f$ (\f$T_2^\top G T_2 = I\f$), and
+ * (3) symmetric eigendecomposition \f$T_2^\top S T_2 = W \operatorname{diag}(\lambda) W^\top\f$, setting \f$T = T_2 W\f$
+ * with the \f$r\f$ smallest eigenvalues zeroed. Any input View with zero rows skips that step.
+ * \tparam CView Host-readable rank-2 `Kokkos::LayoutLeft` View type of `double` for \f$C\f$.
+ * \tparam GView Host-readable rank-2 `Kokkos::LayoutLeft` View type of `double` for \f$G\f$.
+ * \tparam SView Host-readable rank-2 `Kokkos::LayoutLeft` View type of `double` for \f$S\f$.
+ * \param K Dimension of the original univariate basis (\f$K \ge 1\f$).
+ * \param C Constraint matrix of shape \f$m_c \times K\f$, or empty View to skip constraints.
+ * \param G Symmetric positive definite Gram matrix of shape \f$K \times K\f$ (every entry is read), or empty View to skip orthonormalization.
+ * \param S Symmetric positive semidefinite penalty matrix of shape \f$K \times K\f$ (every entry is read), or empty View to skip diagonalization.
+ * \param r Declared null-space dimension of \f$S\f$ within the constraints (\f$0 \le r \le q\f$; ignored when `S` is empty).
+ * \return Constructed basis_transform; numerical failures return an empty transform (\f$q = 0\f$) with diagnostics in `status()`.
+ * \throw std::invalid_argument If \f$K < 1\f$, `C` does not have \f$K\f$ columns, `G` or `S` is non-empty and not \f$K \times K\f$, or `S` is non-empty and \f$r \notin [0, q]\f$.
+ * \par Measured accuracy
+ * Across eight exact-rational cubic B-spline cases, the worst errors over the gcc/OpenMP and CUDA builds are \f$54.7\varepsilon\lambda_{\max}\f$ for eigenvalues, \f$45.0\varepsilon\f$ for \f$T^\top G T - I\f$, \f$6.7\varepsilon\lambda_{\max}\f$ off-diagonal, and \f$75.1\varepsilon\max\lvert C\rvert\f$ for \f$C T\f$; see \ref basis_transform.
+ * \see \ref basis_transform, basis_transform_from_matrix(), basis_transform_status
+ */
 // Canonical order: constraints C (m x K), Gram G (K x K), penalty S (K x K),
 // each skipped when it is an empty View; r is the dimension of the null space
 // of S within the constraints (ignored without S). Matrices are host-readable
-// rank-2 Views of double, LayoutLeft; only the lower triangles of G and S are
-// read. Numerical failures come back in status(); wrong shapes throw
+// rank-2 Views of double, LayoutLeft; G and S are read whole and must be
+// symmetric. Numerical failures come back in status(); wrong shapes throw
 // std::invalid_argument.
 template <class CView, class GView, class SView>
 basis_transform make_basis_transform(int K, const CView& C, const GView& G, const SView& S, int r) {
@@ -300,6 +486,20 @@ basis_transform make_basis_transform(int K, const CView& C, const GView& G, cons
   return b;
 }
 
+/**
+ * \ingroup basis_transform
+ * \brief Wraps a caller-supplied transformation matrix \f$T\f$ in a basis_transform.
+ *
+ * Copies the \f$K \times q\f$ matrix `T` onto host and device storage with no structural properties declared,
+ * `status().success` equal to `true`, and empty `penalty_eigenvalues()`.
+ * \tparam TView Host-readable rank-2 View type of `double` for \f$T\f$.
+ * \param T Caller-supplied \f$K \times q\f$ transformation matrix.
+ * \return Initialized basis_transform holding a copy of `T`.
+ * \throw std::invalid_argument If `T` has zero rows (\f$K < 1\f$).
+ * \par Measured accuracy
+ * Copies the entries of `T` to `matrix()` identically (exact entrywise match in tests).
+ * \see \ref basis_transform, make_basis_transform()
+ */
 // A T given by the caller (host-readable K x q View of double); no property is declared.
 template <class TView>
 basis_transform basis_transform_from_matrix(const TView& T) {

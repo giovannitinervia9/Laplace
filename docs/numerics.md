@@ -5108,3 +5108,263 @@ per level, then Q^T S_j Q, the Cholesky factor and the B_j. A full table of
 derivatives at one theta repeats it for every tuple. Open: an evaluated
 state at one theta that serves every order, if a fit shows that the cost
 matters.
+
+## Basis transforms: constraints, orthonormalization, Demmler-Reinsch
+
+**What.** `basis_transform` (`include/laplace/basis/transform.hpp`) replaces
+the K columns of a univariate basis b(x) by the q columns of b(x)' T, with T a
+K x q matrix, and the coefficients by beta = T gamma. The basis keeps its
+sparse rows; T acts on the coefficient side: rows and derivatives T' b^(k)(x),
+Gram matrices T' G_kl T, penalties T' S T, gradients g_gamma = T' g_beta.
+`make_basis_transform(K, C, G, S, r)` builds T from up to three inputs, always
+in this order (the canonical order), so that every property holds at the end:
+
+1. constraints C beta = 0 (C is m x K): T1 is an orthonormal basis of the null
+   space of C, from the SVD of `laplace::dense::null_space_basis`, so C T1 = 0;
+2. Gram matrix G: T2 = T1 L^-T with T1' G T1 = L L' (Cholesky), so T' G T = I;
+   orthonormal columns of T1 keep this true after the constraint;
+3. penalty S: T = T2 W with T2' S T2 = W diag(lambda) W' (symmetric
+   eigendecomposition, increasing lambda), the Demmler-Reinsch basis when G is
+   given, so T' S T = diag(lambda).
+
+An empty View skips its step; S without G gives the eigenvectors of S in
+Euclidean coordinates. `basis_transform_from_matrix(T)` takes a T built in
+any other way and declares no property. T is built on the host and copied to
+the default device; `expand_coefficients` and `reduce_gradient` run in the
+execution space of the Views they are given, `congruence` (T' A T) on the
+host. Decided with Giovanni on 2026-11-14 (T1-T7 in the diary).
+
+**The null eigenvalues.** The caller declares r, the dimension of the null
+space of S within the constraints (m for D^m without constraints, m - 1 with
+the zero-integral constraint). The r smallest eigenvalues are set to exactly
+0, and the build fails (status: step demmler_reinsch, ratio reported) if one
+of them exceeds 1e-8 lambda_max. A threshold relative to lambda_max is not
+safe: the smallest penalized eigenvalue lambda_(r+1)/lambda_max falls as
+K^(-2m), from 1.1e-4 (K = 10, D^3) to 2.3e-13 = 1040 eps (K = 200, D^3),
+so a threshold K eps lambda_max (200 eps there) keeps a margin of 5 only.
+
+**Failures.** A singular G (data that leave some columns without support)
+is an error, not a silent drop of directions: the status gives the failed
+step (orthonormalization), the dense reason (not_positive_definite) and the
+numerical rank of T1' G T1, the number of its eigenvalues above
+q eps times the largest. Wrong shapes, K < 1 and r outside [0, q] throw
+`std::invalid_argument`.
+
+**The route, measured before the code** (cubic B-splines on [0, 1],
+K = 10, 40, 100, 200, D^2 and D^3, G theoretical G_00 and empirical X'X/n
+with n = 5K, with and without the zero-integral constraint, references with
+mpmath at 200 bits). R1, the generalized eigenproblem; R2, the Cholesky of G
+then the symmetric eigenproblem (the canonical order); R3, the exact null
+space of S taken out first. All three are in the same class: max|T'GT - I|
+up to 460 eps (K = 200, constrained), off-diagonal of T'ST within 2.3 eps
+lambda_max for R1 and R2 and 14.8 for R3, eigenvalues within 370 eps
+lambda_max. The null eigenvalues come within 0.53 eps lambda_max of 0 with R1
+and R2 and exactly 0 with R3. R2 was chosen because the canonical order gives
+it.
+
+**How.** `tools/reference/basis_transform.py` writes
+`tests/data/reference/basis_transform.csv`: for uniform clamped cubic
+B-splines on [0, 1] it computes G = G_00 and S = G_mm in exact rationals
+(Cox-de Boor on polynomials), the zero-integral constraint
+C_j = (t_(j+4) - t_j)/4 and an exact basis Z of its null space, and the
+eigenvalues of the pencil (Z'SZ, Z'GZ) with mpmath at 200 bits; values below
+1e-55 lambda_max are written as 0. Eight cases: K = 10 and 40, D^2 and D^3,
+with and without the constraint. `tests/basis/test_transform.cpp` checks the
+eigenvalues (in eps lambda_max), max|T'GT - I| (in eps), the off-diagonal of
+T'ST (in eps lambda_max) and max|C T| (in eps max|C|); the worst over the
+eight cases:
+
+| quantity | gcc/OpenMP | CUDA (RTX 4070 SUPER) | test bound |
+|---|---|---|---|
+| eigenvalues | 54.7 | 54.7 | 83 |
+| T'GT - I | 43.0 | 45.0 | 68 |
+| off-diagonal of T'ST | 5.2 | 6.7 | 10 |
+| C T | 75.1 | 71.7 | 113 |
+
+The worst case of each column is K = 40, D^3, constrained, except the
+off-diagonal, whose worst is K = 40, D^3 without constraint on both builds.
+The bounds are 1.5 times the larger of the two builds. With an empirical
+G = X'X/n (K = 40, n = 200, D^2, constrained): T'GT - I 26.0 (gcc) and 24.0
+(CUDA) eps against 39, off-diagonal 1.2 eps lambda_max against 2, C T 51.7
+and 55.3 eps against 83. The test also checks the skipped steps (no input,
+C only, G only, S only), the two failures (G from data on [0, 0.5] only; r = 3
+declared for D^2), the coefficients and gradients on the device and on the
+host, the congruence (T'ST diagonal within 64 eps lambda_max, T'GT within 68
+eps of I) and a given T.
+
+**Open.** r is declared by the caller; the exact null space (R3) can be added
+on top to compute it. A basis type with rows T' b(x) can be added if a kernel
+needs rows in gamma.
+
+**Chosen.** As written.
+
+## The cyclic B-spline basis
+
+**What.** `cyclic_bspline_basis` and `cyclic_bspline_basis_owner`
+(`include/laplace/basis/cyclic_bspline.hpp`): periodic B-splines of degree
+d <= 10 with period omega and K >= d + 1 knots t_0 <= ... <= t_(K-1) in one
+period [lower, upper), lower = t_0, upper = lower + omega, extended by
+t_(j+mK) = t_j + m omega. Column j is b_j(x) = sum_m B_(j+mK)(x), B_i the
+B-spline of degree d on t_i..t_(i+d+1). Built as an ordinary B-spline basis
+on the K + 2d + 1 knots t_(-d)..t_(K+d) (dimension K + d, domain one period)
+whose columns are folded modulo K: extended column e belongs to cyclic column
+(e - d) mod K. A row has width d + 1 and value i belongs to column
+(f + i) mod K. Any real x is in the domain: x in [lower, upper) is used as it
+is, any other x is reduced by r = fmod(x - lower, omega) (exact), so the only
+roundings are those of x - lower and lower + r. Integral from lower:
+n c_j + int_lower^(lower + r) b_j with x - lower = n omega + r and
+c_j = (t_(j+d+1) - t_j)/(d + 1); `integral_row` gives the d + 1 columns of
+the row, `integral_column(j, x)` any column. The owner precomputes the K + d
+totals over one period of the extended columns. Gram matrices: the extended
+basis's Gram folded; `gram_bandwidth()` = K - 1. Decided with Giovanni on
+2026-11-14 (C1-C10 in the diary).
+
+**How.** `tools/reference/basis_cyclic_bspline.py`: exact rationals on the
+bi-infinite knot sequence T_e = t_(e mod K) + floor(e/K) omega, Cox-de Boor
+and the derivative recursion at the unreduced x, integrals and Gram matrices
+by exact integration of the polynomial pieces; no reduction and no folding,
+so the route is independent of the code's. 47 cases, d in {0, 1, 2, 3, 5,
+10}: uniform on [0, 1), on [1000, 1001) and with period 365.25, the minimum
+K = d + 1, random knots with period 365, interior multiplicity 2 and d + 1,
+multiplicity 2 and d + 1 at lower. Points: 20 random in
+[lower - 2 omega, lower + 3 omega], the knots of one period and one ulp on
+each side, upper. Errors as for the B-spline basis (rows in ulps of the
+row's largest value, integrals and totals of the largest total, Gram of the
+largest entry); worst over gcc/OpenMP and CUDA (RTX 4070 SUPER):
+
+| | d <= 5 | d = 10 | test bound |
+|---|---|---|---|
+| rows, orders 0..min(d, 6) | 8 | 11 | 12 and 17 |
+| integrals | 6 | 6 | 9 |
+| column totals | 3 | 3 | 9 |
+| Gram matrices | 8 | 9 | 12 and 14 |
+
+The test also checks: derivatives 0..d - mu continuous across lower, G_00
+positive definite, `integral_row` bit for bit equal to `integral_column`,
+expansions against the rows, adding one period adds the totals, NaN and Inf
+give NaN, `operator_penalty` of D^2 equals G_22 and D^4 on a cubic throws.
+Defect found and repaired in `bspline.hpp`: the integral anchor at lower ran
+BSPLVB on interval d, empty when lower is a multiple knot with knots below
+it (0/0, NaN integrals, reachable through bspline `from_knots` too); it now
+uses the interval that contains lower.
+
+**Speed** (`benchmarks/basis_cyclic_bspline.cpp`, cubic, K = 10, 40, 200,
+n = 1e6, against `bspline_basis::uniform_extended` with the same knots on the
+points reduced to [0, 1)), cost ratio cyclic / B-spline:
+
+| points | one thread and OpenMP | CUDA |
+|---|---|---|
+| in one period, values and second derivative | 1.1-1.2 | 1.02-1.04 |
+| over several periods ([-3, 4)) | 1.3-1.9 | 1.1-1.2 |
+| integral rows | 1.06-1.9 | 1.1-1.3 |
+
+Before the totals were precomputed the integral rows cost 1.1-2.1 (CPU) and
+1.7-3.1 (CUDA). The first CUDA lines of the second point set (K = 10) jump to
+2-7 ms for both bases from run to run: a timing artifact.
+
+**Chosen.** As written.
+
+## Tensor product bases
+
+**What.** `tensor_product_basis<B_1, ..., B_D>` (`include/laplace/basis/tensor.hpp`)
+is the tensor product of D >= 2 univariate bases of any types (B-spline,
+cyclic B-spline, Fourier, Legendre, mixed), D fixed at compile time, with its
+own concept `multivariate_basis`. Margin j has K_j columns and rows of width
+w_j; the product has K = prod_j K_j columns
+B_c(x) = b_(1,j_1)(x_1) ... b_(D,j_D)(x_D), c = sum_j s_j j_j, s_D = 1,
+s_j = s_(j+1) K_(j+1): the last margin varies fastest, as
+kron(b_1, ..., b_D). A row at x = (x_1, ..., x_D) is first[D], the first
+column of each margin, and W = prod_j w_j values in the same order; value
+(i_1, ..., i_D) belongs to column sum_j s_j ((f_j + i_j) mod K_j), which
+`column()` computes (the modulus matters only for a cyclic margin). The
+marginal rows are written to a caller's scratch of `scratch_size(k)` =
+sum_j w_j(k_j) values, then their product to the output in place.
+Partial derivatives and integrals take a runtime multi-index k[D]: k_j in
+0..6 is the order in x_j, k_j = -1 the integral from lower_j to x_j. An
+integrated margin contributes its K_j integrals (first column 0, width K_j),
+because the integrals of the columns before a B-spline window are not zero;
+hence row_width(k) = prod_j w_j(k_j) with w_j(-1) = K_j. The integral vector
+of a B-spline margin is its window, `integral_column_total` before it and 0
+after; of a cyclic margin, its column integrals; of Fourier and Legendre,
+`integral_row`. `expansion_partial` contracts the marginal rows with beta
+(flat in the column order), the last margin innermost. Outside its domain each
+margin applies its own rule; a NaN x_j or a margin with the nan rule outside
+its domain makes the whole row NaN. Host functions: `cross_gram(k, l)` =
+kron_j G_j(k_j, l_j), dense K x K column-major; `kronecker_product` of dense
+column-major factors; `tensor_operator_penalty(basis, terms)`, the penalty
+int over the box of (L f)^2 for L = sum_a c_a d^(k^(a)), equal to
+sum_(a,b) c_a c_b G_(k^(a) k^(b)) (a sum of squares of several operators,
+such as thin plate, is a sum of calls; an order above a polynomial margin's
+degree throws); `marginal_operator_penalty(basis, j, op)` =
+G_0 kron ... kron S_j kron ... kron G_0, S_j the `operator_penalty` of op on
+margin j; `kronecker_transform(T_1, ..., T_D)` (constraints, T' G_0 T = I and
+Demmler-Reinsch carry over factor by factor, the result declares no
+property; T is dense K x q); `compose_basis_transforms(a, b)` = T_a T_b;
+`fill_tensor_basis_rows(b, k, x, first, values)`, the rows at n points in a
+kernel. Decided with Giovanni on 2026-11-14 (P1-P10 in the diary).
+
+**How.** `tools/reference/basis_tensor.py` writes
+`tests/data/reference/basis_tensor.csv` (about 1 MB) from the definitions of
+the margins, never from the product code: B-spline and cyclic margins in exact
+rationals on the double knots the C++ constructors compute (Cox-de Boor),
+Legendre from integer coefficients, Fourier with mpmath; products at 400 bits.
+Four cases: B-spline(0, 1, K = 7, d = 3) x B-spline(0, 2, 5, 2), with the thin
+plate penalty G_(2,0)(2,0) + 2 G_(1,1)(1,1) + G_(0,2)(0,2); B-spline(0, 1, 6, 3)
+x cyclic(0, 1, 5, 2), x_2 over several periods; Legendre(0, 2, n = 3) x
+Fourier(0, 1, H = 2); B-spline(0, 1, 5, 2) x cyclic(0, 1, 6, 3) x
+Legendre(-1, 1, 2). 14 points per case drawn from the margins' knots, one ulp
+on either side and random points; 5 to 10 multi-indices per case, integrals
+included; Gram matrices for 2 to 5 pairs. Errors in eps times a scale: rows
+of the row's largest reference value, expansions of sum_c |beta_c B_c|, Gram
+and penalty of the largest entry (the unit is max(eps scale, denorm_min), for
+the integrals one ulp above lower).
+
+| case | rows | expansions | Gram | test bounds (rows, expansions, Gram) |
+|---|---|---|---|---|
+| B-spline x B-spline | 2.31 | 1.17 | 1.74 | 3.5, 1.8, 2.6 |
+| B-spline x cyclic | 11.0 | 3.00 | 3.26 | 16.5, 4.5, 4.9 |
+| Legendre x Fourier | 2.10 | 1.70 (CUDA 1.42) | 1.24 | 3.2, 2.6, 1.9 |
+| B-spline x cyclic x Legendre | 4.01 | 1.14 (CUDA 1.35) | 2.67 | 6.0, 2.1, 4.0 |
+
+gcc/OpenMP and CUDA (RTX 4070 SUPER) agree to the digits printed except where
+noted. Thin plate penalty 0.88 eps (bound 1.3). The rows of the cyclic case
+carry the cyclic margin's own error. Bounds are 1.5 times the worst of the two
+builds. The test also checks: each row equal bit for bit to the product of
+the margins' rows, also outside the domain; NaN propagation and the nan rule;
+`expansion_partial` against the dot product with the scattered row (8 eps);
+`marginal_operator_penalty` with D^2 equal to G_(2,0)(2,0) and G_(0,2)(0,2) bit
+for bit; the Kronecker product of two Demmler-Reinsch transforms
+(T' G T - I 7 eps, bound 256; off-diagonals of T' S_j T 2.2 eps of the
+largest, bound 64); a zero-integral constraint on the product composed after
+the margins' transforms (|C T| 7.1 eps max|C|, bound 256); the throws on
+orders out of range and on an order above a margin's degree; and
+`fill_tensor_basis_rows` on the device against the host (0 on gcc, 1.9 eps
+on CUDA, bound 16).
+
+**Speed** (`benchmarks/basis_tensor.cpp`, cubic B-spline margins on [0, 1],
+n = 1e5 uniform points, ms per call, one thread / 16 OpenMP threads / CUDA;
+run while other builds were using the machine):
+
+| | D = 2, K_j = 20 | D = 3, K_j = 10 |
+|---|---|---|
+| sparse rows | 4.1 / 0.79 / 0.15 | 8.4 / 1.5 / 0.46 |
+| the same rows scattered into a dense n x K matrix | 13.1 / 10.2 / 1.9 | not run |
+| expansion on the fly | 4.5 / 0.54 / 0.093 | 10.5 / 1.1 / 0.16 |
+| dot from stored sparse rows | 3.8 / 0.54 / 0.034 | 23.1 / 2.9 / 0.14 |
+| dot from stored dense rows | 23.1 / 4.9 / 2.4 | not run |
+| bytes per row, sparse and dense | 136 and 3200 | 524 and 8000 |
+
+At D = 2 the margins called directly, with the order fixed at compile time,
+are faster than `row_partial` by 1.08 (one thread), 1.12 (OpenMP) and 1.14
+(CUDA); a compile-time multi-index was measured and gave nothing (1.00-1.02),
+so the gap is the scratch at runtime offsets. At D = 3 on the CPU a dot from
+stored sparse rows is slower than the expansion on the fly (the cost of
+`column()` per value). The integral row with a cyclic second margin costs
+1.10-1.29 times the one with a B-spline second margin.
+
+**Open.** `kronecker_transform` builds T dense (512 MB at D = 3, K_j = 20);
+applying it factored by mode products if a product that large is needed.
+`fill_tensor_basis_rows` allocates an n x scratch_size(k) scratch View; team
+scratch if that memory matters.
+
+**Chosen.** As written.

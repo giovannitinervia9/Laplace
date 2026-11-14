@@ -24,7 +24,7 @@ problems = []
 
 # ---------------------------------------------------------------- generated HTML
 raw = {
-    "raw bold/italic": re.compile(r"\*\*|(?<![\w*])\*(?=\S)[^*\n]{1,80}\*(?![\w*])"),
+    "raw bold/italic": re.compile(r"\*\*|(?<![\w*])\*(?=\S)[^*\n]{0,79}\S\*(?![\w*])"),  # closing * after a non-space, as in Markdown (not "double *out, double *)")
     "raw formula": re.compile(r"\\f[\$\[\]]|\\(frac|nu|log|mathrm|mu|text)\b"),
     "raw command": re.compile(r"\\(ref|see|param|return|brief)\b"),
 }

@@ -5,18 +5,21 @@ Header `<laplace/basis/core.hpp>` defines the common interface and dispatch util
 
 ## Modules in this group
 
-This group contains four specialized modules:
+This group contains seven specialized modules:
 
 - \ref basis_bspline (`<laplace/basis/bspline.hpp>`): B-spline basis of degree \f$d\f$ with a non-decreasing knot vector.
+- \ref basis_cyclic_bspline (`<laplace/basis/cyclic_bspline.hpp>`): Periodic cyclic B-spline basis of degree \f$d\f$ on \f$K\f$ knots over one period \f$\omega\f$.
 - \ref basis_fourier (`<laplace/basis/fourier.hpp>`): Fourier trigonometric basis on \f$[lower, upper]\f$ with period \f$\omega\f$ and \f$H\f$ harmonics.
 - \ref basis_legendre (`<laplace/basis/legendre.hpp>`): Orthonormal Legendre polynomial basis on \f$[lower, upper]\f$ of maximum degree \f$n\f$.
 - \ref basis_operator (`<laplace/basis/operator.hpp>`): Monic linear differential operators, their null spaces, and penalty matrices.
+- \ref basis_transform (`<laplace/basis/transform.hpp>`): Linear coefficient transforms for constraints, Gram orthonormalization, and penalty diagonalization.
+- \ref basis_tensor (`<laplace/basis/tensor.hpp>`): Tensor products of \f$D \ge 2\f$ univariate bases, partial derivatives and integrals, Kronecker penalties, and Kronecker transforms.
 
 ## Univariate basis interface and row representation
 
 A univariate basis is a vector of \f$K\f$ functions \f$b(x) = (b_0(x), \dots, b_{K-1}(x))\f$ on \f$[lower, upper]\f$. The basis is complete: it holds no data and drops no columns for identifiability constraints. Each basis is a lightweight struct copied by value into Kokkos kernels.
 
-At a point \f$x\f$, a basis evaluates a row of fixed width \f$w\f$, returned by `row_width()`. It writes the \f$w\f$ values for columns \f$j_0, \dots, j_0 + w - 1\f$ into `out` and returns the 0-based index \f$j_0\f$. The width \f$w\f$ is constant across all derivative orders and outside the domain: \f$w = d + 1\f$ for a B-spline of degree \f$d\f$, and \f$w = K\f$ with \f$j_0 = 0\f$ for Fourier and Legendre bases.
+At a point \f$x\f$, a basis evaluates a row of fixed width \f$w\f$, returned by `row_width()`. It writes \f$w\f$ values into `out` and returns the 0-based first column index \f$j_0\f$, with value \f$i\f$ of the row belonging to column \f$(j_0 + i) \bmod K\f$. Only a cyclic basis wraps, while for the other bases \f$j_0 + i < K\f$ and the rule changes nothing. The width \f$w\f$ is constant across all derivative orders and outside the domain: \f$w = d + 1\f$ for a B-spline or a cyclic B-spline of degree \f$d\f$, and \f$w = K\f$ with \f$j_0 = 0\f$ for Fourier and Legendre bases.
 
 The concept \ref laplace::basis::univariate_basis "univariate_basis" formalizes this kernel interface. Every basis provides `dimension()` for count \f$K\f$, `row_width()` for width \f$w\f$, and `scratch_size()` for scratch doubles (0 for current bases). Functions `row()` and `row_d1()` through `row_d6()` evaluate \f$b_j^{(k)}(x)\f$ for derivative orders \f$k = 0, \dots, 6\f$ into `out` and return \f$j_0\f$. Given coefficients \f$\beta = (\beta_0, \dots, \beta_{K-1})\f$, `expansion()` and `expansion_d1()` through `expansion_d6()` evaluate \f$\eta^{(k)}(x) = \sum_{j=0}^{K-1} \beta_j b_j^{(k)}(x)\f$. Functions `integral_row()` and `integral_expansion()` evaluate \f$\int_{lower}^x b_j(t) \, \mathrm{d}t\f$ and \f$\sum_{j=0}^{K-1} \beta_j \int_{lower}^x b_j(t) \, \mathrm{d}t\f$ (see each basis page for conventions). On the host, each basis provides `cross_gram()` for cross Gram matrices and `gram_bandwidth()` for their semi-bandwidth.
 
@@ -36,7 +39,7 @@ Outside \f$[lower, upper]\f$, a non-periodic basis follows its configured \ref l
   For a B-spline of degree \f$d \ge 2\f$, this rule gives \f$C^1\f$ continuity at the endpoints because the second derivative jumps to zero.
 - `outside_domain_rule::polynomial`: continues the polynomial piece at the nearer endpoint.
 
-The Fourier basis (\ref basis_fourier) is periodic on \f$\mathbb{R}\f$ and has no outside domain rule.
+The Fourier basis (\ref basis_fourier) and the cyclic B-spline basis (\ref basis_cyclic_bspline) are periodic on \f$\mathbb{R}\f$ and have no outside domain rule.
 
 ## Dispatch and parallel evaluation example
 

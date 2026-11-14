@@ -1,0 +1,161 @@
+/**
+\defgroup basis_cyclic_bspline Cyclic B-spline bases
+\ingroup basis
+\brief Periodic B-spline basis with analytical derivatives to order 6, integrals from the lower boundary, and cross Gram matrices.
+
+Header `<laplace/basis/cyclic_bspline.hpp>` defines \ref laplace::basis::cyclic_bspline_basis "cyclic_bspline_basis" and \ref laplace::basis::cyclic_bspline_basis_owner "cyclic_bspline_basis_owner" in namespace `laplace::basis`. Users construct an owner on the host and call `host()` or `device()` to obtain a lightweight basis view. Evaluation members are marked `LAPLACE_HD` for host code and Kokkos device kernels, whereas constructors, `cross_gram()`, `greville()`, and `regularity_points()` run on the host. Across 47 knot configurations, rows of orders 0 to \f$\min(d, 6)\f$ stay within 8 ulp for \f$d \le 5\f$ and 11 ulp for \f$d = 10\f$, integrals within 6 ulp, column totals within 3 ulp, and cross Gram matrices within 8 and 9 ulp against exact rational references.
+
+## Mathematical definition
+
+A cyclic B-spline basis has degree \f$d\f$ (\f$0 \le d \le 10\f$, \ref laplace::basis::bspline_max_degree "bspline_max_degree"), dimension \f$K \ge d + 1\f$, and period \f$\omega > 0\f$. The \f$K\f$ knots \f$t_0 \le t_1 \le \dots \le t_{K-1}\f$ lie in one period \f$[x_{\mathrm{lo}}, x_{\mathrm{hi}})\f$, where \f$x_{\mathrm{lo}} = t_0\f$ (`lower`) and \f$x_{\mathrm{hi}} = x_{\mathrm{lo}} + \omega\f$ (`upper`), extended periodically by \f$t_{j + mK} = t_j + m\omega\f$ for every integer \f$m\f$.
+
+Column \f$j \in \{0, \dots, K - 1\}\f$ is the periodic function
+\f[
+b_j(x) = \sum_{m} B_{j + mK}(x),
+\f]
+summed over all integers \f$m\f$, where \f$B_i\f$ is the ordinary B-spline of degree \f$d\f$ on knots \f$t_i, \dots, t_{i+d+1}\f$ of the extended sequence (\ref basis_bspline). Each \f$b_j\f$ is supported on \f$[t_j, t_{j+d+1}]\f$ modulo \f$\omega\f$, satisfies \f$b_j(x + \omega) = b_j(x)\f$, and \f$\sum_{j=0}^{K-1} b_j(x) = 1\f$. At a knot of multiplicity \f$\mu\f$, including \f$x_{\mathrm{lo}}\f$ across the wrap, the functions are \f$C^{d - \mu}\f$. A knot value may appear at most \f$d + 1\f$ times in one period, and \f$K \ge d + 1\f$ makes the \f$d + 1\f$ columns of a row distinct. With equally spaced knots \f$t_j = x_{\mathrm{lo}} + j\omega / K\f$, every function is a translate of one cardinal B-spline.
+
+## Domain and special values
+
+Every real \f$x\f$ is in the domain; unlike the non-periodic bases on \ref basis, the cyclic B-spline basis has no outside-domain rule. Derivatives of order \f$k > d\f$ are zero. When \f$x\f$ is NaN or infinite (\f$+\infty\f$ or \f$-\infty\f$), row evaluation and `integral_row()` write quiet NaN and return 0, while `expansion()`, `expansion_d1()` through `expansion_d6()`, `integral_column()`, and `integral_expansion()` return quiet NaN.
+
+## Method
+
+### Construction and storage
+
+The owner constructs an ordinary B-spline basis (\ref basis_bspline) on the \f$K + 2d + 1\f$ knots \f$t_{-d}, \dots, t_{K+d}\f$ of the extended sequence. Its domain \f$[t_0, t_K] = [x_{\mathrm{lo}}, x_{\mathrm{hi}}]\f$ is one period, and it has \f$K + d\f$ columns. Its column \f$e\f$ is the piece of \f$b_c\f$ on that period with \f$c = (e - d) \bmod K\f$. For \f$e < d\f$, columns \f$e\f$ and \f$e + K\f$ are the two pieces of the same cyclic function \f$c = K - d + e\f$ straddling \f$x_{\mathrm{lo}}\f$. The owner stores the extended basis and the totals over one period of its columns, computed once, on the host and in the default memory space; `host()` and `device()` return the lightweight struct and are deleted on temporary owners.
+
+Two static constructors create an owner, and \ref laplace::basis::cyclic_bspline_basis_owner::knots "knots()" returns the \f$K\f$ knots of one period:
+
+- \ref laplace::basis::cyclic_bspline_basis_owner::uniform "uniform(lower, period, dim, degree)" spaces \f$K\f$ (`dim`) knots equally with step \f$h = \omega / K\f$.
+- \ref laplace::basis::cyclic_bspline_basis_owner::from_knots "from_knots(knots, period, degree)" accepts \f$K\f$ non-decreasing finite knots in \f$[t_0, t_0 + \omega)\f$, setting \f$x_{\mathrm{lo}} = t_0\f$ and allowing multiplicity up to \f$d + 1\f$ across the wrap.
+
+Both constructors throw `std::invalid_argument` if `degree` is outside \f$\{0, \dots, 10\}\f$, `lower` or `period` is non-finite, \f$\omega \le 0\f$, `lower + period` rounds to `lower`, or \f$K < d + 1\f$. In addition, `from_knots()` throws if `knots` is empty, has non-finite or decreasing entries, violates \f$t_{K-1} < t_0 + \omega\f$, or repeats a value more than \f$d + 1\f$ times across the wrap.
+
+### Reduction and row evaluation
+
+The member \ref laplace::basis::cyclic_bspline_basis::reduce "reduce()" uses \f$x \in [x_{\mathrm{lo}}, x_{\mathrm{hi}})\f$ as it is with \f$n = 0\f$. Otherwise it computes \f$u = x - x_{\mathrm{lo}}\f$ and \f$r = \operatorname{fmod}(u, \omega)\f$, which is exact in IEEE arithmetic, shifts negative \f$r\f$ up by \f$\omega\f$, and forms \f$y = x_{\mathrm{lo}} + r\f$. If \f$y\f$ rounds to \f$x_{\mathrm{hi}}\f$, it resets \f$y = x_{\mathrm{lo}}\f$ and increments \f$n\f$. Thus \f$x - x_{\mathrm{lo}} = n\omega + r\f$ with whole-number \f$n\f$ returned through the second argument, and the only roundings are those of \f$x - x_{\mathrm{lo}}\f$ and \f$x_{\mathrm{lo}} + r\f$.
+
+The row at \f$x\f$ is the row of the extended basis at \f$y\f$ via BSPLVB and BSPLVD (\ref basis_bspline). Its first column \f$f_e\f$ becomes \f$f = (f_e - d) \bmod K\f$, and value \f$i \in \{0, \dots, d\}\f$ belongs to column \f$(f + i) \bmod K\f$. The width is \f$d + 1\f$ (`row_width()`), and `scratch_size()` is \f$0\f$. Expansions \f$\sum_{j=0}^{K-1} \beta_j b_j^{(k)}(x)\f$ sum the row against \f$\beta_{(f + i) \bmod K}\f$.
+
+### Integrals from the lower boundary
+
+With \f$x - x_{\mathrm{lo}} = n\omega + r\f$,
+\f[
+\int_{x_{\mathrm{lo}}}^{x} b_j(t)\,\mathrm{d}t = n\,c_j + \int_{x_{\mathrm{lo}}}^{x_{\mathrm{lo}} + r} b_j(t)\,\mathrm{d}t,
+\qquad
+c_j = \frac{t_{j+d+1} - t_j}{d + 1},
+\f]
+where \f$c_j\f$ is the integral of \f$b_j\f$ over one period (\ref laplace::basis::cyclic_bspline_basis::integral_column_total "integral_column_total()") and \f$n < 0\f$ for \f$x < x_{\mathrm{lo}}\f$. The second term sums the integrals from \f$x_{\mathrm{lo}}\f$ to \f$y\f$ of the extended pieces of \f$b_j\f$. A piece ending before \f$y\f$ contributes its precomputed period total, while active pieces come from the extended integral window at \f$y\f$.
+
+The member \ref laplace::basis::cyclic_bspline_basis::integral_row "integral_row()" writes the \f$d + 1\f$ columns of the window in the same column order as `row()`. Unlike the ordinary B-spline basis, columns outside the window are not constants because every column grows by \f$c_j\f$ per period. Callers needing another column call \ref laplace::basis::cyclic_bspline_basis::integral_column "integral_column()", and \ref laplace::basis::cyclic_bspline_basis::integral_expansion "integral_expansion()" sums all \f$K\f$ columns against \f$\beta\f$.
+
+### Cross Gram matrices, penalties, Greville abscissae, and regularity points
+
+On the host, \ref laplace::basis::cyclic_bspline_basis::cross_gram "cross_gram()" writes \f$(G_{kl})_{ij} = \int_{x_{\mathrm{lo}}}^{x_{\mathrm{hi}}} b_i^{(k)}(x)\,b_j^{(l)}(x)\,\mathrm{d}x\f$ dense \f$K \times K\f$ and column-major (`out[i + j * K]`), as on \ref basis. It folds the extended basis's cross Gram matrix (\ref basis_bspline) by adding entry \f$(e, e')\f$ to \f$(c(e), c(e'))\f$, with \f$c(e) = (e - d) \bmod K\f$. For \f$K > 2d + 1\f$, the matrix is banded with semi-bandwidth \f$d\f$ plus wrapped corners, so `gram_bandwidth()` returns \f$K - 1\f$; equally spaced knots make it circulant.
+
+The function `operator_penalty()` of \ref basis_operator applies unchanged for operator orders \f$m \le d\f$. On periodic splines, the null space of \f$D^m\f$ is the constants.
+
+Host \ref laplace::basis::cyclic_bspline_basis::greville "greville()" writes \f$K\f$ abscissae \f$\xi_j = (t_{j+1} + \dots + t_{j+d}) / d\f$ for \f$d \ge 1\f$ and \f$(t_j + t_{j+1}) / 2\f$ for \f$d = 0\f$, reduced to \f$[x_{\mathrm{lo}}, x_{\mathrm{hi}})\f$. Host \ref laplace::basis::cyclic_bspline_basis::regularity_points "regularity_points()" returns every distinct knot of one period, including \f$x_{\mathrm{lo}}\f$, with continuity \f$d - \mu\f$ as a vector of \ref laplace::basis::bspline_regularity_point "bspline_regularity_point".
+
+## Accuracy
+
+See \ref accuracy "How accuracy is measured" for error definitions. Exact rational references (`fractions.Fraction`, `tools/reference/basis_cyclic_bspline.py`, rounded to nearest double at the end) evaluate Cox-de Boor and derivative recursions at unreduced \f$x\f$ on the bi-infinite sequence \f$T_e = t_{e \bmod K} + \lfloor e/K \rfloor \omega\f$. Integrals and Gram matrices come from exact integration of the polynomial pieces, without reducing \f$x\f$ or folding an extended basis. The 47 knot configurations cover \f$d \in \{0, 1, 2, 3, 5, 10\}\f$ (uniform, random, and multiple knots inside the period and at \f$x_{\mathrm{lo}}\f$). Evaluation points lie up to two periods below and three above \f$x_{\mathrm{lo}}\f$, on the knots and one ulp away.
+
+As on \ref basis_bspline, errors are in ulp of the row's largest value for rows, of the largest total for integrals and totals, and of the largest entry for Gram matrices. The table shows the worst error over gcc/OpenMP and CUDA (RTX 4070 SUPER) alongside the bounds of `tests/basis/test_cyclic_bspline.cpp`:
+
+| Quantity | Max, \f$d \le 5\f$ | Max, \f$d = 10\f$ | Test bound, \f$d \le 5\f$ | Test bound, \f$d = 10\f$ |
+|---|---|---|---|---|
+| Rows, orders 0 to \f$\min(d, 6)\f$ | 8 ulp | 11 ulp | 12 ulp | 17 ulp |
+| Integrals from lower | 6 ulp | 6 ulp | 9 ulp | 9 ulp |
+| Column totals | 3 ulp | 3 ulp | 9 ulp | 9 ulp |
+| Cross Gram matrices | 8 ulp | 9 ulp | 12 ulp | 14 ulp |
+
+The tests also verify continuity of orders \f$0, \dots, d - \mu\f$ across \f$x_{\mathrm{lo}}\f$, positive definiteness of \f$G_{00}\f$, and expansions against rows. They further check that `integral_row()` and `integral_column()` agree bit for bit, that adding one period to \f$x\f$ adds \f$c_j\f$ to every column, and that `operator_penalty()` of \f$D^2\f$ equals \f$G_{22}\f$ while \f$D^4\f$ on a cubic basis throws. See `docs/numerics.md`.
+
+## Speed
+
+Speed is measured for a cubic basis with \f$n = 10^6\f$ points and \f$K \in \{10, 40, 200\}\f$, relative to the ordinary B-spline basis with the same knots on one period. On points already in one period, evaluation costs 1.1 to 1.2 times on the CPU (one thread and OpenMP) and 1.02 to 1.04 times on CUDA. Points spread over several periods cost 1.3 to 1.9 times on the CPU and 1.1 to 1.2 times on CUDA, the cost of the reduction. Integral rows cost 1.06 to 1.9 times on the CPU and 1.1 to 1.3 times on CUDA.
+
+## Example
+
+This example builds a cubic uniform cyclic basis with period 365.25 days and evaluates rows in a Kokkos kernel:
+
+\code{.cpp}
+#include <laplace/basis/cyclic_bspline.hpp>
+#include <Kokkos_Core.hpp>
+
+void eval_cyclic_bspline(const Kokkos::View<const double*>& x,
+                         Kokkos::View<int*>& first,
+                         Kokkos::View<double**, Kokkos::LayoutRight>& values,
+                         int n) {
+  constexpr int dim = 12;
+  constexpr int degree = 3;
+  constexpr int w = degree + 1;
+
+  const auto owner = laplace::basis::cyclic_bspline_basis_owner::uniform(
+      0.0, 365.25, dim, degree);
+  const laplace::basis::cyclic_bspline_basis basis = owner.device();
+
+  Kokkos::parallel_for("eval_cyclic_bspline", n, KOKKOS_LAMBDA(const int i) {
+    double row_val[w];
+    first(i) = basis.row(x(i), row_val);
+    for (int q = 0; q < w; ++q) {
+      values(i, q) = row_val[q];  // value q belongs to column (first(i) + q) % 12
+    }
+  });
+}
+\endcode
+
+## Module functions and types
+
+### Types
+
+- \ref laplace::basis::cyclic_bspline_basis "cyclic_bspline_basis" — Lightweight evaluation view
+- \ref laplace::basis::cyclic_bspline_basis_owner "cyclic_bspline_basis_owner" — Host and device knot owner
+
+### Member functions of cyclic bspline basis
+
+- \ref laplace::basis::cyclic_bspline_basis::dimension "dimension()" — Basis dimension \f$K\f$
+- \ref laplace::basis::cyclic_bspline_basis::row_width "row_width()" — Active row width \f$w = d + 1\f$
+- \ref laplace::basis::cyclic_bspline_basis::scratch_size "scratch_size()" — Caller scratch size (0)
+- \ref laplace::basis::cyclic_bspline_basis::gram_bandwidth "gram_bandwidth()" — Cross Gram semi-bandwidth \f$K - 1\f$
+- \ref laplace::basis::cyclic_bspline_basis::row "row()" — Basis row, order 0
+- \ref laplace::basis::cyclic_bspline_basis::row_d1 "row_d1()" — First-derivative row
+- \ref laplace::basis::cyclic_bspline_basis::row_d2 "row_d2()" — Second-derivative row
+- \ref laplace::basis::cyclic_bspline_basis::row_d3 "row_d3()" — Third-derivative row
+- \ref laplace::basis::cyclic_bspline_basis::row_d4 "row_d4()" — Fourth-derivative row
+- \ref laplace::basis::cyclic_bspline_basis::row_d5 "row_d5()" — Fifth-derivative row
+- \ref laplace::basis::cyclic_bspline_basis::row_d6 "row_d6()" — Sixth-derivative row
+- \ref laplace::basis::cyclic_bspline_basis::expansion "expansion()" — Linear expansion \f$\sum \beta_j b_j(x)\f$
+- \ref laplace::basis::cyclic_bspline_basis::expansion_d1 "expansion_d1()" — First-derivative expansion
+- \ref laplace::basis::cyclic_bspline_basis::expansion_d2 "expansion_d2()" — Second-derivative expansion
+- \ref laplace::basis::cyclic_bspline_basis::expansion_d3 "expansion_d3()" — Third-derivative expansion
+- \ref laplace::basis::cyclic_bspline_basis::expansion_d4 "expansion_d4()" — Fourth-derivative expansion
+- \ref laplace::basis::cyclic_bspline_basis::expansion_d5 "expansion_d5()" — Fifth-derivative expansion
+- \ref laplace::basis::cyclic_bspline_basis::expansion_d6 "expansion_d6()" — Sixth-derivative expansion
+- \ref laplace::basis::cyclic_bspline_basis::integral_row "integral_row()" — Active window of integrals from \f$x_{\mathrm{lo}}\f$
+- \ref laplace::basis::cyclic_bspline_basis::integral_column "integral_column()" — Integral from \f$x_{\mathrm{lo}}\f$ for column \f$j\f$
+- \ref laplace::basis::cyclic_bspline_basis::integral_expansion "integral_expansion()" — Integrated expansion from \f$x_{\mathrm{lo}}\f$
+- \ref laplace::basis::cyclic_bspline_basis::integral_column_total "integral_column_total()" — Full-period integral \f$c_j\f$
+- \ref laplace::basis::cyclic_bspline_basis::reduce "reduce()" — Period reduction to \f$[x_{\mathrm{lo}}, x_{\mathrm{hi}})\f$
+- \ref laplace::basis::cyclic_bspline_basis::cross_gram "cross_gram()" — Cross Gram matrix \f$G_{kl}\f$
+- \ref laplace::basis::cyclic_bspline_basis::greville "greville()" — Reduced Greville abscissae
+- \ref laplace::basis::cyclic_bspline_basis::regularity_points "regularity_points()" — Reduced-continuity points
+
+### Data members of cyclic bspline basis
+
+- \ref laplace::basis::cyclic_bspline_basis::degree "degree" — Polynomial degree \f$d\f$
+- \ref laplace::basis::cyclic_bspline_basis::dim "dim" — Total number of basis functions \f$K\f$
+- \ref laplace::basis::cyclic_bspline_basis::lower "lower" — Lower boundary of one period \f$x_{\mathrm{lo}} = t_0\f$
+- \ref laplace::basis::cyclic_bspline_basis::upper "upper" — Upper boundary of one period \f$x_{\mathrm{hi}} = x_{\mathrm{lo}} + \omega\f$
+- \ref laplace::basis::cyclic_bspline_basis::period "period" — Fundamental period \f$\omega\f$
+
+### Member functions of cyclic bspline basis owner
+
+- \ref laplace::basis::cyclic_bspline_basis_owner::uniform "cyclic_bspline_basis_owner::uniform()" — Uniform knot constructor
+- \ref laplace::basis::cyclic_bspline_basis_owner::from_knots "cyclic_bspline_basis_owner::from_knots()" — General knot-vector constructor
+- \ref laplace::basis::cyclic_bspline_basis_owner::host "host()" — Host evaluation view
+- \ref laplace::basis::cyclic_bspline_basis_owner::device "device()" — Device evaluation view
+- \ref laplace::basis::cyclic_bspline_basis_owner::knots "knots()" — Knots of one period
+*/
