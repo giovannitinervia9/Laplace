@@ -53,6 +53,10 @@ set(LAPLACE_TEST_SOURCES
   pdmat/test_pilot.cpp
   pdmat/test_unstructured.cpp
   pdmat/test_unit_diagonal_scaled.cpp
+  basis/test_bspline.cpp
+  basis/test_fourier.cpp
+  basis/test_legendre.cpp
+  basis/test_operator.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

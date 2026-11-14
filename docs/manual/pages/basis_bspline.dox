@@ -1,0 +1,374 @@
+/**
+\defgroup basis_bspline B-spline bases
+\ingroup basis
+\brief Complete B-spline basis with analytical derivatives to order 6, integrals from the lower boundary, and cross Gram matrices.
+
+Functions in this module marked `LAPLACE_HD` can be called on the host and inside Kokkos kernels on the device. Constructors, cross Gram matrix generation, Greville abscissae and regularity points execute on the host.
+
+## Mathematical definition
+
+A B-spline basis of polynomial degree \f$d\f$ (with \f$0 \le d \le 10\f$, bounded by \ref laplace::basis::bspline_max_degree "bspline_max_degree") and dimension \f$K \ge d + 1\f$ is defined by a non-decreasing knot vector:
+\f[
+t_0 \le t_1 \le \dots \le t_{K+d}
+\f]
+containing \f$K + d + 1\f$ real knots. The domain of the basis is:
+\f[
+[\text{lower}, \text{upper}] = [t_d, t_K]
+\f]
+On this domain, the \f$K\f$ B-spline basis functions \f$B_0(x), \dots, B_{K-1}(x)\f$ form a partition of unity:
+\f[
+\sum_{j=0}^{K-1} B_j(x) = 1 \quad \text{for all } x \in [t_d, t_K]
+\f]
+The basis functions are defined recursively through the Cox-de Boor recursion. For an evaluation point \f$x \in [t_d, t_K]\f$, let \f$s\f$ be the knot interval index such that \f$t_s \le x < t_{s+1}\f$. At the right boundary \f$x = t_K\f$, the convention assigns \f$x\f$ to the last active interval \f$s = K - 1\f$: the basis is right-continuous on the domain, with left limits at \f$\text{upper}\f$.
+
+The degree-0 basis functions are defined by:
+\f[
+B_{i, 0}(x) = \begin{cases} 1 & \text{if } i = s, \\ 0 & \text{otherwise}. \end{cases}
+\f]
+For degrees \f$p = 1, \dots, d\f$, the recursion defines:
+\f[
+B_{i, p}(x) = \frac{x - t_i}{t_{i+p} - t_i} B_{i, p-1}(x) + \frac{t_{i+p+1} - x}{t_{i+p+1} - t_{i+1}} B_{i+1, p-1}(x)
+\f]
+where any term with a vanishing denominator \f$t_{i+p} = t_i\f$ or \f$t_{i+p+1} = t_{i+1}\f$ is treated as zero. The basis functions of the basis are the functions of degree \f$d\f$:
+\f[
+B_j(x) = B_{j, d}(x), \quad j = 0, \dots, K - 1
+\f]
+
+### Knot multiplicity and continuity
+
+A knot value may appear at most \f$d + 1\f$ times in the knot vector. At an interior knot of multiplicity \f$\mu\f$, the spline is \f$C^{d - \mu}\f$ smooth:
+- \f$\mu = 1\f$: simple knot, \f$C^{d-1}\f$ continuity.
+- \f$\mu = d\f$: \f$C^0\f$ continuity (continuous, with discontinuous first derivative).
+- \f$\mu = d + 1\f$: \f$C^{-1}\f$ continuity, representing a step discontinuity (jump).
+
+### Row representation
+
+At any evaluation point \f$x \in [t_d, t_K]\f$, at most \f$d + 1\f$ basis functions are non-zero:
+\f[
+B_{s-d, d}(x), \dots, B_{s, d}(x)
+\f]
+The row representation (see \ref basis) writes these \f$w = d + 1\f$ non-zero values into a contiguous caller-provided buffer of width \f$w\f$ (`row_width()`), returning the 0-based index of the first active column:
+\f[
+f = s - d
+\f]
+
+## Knot arrangements and constructors
+
+The class \ref laplace::basis::bspline_basis_owner "bspline_basis_owner" provides four static constructors corresponding to standard knot arrangements:
+
+- **Uniform clamped.** \ref laplace::basis::bspline_basis_owner::uniform_clamped "bspline_basis_owner::uniform_clamped(lower, upper, dim, degree, outside)":
+  Constructs \f$K\f$ functions on \f$[\text{lower}, \text{upper}]\f$ with interior knots equally spaced with step:
+  \f[
+  h = \frac{\text{upper} - \text{lower}}{K - d}
+  \f]
+  and the endpoints repeated \f$d + 1\f$ times:
+  \f[
+  t_0 = \dots = t_d = \text{lower}, \quad t_{d+q} = \text{lower} + q h \quad (q = 1, \dots, K - d - 1), \quad t_K = \dots = t_{K+d} = \text{upper}
+  \f]
+- **Uniform extended.** \ref laplace::basis::bspline_basis_owner::uniform_extended "bspline_basis_owner::uniform_extended(lower, upper, dim, degree, outside)":
+  Constructs \f$K\f$ functions on \f$[\text{lower}, \text{upper}]\f$ where all knots are equally spaced with step:
+  \f[
+  h = \frac{\text{upper} - \text{lower}}{K - d}
+  \f]
+  extending \f$d\f$ steps beyond each end (the parametrization of Eilers and Marx):
+  \f[
+  t_j = \text{lower} + (j - d) h \quad (j = 0, \dots, K - 1), \quad t_j = \text{upper} + (j - K) h \quad (j = K, \dots, K + d)
+  \f]
+  with \f$t_d = \text{lower}\f$ and \f$t_K = \text{upper}\f$. Under this arrangement, every basis function is a spatial translate of a single cardinal B-spline.
+- **Clamped.** \ref laplace::basis::bspline_basis_owner::clamped "bspline_basis_owner::clamped(lower, upper, interior, degree, outside)":
+  Accepts a user-supplied vector of interior knots strictly inside \f$(\text{lower}, \text{upper})\f$ in non-decreasing order (multiplicities up to \f$d + 1\f$ allowed) and repeats \f$\text{lower}\f$ and \f$\text{upper}\f$ each \f$d + 1\f$ times at the boundaries.
+- **From knot vector.** \ref laplace::basis::bspline_basis_owner::from_knots "bspline_basis_owner::from_knots(knots, degree, outside)":
+  Constructs the basis from a complete non-decreasing knot vector \f$t_0, \dots, t_{K+d}\f$. The domain is \f$[t_d, t_K]\f$.
+
+### Sample quantiles as knots
+
+The standalone function \ref laplace::basis::quantile_knots "quantile_knots(x, m)" computes \f$m\f$ interior knots placed at sample quantiles:
+\f[
+\frac{j}{m + 1}, \quad j = 1, \dots, m
+\f]
+of a sample vector \f$x\f$ using R's type-7 quantile definition (linear interpolation between order statistics). For a sorted sample \f$x\f$ of size \f$n\f$, let \f$h = (n - 1) j / (m + 1)\f$, \f$lo = \lfloor h \rfloor\f$, and \f$hi = \min(lo + 1, n - 1)\f$:
+\f[
+t_j = x_{lo} + (h - lo)(x_{hi} - x_{lo})
+\f]
+The function throws `std::invalid_argument` if \f$m < 0\f$, if \f$x\f$ is empty or contains non-finite values, if two knots coincide, or if any knot falls on \f$\min(x)\f$ or \f$\max(x)\f$ due to sample ties.
+
+## Evaluation method
+
+### Interval search
+
+For equally spaced knots (when step \f$h > 0\f$ in uniform clamped or uniform extended configurations), the knot interval index \f$s\f$ containing \f$x\f$ is found in \f$O(1)\f$ arithmetic:
+\f[
+s = d + \left\lfloor \frac{x - \text{lower}}{h} \right\rfloor
+\f]
+clamped to \f$[d, K - 1]\f$, and corrected against neighbouring knots \f$t_s\f$ and \f$t_{s+1}\f$ (decrementing \f$s\f$ if \f$x < t_s\f$, incrementing \f$s\f$ if \f$x \ge t_{s+1}\f$). This correction handles cases where floating-point rounding sends points on a knot or one ulp from it to the adjacent interval.
+
+For non-uniform knots (step equals 0), \ref laplace::basis::bspline_basis::interval "interval(x)" performs a binary search to find the largest index \f$s \in [d, K - 1]\f$ such that \f$t_s \le x\f$.
+
+### Values and derivatives
+
+The \f$d + 1\f$ non-zero basis values \f$B_{s-d, d}(x), \dots, B_{s, d}(x)\f$ are evaluated using de Boor's BSPLVB recurrence, building polynomial pieces upward in degree from \f$0\f$ to \f$d\f$.
+
+Derivatives of orders \f$k \in \{1, \dots, 6\}\f$ are evaluated by first computing the basis values of reduced degree \f$d - k\f$ with BSPLVB, followed by \f$k\f$ steps of the differentiation recursion:
+\f[
+\frac{\mathrm{d}}{\mathrm{d}x} B_{i, p}(x) = p \left( \frac{B_{i, p-1}(x)}{t_{i+p} - t_i} - \frac{B_{i+1, p-1}(x)}{t_{i+p+1} - t_{i+1}} \right)
+\f]
+where terms with empty support (vanishing denominator) are zero. For derivative orders \f$k > d\f$, the derivatives are identically zero.
+
+Linear expansions \f$\sum_{j=0}^{K-1} \beta_j B_j^{(k)}(x)\f$ are evaluated by accumulating the inner product of the active slice of coefficients with the evaluated row.
+
+### Integral from the lower boundary
+
+Column integrals from \f$\text{lower}\f$ to \f$x\f$, \f$\int_{\text{lower}}^x B_j(t) \, \mathrm{d}t\f$, are evaluated by \ref laplace::basis::bspline_basis::integral_row "integral_row(x, out)".
+
+For \f$x\f$ in interval \f$s\f$, `integral_row` writes a window of \f$d + 1\f$ values for columns \f$j = s - d, \dots, s\f$ into \c out, using B-splines of degree \f$d + 1\f$:
+\f[
+\int_{t_j}^x B_{j, d}(t) \, \mathrm{d}t = \frac{t_{j+d+1} - t_j}{d + 1} \sum_{i=j}^s B_{i, d+1}(x) - \int_{t_j}^{\text{lower}} B_{j, d}(t) \, \mathrm{d}t
+\f]
+The subtraction removes the portion before \f$\text{lower}\f$, which is non-zero only when knots lie below \f$\text{lower}\f$ (as in uniform extended knots).
+
+The columns outside the active window \f$[s - d, s]\f$ follow from the compact support of B-splines:
+- Columns \f$j < s - d\f$ precede the window. Their support lies entirely to the left of interval \f$s\f$; their integral from \f$\text{lower}\f$ to \f$x\f$ equals their total integral over the domain:
+\f[
+\int_{\text{lower}}^{\text{upper}} B_j(t) \, \mathrm{d}t
+\f]
+which is queried by \ref laplace::basis::bspline_basis::integral_column_total "integral_column_total(j)".
+- Columns \f$j > s\f$ succeed the window. Their support begins to the right of \f$x\f$; their integral from \f$\text{lower}\f$ to \f$x\f$ is zero.
+
+To reconstruct the full \f$K\f$-dimensional row of integrals:
+1. Set columns \f$j \in \{0, \dots, f - 1\}\f$ to `integral_column_total(j)`, where \f$f = s - d\f$ is the first active column returned by `integral_row`.
+2. Set columns \f$j \in \{f, \dots, f + d\}\f$ to `out[j - f]`.
+3. Set columns \f$j \in \{f + d + 1, \dots, K - 1\}\f$ to 0.
+
+The integrated linear expansion:
+\f[
+\sum_{j=0}^{K-1} \beta_j \int_{\text{lower}}^x B_j(t) \, \mathrm{d}t
+\f]
+is evaluated directly by \ref laplace::basis::bspline_basis::integral_expansion "integral_expansion(x, beta)".
+
+### Cross Gram matrices
+
+The cross Gram matrix \f$G_{kl}\f$ between derivative orders \f$k\f$ and \f$l\f$ is defined by:
+\f[
+(G_{kl})_{ij} = \int_{\text{lower}}^{\text{upper}} B_i^{(k)}(x) B_j^{(l)}(x) \, \mathrm{d}x
+\f]
+and is evaluated on the host by \ref laplace::basis::bspline_basis::cross_gram "cross_gram(k, l, out)".
+
+Integration is performed by 16-node Gauss-Legendre quadrature on each knot interval \f$[t_s, t_{s+1}]\f$ for \f$s = d, \dots, K - 1\f$. On each interval, the integrand \f$B_i^{(k)}(x) B_j^{(l)}(x)\f$ is a polynomial of degree at most \f$2d - k - l \le 2d \le 20\f$. A 16-node Gauss-Legendre rule integrates polynomials up to degree 31 exactly, ensuring exact quadrature for all supported degrees \f$d \le 10\f$.
+
+Quadrature nodes are evaluated in the interval's local coordinate:
+\f[
+u = x - t_s
+\f]
+rather than in the global coordinate \f$x\f$. This avoids loss of relative precision on narrow knot intervals or on domains shifted far from zero.
+
+The matrix is written dense \f$K \times K\f$ in column-major order: `out[i + j * K]` contains entry \f$(G_{kl})_{ij}\f$. The semi-bandwidth returned by \ref laplace::basis::bspline_basis::gram_bandwidth "gram_bandwidth()" is \f$d\f$, because \f$B_i\f$ and \f$B_j\f$ have overlapping support only when \f$|i - j| \le d\f$. For derivative orders \f$k > d\f$ or \f$l > d\f$, the cross Gram matrix is identically zero.
+
+### Greville abscissae
+
+The Greville abscissae are evaluated by \ref laplace::basis::bspline_basis::greville "greville(out)":
+\f[
+\xi_j = \frac{1}{d} \sum_{i=1}^d t_{j+i} \quad (d \ge 1)
+\f]
+and for \f$d = 0\f$, the midpoint of the support:
+\f[
+\xi_j = \frac{t_j + t_{j+1}}{2}
+\f]
+For \f$d \ge 1\f$ the \f$K\f$ values \f$\xi_0, \dots, \xi_{K-1}\f$ satisfy linear precision:
+\f[
+\sum_{j=0}^{K-1} \xi_j B_j(x) = x \quad \text{for all } x \in [t_d, t_K]
+\f]
+
+### Regularity points
+
+The member function \ref laplace::basis::bspline_basis::regularity_points "regularity_points()" returns a vector of \ref laplace::basis::bspline_regularity_point "bspline_regularity_point" entries listing every distinct interior knot together with its continuity order:
+\f[
+c = d - \mu
+\f]
+where \f$\mu\f$ is the multiplicity of the knot.
+
+Under the default linear outside domain rule (\ref laplace::basis::outside_domain_rule "outside_domain_rule::linear") and when \f$d \ge 2\f$, the two domain endpoints \f$\text{lower}\f$ and \f$\text{upper}\f$ are also included with continuity \f$1\f$ (\f$C^1\f$), because linear extrapolation causes the second derivative to jump to zero at the boundary.
+
+## Boundary rules
+
+Outside the domain \f$[\text{lower}, \text{upper}]\f$, evaluation follows the basis's configured \ref laplace::basis::outside_domain_rule "outside_domain_rule":
+- `outside_domain_rule::nan`: writes NaN for evaluation points beyond a tolerance of \f$10^{-8} (\text{upper} - \text{lower})\f$ from the domain boundaries. Within that tolerance, it evaluates the polynomial piece of the nearer endpoint.
+- `outside_domain_rule::linear` (the default): evaluates linear extrapolation from the nearer endpoint \f$e\f$ (\f$e = \text{lower}\f$ for \f$x < \text{lower}\f$, and \f$e = \text{upper}\f$ for \f$x > \text{upper}\f$):
+\f[
+f(x) = f(e) + f'(e)(x - e)
+\f]
+Derivative order 1 is constant \f$f'(e)\f$, derivative orders 2 and above are 0, and the integral is:
+\f[
+I(x) = I(e) + f(e)(x - e) + \frac{1}{2} f'(e)(x - e)^2
+\f]
+- `outside_domain_rule::polynomial`: continues the polynomial piece of the nearer endpoint into the exterior.
+
+## Storage and lifetime
+
+The library separates basis parameter storage from basis evaluation views:
+- \ref laplace::basis::bspline_basis "bspline_basis" is a lightweight view struct holding scalar parameters (`degree`, `dim`, `lower`, `upper`, `step`, `outside`) and a raw pointer `knots` to \f$K + d + 1\f$ knot values. It is designed to be copied by value into Kokkos device kernels.
+- \ref laplace::basis::bspline_basis_owner "bspline_basis_owner" manages memory storage of the knots on both the host (in `std::vector<double>`) and the device execution space's memory space (in `Kokkos::View<double*, device_memory>`).
+- Calling `owner.host()` returns a `bspline_basis` struct pointing to host memory.
+- Calling `owner.device()` returns a `bspline_basis` struct pointing to device memory.
+- Both `host()` and `device()` are ref-qualified with `const&`, and their rvalue overloads `const&&` are deleted (`= delete`). Neither can be invoked on a temporary owner, preventing dangling pointers.
+
+## Measured accuracy
+
+See \ref accuracy "How accuracy is measured" for definitions of error measures and reference generation.
+
+Reference values are computed in exact rational arithmetic (`fractions.Fraction`) from the Cox-de Boor definition and the derivative formula (`tools/reference/basis_bspline.py`). Integrals and cross Gram matrices are generated by exact integration of the polynomial pieces expanded in local coordinates \f$x - t_s\f$, independently of the integral formula implemented in the library. A SymPy check (`bspline_basis_set`) confirms values and derivatives.
+
+Measurements cover 42 knot configurations across degrees \f$d \in \{0, 1, 2, 3, 5, 10\}\f$: uniform clamped and extended, random knots, interior multiplicities \f$\mu \in \{2, \dots, d + 1\}\f$, an interval of width \f$10^{-12}\f$, and the domain \f$[1000, 1001]\f$, evaluated at random points, points on knots, and points one ulp away from knots.
+
+### Measured error across knot configurations
+
+Measured maximum errors in units in the last place (ulp) on gcc/OpenMP and on CUDA (RTX 4070 SUPER):
+
+| Quantity | \f$d \le 5\f$ | \f$d = 10\f$ |
+|---|---|---|
+| Rows, orders 0 to 6 | 7 ulp | 19 ulp |
+| Integrals and totals | 3 ulp | 4.7 ulp |
+| Gram matrices | 6 ulp | 6 ulp |
+
+Row errors are measured in ulp of the row's largest value; integrals and totals in ulp of the largest column total; Gram entries in ulp of the largest entry. The same bounds hold on CUDA.
+
+### Automated test bounds
+
+The automated regression test suite (`tests/basis/test_bspline.cpp`) checks computed quantities against exact rational references with the following bounds:
+
+| Quantity | Bound for \f$d \le 5\f$ | Bound for \f$d = 10\f$ |
+|---|---|---|
+| Rows, orders 0 to 6 | 12.0 ulp | 32.0 ulp |
+| Integrals and column totals | 8.0 ulp | 12.0 ulp |
+| Gram matrices | 12.0 ulp | 12.0 ulp |
+
+## Speed
+
+### Execution time comparisons
+
+Evaluation speed was measured in `benchmarks/basis_bspline.cpp` for a cubic B-spline basis (\f$d = 3\f$) with uniform clamped knots on \f$[0, 1]\f$, evaluating \f$n = 10^6\f$ points. Execution time is reported in milliseconds, compared with R 4.6.0 packages `splines2` 0.5.4 (`splines2::bSpline`) and `splines` (`splines::splineDesign`):
+
+| Evaluation mode (\f$n = 10^6\f$, values) | \f$K = 10\f$ | \f$K = 40\f$ |
+|---|---|---|
+| `splines2::bSpline` | 107 ms | 412 ms |
+| `splines::splineDesign` | 141 ms | 216 ms |
+| Laplace dense, one thread | 22.2 ms | 20.7 ms |
+| Laplace sparse, one thread | 18.8 ms | 15.8 ms |
+| Laplace sparse, 16 threads | 2.7 ms | 2.7 ms |
+| Laplace dense, CUDA | 0.38 ms | 2.0 ms |
+| Laplace sparse, CUDA | 0.37 ms | 0.37 ms |
+
+Row definitions:
+- `splines2::bSpline` and `splines::splineDesign` allocate and populate a dense \f$n \times K\f$ matrix at every call.
+- "Laplace dense" evaluates rows into a preallocated dense \f$n \times K\f$ matrix.
+- "Laplace sparse" evaluates sparse rows of width \f$w = d + 1 = 4\f$, writing only non-zero values into contiguous buffers.
+- Backends: one CPU thread (gcc), 16 CPU threads with OpenMP, and CUDA on an NVIDIA RTX 4070 SUPER.
+
+The second derivative and the integral cost 1.1 to 2.0 times the values in both dense and sparse modes. At \f$n = 10^5\f$ and \f$K = 200\f$, `splines2` takes 167 ms, `splineDesign` takes 53 ms, Laplace dense takes 7.1 ms on one thread, and Laplace sparse takes 1.6 ms on one thread and 0.044 ms on CUDA.
+
+The sparse row representation makes evaluation cost per row independent of the basis dimension \f$K\f$; a dense output is limited by the writing of zeros, on the GPU above all.
+
+## Host evaluation example
+
+The following host example constructs a cubic B-spline basis with uniform clamped knots on \f$[0, 1]\f$, evaluates a row of values and second derivatives at \f$x = 0.4\f$, and computes the cross Gram matrix of second derivatives:
+
+\code{.cpp}
+#include <laplace/basis/bspline.hpp>
+#include <iostream>
+
+void example_bspline_host() {
+  constexpr int dim = 8;
+  constexpr int degree = 3;
+  constexpr double lower = 0.0;
+  constexpr double upper = 1.0;
+
+  // Build a B-spline owner with uniform clamped knots
+  const auto owner = laplace::basis::bspline_basis_owner::uniform_clamped(
+      lower, upper, dim, degree);
+  const laplace::basis::bspline_basis basis = owner.host();
+
+  // Evaluate the basis row of order 0 at point x = 0.4
+  constexpr int w = degree + 1;
+  double values[w];
+  const int first_col = basis.row(0.4, values);
+
+  // Evaluate the basis row of second derivatives at point x = 0.4
+  double d2_values[w];
+  const int first_col_d2 = basis.row_d2(0.4, d2_values);
+
+  // Compute the cross Gram matrix of second derivatives G_22
+  constexpr int gram_size = dim * dim;
+  double gram_matrix[gram_size];
+  basis.cross_gram(2, 2, gram_matrix);
+
+  std::cout << "First active column: " << first_col << "\n";
+  std::cout << "Active B-spline values at 0.4: ";
+  for (int q = 0; q < w; ++q) std::cout << values[q] << " ";
+  std::cout << "\n";
+  std::cout << "Second derivatives at 0.4: ";
+  for (int q = 0; q < w; ++q) std::cout << d2_values[q] << " ";
+  std::cout << "\n";
+  std::cout << "G_22(0, 0): " << gram_matrix[0] << "\n";
+}
+\endcode
+
+## Module functions and types
+
+### Types and constants
+
+- \ref laplace::basis::bspline_max_degree "bspline_max_degree" — Maximum supported polynomial degree (\f$d_{\max} = 10\f$)
+- \ref laplace::basis::bspline_regularity_point "bspline_regularity_point" — Point of reduced continuity \f$C^c\f$
+- \ref laplace::basis::bspline_basis "bspline_basis" — Lightweight B-spline evaluation view struct
+- \ref laplace::basis::bspline_basis_owner "bspline_basis_owner" — Memory owner for knot vectors on host and device
+
+### Member functions of bspline basis
+
+- \ref laplace::basis::bspline_basis::dimension "dimension()" — Total number of basis functions \f$K\f$
+- \ref laplace::basis::bspline_basis::row_width "row_width()" — Number of non-zero basis functions in a row (\f$w = d + 1\f$)
+- \ref laplace::basis::bspline_basis::scratch_size "scratch_size()" — Scratch buffer size needed for evaluation (0)
+- \ref laplace::basis::bspline_basis::gram_bandwidth "gram_bandwidth()" — Semi-bandwidth of cross Gram matrices (\f$d\f$)
+- \ref laplace::basis::bspline_basis::row "row()" — Evaluates basis row at order 0
+- \ref laplace::basis::bspline_basis::row_d1 "row_d1()" — Evaluates basis row at derivative order 1
+- \ref laplace::basis::bspline_basis::row_d2 "row_d2()" — Evaluates basis row at derivative order 2
+- \ref laplace::basis::bspline_basis::row_d3 "row_d3()" — Evaluates basis row at derivative order 3
+- \ref laplace::basis::bspline_basis::row_d4 "row_d4()" — Evaluates basis row at derivative order 4
+- \ref laplace::basis::bspline_basis::row_d5 "row_d5()" — Evaluates basis row at derivative order 5
+- \ref laplace::basis::bspline_basis::row_d6 "row_d6()" — Evaluates basis row at derivative order 6
+- \ref laplace::basis::bspline_basis::expansion "expansion()" — Evaluates linear expansion \f$\sum \beta_j B_j(x)\f$
+- \ref laplace::basis::bspline_basis::expansion_d1 "expansion_d1()" — Evaluates expansion at derivative order 1
+- \ref laplace::basis::bspline_basis::expansion_d2 "expansion_d2()" — Evaluates expansion at derivative order 2
+- \ref laplace::basis::bspline_basis::expansion_d3 "expansion_d3()" — Evaluates expansion at derivative order 3
+- \ref laplace::basis::bspline_basis::expansion_d4 "expansion_d4()" — Evaluates expansion at derivative order 4
+- \ref laplace::basis::bspline_basis::expansion_d5 "expansion_d5()" — Evaluates expansion at derivative order 5
+- \ref laplace::basis::bspline_basis::expansion_d6 "expansion_d6()" — Evaluates expansion at derivative order 6
+- \ref laplace::basis::bspline_basis::integral_row "integral_row()" — Evaluates active window of column integrals from lower boundary
+- \ref laplace::basis::bspline_basis::integral_column_total "integral_column_total()" — Evaluates total integral of a column over the domain
+- \ref laplace::basis::bspline_basis::integral_expansion "integral_expansion()" — Evaluates integrated linear expansion from lower boundary
+- \ref laplace::basis::bspline_basis::interval "interval()" — Finds knot interval index \f$s\f$ containing \f$x\f$
+- \ref laplace::basis::bspline_basis::cross_gram "cross_gram()" — Evaluates cross Gram matrix \f$G_{kl}\f$
+- \ref laplace::basis::bspline_basis::greville "greville()" — Computes Greville abscissae
+- \ref laplace::basis::bspline_basis::regularity_points "regularity_points()" — Returns points of reduced continuity
+
+### Data members of bspline basis
+
+- \ref laplace::basis::bspline_basis::knots "knots" — Pointer to knot vector in memory space of caller
+- \ref laplace::basis::bspline_basis::degree "degree" — Polynomial degree \f$d\f$
+- \ref laplace::basis::bspline_basis::dim "dim" — Total number of basis functions \f$K\f$
+- \ref laplace::basis::bspline_basis::lower "lower" — Lower domain boundary \f$t_d\f$
+- `upper` — Upper domain boundary \f$t_K\f$
+- \ref laplace::basis::bspline_basis::step "step" — Knot step \f$h > 0\f$ for equally spaced knots (0 otherwise)
+- \ref laplace::basis::bspline_basis::outside "outside" — Outside domain evaluation rule
+
+### Member functions of bspline basis owner
+
+- \ref laplace::basis::bspline_basis_owner::uniform_clamped "bspline_basis_owner::uniform_clamped()" — Constructs uniform clamped basis
+- \ref laplace::basis::bspline_basis_owner::uniform_extended "bspline_basis_owner::uniform_extended()" — Constructs uniform extended basis
+- \ref laplace::basis::bspline_basis_owner::clamped "bspline_basis_owner::clamped()" — Constructs clamped basis with given interior knots
+- \ref laplace::basis::bspline_basis_owner::from_knots "bspline_basis_owner::from_knots()" — Constructs basis from full knot vector
+- \ref laplace::basis::bspline_basis_owner::host "host()" — Returns evaluation view on host memory
+- \ref laplace::basis::bspline_basis_owner::device "device()" — Returns evaluation view on device memory
+- \ref laplace::basis::bspline_basis_owner::knots "knots()" — Returns const reference to host knots vector
+
+### Standalone functions
+
+- \ref laplace::basis::quantile_knots "quantile_knots()" — Computes interior knots at sample quantiles (R type 7)
+*/

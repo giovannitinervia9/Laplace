@@ -4233,3 +4233,221 @@ mu = 1e4 and sigma^2 = 1, and by the comparison of the information above.
 
 **Chosen.** As written, with the bounds of the test at about 1.5 times its
 measured maxima, on gcc and on CUDA.
+
+## Univariate bases: the choices of route, measured before the code
+
+**What.** The decisions behind `include/laplace/basis/` (2026-11-13/14, with
+Giovanni), each taken on a small measurement written for the purpose and not
+kept in the repository; the chosen routes are measured again by the tests and
+the bench of the entries below.
+
+**B-spline row: interval and degree.** Cubic, eta = sum beta B over one row,
+n = 1e6 random x, K = 10/40/200, ns per row:
+
+| | K | knots from (lower, h) | binary search | degree as template | one thread / 16 / CUDA |
+|---|---|---|---|---|---|
+| uniform, runtime degree | 200 | yes | | | 13.1 / 1.95 / 0.41 |
+| array, runtime degree | 200 | | yes | | 37.3 / 3.14 / 0.35 |
+| uniform, template degree | 200 | yes | | yes | 9.8 / 1.20 / 0.39 |
+| a stored row, read | 200 | | | | 1.5 / 0.33 / 0.03 |
+
+The binary search costs on the CPU and grows with K (random x make its
+branches unpredictable); on CUDA the array is 15-20% faster than the
+arithmetic interval. The degree as a template parameter is worth 10-25% on one
+thread, 35-60% on 16, 4% on CUDA. Chosen: one type, knots always in an array,
+the arithmetic interval when the knots are uniform, the degree at runtime with
+one loop.
+
+**Fourier: sin(j theta) and cos(j theta), j <= 100** (mpmath at 400 bits;
+error in ulp(1); conditioning 2 pi j x eps, from a relative error eps in x):
+
+| route | max error | error / conditioning | ns per row, H = 100: one thread / CUDA |
+|---|---|---|---|
+| sincos(j z), z = 2 pi x rounded | 533 | 1.05 | 2098 / 15.9 |
+| j x mod 1 from an exact product, then sincos | 1.6 | 0.7-1.0 | 2562 / 18.7 |
+| rotation by the angle of j = 1 | 157-171 | 21-22 | 236 / 3.2 |
+| Chebyshev three-term recurrence | 2429 | 2300 | 231 / 1.9 |
+| rotation re-anchored by the exact route every 8 harmonics | 12.5-13.5 | 3.0 | 633 / 5.3 |
+
+The exact product uses fma on the device and Dekker's split on the host (the
+gcc build has no hardware fma and std::fma is emulated); the rounding to an
+integer adds and subtracts 1.5 2^52 (nearbyint is slow on mingw). Chosen: the
+rotation re-anchored every 8 harmonics.
+
+**Legendre: P_n^(k)(t), n <= 50, k <= 6** (references from the exact integer
+coefficients, mpmath at 400 bits): three routes, Gegenbauer
+(2k - 1)!! C^(k + 1/2)_(n-k), the Bonnet recurrence differentiated (orders
+0..k carried together) and the recurrence P^(k)_(n+1) = P^(k)_(n-1) +
+(2n + 1) P^(k-1)_n on arrays, are all within 1-4 times the conditioning
+|t P^(k+1)(t)| eps (up to 359 ulp of |P_n^(k)(1)| near t = +-1 at n = 50).
+At n = 49, 16 threads: Gegenbauer 12.6-14.8 ns, Bonnet 29-55, the arrays
+15-34; on CUDA 3.4-3.7, 3.2-18.2, 2.7-6.2. Chosen: Gegenbauer (no scratch).
+
+**B-spline: values and derivatives.** De Boor's BSPLVB for the values, then
+k steps of the derivative formula (BSPLVD), against a closed form of the
+cardinal B-spline for uniform extended knots (Horner in the local coordinate):
+the closed form is 2-7 times faster (one thread, d = 3: 8 ns against 14-38;
+CUDA 0.13-0.24 against 0.34-1.9) but loses up to 34 ulp at d = 5 to the
+cancellation of the expanded pieces, and covers one arrangement of knots.
+Chosen: BSPLVB/BSPLVD only. The same measurement found that the arithmetic
+interval floor((x - lower)/h) picks the previous interval for points on a
+knot or one ulp from it; the interval is now corrected against t_s and
+t_(s+1).
+
+## The B-spline basis
+
+**What.** `bspline_basis` and `bspline_basis_owner`
+(`include/laplace/basis/bspline.hpp`): degree d <= 10, knots t_0..t_(K+d)
+with any multiplicity up to d + 1, domain [t_d, t_K]; rows of order 0..6
+(BSPLVB, BSPLVD), expansions, the integral from lower (a window of d + 1
+values and the column totals before it, from the degree d + 1 B-splines), the
+cross Gram matrices G_kl = int B^(k) B^(l)' (16-node Gauss-Legendre per knot
+interval, in the interval's own coordinate x - t_s), Greville abscissae, the
+points of reduced continuity, and the outside rules (nan, linear, polynomial).
+
+**How.** `tools/reference/basis_bspline.py`: exact rational values from the
+Cox-de Boor definition and the derivative formula, integrals and Gram matrices
+by exact integration of the polynomial pieces (their Taylor coefficients at
+t_s), independent of the integral formula of the code; a SymPy check
+(`bspline_basis_set`) of the values and derivatives agrees exactly. 42 knot
+configurations, d in {0, 1, 2, 3, 5, 10}: uniform clamped and extended,
+random, interior multiplicity 2..d + 1, an interval of width 1e-12, the
+domain [1000, 1001]; points on the knots and one ulp away. Rows in ulps of
+the row's largest value; integrals and totals in ulps of the largest total;
+Gram entries in ulps of the largest entry.
+
+| | d <= 5 | d = 10 |
+|---|---|---|
+| rows, orders 0..6 | 7 | 19 |
+| integrals and totals | 3 | 4.7 |
+| Gram matrices | 6 | 6 |
+
+The same bounds hold on CUDA. Two defects found by these references and
+repaired: the total of a column of extended knots stopped at the end of its
+support instead of at upper; the Gram matrices took the quadrature nodes as
+x = c + h x_i, which on [1000, 1001] lost up to 6768 ulp to the rounding of
+x, and now take them in the coordinate x - t_s (4 ulp).
+
+**Speed** (`benchmarks/basis_bspline.cpp`, cubic, uniform clamped knots on
+[0, 1], ms per call; R 4.6.0 with splines2 0.5.4 and splines::splineDesign,
+which return a dense n x K matrix allocated at every call; Laplace with its
+sparse rows and with a dense output into a preallocated matrix):
+
+| n = 1e6, values | K = 10 | K = 40 |
+|---|---|---|
+| splines2::bSpline | 107 | 412 |
+| splines::splineDesign | 141 | 216 |
+| Laplace dense, one thread | 22.2 | 20.7 |
+| Laplace sparse, one thread | 18.8 | 15.8 |
+| Laplace sparse, 16 threads | 2.7 | 2.7 |
+| Laplace dense, CUDA | 0.38 | 2.0 |
+| Laplace sparse, CUDA | 0.37 | 0.37 |
+
+The second derivative and the integral cost 1.1-2.0 times the values (2.0 for the sparse integral on CUDA).
+At n = 1e5, K = 200: splines2 167 ms, splineDesign 53, Laplace dense 7.1 on
+one thread, sparse 1.6 on one thread and 0.044 on CUDA.
+
+**What it says.** The sparse row makes the cost independent of K; a dense
+output is limited by the writing of zeros, on CUDA above all.
+
+**Chosen.** As written; test bounds 12 and 32 ulp for the rows, 8 and 12 for
+the integrals, 12 for the Gram matrices.
+
+## The Fourier basis
+
+**What.** `fourier_basis` and `make_fourier_basis`
+(`include/laplace/basis/fourier.hpp`): columns 1, sin(j nu x'), cos(j nu x'),
+j = 1..H, x' = x - lower, nu = 2 pi / omega, on [lower, upper] (upper = lower
++ omega by default; a shorter or longer domain is allowed). The sines and
+cosines by the rotation re-anchored every 8 harmonics; derivatives by the
+shift identity; the integral from lower by one chain over the half angle
+(2 sin^2(theta/2) and 2 sin(theta/2) cos(theta/2), never 1 - cos); Gram
+matrices in closed form by product-to-sum, block diagonal on a full period.
+
+**How.** `tools/reference/basis_fourier.py`: mpmath at 300 bits from the
+definition, 27 configurations ([0, 1], [-3, 4.5] with omega = 7.5, [0, 10]
+with omega = 7, [0, 9] with omega = 12, [1000, 1001], [1000, 1003] with
+omega = 0.7; H in {0, 1, 4, 20, 100}), points random, outside the domain and
+where j u is near an integer or a half-integer; Gram references from complex
+exponentials, a route independent of the code's. Rows in ulps of
+max(1, the row's largest |value|), and divided by the conditioning
+max(1, 2 pi j |x'|/omega) + k:
+
+| H | rows gcc / CUDA | ratio to conditioning | integrals gcc / CUDA | Gram |
+|---|---|---|---|---|
+| 1 | 24.5 / 24.5 | 1.0 / 1.0 | 2.0 / 1.1 | 11 |
+| 4 | 93 / 93 | 1.2 / 1.1 | 2.0 / 2.0 | 11 |
+| 20 | 437 / 437 | 2.0 / 2.5 | 2.0 / 2.0 | 18 |
+| 100 | 2147 / 2147 | 2.0 / 2.0 | 1.5 / 1.2 | 11 |
+
+**What it says.** The row errors are the rounding of x'/omega times
+2 pi j |x'|/omega: the worst case is lower = 1000, omega = 0.7, x' up to 3.
+
+**Open.** x' and x'/omega in double-double would remove that term, for one
+more product per row.
+
+**Chosen.** As written; test bounds 1.5 times the measured maxima.
+
+## The Legendre basis
+
+**What.** `legendre_basis` and `make_legendre_basis`
+(`include/laplace/basis/legendre.hpp`): b_m = sqrt((2m + 1)/w) P_m(t),
+m = 0..n, w = upper - lower, t = 2(x - lower)/w - 1, orthonormal on the
+interval. Derivatives by Gegenbauer; t computed from the nearer end
+(1 - 2(upper - x)/w in the upper half), which cut the row error near t = +-1
+three to five times (n = 50, k = 0: 2468 to 551 ulp). Integral columns as
+(t^2 - 1) P_m'/(m(m + 1)), the same polynomial as
+(P_(m+1) - P_(m-1))/(2m + 1) without its loss near the ends (in a double
+emulation at n = 20, relative error 3e-5 at 1e-12 from lower, against 4e-15).
+Gram matrices: G_00 = I written exactly, the others by Gauss-Legendre in t,
+the 64-node table up to degree 127 and a rule of degree/2 + 1 Newton nodes
+above it (panels would not lower the degree of the integrand).
+
+**How.** `tools/reference/basis_legendre.py`: exact integer coefficients,
+mpmath at 400 bits, exact polynomial integration; n in {0, 1, 2, 5, 10, 20,
+50} on [0, 1], [-1, 1], [-3, 7], [1000, 1001]. Rows in ulps of the row's
+largest |value|, gcc / CUDA:
+
+| n | k = 0 | k = 1 | k = 2 | k = 3 | k = 4 | k = 5 | k = 6 | integral | Gram |
+|---|---|---|---|---|---|---|---|---|---|
+| 5 | 9 / 7 | 5 / 4.5 | 6 / 5 | 4 / 4 | 2 / 2 | 3 / 3 | 0 / 0 | 5 / 4 | 6 |
+| 10 | 28 / 20 | 16 / 14 | 9 / 10 | 12 / 11 | 6 / 10 | 12 / 6 | 5 / 5 | 12 / 11 | 14 |
+| 20 | 115 / 88 | 38 / 34 | 32 / 39 | 28 / 23 | 34 / 25 | 19 / 20 | 24 / 26 | 35 / 41 | 84 |
+| 50 | 551 / 474 | 292 / 258 | 194 / 194 | 116 / 111 | 145 / 149 | 136 / 104 | 104 / 116 | 197 / 193 | 384 |
+
+n = 0, 1, 2 within 4 ulp everywhere. Against the conditioning
+eps/2 (|b^(k)| + (1 + |t|) |b^(k+1)| w/2): at most 5.6 on gcc and 13.4 on
+CUDA (one entry, n = 50, k = 3).
+
+**What it says.** The large figures at n = 50 are the conditioning of P_n in
+t near the ends; CUDA differs from gcc through the contraction into FMA.
+
+**Chosen.** As written; test bounds 1.5 times the measured maxima.
+
+## Linear differential operators and their penalties
+
+**What.** `differential_operator` (`include/laplace/basis/operator.hpp`):
+L = D^m + c_(m-1) D^(m-1) + ... + c_0 stored by the roots of its
+characteristic polynomial with their multiplicities (merged exactly in
+products), the coefficients by multiplying the factors, the null space
+x'^i e^(a x') cos/sin(b x'), and `operator_penalty`,
+S = sum_(k,l) c_k c_l G_kl from the basis's cross Gram matrices, so that the
+penalty int (L f)^2 is exact on every basis. `differential_operator_from_weights`
+finds the roots of a polynomial given by its coefficients by the
+Aberth-Ehrlich iteration and groups approximations within 1e-4 s
+(s = 2 max_j |w_j|^(1/(m - j)), Fujiwara's bound on the roots), since a root of multiplicity mu is
+found only to about eps^(1/mu) s.
+
+**How.** `tests/basis/test_operator.cpp`: D^m gives G_mm bit for bit; on a
+full Fourier period the penalty of the harmonic operators equals
+|P(i j nu)|^2 omega/2 on the diagonal within 64 eps of the largest entry; the
+polynomials of degree < 2 (Legendre, D^2) and the quadratics written by
+Marsden's identity (cubic B-spline, D^3) have a penalty below 1e-12 of a
+random vector's; from weights, the roots of a D + D^2 (0 exactly and -a),
+D^2 (D^2 + nu^2), (D + 1)^3 and D^2 + D + 4.25.
+
+**Open.** Distinct roots closer than 1e-4 s are merged by
+`differential_operator_from_weights`; such operators are given by their
+roots.
+
+**Chosen.** As written.

@@ -1,0 +1,109 @@
+/**
+\addtogroup basis
+
+The member functions that evaluate a basis at a point (rows, expansions, integrals) are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device. The constructors, the Gram matrices and the other functions that build or describe a basis run on the host.
+
+## Overview
+
+A univariate basis is a vector of \f$K\f$ functions \f$b(x) = (b_0(x), \dots, b_{K-1}(x))\f$ defined on a domain \f$[lower, upper]\f$. The basis is complete: no column is ever dropped (a constraint that makes a term identifiable is not the basis's business). A basis knows nothing about data. A basis is a lightweight struct designed to be copied by value into Kokkos kernels.
+
+Three univariate bases are implemented:
+- \ref basis_bspline : B-spline basis of degree \f$d\f$ defined by a non-decreasing knot vector.
+- \ref basis_fourier : Fourier trigonometric basis on \f$[lower, upper]\f$ with period \f$\omega\f$ and \f$H\f$ harmonics.
+- \ref basis_legendre : Orthonormal Legendre polynomial basis on \f$[lower, upper]\f$ of maximum degree \f$n\f$.
+
+## The row representation
+
+At an evaluation point \f$x\f$, a basis evaluates a row of the design: the index \f$f\f$ of the first column and the \f$w\f$ values of the columns \f$f, \dots, f + w - 1\f$. The row width \f$w\f$, returned by `row_width()`, is fixed for the basis, the same for every derivative order and outside the domain:
+- \f$w = d + 1\f$ for a B-spline of degree \f$d\f$.
+- \f$w = K\f$ for the Fourier and Legendre bases (\f$f = 0\f$).
+
+The caller provides an output buffer `out` holding \f$w\f$ values, and each row is written into `out` with fixed width \f$w\f$.
+
+## Common interface and concept
+
+The common interface shared by all univariate bases is formalized by the C++20 concept \ref laplace::basis::univariate_basis "univariate_basis". Every basis provides:
+
+- **Dimension.** Evaluated by `dimension()`, returning the total number of basis functions \f$K\f$.
+- **Row width.** Evaluated by `row_width()`, returning the fixed number of values \f$w\f$ in a row.
+- **Scratch size.** Evaluated by `scratch_size()`, returning the number of doubles of caller-provided scratch buffer required by member functions (0 for the current bases).
+- **Rows of orders 0 to 6.** Evaluated by `row(x, out)` for order 0, and `row_d1(x, out)` through `row_d6(x, out)` for derivative orders 1 to 6 in \f$x\f$. Each function writes the \f$w\f$ values of \f$b_j^{(k)}(x)\f$ for \f$j \in \{f, \dots, f + w - 1\}\f$ into the caller-provided buffer `out`, and returns the 0-based column index \f$f\f$.
+- **Expansions of orders 0 to 6.** Evaluated by `expansion(x, beta)` for order 0, and `expansion_d1(x, beta)` through `expansion_d6(x, beta)` for derivative orders 1 to 6. Given a parameter vector \f$\beta = (\beta_0, \dots, \beta_{K-1})\f$ of \f$K\f$ values, the expansion evaluates the linear combination:
+\f[
+\eta^{(k)}(x) = \sum_{j=0}^{K-1} \beta_j b_j^{(k)}(x)
+\f]
+- **Integral row.** Evaluated by `integral_row(x, out)`, writing the integral of the basis functions from \f$lower\f$ to \f$x\f$:
+\f[
+\int_{lower}^x b_j(t) \, \mathrm{d}t
+\f]
+into `out`, and returning the first column index \f$f\f$.
+- **Integral expansion.** Evaluated by `integral_expansion(x, beta)`, returning the integral of the linear combination from \f$lower\f$ to \f$x\f$:
+\f[
+\sum_{j=0}^{K-1} \beta_j \int_{lower}^x b_j(t) \, \mathrm{d}t
+\f]
+
+The three bases follow their own conventions for specific member functions and integrals:
+- In \ref basis_bspline , the integral row evaluates a window of \f$d + 1\f$ columns, while preceding completed columns are queried by `integral_column_total()`.
+- In \ref basis_fourier , rows are dense (\f$w = K\f$, \f$f = 0\f$), the basis is periodic, and expansions are accumulated during harmonic generation without a buffer of size \f$K\f$.
+- In \ref basis_legendre , rows are dense (\f$w = K\f$, \f$f = 0\f$), and expansions are accumulated during the recurrence without a buffer of size \f$K\f$.
+
+## Domain boundaries and outside rules
+
+Outside the domain \f$[lower, upper]\f$, a basis follows its configured \ref laplace::basis::outside_domain_rule "outside_domain_rule":
+- `outside_domain_rule::nan`: returns NaN for points beyond a tolerance of \f$10^{-8}\f$ of the domain width \f$upper - lower\f$. Within that tolerance, it evaluates the polynomial piece at the nearer endpoint.
+- `outside_domain_rule::linear` (the default): evaluates the linear extrapolation from the nearer endpoint \f$e\f$ (where \f$e = lower\f$ if \f$x < lower\f$, and \f$e = upper\f$ if \f$x > upper\f$):
+\f[
+f(x) = f(e) + f'(e)(x - e)
+\f]
+The first derivative is:
+\f[
+f'(x) = f'(e)
+\f]
+derivatives of order 2 and above are zero:
+\f[
+f^{(k)}(x) = 0 \quad (k \ge 2)
+\f]
+and the integral from \f$lower\f$ is:
+\f[
+I(x) = I(e) + f(e)(x - e) + \frac{1}{2} f'(e)(x - e)^2
+\f]
+For a B-spline of degree \f$d \ge 2\f$, the linear rule gives \f$C^1\f$ regularity at the ends: the second derivative jumps to zero there.
+- `outside_domain_rule::polynomial`: continues the polynomial piece at the nearer endpoint.
+
+The Fourier basis (\ref basis_fourier) is periodic on \f$\mathbb{R}\f$ and has no outside domain rule.
+
+## Dispatch and batch evaluation
+
+Two standalone function templates provide dispatch and parallel evaluation:
+- \ref laplace::basis::basis_row_of_order "basis_row_of_order()": evaluates the row of a runtime derivative order \f$k \in \{0, \dots, 6\}\f$ at point \f$x\f$ by dispatching to the basis's per-order functions `row()`, `row_d1()`, ..., `row_d6()`.
+- \ref laplace::basis::fill_basis_rows "fill_basis_rows()": evaluates the rows of derivative order \f$k\f$ for every point in a 1D View `x`, writing the first column indices to `first(i)` and the row values in place into a 2D View `values(i, 0..w-1)`. The kernel executes on the execution space of `x`. The `values` View must have layout `Kokkos::LayoutRight` so that each row is stored contiguously. The basis instance `b` must hold pointers valid in that execution space's memory space (e.g. through `bspline_basis_owner::device()`).
+
+## Parallel evaluation example
+
+The following example fills the rows of order 0 for a B-spline basis across a View of points:
+
+```cpp
+constexpr int n = 100;
+constexpr int dim = 10;
+constexpr int degree = 3;
+
+const auto owner = laplace::basis::bspline_basis_owner::uniform_clamped(0.0, 1.0, dim, degree);
+const laplace::basis::bspline_basis basis = owner.device();
+
+Kokkos::View<double*> x("x", n);
+// ... populate x ...
+
+Kokkos::View<int*> first("first", n);
+Kokkos::View<double**, Kokkos::LayoutRight> values("values", n, basis.row_width());
+
+laplace::basis::fill_basis_rows(basis, 0, x, first, values);
+```
+
+## Public classes, concepts and functions
+
+- \ref laplace::basis::outside_domain_rule "outside_domain_rule": Enumeration of rules for evaluating a basis outside its domain.
+- \ref laplace::basis::univariate_basis "univariate_basis": Concept defining requirements for univariate bases.
+- \ref laplace::basis::basis_row_of_order "basis_row_of_order()": Dispatches row evaluation for a runtime derivative order \f$k \in \{0, \dots, 6\}\f$.
+- \ref laplace::basis::fill_basis_rows "fill_basis_rows()": Evaluates basis rows of order \f$k\f$ for every point of a View in parallel.
+
+*/

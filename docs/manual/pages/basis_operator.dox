@@ -1,0 +1,182 @@
+/**
+\defgroup basis_operator Differential operators and penalties
+\ingroup basis
+\brief Linear differential operators with constant coefficients, their null spaces, and their penalty matrices on univariate bases.
+
+All functions and classes in this module run on the host.
+
+## Differential operators and characteristic polynomials
+
+A linear differential operator of order \f$m \ge 1\f$ with constant real coefficients is defined in monic form as
+\f[
+L = D^m + c_{m-1} D^{m-1} + \dots + c_1 D + c_0 = D^m + \sum_{k=0}^{m-1} c_k D^k
+\f]
+where:
+- \f$D = \frac{\mathrm{d}}{\mathrm{d}x}\f$ is the derivative operator with respect to \f$x\f$,
+- \f$m \ge 1\f$ is the differential order of the operator,
+- \f$c_k \in \mathbb{R}\f$ are the constant real coefficients for \f$k = 0, \dots, m-1\f$, with \f$c_m = 1\f$.
+
+Restricting \f$L\f$ to monic operators loses no generality: scaling \f$L\f$ by a nonzero constant \f$\alpha\f$ scales the quadratic penalty \f$\int (L f(x))^2 \, \mathrm{d}x\f$ by \f$\alpha^2\f$ and leaves the null space unchanged.
+
+The operator is uniquely associated with its monic characteristic polynomial
+\f[
+P(r) = r^m + c_{m-1} r^{m-1} + \dots + c_0 = \sum_{k=0}^m c_k r^k, \quad c_m = 1.
+\f]
+An operator is stored internally by the multiset of the roots of \f$P(r)\f$ along with their integer multiplicities:
+- a real root \f$a \in \mathbb{R}\f$ of multiplicity \f$\mu \ge 1\f$,
+- a conjugate pair of complex roots \f$a \pm \mathrm{i} b\f$ with \f$b > 0\f$ and multiplicity \f$\mu \ge 1\f$, which contributes \f$2 \mu\f$ to the total order \f$m\f$.
+
+The polynomial coefficients \f$c_0, \dots, c_m\f$ are computed by expanding the linear and quadratic irreducible factors:
+\f[
+(r - a) \quad \text{for a real root } a,
+\f]
+\f[
+(r^2 - 2 a r + a^2 + b^2) \quad \text{for a conjugate pair } a \pm \mathrm{i} b.
+\f]
+The product of two differential operators, \f$L_1 L_2\f$, corresponds to the product of their characteristic polynomials \f$P_1(r) P_2(r)\f$. It is formed by the union of their root sets, with the multiplicities of identical roots added.
+
+## Null space and reference origin
+
+The null space of \f$L\f$ consists of the solutions to the homogeneous linear differential equation
+\f[
+L f(x) = 0.
+\f]
+Its dimension equals the order \f$m\f$. For each root with multiplicity \f$\mu\f$ and power index \f$i \in \{0, \dots, \mu - 1\}\f$, the null space is spanned by:
+- for a real root \f$a\f$:
+  \f[
+  x'^i e^{a x'}
+  \f]
+- for a complex conjugate pair \f$a \pm \mathrm{i} b\f$ with \f$b > 0\f$:
+  \f[
+  x'^i e^{a x'} \cos(b x') \quad \text{and} \quad x'^i e^{a x'} \sin(b x')
+  \f]
+where \f$x' = x - \mathrm{lower}\f$.
+
+The coordinate origin is placed at \f$\mathrm{lower}\f$ rather than zero to keep \f$e^{a x'}\f$ well within numerical range across the interval \f$[\mathrm{lower}, \mathrm{upper}]\f$.
+
+## Operator constructors
+
+Laplace provides constructors for standard differential operators:
+
+1. **Derivative operator:** \ref laplace::basis::derivative_operator "derivative_operator(m)" constructs the pure derivative \f$L = D^m\f$ of order \f$m \ge 1\f$. Its characteristic polynomial is \f$P(r) = r^m\f$, having root \f$0\f$ with multiplicity \f$m\f$. Its null space consists of the polynomials of degree strictly less than \f$m\f$:
+   \f[
+   1, x', x'^2, \dots, x'^{m-1}.
+   \f]
+2. **Oscillator operator:** \ref laplace::basis::oscillator_operator "oscillator_operator(period, harmonics)" constructs the operator
+   \f[
+   L = \prod_{h=1}^H \left(D^2 + (h \nu)^2\right)
+   \f]
+   where \f$T > 0\f$ is the period, \f$H \ge 1\f$ is the number of harmonics, and \f$\nu = \frac{2\pi}{T}\f$ is the fundamental angular frequency. The order is \f$2H\f$. Its roots are \f$\pm \mathrm{i} h \nu\f$ for \f$h = 1, \dots, H\f$ (each of multiplicity 1). Its null space is spanned by the \f$2H\f$ periodic functions
+   \f[
+   \cos(h \nu x'), \quad \sin(h \nu x'), \quad h = 1, \dots, H.
+   \f]
+3. **Harmonic operator:** \ref laplace::basis::harmonic_operator "harmonic_operator(period, harmonics)" constructs the operator
+   \f[
+   L = D \prod_{h=1}^H \left(D^2 + (h \nu)^2\right)
+   \f]
+   formed by multiplying the first derivative \f$D\f$ by the oscillator operator. The order is \f$2H + 1\f$. Its null space is spanned by the constant function \f$1\f$ and the \f$2H\f$ harmonic functions \f$\cos(h \nu x')\f$ and \f$\sin(h \nu x')\f$ for \f$h = 1, \dots, H\f$.
+4. **Constructing from roots:** \ref laplace::basis::differential_operator_from_roots "differential_operator_from_roots(roots)" constructs an operator directly from a vector of root descriptors (\ref laplace::basis::differential_operator_root "differential_operator_root").
+5. **Constructing from weights:** \ref laplace::basis::differential_operator_from_weights "differential_operator_from_weights(w)" constructs
+   \f[
+   L = D^m + w_{m-1} D^{m-1} + \dots + w_0
+   \f]
+   from the weight vector \f$w = (w_0, \dots, w_{m-1})\f$. If all weights are zero, it returns \f$D^m\f$. Otherwise:
+   - Root scale: Fujiwara's bound on the moduli of the roots,
+     \f[
+     s = 2 \max_{j=0, \dots, m-1} |w_j|^{1/(m - j)}.
+     \f]
+     Every root of \f$P(r)\f$ lies within the radius \f$s\f$.
+   - Aberth-Ehrlich iteration: the \f$m\f$ roots are found simultaneously in complex arithmetic, initialized on a circle of radius \f$s\f$ and updated with simultaneous Newton steps with a repulsion between the approximations:
+     \f[
+     \Delta z_k = \frac{P(z_k)/P'(z_k)}{1 - \frac{P(z_k)}{P'(z_k)} \sum_{j \ne k} \frac{1}{z_k - z_j}}.
+     \f]
+     The iteration terminates when the maximum step satisfies \f$\max_k |\Delta z_k| \le 4 \varepsilon s\f$ (where \f$\varepsilon \approx 2.22 \times 10^{-16}\f$) or after 500 sweeps.
+   - Grouping multiple roots: approximations closer than \f$10^{-4} s\f$ are grouped into a single root of that multiplicity, taking their arithmetic mean as the root's value. A multiple root of multiplicity \f$\mu\f$ is inherently conditioned to precision \f$\varepsilon^{1/\mu} s\f$ (about \f$6 \times 10^{-6} s\f$ for \f$\mu = 3\f$), requiring a grouping tolerance such as \f$10^{-4} s\f$ to recover the true multiplicity.
+   - Zeroing small components: real or imaginary parts of a grouped root with absolute value \f$\le 10^{-4} s\f$ are set to zero.
+   - Coefficient verification: the coefficients \f$c_j\f$ reconstructed from the grouped roots are checked against \f$w_j\f$. The function throws `std::invalid_argument` if the order does not match \f$m\f$ (conjugate roots could not be paired) or if for any \f$j \in \{0, \dots, m-1\}\f$:
+     \f[
+     |c_j - w_j| > 10^{-6} \max\left(\max_k |w_k|, \, s^{m - j}\right).
+     \f]
+   - Limit: distinct roots closer than \f$10^{-4} s\f$ are merged by this procedure. An operator having distinct roots closer than \f$10^{-4} s\f$ must be specified directly by its roots via \ref laplace::basis::differential_operator_from_roots "differential_operator_from_roots()".
+
+## Penalty matrix and basis integration
+
+For a basis \f$b(x) = (b_0(x), \dots, b_{K-1}(x))^\top\f$ and a linear expansion \f$f(x) = \sum_{j=0}^{K-1} \beta_j b_j(x)\f$, the quadratic penalty functional is
+\f[
+\int_{\mathrm{lower}}^{\mathrm{upper}} (L f(x))^2 \, \mathrm{d}x = \beta^\top S \beta
+\f]
+where \f$S\f$ is the \f$K \times K\f$ symmetric positive semidefinite penalty matrix computed by \ref laplace::basis::operator_penalty "operator_penalty()":
+\f[
+S = \sum_{k=0}^m \sum_{l=0}^m c_k c_l G_{kl}
+\f]
+where
+\f[
+G_{kl} = \int_{\mathrm{lower}}^{\mathrm{upper}} b^{(k)}(x) (b^{(l)}(x))^\top \, \mathrm{d}x
+\f]
+is the cross Gram matrix of derivative orders \f$k\f$ and \f$l\f$ computed by the basis (`basis.cross_gram(k, l, out)`).
+
+Because the cross Gram matrices of \ref basis_bspline "B-spline bases", \ref basis_fourier "Fourier bases", and \ref basis_legendre "Legendre bases" (see also \ref basis "univariate bases") are evaluated to floating-point precision by exact quadrature or explicit integration formulas, the penalty matrix \f$S\f$ is exact on every basis.
+
+### Operating limits
+
+1. The operator order must satisfy \f$m \le 6\f$, because cross Gram matrices in Laplace are implemented up to derivative order 6.
+2. For polynomial bases (\ref basis_bspline "B-spline" and \ref basis_legendre "Legendre"), the order \f$m\f$ cannot exceed the polynomial degree \f$d\f$ of the basis. Above degree \f$d\f$, \f$D^m b(x) = 0\f$, so the highest derivative vanishes identically and the resulting matrix would not represent the penalty of \f$L\f$.
+
+### Output layout
+
+The penalty matrix \f$S\f$ is written into `out` as a dense \f$K \times K\f$ matrix in column-major order, where entry \f$S_{ij}\f$ is located at index \f$i + j K\f$ (`out[i + j * K]`).
+
+## Accuracy and automated tests
+
+See \ref accuracy "How accuracy is measured" for error metric definitions and test structure.
+
+The operator module is tested in `tests/basis/test_operator.cpp`:
+1. **Consistency with cross Gram matrices:** For pure derivative operators \f$D^m\f$ with \f$m \in \{1, 2, 3\}\f$ on a uniform clamped cubic B-spline basis, \ref laplace::basis::operator_penalty "operator_penalty()" reproduces `basis.cross_gram(m, m, ...)` bit for bit (`S[i] == G[i]`).
+2. **Closed form on a full Fourier period:** On a full period \f$[0, \omega]\f$ (\f$\omega = 366.0\f$, \f$\nu = 2\pi/\omega\f$) with a Fourier basis of 6 harmonics (\f$K = 13\f$), the penalty matrix of the harmonic operator \f$L = D \prod_{h=1}^H (D^2 + (h \nu)^2)\f$ for \f$H \in \{1, 2\}\f$ is diagonal. For column index \f$i > 0\f$ corresponding to harmonic \f$j = \lfloor (i + 1)/2 \rfloor\f$, the diagonal entry is
+   \f[
+   |P(\mathrm{i} j \nu)|^2 \frac{\omega}{2} = (j \nu)^2 \prod_{h=1}^H \left((h \nu)^2 - (j \nu)^2\right)^2 \frac{\omega}{2}.
+   \f]
+   In automated tests, the computed matrix agrees with this closed form within \f$64 \varepsilon \max_{a,b} |S_{ab}|\f$, where \f$\varepsilon \approx 2.22 \times 10^{-16}\f$.
+3. **Null space penalty checks:** A null-space function that the basis represents exactly has zero penalty, up to rounding:
+   - On a Legendre basis of degree 8, \f$D^2\f$ applied to polynomials of degree \f$< 2\f$ (columns 0 and 1) produces entries bounded by \f$|S_{ij}| \le 10^{-13} \max |S|\f$.
+   - On a clamped cubic B-spline basis, \f$D^3\f$ applied to quadratics written via Marsden's identity produces quadratic penalties \f$\beta^\top S \beta\f$ below \f$10^{-13}\f$ of a random vector's penalty for constant and linear functions, and below \f$10^{-12}\f$ for quadratic functions.
+4. **Root finding from weights:** \ref laplace::basis::differential_operator_from_weights "differential_operator_from_weights()" is verified against known root structures:
+   - \f$a D + D^2\f$ with \f$a = \frac{\log 2}{3}\f$: root 0 is exact, root \f$-a\f$ within \f$10^{-14}\f$, coefficients reproduced within \f$10^{-12} \max(|w|, 1)\f$.
+   - \f$D^2 (D^2 + \nu^2) = D^4 + \nu^2 D^2\f$: double root 0 exact, complex pair \f$\pm \mathrm{i} \nu\f$ with real part zero and imaginary part within relative error \f$10^{-10}\f$.
+   - \f$(D + 1)^3\f$: triple root at \f$-1\f$ grouped with real part within relative error \f$10^{-5}\f$.
+   - \f$(D + 0.5)^2 + 4 = D^2 + D + 4.25\f$: complex pair \f$-0.5 \pm 2 \mathrm{i}\f$ within relative error \f$10^{-13}\f$.
+
+## Example
+
+The following example evaluates the penalty matrix of a harmonic operator of period 365.25 on a Fourier basis with 6 harmonics on the host:
+
+\code{.cpp}
+#include <laplace/basis/fourier.hpp>
+#include <laplace/basis/operator.hpp>
+
+// Fourier basis with 6 harmonics on [0, 365.25]: dimension K = 2 * 6 + 1 = 13
+constexpr double period = 365.25;
+const auto basis = laplace::basis::make_fourier_basis(0.0, period, 6);
+const int K = basis.dimension();
+
+// Harmonic operator: D (D^2 + nu^2), order 3
+const auto op = laplace::basis::harmonic_operator(period, 1);
+
+// Dense K x K penalty matrix in column-major order
+constexpr int max_dim = 13;
+double S[max_dim * max_dim];
+laplace::basis::operator_penalty(basis, op, S);
+\endcode
+
+## Function reference
+
+- \ref laplace::basis::differential_operator_root "differential_operator_root"
+- \ref laplace::basis::differential_operator "differential_operator"
+- \ref laplace::basis::derivative_operator "derivative_operator()"
+- \ref laplace::basis::oscillator_operator "oscillator_operator()"
+- \ref laplace::basis::harmonic_operator "harmonic_operator()"
+- \ref laplace::basis::differential_operator_from_roots "differential_operator_from_roots()"
+- \ref laplace::basis::differential_operator_from_weights "differential_operator_from_weights()"
+- \ref laplace::basis::operator_penalty "operator_penalty()"
+
+*/
