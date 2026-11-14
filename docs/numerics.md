@@ -3347,6 +3347,74 @@ central branch at |z| between 13 and 22, not in the tail route; whether that is
 `log_Phi_dK` at a large positive argument or the composition is not located.
 The gumbel's log(1 - F) at 394 ulp is twenty times its log F at 19.1, and the
 choice between the Laguerre route and the z-polynomials there was never
+## The chain rule for two variables in two variables, to order 6
+
+**What.** `include/laplace/math/chain_pair.hpp`:
+`chain_rule_pair_dk<K>(G, u0, u1, out)`, the symmetric tensor of order K in
+(x_0, x_1) of H(x) = G(u_0(x), u_1(x)), from the partial derivatives of the
+outer function G in its own two arguments and those of the two inner maps in
+(x_0, x_1). `faa_di_bruno.hpp` composes one function of one variable, and the
+distributions have so far formed a mixed derivative as a product of one Bell
+sum per parameter, which is exact only when each inner variable depends on one
+parameter alone (gamma1: the shape 1/phi on phi, the ratio y/mu on mu). The
+second batch of distributions has two reparametrizations that are not of that
+kind, gamma2's shape mu^2/sigma^2 and lognormal2's map
+sigma^2 = log(1 + v/m^2), mu = log m - sigma^2/2, and the Jacobian of an
+expected information transforms the same way.
+
+**How.** Not the multivariate Bell polynomials but one numeric recursion. With
+multi-indices gamma over (x_0, x_1) and k over the arguments of G, and
+D[gamma][k] = d^gamma (G_k o u), one more derivative in x_m expanded by
+Leibniz's rule over the product gives
+
+    D[gamma + e_m][k] = sum_(alpha <= gamma) C(gamma, alpha)
+                        sum_(r = 0, 1) D[alpha][k + e_r] d^(gamma - alpha + e_m) u_r,
+
+C(gamma, alpha) being the product of two binomial coefficients. The table is
+filled by increasing |gamma| from D[0][k] = G_k; only the entries with
+|gamma| + |k| <= K are read, so the state is 210 doubles at K = 6, laid out
+compactly so that the array fits a device thread. Every coefficient is a
+positive binomial, so the recursion adds no cancellation of its own: whatever
+cancels does so in the derivatives it is handed. A multi-index (i, j) sits at
+position (i + j)(i + j + 1)/2 + j, by total order and then by the number of
+derivatives in the second variable, which within one order is the packing of
+`sym_tensor<2, n>`, so a caller fills its inputs order by order.
+
+**Measurement.** Against the truncated bivariate Taylor composition of
+`tools/reference/chain_pair.py` at 300 bits, which is independent of the
+recursion: 96 cases, 60 with derivatives drawn at random (magnitudes
+log-uniform on 2^-8 to 2^8, random signs, so the sums cancel) and 36 on the two
+maps of the batch with an outer function of the shape of a log-density.
+Maximum error in ulp of the largest component of the order, gcc build,
+2026-11-13, the two groups apart:
+
+| order | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| random derivatives | 0.841 | 0.898 | 2.48 | 0.994 | 2.07 | 2.8 |
+| the two maps | 0.647 | 1.06 | 1.59 | 3.74 | 0.755 | 26.2 |
+
+The random cases, whose signs are drawn so that the sums cancel, stay within
+2.8 ulp at every order; the whole of the order-6 figure comes from one point of
+the gamma2 map, mu = 0.3 and v = 9 (shape mu^2/v = 1.1e-3) at y = 0.05, which
+is also the worst point at orders 1 to 4. The worst point at order 5 is the
+lognormal2 map at m = 0.3, v = 9. So what the recursion costs is set by the
+extreme corner of a real reparametrization and not by cancelling inputs, and
+the distributions that compose through it at a shape of 1e-3 inherit those 26
+ulp at order 6.
+
+An earlier version of this table, written before the test printed the groups
+apart, is wrong and was corrected here: the test's own accumulator was a flat
+array indexed by order while the function writing into it indexed by group, so
+each group's maxima were stored in the next order's slot (and at order 6 one
+element past the end). The figures above come from the repaired test.
+
+**Open.** Nothing in the recursion; what the composition costs each
+distribution is measured in that distribution's own section.
+
+**Chosen.** This version, bounded at 40 ulp in
+`tests/math/test_chain_pair.cpp`, on gcc and CUDA, with a kernel case at
+order 6.
+
 measured. Every other test file of the project that writes a `KOKKOS_LAMBDA`
 in a TEST_CASE body carries the latent collision above and passes only because
 its counters do not collide today.
@@ -3641,3 +3709,305 @@ multiplies the whole sum); only a route to R^-1 with exact zeros could.
 the gcc and CUDA errors, on the matrices with the scaling undone (D^-1 M D^-1,
 D M^-1 D, D^-1 L), the measure that reaches x^T M^-1 x = z^T R^-1 z for
 x = D z (Giovanni, 2026-11-14). No change to the route.
+## Univariate distributions, batch 2: exponential, chisq and the inverse Gaussian
+
+**What.** `include/laplace/distrib/`: `exponential.hpp` (mean mu),
+`chisq.hpp` (mu degrees of freedom, treated as a continuous parameter) and
+`invgauss.hpp` (mean mu, dispersion phi, Var = phi mu^3), each with the whole
+interface of `core.hpp`: the parameter descriptors, the log-density and its
+derivatives to order 6, the mixed (y, theta) derivatives, the expected
+information and its derivatives to order 4, cdf, ccdf, log F and log(1 - F)
+with their derivatives to order 6, and the quantile. All three are continuous
+on (0, infinity) with a fixed support, every parameter is C^inf in log f and
+in log F, and none has kinks. The exponential and the chisq carry one
+parameter, so each derivative tensor has one component; neither name carries a
+digit, since each family is implemented in one parametrization only. The
+inverse Gaussian has no closed quantile and deliberately has no member: the
+generic route of `generic_quantile.hpp` supplies it, and the test checks it
+against this distribution's own cdf in both tails. gamma2 and the two
+lognormals of the same batch are in their own section. The mathematics of each
+form was checked by hand against its definition.
+
+**How.**
+- exponential: log(1 - F) = -y/mu is exact and its derivatives are closed.
+  log F = G(y/mu) with G(u) = log(1 - e^(-u)) is split at u = 1. Above it,
+  G^(k)(u) = (-1)^(k+1) q A_(k-1)(q)/(1 - q)^k with q = e^(-u) and A_m the
+  Eulerian polynomials, which follows from G^(k) = (-1)^(k+1) Li_(1-k)(q) and
+  whose coefficients are all positive, so nothing cancels; 1 - q is formed as
+  -expm1(-u). Below it the pole is taken out exactly,
+  log F = log u + log exprel(-u), the first part being -log mu plus a constant
+  whose derivatives are closed and the second going through the univariate
+  chain rule of `faa_di_bruno.hpp` over the derivatives of `exprel`. The value
+  is log(-expm1(-u)) and needs no split.
+- chisq: the log-density is the saddle-point form of gamma1 at shape a = mu/2
+  and mean mu, l = -a D(y/mu) + (1/2) log a - delta(a) - log y - (1/2) log 2pi,
+  an exact rewriting of (a - 1) log y - y/2 - log Gamma(a) - a log 2 that does
+  not cancel at large a; it reuses gamma1's `deviance_unit` and
+  `stirling_error` rather than copying them. The parameter derivatives are
+  (1/2)(log(y/2) - psi(a)) and -2^(-K) psi^(K-1)(a) from `polygamma`, the
+  information is psi'(a)/4 with 2^(-(K+2)) psi^(K+1)(a), and F(y) = P(a, y/2)
+  carries x = y/2 free of mu with a linear in mu, so the K-th derivative of
+  log F is exactly 2^(-K) times the pure shape derivative of log P, the j = 0
+  column of `incomplete_gamma_mixed.hpp`. Nothing can cancel in that
+  composition, so the figures below are inherited from that module.
+- invgauss: the log-density derivatives are closed and elementary, with 1/phi
+  factored out. The cdf is the hard part. Writing
+  H(z) = log Phi(-z) + z^2/2 = log(erfcx(z/sqrt 2)/2) and using the exact
+  identity z2^2/2 - z1^2/2 = 2/(phi mu), the exponential factor e^(2/(phi mu))
+  never appears: the term that carried it becomes H(z2) - z1^2/2, and the
+  identity is applied before differentiating, the z^2/2 parts being closed
+  arrays and only H going through `chain_rule_pair_dk`. The survival rests on
+  X = log erfcx(a + d) - log erfcx(a), a = z1/sqrt 2 and d = sqrt(2/(phi y)),
+  whose value is log1p(-S/erfcx(a)) with S the difference of the two erfcx
+  values from a series in d where d is small. H' and H'' come from a backward
+  continued fraction of erfc at depth 200 for a >= 1.25, whose factors are all
+  positive; H^(n) for n >= 3 are the derivatives of log Phi. Every switch and
+  threshold is a named constant in the header.
+
+**Measurement.** Every derivative order of l, of I and of log F against a
+5-point difference of the order below; I against the variance of the score
+through the generic route; the cdf against its identities and the quantile
+against the cdf in both tails; and log F and log(1 - F) against mpmath
+references written from the definition
+(`tools/reference/distrib_expchi.py`, `distrib_invgauss.py`, with
+`distrib_expchi_forms.py` checking each closed form against SymPy's own
+derivative). Maximum error in ulp of the largest component of each order,
+gcc, 2026-11-13:
+
+| distribution | log F | log(1 - F) | bounds |
+|---|---|---|---|
+| exponential | 22.6 (order 6, y = 1.01, mu = 1) | 1.68 | per order, 3 to 34 and 1.0 to 2.6 |
+| chisq | 294 (order 6, y = mu = 17) | 525 (order 6, y = 15.3, mu = 17) | per order, 2.2 to 441 and 1.3 to 788 |
+| invgauss | 580 (order 3, upper tail) | 116 | 870 and 175 |
+
+The exponential is at the pilot's level (gaussian1 measured 30.9 and 29.7,
+laplace1 11.2 and 9.86). The chisq sits where its own cdf module does: the
+pure shape column of log P reaches 176 ulp at order 5 and 651 at order 6, and
+log Q at a >= 1 reaches 45.7 and 97.2, measured there in min(ulpL, ulp1)
+rather than in the scale of the order, so the two measures are not the same
+quantity; since the composition is one power of 1/2, the chisq figures are
+inherited and not introduced, and they sit below gamma1's 379 and 356. The
+inverse Gaussian's own derivatives of the log-density, measured against mpmath
+over J + K <= 6, stay within 28.3 ulp.
+
+**What the switches bought, invgauss.** The first version formed 1 - F by
+subtraction: 2035 ulp at the value in the far upper tail and about 1e4 in the
+orders. The erfcx form removed that. The identity above then took the small
+region from 1398 to 179 ulp at order 6, by removing the term
+2/(phi mu) = 666.7 that was cancelling against log Phi(-z2) at a measured
+factor of 8e3 (4.8e17 against -4.8006e17). The continued fraction is required:
+switched off, the central region of log F runs from 1e3 to 4e3 and the small
+region to 7e5. Its depth matters as much: at depth 60 K' was wrong by 4e-13 at
+a = 1.78, which alone set the far tail of log(1 - F) at 580 to 630 ulp. The
+series in d was swept over thresholds from 1/16 to 2; 1 was chosen, and at 2
+the series breaks down.
+
+**What is open.** The far-tail log F of the inverse Gaussian at order 3, 580
+ulp, is unchanged by every switch and is not located; the bound is set on it.
+The band where the series in d applies still carries one scalar difference
+whose cancellation factor is about 1/d, measured at about 11 where d = 0.09.
+The chisq figures will move only when the pure shape column of the incomplete
+gamma moves. The derivatives of H for orders 1 and 2 are computed here by a
+continued fraction of this header's own, because the shared tail route of
+gaussian1 covers only arguments above about 4 while the inverse Gaussian needs
+them from 1.25: the two should be reconciled when the normal tail is next
+revisited.
+
+**Chosen.** The three distributions as written, with the bounds of each test at
+about 1.5 times its measured maximum, on gcc.
+
+## Univariate distributions, batch 2: the two lognormals
+
+**What.** `include/laplace/distrib/lognormal1.hpp` (mu and v = sigma^2, the
+mean and the variance of log Y, neither of them a moment of Y) and
+`lognormal2.hpp` (the mean m and the variance v of Y), each with the whole
+interface of `core.hpp`. Both are continuous on (0, infinity), smooth in every
+parameter and in y, with no kinks. They are the two parametrizations
+`note/distrib.md` point H.2 keeps although only the second one's first
+parameter is a moment of Y.
+
+**How.** With x = log y, l(mu, v; y) = l_gaussian2(mu, v; x) - log y, and
+-log y carries no parameter, so every parameter derivative of order 1 to 6,
+the expected information with its four derivative orders, and log F, log(1 - F)
+with their derivatives are `gaussian2_distrib`'s at x, unchanged: lognormal1
+builds one and forwards to it, instead of carrying a second copy of the normal
+tail route. Its own members are the value, the quantile (the exponential of
+gaussian2's), the support, the hints, and the derivatives in y, where
+d/dy = (1/y) d/dx gives
+
+    d^J/dy^J f(log y) = y^(-J) sum_(k = 1..J) s(J, k) f^(k)(log y)
+
+with s(J, k) the signed Stirling numbers of the first kind, one function per J.
+
+lognormal2 is the same law through s = log(1 + v/m^2) and mu = log m - s/2, so
+its derivatives are lognormal1's composed with a two-into-two map in which both
+inner variables depend on both parameters; the composition is
+`chain_rule_pair_dk` (see its own section). Its information is the tensor
+transform I_new = J' I_old J of diag(1/s, 1/(2 s^2)), with a nonzero
+off-diagonal entry, -3/(2 m v) to leading order at small v/m^2; its derivatives
+to order 4 come from the same routine applied to the products, the product rule
+being the chain rule of the product function, so there is no private Leibniz
+recursion. The residual x - mu is formed as log1p((y - m)/m) + s/2 near y = m
+and as log y - log m + s/2 elsewhere.
+
+**A defect this found.** The first version formed x - mu by subtracting, which
+cancels when y is near m and v/m^2 is small: 6e-11 relative at (m, v) =
+(40, 0.001) and y = 40 in the mixed (y, theta) derivatives. The residual form
+above removed it, and the measured maximum over every (J, K) with J + K <= 6
+at six points is 23.76 ulp of the group's scale (J = 1, K = 5), bounded at 36.
+
+**Measurement.** Every order against a 5-point difference of the order below;
+the information against the variance of the score and against the generic
+quadrature route; log F and log(1 - F) against mpmath at 300 and 400 bits
+(`tools/reference/distrib_lognormal.py`, 7776 rows, plus 504 rows for the
+mixed derivatives in y). Checked against independent mpmath values at
+300 bits, 2026-11-14: lognormal2's expected information agrees with the exact
+transform to 1 to 2 ulp in every component at (1.5, 0.8), (40, 0.001) and
+(0.5, 50), and so do log F and its first derivatives; the off-diagonal entry
+times m v is -1.4999995 at (40, 0.001), as the leading term says. The
+cancellation of the expected information that was recorded for this family at
+mean 40 and variance 0.001 does not occur in this formulation.
+
+Maximum error of the log F derivatives in ulp of the largest component of each
+order, gcc, 2026-11-13:
+
+| distribution | log F | log(1 - F) | bounds |
+|---|---|---|---|
+| lognormal1 | 322 (order 6) | 648 (order 6) | 483 and 973 |
+| lognormal2 | 7056 (order 6) | 169 (order 2) | 10600 and 255 |
+
+**What this says.** Two different things are in those numbers. The first is
+that the accuracy of the normal route both distributions inherit through
+gaussian2 is absolute, set by the largest component of the order and not by the
+component being read: where a high-order component falls near a zero of itself,
+one ulp of the order's largest component is already many ulp of that component,
+and the figures above are in ulp of the order's scale for exactly that reason.
+At the worst row of lognormal2's order 6 the component is about one part in a
+hundred and twenty of the largest component of its order (7.06e3 ulp of the
+order's scale against 8.55e5 ulp of the component itself), so almost all of
+that reading is the smallness of the component. That error is uniform across the order
+rather than larger at the high orders, so a chain that works one component at a
+time inherits it divided by the size of its own component, which near a zero of
+that component is whatever the ratio says: conditioning, not a floor. No
+number is put on the normal route's own share here. An earlier figure of 43
+to 65 ulp, quoted as a relative floor, was withdrawn as being that same
+absolute error divided by a small component; the route was then improved
+(see its own section), and it is now accurate to a couple of ulp of the
+component itself across the band, zeros of the components included, so there
+is no inherited floor of any size to quote. What remains in the figures
+above is the cost of the composition and the conditioning of the components
+being read. Remeasured after that change: lognormal1 does not move, its
+worst points lying in the tail, and lognormal2's figures in ulp of the
+order's scale do not move either. The second is that the composition through
+the map costs lognormal2 about three times lognormal1's error at orders 1
+and 2 and
+twenty to thirty times at orders 3 to 6 on the common points, the worst rows
+being at v/m^2 = 200 with y far in the upper tail, where log F tends to zero
+and every derivative of it is a cancelling sum. At the opposite corner the
+comparison reverses: at (40, 0.001) lognormal2 is more accurate than its
+lognormal1 twin, 6034 against 5.4e6 ulp at order 4, because its residual avoids
+the subtraction that lognormal1 cannot avoid there.
+
+**The conditioning of lognormal1 at a tiny variance.** At the twin of that
+corner, (mu, s) = (3.689, 6.25e-7), the residual log y - mu is about 1e-17
+while the rounding of log y alone is about 4e-16: the digits are gone before
+the library sees them, and no rearrangement inside lognormal1 can recover them,
+because mu and y are what the caller passes. Measured by perturbing y and mu by
+one ulp and recomputing with mpmath at 300 bits, the library's error is at most
+0.165 of max(one ulp of the result, the change caused by one input ulp), where
+the plain measure reads up to 5.4e6 ulp. So the distribution is as accurate as
+its arguments allow; those rows are excluded from the plain-ulp check with that
+figure recorded in the test.
+
+**What is open.** lognormal2's log F at orders 3 to 6 in the far upper tail at
+large v/m^2, 7056 ulp at order 6: the region is located and the smallness of
+the components is part of it, but the share that belongs to the chain itself is
+not separated, and separating it waits on the log Phi table. The 5-point difference in y cannot hold the tolerance of the other
+checks for lognormal2 (measured 6.7e-8 against 3.8e-10 at orders 5 and 6), so
+there the mpmath reference is the only check, which is the stronger one.
+
+**Chosen.** Both distributions as written, with every bound at about 1.5 times
+its measured maximum, on gcc and on CUDA.
+
+## Univariate distributions, batch 2: gamma2, the gamma in mean and variance
+
+**What.** `include/laplace/distrib/gamma2.hpp`: the gamma law in its mean
+mu > 0 and its variance sigma^2 > 0, so that the shape is s = mu^2/sigma^2 and
+the scale sigma^2/mu, with the whole interface of `core.hpp`. Unlike gamma1's
+(mu, phi), these two parameters are not orthogonal: the off-diagonal entry of
+the expected information is not zero, and a derivative in mu reaches both the
+shape and the ratio y/mu.
+
+**How.** The log-density is gamma1's cancellation-free form with a different
+inner map,
+
+    l = -s D(y/mu) + (1/2) log s - delta(s) - log y - (1/2) log 2pi,
+    D(z) = z - 1 - log z,   s = mu^2/sigma^2,
+
+with delta Stirling's error; the deviance and the Stirling error are gamma1's
+own functions, not copies. The outer function G(s, c) = -s D(c) + (1/2) log s
+- delta(s), c = y/mu, has closed partials in (s, c) to total order 6 (the only
+mixed term is -s D(c), whose derivatives in s above the first vanish), and the
+inner maps s(mu, sigma^2) = mu^2/sigma^2 and c(mu) = y/mu have closed partials
+too; both inner variables depend on mu, so the composition is the two-into-two
+chain rule `chain_rule_pair_dk` and not a product of one Bell sum per
+parameter. log F = log P(s, s c) composes the partials of log P(a, a c) at
+fixed ratio the same way. The expected information is the tensor transform
+I_new = J' I_old J of gamma1's, with J the Jacobian of phi = sigma^2/mu^2, and
+its derivatives to order 4 follow by the same routine. The quantile is
+(sigma^2/mu) P^-1(s, p).
+
+**Measurement.** Every derivative order of l, of I and of log F against a
+5-point difference of the order below, in the parameters and in y; the
+information against the variance of the score and against the generic
+quadrature route; the cdf against its identities and the quantile against the
+cdf; and l, log F and log(1 - F) against mpmath references computed from the
+definitions (`tools/reference/distrib_gamma2.py`, 4510 rows, shapes 1e-4 to
+1e4 and c = y/mu from 0.01 to 10). That script also checks every closed form of
+the header against SymPy's own derivative, including the entries of the
+information and the Leibniz expansion of its derivatives, and it writes the
+direct closed forms of the log-density at orders 1 and 2 as a second route:
+the composed route reproduces them to the same error as the log-density rows,
+4.41 and 5.41 ulp, which is the check that the composition is the right
+formula and not only a convergent one. Maximum error in ulp of the largest
+component of each order, gcc, 2026-11-14:
+
+| quantity | order 1 | 2 | 3 | 4 | 5 | 6 | bound |
+|---|---|---|---|---|---|---|---|
+| log f | 4.41 | 5.41 | 39.8 | 20.1 | 38.7 | 186 | 280 |
+| log F | 138 | 131 | 191 | 274 | 1.13e3 | 4.60e3 | 6900 |
+| log(1 - F) | 122 | 125 | 97.3 | 197 | 482 | 1.20e3 | 6900 |
+
+**Where the error is, and where it is not.** The worst rows are not at the
+extreme shapes, where the partials of the incomplete gamma are hardest: at
+shapes 1e-4 and 1e4 the log F derivatives stay within 5.6e2 and 7.0e2 ulp at
+order 6. They are at shape 1, at c between 0.7 and 10, in the components with
+every derivative in one parameter: 4.60e3 at order 6 with all six derivatives
+in mu (c = 0.95), 2.59e3 at c = 1 and 2.42e3 with all six in sigma^2 at
+c = 10. That is the signature of the composition rather than of the partials,
+because a derivative in mu reaches both inner variables and the component with
+all derivatives in mu is the one where the chain sums the most products. For
+comparison the pilot gamma1, whose shape depends on one parameter alone and
+whose ratio depends on the other, measured 379 and 356 on its own grid.
+
+**The expected information at extreme shapes.** Checked against the exact
+transform of the gamma information, computed with mpmath at 300 bits from the
+textbook entries s/mu^2 and s^4 (psi'(s) - 1/s): the closed form agrees to 1
+to 2 ulp in every component at (mu, sigma^2) = (0.4, 1600), (0.4, 0.16),
+(2.5, 0.125), (1e4, 1) and (1, 1e-8), that is at shapes from 1e-4 to 1e8. The
+cancellation of the information at a shape of 1e8 that was recorded for this
+parametrization does not appear.
+
+**What is open.** The composition's cost at shape 1, above. The component with
+every derivative in mu could instead be composed over (a, x) with a = mu^2/v
+and x = mu y/v, both polynomial in mu, where the objection that rules that
+route out for gamma1 does not apply, since along mu the ratio x/a = y/mu is
+not fixed; whether that is more accurate than the present route has not been
+measured, and it is a choice between two routes rather than a repair. The
+mpmath table stops at shape 1e4 because mpmath's own gammainc raises
+NoConvergence at shape 1e8 for every c >= 1 and takes no maxterms argument;
+that shape is covered by the SymPy checks, by the difference checks at
+mu = 1e4 and sigma^2 = 1, and by the comparison of the information above.
+
+**Chosen.** As written, with the bounds of the test at about 1.5 times its
+measured maxima, on gcc and on CUDA.
