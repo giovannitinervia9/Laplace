@@ -3431,21 +3431,35 @@ max(|g|, 1), which cannot see a relative error in a component smaller than 1,
 so this was not a regression there but a quantity that had never been bounded
 relatively.
 
-It has been now, by the session that owns `include/laplace/math/normal.hpp`,
-which added the relative error of each order on [-1, 4) to `check_deriv` in
-`tests/math/test_normal.cpp`, away from the zeros of the component (|g| at
-least a hundredth of the largest |g| of that order, since a component crosses
-zero inside the band and nothing can be relatively accurate there). Orders 4,
-5 and 6 carry 43.2, 65.3 and 36.8 ulp where the earlier measure saw 0.177,
-0.228 and 0.429. That is the size of the 90 ulp above, so gaussian2's 117 is
-accounted for by a chain costing at most 28 and inputs carrying tens, with
-nothing wrong in the composition.
+It has been now, by the sessions that own `include/laplace/math/normal.hpp`,
+and in the form that bounds something: `check_deriv` in
+`tests/math/test_normal.cpp` measures the error of each order on [-1, 4) in
+ulp of the largest |g_k| of that order on the band, which is the property of
+a Chebyshev route, its error being absolute and of the size of an ulp of the
+coefficients of the piece. It is uniform and small: 1.19, 1.28, 1.36, 1.41,
+0.913 and 1.72 ulp for orders 1 to 6 on gcc, 1.10 to 1.61 on CUDA. See "The
+accuracy of the log Phi derivatives on [-1, 4), absolutely and relatively".
 
-**What is open.** Whether those 43 to 65 ulp on [-1, 4) can be reduced, which
-is a question about how the Chebyshev pieces of that band are generated and
-whether the expansion is in the right variable for the high orders. It bounds
-what any chain built on those derivatives can achieve, gaussian1, gaussian2
-and gaussian3 alike.
+That is what feeds the chain, and it explains gaussian2's 117 without anything
+being wrong in the composition: the inputs carry about 1.5 ulp of the largest
+component of their order, and at the point where the header is worst the
+component the chain needs is a small fraction of its neighbours, so the same
+absolute error is tens of ulp of that component. With a chain costing at most
+28 ulp, the 117 is accounted for.
+
+**A figure withdrawn.** An earlier version of this paragraph said that orders
+4, 5 and 6 carry 43.2, 65.3 and 36.8 ulp "away from the zeros of the
+component", on a threshold that kept points where |g_k| is a hundredth of the
+largest component of the order. A hundredth is not away from a zero: at that
+ratio an absolute error of one ulp of the largest component is already a
+hundred ulp of the component, and those three points lie less than 0.013 from
+a sign change. Those figures were conditioning, not the route, and the
+sentence that made them the limit on the chains was wrong.
+
+**What is open.** Whether the 1.5 ulp of the largest component of the order
+can be cut, which is Giovanni's decision and a question about how the
+Chebyshev pieces of that band are generated. Whatever it is, it bounds every
+chain built on those derivatives alike, gaussian1, gaussian2 and gaussian3.
 
 **Chosen.** The routes as they are, with the conditioning measured and
 recorded, and a test that pins each chain's own error so that a future change
