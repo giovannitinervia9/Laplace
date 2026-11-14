@@ -3353,3 +3353,100 @@ its counters do not collide today.
 
 **Chosen.** The six distributions as written, with the bounds of each test at
 about 1.5 times the measured maximum, on gcc and on CUDA.
+
+## Where the log F derivatives of the gaussians and of the gumbel lose their digits
+
+**What.** The two accuracy questions left open by batch 1 are answered, and
+both are the conditioning of the quantity rather than a defect of a route, so
+nothing in the headers changed. New: `tools/reference/distrib_conditioning.py`
+(2473 rows) and `tests/distrib/test_conditioning.cpp`, which measure the same
+derivatives at an argument that is exact in double (mu = 0, every scale 1, so
+z = y) and therefore separate the error a route makes from the error it
+inherits.
+
+**How, and why the grids of batch 1 could not tell.** On the grid of
+test_gaussian2.cpp the worst points of log F sit at z = +13 and of log(1 - F)
+at z = -13, that is on the side where the logarithm tends to 0 from below. The
+first suspicion was cancellation in the z-polynomial of the chain, and it was
+wrong: at z = 13 the ratio between the largest term of the sum and the sum
+itself is 1.2 at order 6, and at order 1 the derivative is a single term. The
+cause is that z = (y - mu)/sigma is itself rounded. With L_1 = R(z) =
+phi(z)/Phi(z) and d log L_1 / dz about -z, half an ulp on z, that is z eps/2 in
+absolute terms, becomes a relative error of about z^2 eps/2 in the result: 85
+ulp at z = 13 against 97.4 measured, and 239 ulp at z = 21.9 against 301
+measured. The gumbel is the same story in its own variable: log(1 - F) = -e^-u
+with u = e^-z, so the inherited error is about |z| u eps/2, which at the worst
+point of its grid (z = -5, u = 148) is 370 ulp against 394 measured.
+
+**What the exact argument shows** (gcc, 2026-11-13, in ulp of the largest
+component of the order, maximum over orders 1 to 6):
+
+| route | on its own grid | at an exact argument |
+|---|---|---|
+| gaussian1, chain in sigma (k = 1) | 30.9 / 29.7 | 38 |
+| gaussian2, chain in the variance (k = 1/2) | 483 / 441 | 117 |
+| gaussian3, chain in the precision (k = -1/2) | 301 / 156 | 3.08 |
+| gumbel, chain in sigma | 19.1 / 394 | 3.66 / 30.5 |
+
+**What it says.** Most of what batch 1 measured on the gaussians and on the
+gumbel was inherited, not produced: no route can do better without taking y
+and the parameters in extended precision. What is left is one real and
+measured asymmetry between the chains. The step of `mixed_power_dk` is
+-((k a + i) R_i + k z R_i'), whose two terms subtract when k > 0 and add when
+k < 0, so the chain in the precision is the best conditioned of the three and
+the chain in the variance the worst: 3.08 against 117 ulp, a factor of 38, and
+the same ordering appears in the cancellation ratio of the polynomial at
+z = 4 and order 6, 2.4 for k = -1/2 against 291 for k = 1/2.
+
+**The alternative chain for the variance, tried and rejected.** Giovanni asked
+for the attempt, so both routes were run in double from the same z-derivatives
+rounded to double, and compared with the exact value at 300 bits
+(`tools/reference/variance_chain.py`): the chain now in the header against the
+chain in the precision (k = -1/2, where the recursion step adds) followed by the
+conversion of the tau-derivatives to v-derivatives through tau = 1/v by Faa di
+Bruno. The alternative is worse almost everywhere, in ulp of the largest
+component of the order:
+
+| z | order | chain in the variance | through the precision |
+|---|---|---|---|
+| 3 | 5 | 21 | 141 |
+| 3 | 6 | 16 | 133 |
+| 4 | 5 | 3 | 5 |
+| 4 | 6 | 28 | 124 |
+| 6 | 6 | 13 | 5 |
+| 8 | 6 | 1 | 0.2 |
+
+The conversion costs more than the better-conditioned chain saves, because the
+Faa di Bruno sum over the derivatives of 1/v brings its own cancellation. The
+chain stays as it is.
+
+**Where gaussian2's remaining 117 ulp actually comes from.** The same
+measurement answers that too, and it is not the chain: fed z-derivatives that
+are exactly rounded, the chain in the variance costs at most 28 ulp at the
+worst point, while the header measures 117 at mu = 0 and v = 1, where z is
+exact and the chain is the same. The difference is the relative accuracy of
+log_Phi_dK itself near z = 3 and 4, at the upper end of its Chebyshev range.
+The tests of the normal block measured those derivatives for t >= -1 in ulp of
+max(|g|, 1), which cannot see a relative error in a component smaller than 1,
+so this was not a regression there but a quantity that had never been bounded
+relatively.
+
+It has been now, by the session that owns `include/laplace/math/normal.hpp`,
+which added the relative error of each order on [-1, 4) to `check_deriv` in
+`tests/math/test_normal.cpp`, away from the zeros of the component (|g| at
+least a hundredth of the largest |g| of that order, since a component crosses
+zero inside the band and nothing can be relatively accurate there). Orders 4,
+5 and 6 carry 43.2, 65.3 and 36.8 ulp where the earlier measure saw 0.177,
+0.228 and 0.429. That is the size of the 90 ulp above, so gaussian2's 117 is
+accounted for by a chain costing at most 28 and inputs carrying tens, with
+nothing wrong in the composition.
+
+**What is open.** Whether those 43 to 65 ulp on [-1, 4) can be reduced, which
+is a question about how the Chebyshev pieces of that band are generated and
+whether the expansion is in the right variable for the high orders. It bounds
+what any chain built on those derivatives can achieve, gaussian1, gaussian2
+and gaussian3 alike.
+
+**Chosen.** The routes as they are, with the conditioning measured and
+recorded, and a test that pins each chain's own error so that a future change
+to a chain is judged on the figure it can actually move.

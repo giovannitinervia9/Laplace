@@ -42,6 +42,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_logistic.cpp
   distrib/test_gumbel.cpp
   distrib/test_laplace2.cpp
+  distrib/test_conditioning.cpp
   pdmat/test_pilot.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
