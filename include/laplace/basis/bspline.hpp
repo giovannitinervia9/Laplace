@@ -803,12 +803,15 @@ struct bspline_basis {
   // a[j] = int_{t_j}^lower B_j, j = 0..d (zero for clamped knots)
   template <class T>
   LAPLACE_HD void lower_anchor(T* a) const {
-    const int d = degree;
+    // on the interval that contains lower: s0 > d when lower is a multiple
+    // knot (interval d is then empty and BSPLVB would divide 0 by 0)
+    const int d = degree, s0 = interval(T(lower)), o = s0 - d - 1;
     T n[bspline_max_degree + 2];
-    bsplvb(d, d + 1, T(lower), n);
+    bsplvb(s0, d + 1, T(lower), n);  // n[i - o] = B_{i, d+1}(lower), i = o..s0
     T tail = 0;
+    for (int i = d + 1; i <= s0; ++i) tail += n[i - o];
     for (int q = d; q >= 0; --q) {
-      tail += n[q + 1];
+      if (q >= o) tail += n[q - o];
       a[q] = T(knots[q + d + 1] - knots[q]) / T(d + 1) * tail;
     }
   }

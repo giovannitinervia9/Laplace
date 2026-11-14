@@ -10,7 +10,10 @@
 // a row of the design at one point x: the first column f and the values of
 // the columns f, ..., f + w - 1, where the width w = row_width() is fixed for
 // the basis (d + 1 for a B-spline of degree d, K for the dense bases), the
-// same for every derivative order and outside the domain:
+// same for every derivative order and outside the domain. Value i of a row
+// belongs to column (f + i) mod K, K = dimension(): only a cyclic basis wraps
+// (cyclic_bspline_basis); for the others f + i < K and the rule changes
+// nothing (decision C2):
 //
 //   row(x, out), row_d1(x, out) .. row_d6(x, out)
 //                      the values of b^(k)(x), one function per order k;

@@ -58,6 +58,7 @@ set(LAPLACE_TEST_SOURCES
   pdmat/test_reduced_rank.cpp
   pdmat/test_weighted_sum.cpp
   basis/test_bspline.cpp
+  basis/test_cyclic_bspline.cpp
   basis/test_fourier.cpp
   basis/test_legendre.cpp
   basis/test_operator.cpp
