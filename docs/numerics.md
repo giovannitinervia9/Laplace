@@ -3431,8 +3431,7 @@ max(|g|, 1), which cannot see a relative error in a component smaller than 1,
 so this was not a regression there but a quantity that had never been bounded
 relatively.
 
-It has been now, by the sessions that own `include/laplace/math/normal.hpp`,
-and in the form that bounds something: `check_deriv` in
+It has been now, and in the form that bounds something: `check_deriv` in
 `tests/math/test_normal.cpp` measures the error of each order on [-1, 4) in
 ulp of the largest |g_k| of that order on the band, which is the property of
 a Chebyshev route, its error being absolute and of the size of an ulp of the
