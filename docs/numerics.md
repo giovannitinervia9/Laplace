@@ -4891,3 +4891,148 @@ distinct parameters spread over the rows):
 | (8, 2) | 553 / 74 | 557 / 75 | 613 / 99 | 938 / 162 | 3132 / 434 |
 | (16, 4) | 2308 / 314 | 2223 / 299 | 2339 / 348 | 3103 / 496 | 9686 / 2171 |
 
+## Weighted sums of penalties: weighted_sum_psdmat
+
+**What.** `weighted_sum_psdmat` (`include/laplace/pdmat/weighted_sum.hpp`) is
+a `psdmat_structure` that runs on the host only:
+M(theta) = sum_j e^(theta_j) S_j, where the S_j are fixed p x p positive
+semidefinite matrices (the penalties of smooth and tensor-product terms) and
+q = m. It supplies M and its derivatives (e^(theta_j) S_j along a tuple of
+one repeated index, zero otherwise), the log pseudo-determinant log|M|_+ (the
+sum of the logs of the nonzero eigenvalues) with its derivatives of orders 1
+to 6, the rank r and an orthonormal basis of the null space. The null space
+of a sum of positive semidefinite matrices is the intersection of their null
+spaces, so r and the basis do not depend on theta. Both come from
+`laplace::dense::null_space_basis` applied to sum_j S_j / max|S_j| at
+construction. Decided with Giovanni on 2026-11-14.
+
+**Why not the eigenvalues of the sum.** When the lambda_j = e^(theta_j)
+spread apart, an eigendecomposition of M in double resolves the eigenvalues
+of the small terms only to lambda_max eps. The r-th eigenvalue then turns
+negative (its log is NaN) or carries no correct digit, and the derivatives
+tr(lambda_j M^+ S_j) lose one digit per order of magnitude of the spread.
+statmodels7 recorded this failure on its additive penalties, with values
+that were finite and wrong from a spread of about 1e13.
+
+**How.** A graded similarity transform after Wood (2011, appendix B), with
+the components grouped by lambda_j ||S_j||, where ||S|| is the largest
+absolute entry. Let U be the basis of the subspace not yet resolved (at
+first I_p). Each level:
+
+- drops the components whose restriction R_j = U^T S_j U is zero
+  (max|R_j| <= 8 p eps max|S_j|);
+- takes as dominant the components whose theta_j + log max|R_j| is within a
+  factor split_tolerance of the largest;
+- splits U by the eigendecomposition of sum_dom R_j / max|R_j| into its range
+  U_+ (rank by the rule of laplace::dense, lambda > u eps lambda_max) and its
+  null space U_0;
+- appends U U_+ to Q, with the level's scale d_l = e^(top);
+- continues on U U_0, where every dominant component is exactly zero.
+
+These structural zeros are set, never computed: a zero computed in floating
+point costs lambda_dom eps, which swamps the subordinate terms. Let D be the
+diagonal matrix of the scales, G_j = D^-1/2 Q^T (lambda_j S_j) Q D^-1/2 with
+the zeros set, and H = sum_j G_j, whose entries are of order one. Then
+
+    log|M|_+ = log det H + sum_l r_l log d_l,
+
+where r_l is the number of columns of level l and log det H comes from a
+Cholesky factorization. B_j = H^-1 G_j is similar to lambda_j M^+ S_j on the
+range of M, so d log|M|_+ / d theta_j = tr B_j and
+d B_j / d theta_k = delta_jk B_j - B_k B_j. Along a sorted tuple of K
+positions, the derivative is a sum over the set partitions pi of the
+positions whose blocks each repeat one index: each partition contributes
+(-1)^(|pi| - 1) times the sum, over the (|pi| - 1)! cyclic orders of its
+blocks, of tr(B_(j_1) ... B_(j_|pi|)). Each word of indices is reduced to its
+least rotation, and its trace is computed once. sum_j tr B_j = r is an exact
+identity, a check that needs no reference. Every call recomputes the
+transform. statmodels7's route takes a Schur complement at each level and
+builds the next level's correction from the dominant reductions; this route
+subtracts nothing, because H is formed directly from the scaled G_j.
+
+**References** (`tools/reference/pdmat_weighted_sum.py`). Every S_j is exact
+in double (integers, or integers times powers of two), so its null space is
+exact. SymPy gives an exact rational basis Z of the range. Then
+log|M|_+ = log det(Z^T M Z) - log det(Z^T Z), and the derivatives follow from
+the partition formula applied to (Z^T M Z)^-1 (lambda_j Z^T S_j Z), at 256
+bits, without the levels or the scaling. The partition formula agrees with
+tensor central differences of log det(Z^T M Z) at 640 bits (steps 2^-60 and
+2^-70) to 5.3e-61, on every sorted tuple of orders 1 to 6 at two points.
+The cases:
+
+- te2: P6 (x) I5 and I6 (x) P5, where P_k is the integrated squared second
+  derivative of k cubic B-splines on integer knots, scaled to integers;
+  p 30, r 26.
+- te3: three second-difference penalties, 3 x 3 x 4; p 36, r 28.
+- lowrank: three matrices A A^T, A with 3, 2 and 2 integer columns; p 8, r 7.
+- lowrank_ill: the same, with columns scaled by 2^-4 to 2^-8, so that one
+  component reaches condition 2^16.
+- ridge: P10 + I10, full rank.
+- single: P8 alone.
+
+The points are theta_0 = s ln 10, theta_1 = 0, theta_2 = (s/2) ln 10, with
+s in -20, -12, -6, 0, 3, 6, 9, 12, 15, 20, plus one random point. Every
+sorted tuple of orders 0 to 6 is used: 3045 values in all.
+
+**The split threshold, measured** (benchmarks/pdmat_weighted_sum.cpp, gcc).
+The columns give the worst error over the cases in ulps of max(|ref|, 1)
+over orders 0 to 6, the same on the two tensor cases, and the worst
+|sum_j tr B_j - r|:
+
+| split_tolerance | worst | worst on te2, te3 | rank identity |
+|---|---|---|---|
+| eps^0 (one component per level, ties grouped) | 3.1e4 | 1.7e4 | 1.5e-12 |
+| eps^0.05 (chosen) | 2.2e4 | 1.7e4 | 6.1e-14 |
+| eps^0.10 to eps^0.15 | 6.9e4 | 1.7e4 | 1.8e-13 |
+| eps^0.20 to eps^0.25 | 2.9e5 | 1.5e4 | 1.2e-11 |
+| eps^0.30 to eps^0.35 | 4.3e5 | 1.5e4 | 4.2e-11 |
+| eps^0.40 | 3.4e9 | 1.2e6 | 1.2e-8 |
+| eps^0.50 | 3.4e9 | 1.2e6 | 4.2e-8 |
+| naive (eigenvalues of the sum) | NaN; 1e15 to 4e21 | NaN; 1e15 to 1e18 | not computed |
+
+The best threshold is the reverse of statmodels7's (eps^0.35 there, and
+eps^0.3 in mgcv's gam.reparam). A level that holds a spread leaves that
+spread unscaled in H, while a deeper recursion costs nothing here, because
+nothing is subtracted. Giovanni chose eps^0.05, about 0.165: a level holds
+the components within a factor of about 6 of the largest. The zero test gives
+identical results from 1 to 1024 p eps; 8 p eps is kept.
+
+**Accuracy by order** at eps^0.05 (ulps of max(|ref|, 1); gcc and the CUDA
+build, whose host code MSVC compiles, agree to the digits shown):
+
+| case | K=0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| te2 | 1.96 | 0.89 | 48.5 | 92 | 176 | 1860 | 1.73e4 |
+| te3 | 1.13 | 0.75 | 37 | 72 | 253 | 2100 | 1.03e4 |
+| lowrank | 0.71 | 4.5 | 8 | 16 | 32 | 128 | 1280 |
+| lowrank_ill | 1.31e4 | 1.09e4 | 2.18e4 | 2.18e4 | 2.19e4 | 2.19e4 | 2.18e4 |
+| ridge | 5.95 | 1 | 11.5 | 36 | 293 | 995 | 2070 |
+| single | 16.2 | 0 | 4 | 8 | 32 | 256 | 2050 |
+
+The loss that grows with the order comes from the alternating signs of the
+partition sum. In single, the derivatives of orders 2 to 6 are exactly 0, and
+the sum of the words in tr B^k = r cancels to 2050 ulps of 1 at order 6.
+lowrank_ill loses about 1e4 at every order and every threshold, also at a
+spread of 1, where the naive route loses as much (3.9e4): the loss comes
+from the conditioning of the components themselves, not from the route.
+By spread, on te2 (worst over orders 0 to 6, graded / naive): 1.0e4 / NaN at
+1e-20, 3.6e3 / 6.7e12 at 1e-12, 1.6e3 / 3.0e3 at 1, 1.5e4 / 4.3e5 at 1e6,
+2.2e3 / 1.2e11 at 1e12, 1.0e4 / NaN at 1e20. The test bounds are these worst
+errors times about 4. Central differences of the order below agree within
+1e-6 at three points per case for every tuple.
+
+Speed (gcc, microseconds per call, one thread, theta = (9.2, 0, 4.6)):
+
+| case | p | r | m | value | K=1 | K=2 | K=6 |
+|---|---|---|---|---|---|---|---|
+| lowrank | 8 | 7 | 3 | 8.2 | 10.3 | 9.8 | 55.9 |
+| ridge | 10 | 10 | 2 | 9.4 | 11.1 | 11.2 | 59.5 |
+| single | 8 | 6 | 1 | 4.5 | 5.0 | 5.1 | 112.5 |
+| te2 | 30 | 26 | 2 | 104 | 112 | 111 | 250 |
+| te3 | 36 | 28 | 3 | 218 | 233 | 235 | 718 |
+
+Every call repeats the transform: one restriction and one eigendecomposition
+per level, then Q^T S_j Q, the Cholesky factor and the B_j. A full table of
+derivatives at one theta repeats it for every tuple. Open: an evaluated
+state at one theta that serves every order, if a fit shows that the cost
+matters.
