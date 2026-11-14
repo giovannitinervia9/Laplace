@@ -1,6 +1,5 @@
 /**
 \defgroup gamma Gamma function and polygamma
-\ingroup special
 \brief Logarithm of the gamma function, \f$\log \Gamma(x)\f$, digamma, trigamma, and polygamma functions to order 6.
 
 This module evaluates \f$\log \Gamma(x)\f$ along with digamma, trigamma, and polygamma functions up to order 6. Include `<laplace/math/special.hpp>` for the primary `laplace::math` functions, or `<laplace/math/polygamma.hpp>` (included by `special.hpp`) for Laplace's own `laplace::math::own` routines. All functions are marked `LAPLACE_HD` or `LAPLACE_HD_FORCEINLINE` and run on the host and inside Kokkos kernels on the device. In tests, `lgamma()`, `digamma()`, and `trigamma()` stay within 2.42 ulp on gcc and CUDA, while `polygamma()` for orders 2 to 6 stays within 3.36 to 9.44 ulp.

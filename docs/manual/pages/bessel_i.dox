@@ -1,6 +1,5 @@
 /**
 \defgroup bessel_i Modified Bessel function of the first kind
-\ingroup special
 \brief Logarithm of \f$I_0(k)\f$, its scaled form, the ratio \f$A(k) = I_1(k)/I_0(k)\f$ and its inverse \f$K(\rho)\f$ with derivatives to order 6, and the ratios \f$I_j(k)/I_0(k)\f$.
 
 This module computes \f$\log I_0(k)\f$, its scaled form \f$\log I_0(k) - k\f$, the ratio \f$A(k) = I_1(k)/I_0(k)\f$, the inverse \f$K(\rho) = A^{-1}(\rho)\f$, their derivatives to order 6, and the ratios \f$I_j(k)/I_0(k)\f$. Include `<laplace/math/bessel_i.hpp>` and call each function as `laplace::math::NAME`. Every function is marked `LAPLACE_HD` and runs on the host and inside Kokkos device kernels. Scalar functions stay within 3.5 ulp on gcc and CUDA; \ref laplace::math::own::bessel_i_ratios "bessel_i_ratios()" stays within 13.8 ulp and 2.3 ulp1.

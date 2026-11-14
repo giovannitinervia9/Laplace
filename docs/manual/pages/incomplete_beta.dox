@@ -1,6 +1,5 @@
 /**
  * \defgroup incomplete_beta Regularized incomplete beta function
- * \ingroup special
  *
  * The incomplete beta module evaluates the regularized incomplete beta function, its
  * complement, their natural logarithms, mixed partial derivatives with respect to both shape

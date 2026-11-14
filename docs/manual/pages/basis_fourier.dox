@@ -1,6 +1,5 @@
 /**
 \defgroup basis_fourier Fourier bases
-\ingroup basis
 \brief Complete periodic Fourier trigonometric basis with analytical derivatives to order 6, integrals from the lower boundary, and closed-form cross Gram matrices.
 
 Include `<laplace/basis/fourier.hpp>` to use \ref laplace::basis::fourier_basis "fourier_basis", constructed on the host by \ref laplace::basis::make_fourier_basis "make_fourier_basis()". Point evaluation functions marked `LAPLACE_HD` run on the host and inside Kokkos kernels on the device, whereas cross Gram matrix generation and semi-bandwidth queries run on the host. Across all tested configurations, row errors stay within 2.5 times the angle conditioning, integrals within 2.0 ulp, and cross Gram matrices within 18 ulp.

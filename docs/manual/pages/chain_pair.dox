@@ -1,6 +1,5 @@
 /**
 \defgroup chain_pair The chain rule for two variables in two variables
-\ingroup math
 \brief The chain rule for the composition of two variables in two variables up to total order 6.
 
 Include `<laplace/math/chain_pair.hpp>` and call \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()" as `laplace::math::chain_rule_pair_dk<K>(G, u0, u1, out)` to compute all partial derivatives of total order \f$K \in \{1, \dots, 6\}\f$ of \f$H(x_0, x_1) = G(u_0(x_0, x_1), u_1(x_0, x_1))\f$. Functions in this module are marked `LAPLACE_HD` for host and Kokkos device execution. On the gcc reference suite, errors stay within 2.8 ulp on cancelling random derivatives and 26.2 ulp on non-linear coordinate maps, bounded at 40.0 ulp in automated tests.

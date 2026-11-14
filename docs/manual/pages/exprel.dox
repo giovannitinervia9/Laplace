@@ -1,6 +1,5 @@
 /**
 \defgroup exprel Relative exponential
-\ingroup math
 \brief Relative exponential function \f$\varphi(x) = (e^x - 1)/x\f$ and its derivatives in \f$x\f$ to order 6.
 
 This module provides the relative exponential function \f$\varphi(x)\f$ and its first six derivatives in `<laplace/math/exprel.hpp>`. Functions are marked `LAPLACE_HD`, run on the host and inside Kokkos kernels on the device, and are called as `laplace::math::exprel` and `laplace::math::exprel_d1` through `laplace::math::exprel_d6`. The name `exprel` matches GSL (`gsl_sf_exprel`) and SciPy (`scipy.special.exprel`). Across all seven functions, the largest measured error is 5.92 ulp on gcc and 6.57 ulp on CUDA, both at `exprel_d6()`.

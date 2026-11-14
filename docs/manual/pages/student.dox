@@ -1,6 +1,5 @@
 /**
 \defgroup student Student t distribution function
-\ingroup special
 \brief Natural logarithm of the standard Student t distribution function, \f$\log T_\nu(z)\f$, and its mixed partial derivatives in \f$(z, \nu)\f$ to order 5.
 
 The header `<laplace/math/student.hpp>` evaluates \f$\log T_\nu(z)\f$ and its mixed partial derivatives in \f$(z, \nu)\f$ up to total order 5. Every public function is called in `laplace::math` (forwarding to definitions in `laplace::math::own`) and is marked `LAPLACE_HD` for host and Kokkos device execution. Across the reference tests, the value function stays within 188 ulp (10.8 ulp1), and the derivatives stay within 525 ulpN on gcc and 1480 ulpN on CUDA (at most 281 ulpL).

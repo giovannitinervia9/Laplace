@@ -1,6 +1,5 @@
 /**
 \defgroup basis_transform Basis transforms
-\ingroup basis
 \brief Linear coefficient transforms for constraints, Gram orthonormalization, and penalty diagonalization.
 
 The module `<laplace/basis/transform.hpp>` provides linear transforms of the coefficients of a univariate basis in namespace `laplace::basis`. A transform is built on the host by \ref laplace::basis::make_basis_transform "make_basis_transform()" and copied to the default device. Nothing in this module is `LAPLACE_HD`. On eight cubic B-spline cases, the eigenvalues of the penalty agree with mpmath references within \f$54.7\varepsilon\f$ of the largest.

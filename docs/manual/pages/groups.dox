@@ -1,20 +1,187 @@
-/**
-\defgroup math Mathematics
-\brief Numerical functions callable inside Kokkos kernels, on the host and on the device.
-
-\defgroup special Special functions
-\ingroup math
-\brief Gamma, beta, normal, Student t, Owen's T and Bessel functions, with their derivatives.
-
-\defgroup bijector Bijectors
-\brief Bijections between intervals, with their inverses, derivatives and log-Jacobians.
-
-\defgroup basis Bases
-\brief Univariate bases of functions, their derivatives, integrals and Gram matrices.
-
-\defgroup dense Dense linear algebra
-\brief Decompositions of dense matrices on the host: Cholesky, triangular solve, pivoted QR, SVD, symmetric and generalized symmetric eigendecompositions, null space.
-
-\defgroup distrib Distributions
-\brief Univariate probability distributions, their densities, log-likelihood derivatives, expected information and cumulative distributions.
+/*
+The hierarchy of the manual's modules, in the order of the sidebar.
+Doxygen reads this file first (INPUT in the Doxyfile) and orders the members
+of a group in the order they are added, so each group is attached to its
+parent here, in tree order; the module pages define their groups without
+\ingroup.
 */
+
+/** \defgroup math Mathematics
+\brief Numerical functions callable inside Kokkos kernels, on the host and on the device. */
+
+/** \defgroup math_elementary Exponentials and logarithms
+\ingroup math
+\brief The exponential and the logarithm, and the relative exponential and logarithm with their derivatives. */
+/** \addtogroup elementary
+\ingroup math_elementary */
+/** \addtogroup exprel
+\ingroup math_elementary */
+/** \addtogroup log1prel
+\ingroup math_elementary */
+
+/** \defgroup math_compositions Derivatives of compositions
+\ingroup math
+\brief Derivatives of composed functions: Faà di Bruno's formula and the chain rule in two variables. */
+/** \addtogroup faa_di_bruno
+\ingroup math_compositions */
+/** \addtogroup chain_pair
+\ingroup math_compositions */
+
+/** \addtogroup quadrature
+\ingroup math */
+
+/** \defgroup special Special functions
+\ingroup math
+\brief Gamma, beta, normal, Student t, Owen's T and Bessel functions, with their derivatives. */
+
+/** \defgroup special_gamma Gamma family
+\ingroup special
+\brief The gamma function and its logarithmic derivatives, Stirling's error and the regularized incomplete gamma function. */
+/** \addtogroup gamma
+\ingroup special_gamma */
+/** \addtogroup stirling
+\ingroup special_gamma */
+/** \addtogroup incomplete_gamma
+\ingroup special_gamma */
+
+/** \addtogroup incomplete_beta
+\ingroup special */
+
+/** \defgroup special_bessel Bessel functions
+\ingroup special
+\brief The modified Bessel functions of the first and second kind. */
+/** \addtogroup bessel_i
+\ingroup special_bessel */
+/** \addtogroup bessel_k
+\ingroup special_bessel */
+
+/** \defgroup special_cdf Distribution functions
+\ingroup special
+\brief The normal, Student t and skew normal distribution functions. */
+/** \addtogroup normal
+\ingroup special_cdf */
+/** \addtogroup student
+\ingroup special_cdf */
+/** \addtogroup owen
+\ingroup special_cdf */
+
+/** \defgroup bijector Bijectors
+\brief Bijections between intervals, with their inverses, derivatives and log-Jacobians. */
+/** \addtogroup bijector_scalar
+\ingroup bijector */
+/** \addtogroup bijector_coupled
+\ingroup bijector */
+
+/** \defgroup basis Bases
+\brief Bases of functions, their derivatives, integrals, Gram matrices, penalties and transforms. */
+
+/** \defgroup basis_univariate Univariate bases
+\ingroup basis
+\brief B-spline, cyclic B-spline, Fourier and Legendre bases on an interval. */
+/** \addtogroup basis_bspline
+\ingroup basis_univariate */
+/** \addtogroup basis_cyclic_bspline
+\ingroup basis_univariate */
+/** \addtogroup basis_fourier
+\ingroup basis_univariate */
+/** \addtogroup basis_legendre
+\ingroup basis_univariate */
+
+/** \defgroup basis_multivariate Multivariate bases
+\ingroup basis
+\brief Bases of functions of several variables built from univariate bases. */
+/** \addtogroup basis_tensor
+\ingroup basis_multivariate */
+
+/** \defgroup basis_penalties Penalties and transforms
+\ingroup basis
+\brief Penalty matrices of differential operators and linear transforms of a basis's coefficients. */
+/** \addtogroup basis_operator
+\ingroup basis_penalties */
+/** \addtogroup basis_transform
+\ingroup basis_penalties */
+
+/** \defgroup matrices Matrices
+\brief Dense linear algebra and structured matrices with derivatives in their parameters. */
+
+/** \defgroup dense Dense linear algebra
+\ingroup matrices
+\brief Decompositions of dense matrices on the host: Cholesky, triangular solve, pivoted QR, SVD, symmetric and generalized symmetric eigendecompositions, null space. */
+/** \addtogroup pdmat
+\ingroup matrices */
+/** \addtogroup psdmat
+\ingroup matrices */
+
+/** \defgroup distrib Distributions
+\brief Univariate probability distributions, their densities, log-likelihood derivatives, expected information and cumulative distributions. */
+
+/** \defgroup distrib_framework Framework
+\ingroup distrib
+\brief The structure every distribution has, and the generic routes built on it. */
+/** \addtogroup distrib_core
+\ingroup distrib_framework */
+/** \addtogroup distrib_generic
+\ingroup distrib_framework */
+
+/** \defgroup distrib_real Continuous on the real line
+\ingroup distrib
+\brief Continuous distributions with support on the whole real line. */
+
+/** \defgroup distrib_gaussian Gaussian
+\ingroup distrib_real
+\brief The Gaussian distribution in three parametrizations. */
+/** \addtogroup distrib_gaussian1
+\ingroup distrib_gaussian */
+/** \addtogroup distrib_gaussian2
+\ingroup distrib_gaussian */
+/** \addtogroup distrib_gaussian3
+\ingroup distrib_gaussian */
+
+/** \defgroup distrib_laplace Laplace
+\ingroup distrib_real
+\brief The Laplace distribution in two parametrizations. */
+/** \addtogroup distrib_laplace1
+\ingroup distrib_laplace */
+/** \addtogroup distrib_laplace2
+\ingroup distrib_laplace */
+
+/** \addtogroup distrib_cauchy
+\ingroup distrib_real */
+/** \addtogroup distrib_logistic
+\ingroup distrib_real */
+/** \addtogroup distrib_gumbel
+\ingroup distrib_real */
+
+/** \defgroup distrib_positive Continuous on the positive half-line
+\ingroup distrib
+\brief Continuous distributions with support on the positive half-line. */
+
+/** \defgroup distrib_gamma Gamma
+\ingroup distrib_positive
+\brief The gamma distribution in two parametrizations. */
+/** \addtogroup distrib_gamma1
+\ingroup distrib_gamma */
+/** \addtogroup distrib_gamma2
+\ingroup distrib_gamma */
+
+/** \addtogroup distrib_exponential
+\ingroup distrib_positive */
+/** \addtogroup distrib_chisq
+\ingroup distrib_positive */
+
+/** \defgroup distrib_lognormal Log-normal
+\ingroup distrib_positive
+\brief The log-normal distribution in two parametrizations. */
+/** \addtogroup distrib_lognormal1
+\ingroup distrib_lognormal */
+/** \addtogroup distrib_lognormal2
+\ingroup distrib_lognormal */
+
+/** \addtogroup distrib_invgauss
+\ingroup distrib_positive */
+
+/** \defgroup distrib_discrete Discrete
+\ingroup distrib
+\brief Distributions on the non-negative integers. */
+/** \addtogroup distrib_poisson
+\ingroup distrib_discrete */

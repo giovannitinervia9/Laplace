@@ -1,13 +1,16 @@
 /**
-\defgroup distrib_gaussian2 Gaussian distribution in mean and variance
-\ingroup distrib
+\defgroup distrib_gaussian2 gaussian2 (mean, variance)
 \brief Univariate normal distribution parametrized by mean and variance, with closed-form log-density derivatives and Mills-ratio cumulative tails.
 
 Defined in `<laplace/distrib/gaussian2.hpp>` as \ref laplace::distrib::gaussian2_distrib "gaussian2_distrib", this module evaluates the real-line normal distribution parametrized by variance rather than standard deviation: log-density and mixed observation-parameter derivatives, expected Fisher information and its derivatives, cumulative and complementary probabilities with log-parameter derivatives, quantiles, and regularity metadata. Functions are marked `LAPLACE_HD` for host and Kokkos device execution; see \ref distrib_core for the shared interface, packed `sym_tensor<2, K>` storage, and Kokkos usage. Cumulative derivatives match 300-bit and 400-bit mpmath reference values within 483 scaled ulp (`log_cdf`) and 441 scaled ulp (`log_ccdf`).
 
 ## Classic form and regularity
 
-On \f$y \in (-\infty, \infty)\f$ with mean \f$\mu \in (-\infty, \infty)\f$ and standard deviation \f$\sigma \in (0, \infty)\f$, the textbook normal density \f$f(y; \mu, \sigma) = \frac{1}{\sigma\sqrt{2\pi}}\exp\bigl(-\frac{(y-\mu)^2}{2\sigma^2}\bigr)\f$ becomes \f$f(y; \mu, v) = \frac{1}{\sqrt{2\pi v}}\exp\bigl(-\frac{(y-\mu)^2}{2v}\bigr)\f$ under variance \f$v = \sigma^2 \in (0, \infty)\f$. Both `mu` and `v` have `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`; observation regularity is `y_regularity = infinitely_smooth`, and `param_kinks` and `y_kinks` report `count = 0`.
+On \f$y \in (-\infty, \infty)\f$ with mean \f$\mu \in (-\infty, \infty)\f$ and standard deviation \f$\sigma \in (0, \infty)\f$, the textbook normal density is \f$f(y; \mu, \sigma) = \frac{1}{\sigma\sqrt{2\pi}}\exp\bigl(-\frac{(y-\mu)^2}{2\sigma^2}\bigr)\f$. Under variance \f$v = \sigma^2 \in (0, \infty)\f$ it becomes
+\f[
+f(y; \mu, v) = \frac{1}{\sqrt{2\pi v}} \exp\!\left(-\frac{(y - \mu)^2}{2v}\right), \qquad y \in (-\infty, \infty).
+\f]
+Both `mu` and `v` have `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`; observation regularity is `y_regularity = infinitely_smooth`, and `param_kinks` and `y_kinks` report `count = 0`.
 
 ## Log-density, Fisher information, and cumulative functions
 
@@ -33,15 +36,18 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against mpmath reference va
 */
 
 /**
-\defgroup distrib_gaussian3 Gaussian distribution in mean and precision
-\ingroup distrib
+\defgroup distrib_gaussian3 gaussian3 (mean, precision)
 \brief Univariate normal distribution parametrized by mean and precision, with closed-form log-density derivatives and Mills-ratio cumulative tails.
 
 Defined in `<laplace/distrib/gaussian3.hpp>` as \ref laplace::distrib::gaussian3_distrib "gaussian3_distrib", this module evaluates the real-line normal distribution parametrized by precision \f$\tau = 1/\sigma^2\f$: log-density and mixed observation-parameter derivatives, expected Fisher information and its derivatives, cumulative and complementary probabilities with log-parameter derivatives, quantiles, and regularity metadata. Functions are marked `LAPLACE_HD` for host and Kokkos device execution; see \ref distrib_core for the shared interface, `sym_tensor<2, K>` storage, and Kokkos usage. Cumulative derivatives match 300-bit and 400-bit mpmath references within 301 scaled ulp (`log_cdf`) and 156 scaled ulp (`log_ccdf`).
 
 ## Classic form and regularity
 
-Substituting precision \f$\tau = 1/\sigma^2 \in (0, \infty)\f$ into the standard normal density on \f$y \in (-\infty, \infty)\f$ gives \f$f(y; \mu, \tau) = \sqrt{\frac{\tau}{2\pi}}\exp\bigl(-\frac{\tau(y-\mu)^2}{2}\bigr)\f$ with mean \f$\mu \in (-\infty, \infty)\f$. Both `mu` and `tau` have `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`; `y_regularity = infinitely_smooth`, and `param_kinks` and `y_kinks` report `count = 0`.
+Substituting precision \f$\tau = 1/\sigma^2 \in (0, \infty)\f$ into the textbook normal density \f$f(y; \mu, \sigma) = \frac{1}{\sigma\sqrt{2\pi}}\exp\bigl(-\frac{(y-\mu)^2}{2\sigma^2}\bigr)\f$, with mean \f$\mu \in (-\infty, \infty)\f$ and standard deviation \f$\sigma \in (0, \infty)\f$, gives
+\f[
+f(y; \mu, \tau) = \sqrt{\frac{\tau}{2\pi}} \exp\!\left(-\frac{\tau (y - \mu)^2}{2}\right), \qquad y \in (-\infty, \infty).
+\f]
+Both `mu` and `tau` have `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`; `y_regularity = infinitely_smooth`, and `param_kinks` and `y_kinks` report `count = 0`.
 
 ## Log-density, Fisher information, and cumulative functions
 
@@ -67,15 +73,18 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against mpmath reference va
 */
 
 /**
-\defgroup distrib_cauchy Cauchy distribution
-\ingroup distrib
+\defgroup distrib_cauchy Cauchy (location, scale)
 \brief Univariate Cauchy distribution in location and scale, with Chebyshev-like rational derivatives, Riccati log-cumulative ODE, and far-tail monomial series.
 
 Defined in `<laplace/distrib/cauchy.hpp>` as \ref laplace::distrib::cauchy_distrib "cauchy_distrib", this module evaluates the Cauchy distribution's log-density, mixed observation-parameter derivatives, expected Fisher information and its derivatives, cumulative and complementary probabilities with log-parameter derivatives, quantiles, and regularity metadata. Functions are marked `LAPLACE_HD` for host and Kokkos device execution; see \ref distrib_core for the shared interface, `sym_tensor<2, K>` storage, and Kokkos usage. Cumulative derivatives match 300-bit and 400-bit mpmath references within 59 scaled ulp (`log_cdf`) and 41 scaled ulp (`log_ccdf`).
 
 ## Classic form and regularity
 
-The textbook Cauchy density uses median and mode \f$x_0 \in (-\infty, \infty)\f$ (mean and variance are undefined) and half-width at half-maximum \f$\gamma \in (0, \infty)\f$; Laplace writes \f$\mu = x_0\f$ (`mu`) and \f$\sigma = \gamma\f$ (`sigma`), giving \f$f(y; \mu, \sigma) = \frac{1}{\pi\sigma\bigl(1 + ((y-\mu)/\sigma)^2\bigr)}\f$ on \f$y \in (-\infty, \infty)\f$. Both parameters have `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`; `y_regularity = infinitely_smooth`, and `param_kinks` and `y_kinks` report `count = 0`.
+The textbook Cauchy density uses median and mode \f$x_0 \in (-\infty, \infty)\f$ (mean and variance are undefined) and half-width at half-maximum \f$\gamma \in (0, \infty)\f$; Laplace writes \f$\mu = x_0\f$ (`mu`) and \f$\sigma = \gamma\f$ (`sigma`), so that the density is
+\f[
+f(y; \mu, \sigma) = \frac{1}{\pi\sigma \left(1 + \left(\frac{y - \mu}{\sigma}\right)^2\right)}, \qquad y \in (-\infty, \infty).
+\f]
+Both parameters have `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`; `y_regularity = infinitely_smooth`, and `param_kinks` and `y_kinks` report `count = 0`.
 
 ## Log-density, Fisher information, and cumulative functions
 
@@ -100,15 +109,18 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against 300-bit and 400-bit
 */
 
 /**
-\defgroup distrib_logistic Logistic distribution
-\ingroup distrib
+\defgroup distrib_logistic Logistic (location, scale)
 \brief Univariate logistic distribution in location and scale, with logistic polynomial derivatives for log-density and log-cumulatives.
 
 Defined in `<laplace/distrib/logistic.hpp>` as \ref laplace::distrib::logistic_distrib "logistic_distrib", this module evaluates the logistic distribution's log-density, mixed observation-parameter derivatives, expected Fisher information and its derivatives, cumulative and complementary probabilities with log-parameter derivatives, quantiles, and regularity metadata. Functions are marked `LAPLACE_HD` for host and Kokkos device execution; see \ref distrib_core for the shared interface, `sym_tensor<2, K>` storage, and Kokkos usage. Cumulative derivatives match 300-bit and 400-bit mpmath references within 108 scaled ulp (`log_cdf`) and 44.4 scaled ulp (`log_ccdf`).
 
 ## Classic form and regularity
 
-The textbook logistic density on \f$y \in (-\infty, \infty)\f$ uses location \f$\mu \in (-\infty, \infty)\f$ and scale \f$s \in (0, \infty)\f$ (with mean \f$\mu\f$ and variance \f$\pi^2 s^2/3\f$); Laplace writes \f$\sigma = s\f$ (`sigma`) and `mu` for \f$\mu\f$, giving \f$f(y; \mu, \sigma) = \frac{\exp(-(y-\mu)/\sigma)}{\sigma\bigl(1 + \exp(-(y-\mu)/\sigma)\bigr)^2}\f$. Both parameters have `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`; `y_regularity = infinitely_smooth`, and `param_kinks` and `y_kinks` report `count = 0`.
+The textbook logistic density on \f$y \in (-\infty, \infty)\f$ uses location \f$\mu \in (-\infty, \infty)\f$ and scale \f$s \in (0, \infty)\f$ (with mean \f$\mu\f$ and variance \f$\pi^2 s^2/3\f$); Laplace writes \f$\sigma = s\f$ (`sigma`) and `mu` for \f$\mu\f$, so that the density is
+\f[
+f(y; \mu, \sigma) = \frac{\exp\!\left(-\frac{y - \mu}{\sigma}\right)}{\sigma \left(1 + \exp\!\left(-\frac{y - \mu}{\sigma}\right)\right)^2}, \qquad y \in (-\infty, \infty).
+\f]
+Both parameters have `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`; `y_regularity = infinitely_smooth`, and `param_kinks` and `y_kinks` report `count = 0`.
 
 ## Log-density, Fisher information, and cumulative functions
 
@@ -133,15 +145,18 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against 300-bit and 400-bit
 */
 
 /**
-\defgroup distrib_gumbel Gumbel distribution
-\ingroup distrib
+\defgroup distrib_gumbel Gumbel
 \brief Univariate Gumbel (type-I maximum) distribution in mode and scale, with Laguerre log-density derivatives and Bernoulli series for the complementary log-cdf.
 
 Defined in `<laplace/distrib/gumbel.hpp>` as \ref laplace::distrib::gumbel_distrib "gumbel_distrib", this module evaluates the Gumbel (maximum) distribution's log-density, mixed observation-parameter derivatives, expected Fisher information and its derivatives, cumulative and complementary probabilities with log-parameter derivatives, quantiles, and regularity metadata. Functions are marked `LAPLACE_HD` for host and Kokkos device execution; see \ref distrib_core for the shared interface, `sym_tensor<2, K>` storage, and Kokkos usage. Cumulative derivatives match 300-bit and 400-bit mpmath references within 19.1 scaled ulp (`log_cdf`) and 394 scaled ulp (`log_ccdf`).
 
 ## Classic form and regularity
 
-The textbook Gumbel density uses mode \f$\mu \in (-\infty, \infty)\f$ (not the mean \f$\mu + \gamma\beta\f$, with variance \f$\pi^2\beta^2/6\f$) and scale \f$\beta \in (0, \infty)\f$; Laplace writes \f$\sigma = \beta\f$ (`sigma`) and `mu` for \f$\mu\f$, giving \f$f(y; \mu, \sigma) = \frac{1}{\sigma}\exp\bigl(-(z + e^{-z})\bigr)\f$ with \f$z = (y - \mu)/\sigma\f$ on \f$y \in (-\infty, \infty)\f$. Both parameters have `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`; `y_regularity = infinitely_smooth`, and `param_kinks` and `y_kinks` report `count = 0`.
+The textbook Gumbel density uses mode \f$\mu \in (-\infty, \infty)\f$ (not the mean \f$\mu + \gamma\beta\f$, with variance \f$\pi^2\beta^2/6\f$) and scale \f$\beta \in (0, \infty)\f$; Laplace writes \f$\sigma = \beta\f$ (`sigma`) and `mu` for \f$\mu\f$, so that, with \f$z = (y - \mu)/\sigma\f$, the density is
+\f[
+f(y; \mu, \sigma) = \frac{1}{\sigma} \exp\!\left(-\left(z + e^{-z}\right)\right), \qquad y \in (-\infty, \infty).
+\f]
+Both parameters have `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`; `y_regularity = infinitely_smooth`, and `param_kinks` and `y_kinks` report `count = 0`.
 
 ## Log-density, Fisher information, and cumulative functions
 
@@ -166,15 +181,18 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against 300-bit and 400-bit
 */
 
 /**
-\defgroup distrib_laplace2 Laplace distribution in location and rate
-\ingroup distrib
+\defgroup distrib_laplace2 laplace2 (location, rate)
 \brief Univariate Laplace (double-exponential) distribution parametrized by location and rate, with symmetric kink convention and Laguerre-transformed tail series.
 
 Defined in `<laplace/distrib/laplace2.hpp>` as \ref laplace::distrib::laplace2_distrib "laplace2_distrib", this module evaluates the Laplace distribution parametrized by inverse scale (rate \f$\lambda = 1/b\f$): log-density, mixed observation-parameter derivatives, expected Fisher information and its derivatives, cumulative and complementary probabilities with log-parameter derivatives, quantiles, and kink metadata. Functions are marked `LAPLACE_HD` for host and Kokkos device execution; see \ref distrib_core for the shared interface, `sym_tensor<2, K>` storage, and Kokkos usage. Cumulative derivatives match 300-bit and 400-bit mpmath references within 5.64 scaled ulp (`log_cdf`) and 24.8 scaled ulp (`log_ccdf`).
 
 ## Classic form and regularity
 
-Substituting rate \f$\lambda = 1/b \in (0, \infty)\f$ (`lambda`) into the textbook density with location \f$\mu \in (-\infty, \infty)\f$ (`mu`) and scale \f$b \in (0, \infty)\f$ yields \f$f(y; \mu, \lambda) = \frac{\lambda}{2}\exp(-\lambda|y - \mu|)\f$, the same law as \ref distrib_laplace1 "laplace1_distrib" with \f$\sigma = 1/\lambda\f$. On \f$y \in (-\infty, \infty)\f$, rate \f$\lambda\f$ is infinitely smooth (`regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, `moves_support = false`, `param_kinks(1, y)` has `count = 0`), while at \f$\mu = y\f$ location and observation have a kink (`regularity = 0`, `y_regularity = 0`, `cdf_regularity = 1`, matching \ref distrib_laplace1 "laplace1") reported by `param_kinks(0, y)` (\f$\mu = y\f$) and `y_kinks()` (\f$y = \mu\f$).
+The textbook Laplace density with location \f$\mu \in (-\infty, \infty)\f$ (`mu`) and scale \f$b \in (0, \infty)\f$ is \f$f(y; \mu, b) = \frac{1}{2b}\exp\bigl(-\frac{|y - \mu|}{b}\bigr)\f$. Substituting rate \f$\lambda = 1/b \in (0, \infty)\f$ (`lambda`) gives
+\f[
+f(y; \mu, \lambda) = \frac{\lambda}{2} \exp\!\left(-\lambda |y - \mu|\right), \qquad y \in (-\infty, \infty).
+\f]
+This is the same law as \ref distrib_laplace1 "laplace1_distrib" with \f$\sigma = 1/\lambda\f$. On \f$y \in (-\infty, \infty)\f$, rate \f$\lambda\f$ is infinitely smooth (`regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, `moves_support = false`, `param_kinks(1, y)` has `count = 0`), while at \f$\mu = y\f$ location and observation have a kink (`regularity = 0`, `y_regularity = 0`, `cdf_regularity = 1`, matching \ref distrib_laplace1 "laplace1") reported by `param_kinks(0, y)` (\f$\mu = y\f$) and `y_kinks()` (\f$y = \mu\f$).
 
 ## Log-density, Fisher information, and cumulative functions
 

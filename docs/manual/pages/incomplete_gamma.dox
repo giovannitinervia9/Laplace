@@ -1,6 +1,5 @@
 /**
 \defgroup incomplete_gamma Regularized incomplete gamma function
-\ingroup special
 \brief Regularized incomplete gamma functions \f$P(a, x)\f$ and \f$Q(a, x)\f$, their logarithms, partial derivatives to order 6, and inverses.
 
 This module provides regularized incomplete gamma functions, logs, order-\f$6\f$ partials, and four inverses in `laplace::math` via `<laplace/math/incomplete_gamma.hpp>`, `<laplace/math/incomplete_gamma_deriv.hpp>`, `<laplace/math/incomplete_gamma_mixed.hpp>`, `<laplace/math/incomplete_gamma_ratio.hpp>`, and `<laplace/math/incomplete_inverse.hpp>`, using `LAPLACE_HD` for host and Kokkos device execution without \f$O(\sqrt{a})\f$ large-shape scaling.

@@ -1,6 +1,5 @@
 /**
 \defgroup basis_cyclic_bspline Cyclic B-spline bases
-\ingroup basis
 \brief Periodic B-spline basis with analytical derivatives to order 6, integrals from the lower boundary, and cross Gram matrices.
 
 Header `<laplace/basis/cyclic_bspline.hpp>` defines \ref laplace::basis::cyclic_bspline_basis "cyclic_bspline_basis" and \ref laplace::basis::cyclic_bspline_basis_owner "cyclic_bspline_basis_owner" in namespace `laplace::basis`. Users construct an owner on the host and call `host()` or `device()` to obtain a lightweight basis view. Evaluation members are marked `LAPLACE_HD` for host code and Kokkos device kernels, whereas constructors, `cross_gram()`, `greville()`, and `regularity_points()` run on the host. Across 47 knot configurations, rows of orders 0 to \f$\min(d, 6)\f$ stay within 8 ulp for \f$d \le 5\f$ and 11 ulp for \f$d = 10\f$, integrals within 6 ulp, column totals within 3 ulp, and cross Gram matrices within 8 and 9 ulp against exact rational references.

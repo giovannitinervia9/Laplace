@@ -1,6 +1,5 @@
 /**
 \defgroup basis_operator Differential operators and penalties
-\ingroup basis
 \brief Linear differential operators with constant coefficients, their null spaces, and their penalty matrices on univariate bases.
 
 The module `<laplace/basis/operator.hpp>` defines monic linear differential operators with constant real coefficients, their null spaces, and quadratic penalty matrices on univariate bases in namespace `laplace::basis`. All functions and classes in this module run on the host. Penalty matrices match the underlying basis cross Gram matrices and closed-form Fourier spectra to rounding, while constructing an operator from polynomial weights merges roots closer than \f$10^{-4}\f$ of Fujiwara's root bound.

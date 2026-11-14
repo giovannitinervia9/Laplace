@@ -1,6 +1,5 @@
 /**
 \defgroup bessel_k Modified Bessel function of the second kind
-\ingroup special
 \brief Logarithm of the modified Bessel function of the second kind, \f$\log K_\nu(x)\f$, and its derivatives in \f$x\f$ to order 7.
 
 This module computes \f$\log K_\nu(x)\f$ and its first seven derivatives with respect to \f$x\f$ from the header `<laplace/math/bessel_k.hpp>`. Every function is called in `laplace::math`, is marked `LAPLACE_HD`, and runs on both the host and inside Kokkos kernels on the device. Against the integral references, the value stays within 4.8 ulpC on both gcc and CUDA, and the derivatives stay within 44.4 ulp on gcc (37.4 ulp across the orders measured on CUDA).

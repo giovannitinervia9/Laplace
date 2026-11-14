@@ -1,6 +1,5 @@
 /**
 \defgroup owen Owen's T function and the skew normal distribution function
-\ingroup special
 \brief Owen's \f$T(h, a)\f$, \f$\log F(z; \alpha)\f$, and its derivatives in \f$(z, \alpha)\f$ to order 5.
 
 Header `<laplace/math/owen.hpp>` provides Owen's \f$T\f$ function, the logarithm of the standard skew normal distribution function \f$\log F(z; \alpha)\f$, and mixed partial derivatives up to order 5. Functions are called in `laplace::math` and marked `LAPLACE_HD` for host and Kokkos device execution.

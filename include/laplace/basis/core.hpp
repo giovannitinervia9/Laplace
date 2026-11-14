@@ -60,7 +60,7 @@ namespace laplace::basis {
 enum class outside_domain_rule : int { nan = 0, linear = 1, polynomial = 2 };
 
 /**
- * \ingroup basis
+ * \ingroup basis_univariate
  * \brief Concept defining the kernel evaluation interface of a univariate basis.
  *
  * Requires `dimension()`, `row_width()`, `scratch_size()`, row evaluations

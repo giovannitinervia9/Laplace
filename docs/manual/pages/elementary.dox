@@ -1,6 +1,5 @@
 /**
 \defgroup elementary Elementary functions
-\ingroup math
 \brief Exponential function \f$\exp(x)\f$ and natural logarithm \f$\log(x)\f$.
 
 This module provides \f$\exp(x)\f$ and \f$\log(x)\f$ in `<laplace/math/elementary.hpp>`. Functions are marked `LAPLACE_HD`, run on the host and inside Kokkos kernels on the device, and are called as `laplace::math::exp` and `laplace::math::log`. Under default dispatch, `exp()` is accurate to at most 1.0000 ulp on CPU and GPU, and `log()` is accurate to at most 0.7767 ulp on CPU and 0.5207 ulp on CUDA.

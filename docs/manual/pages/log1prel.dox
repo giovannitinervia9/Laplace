@@ -1,6 +1,5 @@
 /**
 \defgroup log1prel Relative logarithm
-\ingroup math
 \brief Relative logarithm function \f$\psi(x) = \log(1 + x)/x\f$ and its derivatives in \f$x\f$ to order 6.
 
 This module computes the relative logarithm \f$\psi(x) = \log(1 + x)/x\f$ and its derivatives \f$\psi^{(k)}(x)\f$ up to order \f$k = 6\f$. Include `<laplace/math/log1prel.hpp>` and call functions in namespace `laplace::math`, such as \ref laplace::math::log1prel "log1prel()" through \ref laplace::math::log1prel_d6 "log1prel_d6()". Every function is marked `LAPLACE_HD` for use on the host and inside Kokkos device kernels. Measured errors across all seven functions are at most 9.60 ulp on both gcc and CUDA, within test bounds up to 14.4 ulp. The name `log1prel` is Laplace's name, chosen by analogy with \ref exprel "exprel".

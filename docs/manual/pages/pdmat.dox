@@ -1,5 +1,5 @@
 /**
-\defgroup pdmat Structured positive definite matrices
+\defgroup pdmat Positive definite structures
 \brief Structured symmetric positive definite matrices with exact values, log-determinants, inverses, Cholesky factors, and derivatives to order 6.
 
 Functions in this module are marked `LAPLACE_HD` for host and Kokkos device execution, except host-only \ref laplace::pdmat::factor_analytic_max_factors "factor_analytic_max_factors()". Include `<laplace/pdmat/core.hpp>` with `diagonal.hpp`, `compound_symmetry.hpp`, `ar1.hpp`, `toeplitz.hpp`, `unstructured.hpp`, `unit_diagonal_scaled.hpp`, or `factor_analytic.hpp`.

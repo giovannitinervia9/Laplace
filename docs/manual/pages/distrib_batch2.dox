@@ -1,5 +1,4 @@
-/** \defgroup distrib_exponential Exponential distribution
- * \ingroup distrib
+/** \defgroup distrib_exponential Exponential
 
 The exponential distribution models waiting times between independent Poisson events and is implemented in `<laplace/distrib/exponential.hpp>` by \ref laplace::distrib::exponential_distrib "exponential_distrib" (`LAPLACE_HD`). Through order 6, `log_cdf_dk` stays within 22.6 scaled ulp and `log_ccdf_dk` within 1.68 scaled ulp relative to mpmath.
 
@@ -53,8 +52,7 @@ Struct \ref laplace::distrib::exponential_distrib "exponential_distrib" implemen
 - Fredrik Johansson et al., mpmath: arbitrary-precision floating-point Python library, used for reference test data.
 */
 
-/** \defgroup distrib_chisq Chi-square distribution
- * \ingroup distrib
+/** \defgroup distrib_chisq Chi-square
 
 The chi-square distribution models sums of squared standard normal deviates and is implemented in `<laplace/distrib/chisq.hpp>` by \ref laplace::distrib::chisq_distrib "chisq_distrib" (`LAPLACE_HD`). Through order 6, `log_cdf_dk` stays within 294 scaled ulp and `log_ccdf_dk` within 525 scaled ulp relative to mpmath.
 
@@ -102,8 +100,7 @@ Struct \ref laplace::distrib::chisq_distrib "chisq_distrib" implements \ref dist
 - Fredrik Johansson et al., mpmath: arbitrary-precision floating-point Python library, used for reference test data.
 */
 
-/** \defgroup distrib_gamma2 Gamma distribution (mean-variance)
- * \ingroup distrib
+/** \defgroup distrib_gamma2 gamma2 (mean, variance)
 
 The mean-variance gamma distribution models positive right-skewed outcomes by mean and variance and is implemented in `<laplace/distrib/gamma2.hpp>` by \ref laplace::distrib::gamma2_distrib "gamma2_distrib" (`LAPLACE_HD`). Through order 6, `logpdf_dk` stays within 186 scaled ulp relative to mpmath.
 
@@ -151,8 +148,7 @@ Struct \ref laplace::distrib::gamma2_distrib "gamma2_distrib" implements \ref di
 - Aaron Meurer et al. (2017), SymPy 1.14.0: symbolic computing in Python, used to verify direct first- and second-order parameter derivatives.
 */
 
-/** \defgroup distrib_invgauss Inverse Gaussian distribution
- * \ingroup distrib
+/** \defgroup distrib_invgauss Inverse Gaussian (mean, dispersion)
 
 The inverse Gaussian (Wald) distribution models Brownian first-passage times with positive drift and is implemented in `<laplace/distrib/invgauss.hpp>` by \ref laplace::distrib::invgauss_distrib "invgauss_distrib" (`LAPLACE_HD`). Through order 6, `log_cdf_dk` stays within 580 and `log_ccdf_dk` within 116 scaled ulp relative to mpmath.
 
@@ -195,8 +191,7 @@ Struct \ref laplace::distrib::invgauss_distrib "invgauss_distrib" implements \re
 - Fredrik Johansson et al., mpmath: arbitrary-precision floating-point Python library, used for reference test data.
 */
 
-/** \defgroup distrib_lognormal1 Log-normal distribution (log-scale parameters)
- * \ingroup distrib
+/** \defgroup distrib_lognormal1 lognormal1 (mean and variance of log Y)
 
 The log-scale log-normal distribution models positive outcomes whose logarithm is normal and is implemented in `<laplace/distrib/lognormal1.hpp>` by \ref laplace::distrib::lognormal1_distrib "lognormal1_distrib" (`LAPLACE_HD`). Through order 6, `log_cdf_dk` stays within 322.2 and `log_ccdf_dk` within 648.2 scaled ulp relative to mpmath.
 
@@ -233,8 +228,7 @@ Struct \ref laplace::distrib::lognormal1_distrib "lognormal1_distrib" implements
 - Fredrik Johansson et al., mpmath: arbitrary-precision floating-point Python library, used for reference test data.
 */
 
-/** \defgroup distrib_lognormal2 Log-normal distribution (mean-variance parameters)
- * \ingroup distrib
+/** \defgroup distrib_lognormal2 lognormal2 (mean, variance)
 
 The mean-variance log-normal distribution models positive right-skewed outcomes directly by mean and variance and is implemented in `<laplace/distrib/lognormal2.hpp>` by \ref laplace::distrib::lognormal2_distrib "lognormal2_distrib" (`LAPLACE_HD`). Through order 6, `logpdf_dy_dk` stays within 23.76 scaled ulp relative to mpmath.
 

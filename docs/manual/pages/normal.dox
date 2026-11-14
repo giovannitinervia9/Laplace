@@ -1,6 +1,5 @@
 /**
 \defgroup normal Normal distribution function
-\ingroup special
 \brief Standard normal distribution function, complementary error functions, log distribution function with derivatives to order 6, and quantile functions from probability and log-probability.
 
 The header `<laplace/math/normal.hpp>` provides the standard normal distribution function \f$\Phi\f$, its logarithm \f$\log \Phi\f$ and derivatives to order 6, the complementary error functions \f$\operatorname{erfc}\f$ and \f$\operatorname{erfcx}\f$, and the quantile functions from probability and log-probability. Every public function is called in `laplace::math`, is marked `LAPLACE_HD` for host and Kokkos device execution, and stays within 4.08 ulp for scalar values, 2.76 ulpC for quantiles, 2.85 ulp relative for derivatives on \f$[-1, 4)\f$, and 767 ulp (478 ulp on CUDA) for derivatives below \f$-1\f$.

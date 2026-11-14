@@ -1,6 +1,5 @@
 /**
 \defgroup quadrature Quadrature rules
-\ingroup math
 \brief Quadrature rules callable inside Kokkos kernels on the host and device: double-exponential, adaptive Gauss-Kronrod, geometric panels, and fixed Gauss rules.
 
 This module provides one-dimensional quadrature rules in `<laplace/math/quadrature.hpp>` (`laplace::math::quad`), marked `LAPLACE_HD` to run on host and Kokkos device without dynamic allocation, recursion, or unbounded loops. On reference integrals, double-exponential and panel rules reach 2.8 to 68 ulp on gcc (2.8 to 21 ulp on CUDA), and Gauss-Kronrod reaches 72 ulp.

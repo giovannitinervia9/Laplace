@@ -1,6 +1,5 @@
 /**
 \defgroup bijector_coupled Coupled bijectors
-\ingroup bijector
 \brief Coupled bijections between constrained vectors or matrices and Euclidean space, their inverses, log-Jacobians, and derivatives to order 6.
 
 Functions in this module are marked `LAPLACE_HD` for host and Kokkos device execution. Include `<laplace/bijector/alr.hpp>`, `<laplace/bijector/log_cholesky.hpp>`, `<laplace/bijector/partial_corr.hpp>`, or `<laplace/bijector/matrix_log.hpp>`; each includes `<laplace/bijector/coupled.hpp>`. Every map is a lightweight parameter-free struct in `laplace::bijector` constructed from runtime `dim`: `alr_bijector(K)`, `log_cholesky_bijector(p)`, `partial_corr_bijector(p)`, and `matrix_log_bijector(p)`. Across orders 0 to 6, `alr_bijector` stays within 93.9 ulp, `log_cholesky_bijector` within 1.03 ulpN (inverse) and 1984 ulpN (forward), `partial_corr_bijector` within 2839 ulpN (inverse) and 7361 ulpN (forward), and `matrix_log_bijector` within 210 ulpN on the maps.

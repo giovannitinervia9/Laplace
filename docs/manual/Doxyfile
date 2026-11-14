@@ -29,7 +29,7 @@ EXCLUDE_SYMBOLS        = detail detail_* *::detail *::detail_*
 WARN_IF_UNDOCUMENTED   = NO
 WARN_NO_PARAMDOC       = YES
 
-INPUT                  = docs/manual/pages include/laplace
+INPUT                  = docs/manual/pages/groups.dox docs/manual/pages include/laplace
 FILE_PATTERNS          = *.hpp *.md *.dox
 RECURSIVE              = YES
 EXCLUDE_PATTERNS       = */detail/*

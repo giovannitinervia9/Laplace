@@ -1,6 +1,5 @@
 /**
 \defgroup distrib_generic Generic routes
-\ingroup distrib
 \brief Generic numerical routes and compile-time dispatchers for probability distributions.
 
 This module provides generic numerical routes and compile-time dispatchers for probability distributions (`distrib`s), covering cumulative distribution functions, quantiles, expectations, moments, expected Fisher information, and random variate generation. Its declarations live in `<laplace/distrib/generic_cdf.hpp>`, `<laplace/distrib/generic_quantile.hpp>`, `<laplace/distrib/generic_expectation.hpp>`, `<laplace/distrib/generic_info.hpp>`, and `<laplace/distrib/generic_rng.hpp>` inside namespace `laplace::distrib`, so users call them as `laplace::distrib::NAME`. All functions are marked `LAPLACE_HD` and execute on both host and device inside Kokkos kernels. On the tested pilot distributions, generic routes achieve 31.9 conditioning units on continuous quantiles, exact ranks on discrete search, 5.91 ulp of \f$\max(|\log|, 1)\f$ on discrete log-CDFs, 6.7 eps on moments, and 4.0 eps on smooth continuous expected information.

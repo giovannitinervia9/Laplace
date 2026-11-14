@@ -1,6 +1,5 @@
 /**
 \defgroup basis_legendre Legendre bases
-\ingroup basis
 \brief Orthonormal Legendre polynomial basis with analytical derivatives to order 6, integrals from the lower boundary, and cross Gram matrices by Gauss-Legendre quadrature.
 
 The header `<laplace/basis/legendre.hpp>` implements an orthonormal Legendre polynomial basis of maximum degree \f$n \ge 0\f$ on \f$[lower, upper]\f$. A \ref laplace::basis::legendre_basis "legendre_basis" is constructed with \ref laplace::basis::make_legendre_basis "make_legendre_basis()", defaulting to linear extrapolation outside the domain, and is passed by value into Kokkos kernels. Member functions marked `LAPLACE_HD` execute on both host and device, while \ref laplace::basis::legendre_basis::cross_gram "cross_gram()" and \ref laplace::basis::legendre_basis::gauss_legendre_nodes "gauss_legendre_nodes()" run on the host. Row evaluations stay within 4 ulp for \f$n \le 2\f$, 115 ulp for \f$n \le 20\f$, and 551 ulp for \f$n = 50\f$, within 13.4 times the polynomial conditioning scale across all tested configurations and backends.

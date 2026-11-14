@@ -1,6 +1,5 @@
 /**
 \defgroup stirling Stirling's error
-\ingroup special
 \brief Stirling's error \f$\delta(a)\f$ and its derivatives in \f$a\f$ to order 6.
 
 This module computes Stirling's error \f$\delta(a)\f$ and its derivatives in \f$a\f$ to order 6. Include `<laplace/math/stirling.hpp>` and call functions in namespace `laplace::math`, from \ref laplace::math::stirling_error "stirling_error()" through \ref laplace::math::stirling_error_d6 "stirling_error_d6()". Every function is marked `LAPLACE_HD_FORCEINLINE` for use on the host and inside Kokkos device kernels. Across all seven functions, the largest measured error is 14.8 ulp on gcc and 16.1 ulp on CUDA, within test bounds up to 22.0 ulp.

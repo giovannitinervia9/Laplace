@@ -1,6 +1,5 @@
 /**
 \defgroup basis_tensor Tensor product bases
-\ingroup basis
 \brief Tensor products of univariate bases with partial derivatives, integrals, Kronecker Gram matrices, penalties, and transforms.
 
 Header `<laplace/basis/tensor.hpp>` defines \ref laplace::basis::tensor_product_basis "tensor_product_basis", the concept \ref laplace::basis::multivariate_basis "multivariate_basis", and host and device utilities in namespace `laplace::basis`. A `tensor_product_basis` is a lightweight struct copied by value into Kokkos kernels; its evaluation members are marked `LAPLACE_HD` for host and device execution, `cross_gram()` and most free functions run on the host, and \ref laplace::basis::fill_tensor_basis_rows "fill_tensor_basis_rows()" launches a Kokkos kernel. Across four mixed-margin reference cases evaluated at 400 bits, rows stay within \f$11.0\epsilon\f$, expansions within \f$3.00\epsilon\f$, and cross Gram matrices within \f$3.26\epsilon\f$ of their scales.

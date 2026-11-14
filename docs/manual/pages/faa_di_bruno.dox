@@ -1,6 +1,5 @@
 /**
 \defgroup faa_di_bruno Faà di Bruno's formula and partial Bell polynomials
-\ingroup math
 \brief Faà di Bruno's formula for the \f$N\f$-th derivative of a composite function \f$f(g(x))\f$ and the partial Bell polynomials \f$B_{n,k}\f$ up to order 7.
 
 Include `<laplace/math/faa_di_bruno.hpp>` and call functions in this module as `laplace::math::NAME`. It provides \ref laplace::math::bell_partial "bell_partial()" for partial Bell polynomials \f$B_{n,k}\f$ with \f$1 \le k \le n \le 7\f$, and \ref laplace::math::chain_rule_d1 "chain_rule_d1()" through \ref laplace::math::chain_rule_d7 "chain_rule_d7()" for composite derivatives up to order 7. All functions are marked `LAPLACE_HD` for host and Kokkos device execution. Measured maximum errors stay within 5.03 ulp of the absolute term sum on gcc and CUDA, bounded at 1.0 to 7.5 ulp in automated tests.

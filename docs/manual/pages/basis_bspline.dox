@@ -1,6 +1,5 @@
 /**
 \defgroup basis_bspline B-spline bases
-\ingroup basis
 \brief Complete B-spline basis with analytical derivatives to order 6, integrals from the lower boundary, and cross Gram matrices.
 
 This module implements univariate B-spline bases of degree \f$d \le 10\f$ in `<laplace/basis/bspline.hpp>`. Users construct a \ref laplace::basis::bspline_basis_owner "bspline_basis_owner" on the host and call \ref laplace::basis::bspline_basis_owner::host "host()" or \ref laplace::basis::bspline_basis_owner::device "device()" to obtain a lightweight \ref laplace::basis::bspline_basis "bspline_basis" view. Evaluation members are marked `LAPLACE_HD` for host code and Kokkos device kernels; constructors, cross Gram matrices, Greville abscissae, and regularity points run on the host. Across 42 knot configurations, rows of orders 0 to 6 stay within 7 ulp for \f$d \le 5\f$ and 19 ulp for \f$d = 10\f$, integrals and column totals within 3 and 4.7 ulp, and cross Gram matrices within 6 ulp against exact rational references.

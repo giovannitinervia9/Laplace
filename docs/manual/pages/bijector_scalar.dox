@@ -1,7 +1,5 @@
 /**
-\page bijector_scalar Scalar bijectors
 \defgroup bijector_scalar Scalar bijectors
-\ingroup bijector
 
 The scalar bijector module (`#include <laplace/bijector/scalar.hpp>`) provides twenty one-dimensional invertible maps (twelve parameter-free and eight with parameters) together with their inverses, log-Jacobians, derivatives in the argument up to order 6, parameter partial derivatives up to total order 6, non-smooth points, and distances to domain bounds. A parameter-free map is constructed as `scalar_bijector{scalar_bijector_map::NAME}`, a parameterized map is constructed through static factories such as `scalar_bijector::affine(location, scale)`, and every member function carries `LAPLACE_HD` for host and CUDA device execution. Over orders 0 to 6 on both gcc and CUDA, all quantities are accurate within 11 ulpC across parameter-free maps and within 50 ulpC across parameterized maps (and within 8 ulpC outside higher-order Box-Cox, Yeo-Johnson, and softplus peaks).
 

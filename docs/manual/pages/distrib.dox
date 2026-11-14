@@ -1,6 +1,5 @@
 /**
 \defgroup distrib_core The structure of a distribution
-\ingroup distrib
 \brief Common interface, parameter and kink descriptors, packed symmetric tensors, and tensor error scaling for univariate distributions.
 
 Include `<laplace/distrib/core.hpp>`; every type, constant, and helper lives in `laplace::distrib`. Functions in this module are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device.

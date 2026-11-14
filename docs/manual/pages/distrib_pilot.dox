@@ -1,6 +1,5 @@
 /**
- * \defgroup distrib_gaussian1 Gaussian distribution (mean-sd)
- * \ingroup distrib
+ * \defgroup distrib_gaussian1 gaussian1 (mean, sd)
  *
  * Defined in `<laplace/distrib/gaussian1.hpp>` as \ref laplace::distrib::gaussian1_distrib "gaussian1",
  * the univariate Gaussian distribution provides log-density, parameter and observation derivatives up
@@ -82,8 +81,7 @@
  */
 
 /**
- * \defgroup distrib_laplace1 Laplace distribution (location-scale)
- * \ingroup distrib
+ * \defgroup distrib_laplace1 laplace1 (location, scale)
  *
  * Defined in `<laplace/distrib/laplace1.hpp>` as \ref laplace::distrib::laplace1_distrib "laplace1",
  * the univariate Laplace distribution provides log-density and mixed derivatives up to order \f$6\f$,
@@ -162,8 +160,7 @@
  */
 
 /**
- * \defgroup distrib_poisson Poisson distribution (mean)
- * \ingroup distrib
+ * \defgroup distrib_poisson Poisson (mean)
  *
  * Defined in `<laplace/distrib/poisson.hpp>` as \ref laplace::distrib::poisson_distrib "poisson",
  * the univariate Poisson distribution provides log-mass and parameter derivatives up to order \f$6\f$,
@@ -231,8 +228,7 @@
  */
 
 /**
- * \defgroup distrib_gamma1 Gamma distribution (mean-dispersion)
- * \ingroup distrib
+ * \defgroup distrib_gamma1 gamma1 (mean, dispersion)
  *
  * Defined in `<laplace/distrib/gamma1.hpp>` as \ref laplace::distrib::gamma1_distrib "gamma1",
  * the univariate gamma distribution provides log-density and mixed derivatives up to order \f$6\f$,
