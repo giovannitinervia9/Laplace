@@ -3570,3 +3570,61 @@ closed form would need the factor computed from M first.
 
 **Chosen.** This version; tested in `tests/pdmat/test_unstructured.cpp` on
 gcc and CUDA, bounds 1.5 times the larger measured error.
+
+## Diagonal scaling: unit_diagonal_scaled_pdmat
+
+**What.** `unit_diagonal_scaled_pdmat<R>` (`include/laplace/pdmat/unit_diagonal_scaled.hpp`):
+M = D R D with D = diag(e^(s_i)), s_i = log sigma_i, and R any structure with
+unit diagonal (compound_symmetry_pdmat, ar1_pdmat, unstructured_corr_pdmat).
+theta = (s, r); with `common_scale` one s for every row. Decided with
+Giovanni on 2026-11-13.
+
+**How.** Every quantity is R's, rescaled in place: M_ij = e^(s_i + s_j) R_ij,
+M^-1_ij = e^(-s_i - s_j) R^-1_ij, L = D L_R, log det M = 2 sum s_i + log det R,
+log-Jacobian p log 2 + (p + 1) sum s_i + R's. A derivative splits its tuple
+into the scale indices A and those of R, B, and multiplies d^B of R's quantity
+by c_ij(A) = prod_(k in A) (delta_ik + delta_jk) (with (-1)^|A| for the
+inverse, prod delta_ik for the factor). e^(s_i + s_j) is formed as a product of
+two exponentials (exp(2 s_i) on the diagonal), so that the rounding of
+s_i + s_j is not magnified by |s|. No scratch of its own.
+
+**Measured** (gcc/OpenMP, 2026-11-13; references `tools/reference/pdmat_scaled.py`,
+mpmath at 640 bits from the definition, mixed central differences with steps
+2^-60 and 2^-70 that agree to 2.7e-35; 13906 values; p in {1, 3} for compound
+symmetry and AR(1), {2, 3} for the correlation, heterogeneous and common
+scales, a random point and a spread one with s = +-3 and r = +-1.5). Worst
+ulpN over orders 0..6:
+
+| R | M | M^-1 | L | log det (ulp) | log-Jacobian (ulp) |
+|---|---|---|---|---|---|
+| compound_symmetry | 83.4 (K = 6) | 2.8 | 5.1 | 3.4 | |
+| ar1 | 7.4 | 1.1 | 5.2 | 5.3 | |
+| unstructured_corr | 40.2 (K = 6) | 16250 (K = 6); 31 with the scaling undone | 16.0 | 9.4 | 14.1 |
+
+On CUDA (RTX 4070 SUPER, same day), in the same order: compound symmetry
+76.3, 2.8, 4.8, 3.1; AR(1) 6.3, 0.73, 5.8, 6.1; unstructured_corr 17.3,
+27504 (28 with the scaling undone), 16.0, 7.4, 11.1.
+
+**What it says.** The composition adds a few ulp to R's own error; the large
+figures are R's. The 83 ulpN of compound symmetry at order 6 is R's matrix
+derivative itself (the same with the scaling undone). The inverse with the
+correlation and heterogeneous scales: the normwise measure divides by the
+largest entry of M^-1, while R^-1's error, of at most 31 ulpN of R^-1's largest
+entry, is multiplied by e^(-s_i - s_j), up to e^12 apart at s = +-3. This is
+the conditioning of the scaled inverse in the normwise measure, not a loss in
+the code.
+
+Measured per entry on 2026-11-14 (each entry in ulps of itself): every nonzero
+entry of M^-1 and its derivatives is within 1.9, 3.0, 4.7, 7.7, 18, 103, 299
+ulp at orders 0 to 6. The normwise figure comes from entries that are zero in
+exact arithmetic: at order 1 along r_20 the entry (1, 1) has reference 1e-169
+and comes out as 2.5e-12, the residue of R^-1's generic route (a few ulp of
+max |R^-1|) times e^(-2 s_1) = e^6. The zero is a hidden cancellation,
+(R^-1)_11 = 1/L_11^2 + (L_21/(L_11 L_22))^2 with z_20 cancelling between L_21
+and L_22, so the order of the operations cannot remove it (e^(-s_i - s_j)
+multiplies the whole sum); only a route to R^-1 with exact zeros could.
+
+**Chosen.** The composition as designed; test bounds 1.5 times the larger of
+the gcc and CUDA errors, on the matrices with the scaling undone (D^-1 M D^-1,
+D M^-1 D, D^-1 L), the measure that reaches x^T M^-1 x = z^T R^-1 z for
+x = D z (Giovanni, 2026-11-14). No change to the route.

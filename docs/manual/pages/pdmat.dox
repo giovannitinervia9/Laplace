@@ -10,12 +10,13 @@ A structured matrix maps \f$q\f$ real, unconstrained parameters \f$\theta = (\th
 
 The dimension \f$p\f$ is stored in the runtime field `dim`, and the parameter count \f$q\f$ is returned by `n_params()`. Each structure is a lightweight struct designed to be copied by value into Kokkos parallel kernels.
 
-Five structures are implemented:
+Six structures are implemented:
 - \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": diagonal matrix with \f$p\f$ unconstrained parameters \f$\theta_i = \log \sigma_i\f$ such that \f$M_{ii} = \sigma_i^2 = e^{2\theta_i}\f$.
 - \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": equicorrelation matrix with 1 unconstrained parameter mapped to correlation \f$\rho \in (-1/(p - 1), 1)\f$.
 - \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": first-order autoregressive correlation matrix with 1 unconstrained parameter mapped to correlation \f$\rho = \tanh\theta \in (-1, 1)\f$.
 - \ref laplace::pdmat::unstructured_pdmat "unstructured_pdmat": unstructured positive definite matrix or correlation matrix parameterized by a coupled bijector \c B (\ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector", \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector", or \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector").
 - \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat": unstructured correlation matrix using partial correlations (\c unstructured_pdmat with \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector").
+- \ref laplace::pdmat::unit_diagonal_scaled_pdmat "unit_diagonal_scaled_pdmat\<R\>": diagonal scaling of a unit-diagonal structure \c R with \f$p\f$ scale parameters \f$s_i = \log\sigma_i\f$ (or 1 with `common_scale`) such that \f$M = D R D\f$ with \f$D = \operatorname{diag}(e^{s_0}, \dots, e^{s_{p-1}})\f$.
 
 ## Storage layout and indexing
 
@@ -255,6 +256,90 @@ The matrix \f$M\f$, the Cholesky factor \f$L\f$, and the log-Jacobian are identi
 | Matrix logarithm, \f$p = 3\f$ | 474 ns | 9493 ns | 169617 ns | 4.6 ns |
 | Matrix logarithm, \f$p = 4\f$ | 1123 ns | 11915 ns | 296256 ns | 3.0 ns |
 
+## Scaled unit diagonal structure
+
+The class template \ref laplace::pdmat::unit_diagonal_scaled_pdmat "unit_diagonal_scaled_pdmat\<R\>" scales an underlying structure \c R having unit diagonal by a diagonal matrix:
+\f[
+M = D R D, \quad D = \operatorname{diag}(e^{s_0}, \dots, e^{s_{p-1}})
+\f]
+with log-scale parameters \f$s_i = \log\sigma_i\f$.
+The template argument \c R must satisfy \ref laplace::pdmat::pdmat_structure "pdmat_structure" and have `unit_diagonal = true` (enforced at compile time by a C++20 requires clause; the compiler rejects any other structure).
+Without a unit diagonal the scales would not be identifiable: \f$D R D = (c D)(R / c^2)(c D)\f$ for every \f$c > 0\f$.
+
+The parameter vector is \f$\theta = (s_0, \dots, s_{p-1}, r)\f$, where \f$r\f$ comprises the \f$q_R\f$ parameters of \f$R\f$.
+When the runtime field `common_scale` is \c true (default \c false), a single scale parameter \f$s\f$ is shared across all rows (\f$D = e^s I\f$), giving \f$q = 1 + q_R\f$ parameters; otherwise \f$q = p + q_R\f$.
+
+- **Matrix value.** Evaluated by `matrix(theta, m, w)`:
+  \f[
+  M_{ij} = e^{s_i + s_j} R_{ij}
+  \f]
+  with \f$s_i = s\f$ when `common_scale` is \c true. The entries \f$e^{s_i + s_j}\f$ are formed as \f$e^{s_i} e^{s_j}\f$ (\f$e^{2 s_i}\f$ on the diagonal), so that the rounding of \f$s_i + s_j\f$ is not magnified by \f$|s|\f$.
+- **Log-determinant.** Evaluated by `log_det(theta, w)`:
+  \f[
+  \log \det M = 2 \sum_{i=0}^{p-1} s_i + \log \det R
+  \f]
+  where \f$\sum_{i=0}^{p-1} s_i = p s\f$ when `common_scale` is \c true.
+- **Inverse.** Evaluated by `inverse(theta, m, w)`:
+  \f[
+  M^{-1}_{ij} = e^{-s_i - s_j} R^{-1}_{ij}
+  \f]
+  with \f$s_i = s\f$ when `common_scale` is \c true.
+- **Cholesky factor.** Evaluated by `cholesky(theta, l, w)`:
+  \f[
+  L = D L_R, \quad L_{ij} = e^{s_i} (L_R)_{ij}
+  \f]
+  with \f$s_i = s\f$ when `common_scale` is \c true.
+- **Log-Jacobian.** Evaluated by `log_jacobian(theta, w)`:
+  the transformation \f$\theta \mapsto M\f$ in reference coordinates (the lower triangle of \f$M\f$ including its diagonal, whereas \f$R\f$'s coordinates are its strict lower triangle) has log-Jacobian:
+  \f[
+  \log\lvert\det J\rvert = p \log 2 + (p + 1) \sum_{i=0}^{p-1} s_i + \log\lvert J_R\rvert
+  \f]
+  This is available only when \c R has `has_density = true` (currently \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat").
+  When `common_scale` is \c true, there are fewer parameters than entries in \f$M\f$, so no density exists and `log_jacobian()` returns NaN.
+- **Derivatives along sorted tuples.** For order \f$K \in \{1, \dots, 6\}\f$, a sorted tuple of parameter indices splits into a run \f$A\f$ of scale indices followed by remaining indices \f$B\f$ of \f$R\f$.
+  The derivatives are:
+  \f[
+  \frac{\partial^K M_{ij}}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}} = c_{ij}(A)\,e^{s_i + s_j}\,\partial^B R_{ij}, \quad c_{ij}(A) = \prod_{k \in A} (\delta_{ik} + \delta_{jk})
+  \f]
+  where \f$\delta\f$ is the Kronecker delta;
+  \f[
+  \frac{\partial^K M^{-1}_{ij}}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}} = (-1)^{|A|} c_{ij}(A)\,e^{-s_i - s_j}\,\partial^B R^{-1}_{ij}
+  \f]
+  and
+  \f[
+  \frac{\partial^K L_{ij}}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}} = \left(\prod_{k \in A} \delta_{ik}\right) e^{s_i}\,\partial^B (L_R)_{ij}
+  \f]
+  When `common_scale` is \c true, the scale factor is \f$2^{|A|}\f$ for \f$M\f$, \f$(-2)^{|A|}\f$ for \f$M^{-1}\f$, and 1 for \f$L\f$.
+  The matrix derivative functions return `false` leaving the buffer untouched when \f$A\f$ contains more than two distinct scale indices (more than one for \f$L\f$), or when \f$R\f$'s derivative along \f$B\f$ is structurally zero.
+  For the log-determinant:
+  \f[
+  \frac{\partial \log \det M}{\partial s_i} = 2 \quad (2p \text{ with common scale}), \quad \frac{\partial^K \log \det M}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}} = \partial^B \log \det R \quad (|A| = 0)
+  \f]
+  and \f$0.0\f$ otherwise.
+  For the log-Jacobian:
+  \f[
+  \frac{\partial \log\lvert\det J\rvert}{\partial s_i} = p + 1, \quad \frac{\partial^K \log\lvert\det J\rvert}{\partial\theta_{i_1}\cdots\partial\theta_{i_K}} = \partial^B \log\lvert J_R\rvert \quad (|A| = 0)
+  \f]
+  and \f$0.0\f$ otherwise (or NaN with `common_scale`).
+- **Descriptors.**
+  - `unit_diagonal` is \c false (diagonal entries are \f$e^{2s_i}\f$).
+  - `closed_inverse` is `R::closed_inverse`.
+  - `closed_factor` is `R::closed_factor`.
+  - `has_density` is `R::has_density`.
+- **Scratch size.** `scratch_size()` returns `unit_structure.scratch_size()`. The underlying structure \f$R\f$ writes its quantity into the caller's output buffer, which the composition rescales in place, requiring no additional scratch.
+- **Accuracy of scaled matrices.** Reference values were computed from the mathematical definition of each scaled matrix in mpmath at 640 bits (`tools/reference/pdmat_scaled.py`, 13906 values), using mixed central differences with steps \f$2^{-60}\f$ and \f$2^{-70}\f$ that agree to \f$2.7 \times 10^{-35}\f$.
+  Evaluation points comprise \f$p \in \{1, 3\}\f$ for compound symmetry and AR(1), \f$p \in \{2, 3\}\f$ for unstructured correlation, heterogeneous and common scales, a random point (scales \f$\mathcal{N}(0, 1)\f$, \f$r \sim \mathcal{N}(0, 0.5^2)\f$) and a spread point (\f$s = \pm 3\f$, \f$r = \pm 1.5\f$).
+  Maximum error over orders 0 to 6, gcc/OpenMP / CUDA (RTX 4070 SUPER):
+
+| \f$R\f$ | \f$M\f$ | \f$M^{-1}\f$ | \f$L\f$ | \f$\log \det M\f$ | \f$\log\lvert\det J\rvert\f$ |
+|---|---|---|---|---|---|
+| Compound symmetry (`compound_symmetry_pdmat`) | 83.4 / 76.3 ulpN (\f$K=6\f$) | 2.8 / 2.8 ulpN | 5.1 / 4.8 ulpN | 3.4 / 3.1 ulp | — |
+| Autoregressive AR(1) (`ar1_pdmat`) | 7.4 / 6.3 ulpN | 1.1 / 0.73 ulpN | 5.2 / 5.8 ulpN | 5.3 / 6.1 ulp | — |
+| Unstructured correlation (`unstructured_corr_pdmat`) | 40.2 / 17.3 ulpN (\f$K=6\f$) | 16250 / 27504 ulpN (\f$K=6\f$); 31 / 28 ulpN with scaling undone | 16.0 / 16.0 ulpN | 9.4 / 7.4 ulp | 14.1 / 11.1 ulp |
+
+  The composition adds only a few ulp to \f$R\f$'s own error. The 16250 / 27504 ulpN error on \f$M^{-1}\f$ with unstructured correlation and heterogeneous scales comes from the measure, not from inaccurate entries: every nonzero entry is accurate to at most 299 ulp of itself (order 6; 7.7 up to order 3). Some entries of the derivatives are zero in exact arithmetic through a cancellation inside \f$R^{-1}\f$ (for instance \f$(R^{-1})_{11} = 1/L_{11}^2 + (L_{21}/(L_{11}L_{22}))^2\f$ does not depend on \f$z_{20}\f$), and they come out as a rounding residue of a few ulp of the largest entry of \f$R^{-1}\f$; the scaling multiplies such an entry by up to \f$e^{6}\f$ while it multiplies the largest entries by \f$e^{-6}\f$. With the scaling undone, in the measure of \f$D M^{-1} D = R^{-1}\f$, the error is at most 31 / 28 ulpN. This is the measure that reaches a quadratic form: with \f$x = Dz\f$, \f$x^\top M^{-1} x = z^\top R^{-1} z\f$.
+  Test bounds in automated regression tests (`tests/pdmat/test_unit_diagonal_scaled.cpp`) are set to 1.5 times the larger of the errors measured on gcc/OpenMP and CUDA, rounded up, on the matrices with the scaling undone (\f$D^{-1} M D^{-1}\f$, \f$D M^{-1} D\f$, \f$D^{-1} L\f$).
+
 ## Measured accuracy
 
 The general method is on the page \ref accuracy "How accuracy is measured"; what is specific here: the reference script `tools/reference/pdmat_pilot.py` builds each matrix from its definition in mpmath at 640 bits (inverse, Cholesky factor and determinant by mpmath's own routines), and takes the derivatives by central differences with steps \f$2^{-60}\f$ and \f$2^{-70}\f$, which agree to \f$1.6 \times 10^{-35}\f$ relative. There are 16569 reference values:
@@ -330,6 +415,7 @@ Kokkos::parallel_for(
 - \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": First-order autoregressive AR(1) positive definite correlation matrix structure.
 - \ref laplace::pdmat::unstructured_pdmat "unstructured_pdmat": Unstructured positive definite matrix structure parameterized by a coupled bijector.
 - \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat": Unstructured correlation matrix structure parameterized by partial correlations.
+- \ref laplace::pdmat::unit_diagonal_scaled_pdmat "unit_diagonal_scaled_pdmat\<R\>": Structure with unit diagonal scaled by a diagonal matrix.
 - \ref laplace::pdmat::pdmat_orders "pdmat_orders": CRTP base class template providing named derivative member functions.
 - \ref laplace::pdmat::pdmat_structure "pdmat_structure": Concept defining requirements for structured positive definite matrices.
 - \ref laplace::pdmat::packed_index "packed_index()": Row-major lower-triangular packed storage index.
