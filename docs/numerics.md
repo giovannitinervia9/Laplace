@@ -3436,16 +3436,30 @@ and in the form that bounds something: `check_deriv` in
 `tests/math/test_normal.cpp` measures the error of each order on [-1, 4) in
 ulp of the largest |g_k| of that order on the band, which is the property of
 a Chebyshev route, its error being absolute and of the size of an ulp of the
-coefficients of the piece. It is uniform and small: 1.19, 1.28, 1.36, 1.41,
-0.913 and 1.72 ulp for orders 1 to 6 on gcc, 1.10 to 1.61 on CUDA. See "The
-accuracy of the log Phi derivatives on [-1, 4), absolutely and relatively".
+coefficients of the piece. It is uniform and small, 0.84 to 1.49 ulp over the
+six orders on gcc. See "The accuracy of the log Phi derivatives on [-1, 4),
+absolutely and relatively".
 
-That is what feeds the chain, and it explains gaussian2's 117 without anything
-being wrong in the composition: the inputs carry about 1.5 ulp of the largest
-component of their order, and at the point where the header is worst the
+That was what fed the chain, and it explained gaussian2's 117 without anything
+being wrong in the composition: the inputs carried about 1.5 ulp of the largest
+component of their order, and at the point where the header was worst the
 component the chain needs is a small fraction of its neighbours, so the same
-absolute error is tens of ulp of that component. With a chain costing at most
-28 ulp, the 117 is accounted for.
+absolute error was tens of ulp of that component.
+
+**Measured again after those pieces were repaired (2026-11-14).** Each order
+now has its own pieces on [-1, 4), a piece centred on a zero of g_k expands
+g_k(t)/(t - z), and the pieces above t = 1 are half as wide, so the error
+relative to the component is 2.2 to 2.9 ulp everywhere on the band instead of
+reaching thousands near a zero. gaussian2's figure at an exact argument falls
+from 117 ulp at z = 3 and order 5 to **29 at z = 2 and order 6**, which is the
+chain's own cost and agrees with the at most 28 ulp measured independently for
+that chain on exactly rounded inputs. gaussian1 does not move, 38 ulp, because
+its worst point z = 4 is above the band; gaussian3 stays at 3.08 and the gumbel
+at 3.66 and 30.5. On the grids of `test_gaussian2.cpp` and
+`test_gaussian3.cpp` **nothing moves**: 483, 441, 301 and 156 before and after.
+That is the sharpest confirmation of the diagnosis in this entry, since those
+grids are dominated by the inherited z^2 eps/2 and a change to the inputs
+cannot reach them.
 
 **A figure withdrawn.** An earlier version of this paragraph said that orders
 4, 5 and 6 carry 43.2, 65.3 and 36.8 ulp "away from the zeros of the

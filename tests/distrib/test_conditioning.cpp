@@ -93,9 +93,16 @@ TEST_CASE("distrib gaussians: log F derivatives at an exact argument") {
       if (std::getenv("LAPLACE_PRINT_ERRORS"))
         std::printf("%-22s %-10s exact z: max %.3g ulp of the order's scale at z = %g, K = %d\n",
                     name[d], u ? "log(1-F)" : "log F", worst[d][u], worst_y[d][u], worst_K[d][u]);
-  // Measured 2026-11-13 on the gcc build, bounds about 1.5 times the maxima: gaussian1 38 ulp
-  // at z = 4 and order 5, gaussian2 117 at z = 3 and order 5, gaussian3 3.08 at z = 8 and
-  // order 6. The three compute the same z-derivatives and differ only in the chain that
+  // Measured 2026-11-14 on the gcc build, bounds about 1.5 times the maxima: gaussian1 38 ulp
+  // at z = 4 and order 5, gaussian2 29 at z = 2 and order 6, gaussian3 3.08 at z = 8 and
+  // order 6. gaussian2 read 117 at z = 3 and order 5 until the pieces of log_Phi_dK on
+  // [-1, 4) were given a zero-aware form; its 29 is the chain's own cost, and it agrees with
+  // the at most 28 ulp measured independently for that chain on exactly rounded inputs
+  // (tools/reference/variance_chain.py). gaussian1 did not move because its worst point,
+  // z = 4, is above that band. On the grids of test_gaussian2.cpp and test_gaussian3.cpp
+  // nothing moved at all, 483 and 301 before and after, which is what the inherited error
+  // predicts.
+  // The three compute the same z-derivatives and differ only in the chain that
   // carries them to the parameters, so the gap between the columns is the chain's own cost.
   // It follows the sign of k in sigma = w^k: the recursion step is
   // -((k a + i) R_i + k z R_i'), whose two terms subtract when k > 0 (sigma, variance) and
@@ -108,7 +115,7 @@ TEST_CASE("distrib gaussians: log F derivatives at an exact argument") {
   // u = e^-z, so half an ulp on z becomes a relative |z| u eps/2 in the result, about 370 ulp
   // at the worst point of that grid (z = -5, u = 148). Its route needs no change; measured
   // 3.66 ulp for log F at z = 13 and order 5, 30.5 for log(1 - F) at z = -2 and order 6.
-  const double bound[4][2] = {{57.0, 57.0}, {176.0, 176.0}, {4.6, 4.6}, {5.5, 46.0}};
+  const double bound[4][2] = {{57.0, 57.0}, {44.0, 44.0}, {4.6, 4.6}, {5.5, 46.0}};
   for (int d = 0; d < 4; ++d)
     for (int u = 0; u < 2; ++u) {
       INFO("dist " << d << " upper " << u << ": " << worst[d][u] << " ulp at z = " << worst_y[d][u]);
