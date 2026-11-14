@@ -4817,3 +4817,77 @@ derivatives of M^-1 (Giovanni, 2026-11-14). Tested in
 larger measured error, log det at d = p in a row of its own; twins: d = 0 is
 `diagonal_pdmat` bit for bit, at d = p M - Psi is `log_cholesky`'s M.
 
+
+## Reduced-rank matrices: reduced_rank_psdmat
+
+**What.** `reduced_rank_psdmat` (`include/laplace/pdmat/reduced_rank.hpp`), the
+first positive semidefinite structure (`psdmat_structure` in
+`include/laplace/pdmat/core.hpp`): M = Lambda Lambda^T of rank d, Lambda
+p x d with the convention of `factor_analytic_pdmat` (lower trapezoidal,
+Lambda_jj = e^(theta) on its diagonal, the other loadings free, theta the
+loadings by rows; q = pd - d(d-1)/2; 1 <= d <= p). It supplies M, the factor
+Lambda and log|M|_+, the log of the product of the d nonzero eigenvalues of M,
+each with its derivatives of orders 1 to 6, and the rank d. Decided with
+Giovanni on 2026-11-14.
+
+**How.** M and Lambda with closed sparse derivatives: Lambda moves only along
+one repeated loading (1 at order 1 for a free loading, e^theta at every order
+for a diagonal one), and M as in `factor_analytic_pdmat` without Psi. The
+nonzero eigenvalues of Lambda Lambda^T are those of C = Lambda^T Lambda (d x d),
+so log|M|_+ = log det C. At d = p, Lambda is square and triangular and
+log|M|_+ = 2 sum_j theta_jj exactly (derivative 2 along a diagonal loading at
+order 1, else 0). For d < p the value comes from a Cholesky factorization of
+C, and the derivatives from the recursion of `factor_analytic_pdmat` on C:
+C[T] is zero unless every index of the mask T is a loading of one row r, and
+then it is the Leibniz sum over those loadings of lambda_r lambda_r^T;
+X[S] = -X[0] sum_T C[T] X[S \ T] with X = C^-1, and
+d^F log det C = sum_(T subset of F \ f) tr(X[T] C[f + (F \ f \ T)]). The
+helpers (the loadings, the d x d Cholesky, the recursion) are shared with
+`factor_analytic_pdmat` in `include/laplace/pdmat/detail/loadings.hpp`.
+
+**Measured** (2026-11-14; references `tools/reference/pdmat_reduced_rank.py`,
+mpmath at 640 bits, log|M|_+ as the sum of the logs of the d largest
+eigenvalues of M from `mp.eigsy`, independent of Lambda^T Lambda; mixed
+central differences with steps 2^-60 and 2^-70 that agree to 4.3e-34; 47362
+values; (p, d) in {(1, 1), (2, 1), (3, 1), (3, 2), (3, 3), (5, 2), (5, 4)}, a
+random point, a spread one with loadings +-1.5 and diagonal loadings 0.4, and
+two near-singular ones with free loadings +-1e-3 and +-1e-5).
+M and Lambda in ulpN, log|M|_+ in ulp of max(|ref|, 1); by order, gcc/OpenMP /
+CUDA (RTX 4070 SUPER), K = 0..6:
+
+| K | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| M | 0.63 / 0.55 | 0.43 / 0.43 | 0.49 / 0.38 | 0.38 / 0.38 | 0.38 / 0.38 | 0.38 / 0.38 | 0.38 / 0.38 |
+| Lambda | 0.34 / 0.34 | 0.49 / 0.43 | 0.49 / 0.34 | 0.49 / 0.43 | 0.49 / 0.43 | 0.49 / 0.43 | 0.49 / 0.43 |
+| log\|M\|_+ | 0.97 / 1.6 | 9.6 / 21 | 131 / 146 | 742 / 219 | 161 / 1440 | 3850 / 2502 | 3682 / 2946 |
+
+At d = p log|M|_+ is within 0.42 ulp at every order. The peaks of log|M|_+
+at orders 4 to 6 come from the spread point of (p, d) = (5, 4) along one
+repeated diagonal loading (Lambda_22). There the reference is well
+conditioned: one ulp of any theta_k moves the order-5 derivative by 1.1 ulp
+and the order-6 one by 2.2 ulp (mpmath, the same script). The loss is the
+recursion's: the Leibniz sums of a repeated e^theta grow like 2^K and cancel
+in the traces. The same class as `factor_analytic_pdmat`'s log det for d < p
+(795 ulp at order 6).
+
+A second route was measured and removed (Giovanni, 2026-11-14): for a tuple
+within one row r, log det C = log det A_r + log g with
+A_r = sum_(i != r) lambda_i lambda_i^T (free of row r) and
+g = 1 + lambda_r^T A_r^-1 lambda_r, the derivatives of the scalar log g by the
+sub-mask recursion (g y[f] = g[f]), with a fallback to the recursion on C when
+A_r is near singular. Worst log|M|_+ over the points (gcc, ulp), orders 1..6:
+row route 131, 131, 110, 316, 1029, 4583; recursion on C 131, 131, 742, 161,
+3850, 3682. It was better at orders 3 and 5 and worse at order 6, up to twice
+at several points: the cancellation of a repeated e^theta stays in the
+derivatives of log g. The two near-singular reference points did not move the
+worst errors of the recursion on C.
+
+Speed (gcc, ns per call, one thread / OpenMP on 8 threads, log|M|_+ along K
+distinct parameters spread over the rows):
+
+| (p, d) | M | log\|M\|_+ K=0 | K=1 | K=3 | K=6 |
+|---|---|---|---|---|---|
+| (4, 1) | 112 / 23 | 127 / 23 | 143 / 39 | 279 / 60 | 1910 / 317 |
+| (8, 2) | 553 / 74 | 557 / 75 | 613 / 99 | 938 / 162 | 3132 / 434 |
+| (16, 4) | 2308 / 314 | 2223 / 299 | 2339 / 348 | 3103 / 496 | 9686 / 2171 |
+

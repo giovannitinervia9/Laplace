@@ -1,6 +1,6 @@
 # Measurement tools (accuracy and speed); not part of the test suite.
 
-laplace_kokkos_sources(math_elementary.cpp math_special.cpp math_incomplete.cpp math_ibeta.cpp math_inverse.cpp math_normal.cpp math_gamma_deriv.cpp math_gamma_mixed.cpp math_gamma_ratio.cpp math_beta_deriv.cpp math_student.cpp math_owen.cpp math_bessel.cpp math_bessel_k.cpp math_faa.cpp math_quad.cpp math_dd.cpp math_rel.cpp math_stirling.cpp bijector_scalar.cpp distrib_generic.cpp pdmat_pilot.cpp bijector_coupled.cpp pdmat_unstructured.cpp pdmat_toeplitz.cpp pdmat_factor_analytic.cpp basis_bspline.cpp)
+laplace_kokkos_sources(math_elementary.cpp math_special.cpp math_incomplete.cpp math_ibeta.cpp math_inverse.cpp math_normal.cpp math_gamma_deriv.cpp math_gamma_mixed.cpp math_gamma_ratio.cpp math_beta_deriv.cpp math_student.cpp math_owen.cpp math_bessel.cpp math_bessel_k.cpp math_faa.cpp math_quad.cpp math_dd.cpp math_rel.cpp math_stirling.cpp bijector_scalar.cpp distrib_generic.cpp pdmat_pilot.cpp bijector_coupled.cpp pdmat_unstructured.cpp pdmat_toeplitz.cpp pdmat_factor_analytic.cpp pdmat_reduced_rank.cpp basis_bspline.cpp)
 
 add_executable(math_elementary math_elementary.cpp)
 target_link_libraries(math_elementary PRIVATE Laplace::laplace)
@@ -78,6 +78,9 @@ target_link_libraries(pdmat_toeplitz PRIVATE Laplace::laplace)
 
 add_executable(pdmat_factor_analytic pdmat_factor_analytic.cpp)
 target_link_libraries(pdmat_factor_analytic PRIVATE Laplace::laplace)
+
+add_executable(pdmat_reduced_rank pdmat_reduced_rank.cpp)
+target_link_libraries(pdmat_reduced_rank PRIVATE Laplace::laplace)
 
 add_executable(basis_bspline basis_bspline.cpp)
 target_link_libraries(basis_bspline PRIVATE Laplace::laplace)

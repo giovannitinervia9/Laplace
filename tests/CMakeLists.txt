@@ -55,6 +55,7 @@ set(LAPLACE_TEST_SOURCES
   pdmat/test_unit_diagonal_scaled.cpp
   pdmat/test_toeplitz.cpp
   pdmat/test_factor_analytic.cpp
+  pdmat/test_reduced_rank.cpp
   basis/test_bspline.cpp
   basis/test_fourier.cpp
   basis/test_legendre.cpp

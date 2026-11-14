@@ -686,6 +686,47 @@ concept pdmat_structure = requires(const S s, const double* t, double* m, double
   { s.log_det_d6(t, i6, w) } -> std::same_as<double>;
 };
 
+// The positive semidefinite structures (psdmat, note/pdmat_structures.md
+// section 10): theta -> M(theta) symmetric p x p of rank r, constant in theta,
+// with the storage and the conventions of the pdmat above. In place of
+// log det M they supply log|M|_+, the log of the product of the r nonzero
+// eigenvalues (log_pdet), and they have no inverse. A structure S derives from
+// psdmat_orders<S> and implements matrix_dk<K> and log_pdet_dk<K>, or (a host
+// only structure) writes the named functions itself; psdmat_structure checks
+// only the members, so a host-only type satisfies it.
+template <class S>
+struct psdmat_orders {
+  LAPLACE_HD bool matrix_d1(const double* t, const int (&i)[1], double* m, double* w) const { return s().template matrix_dk<1>(t, i, m, w); }
+  LAPLACE_HD bool matrix_d2(const double* t, const int (&i)[2], double* m, double* w) const { return s().template matrix_dk<2>(t, i, m, w); }
+  LAPLACE_HD bool matrix_d3(const double* t, const int (&i)[3], double* m, double* w) const { return s().template matrix_dk<3>(t, i, m, w); }
+  LAPLACE_HD bool matrix_d4(const double* t, const int (&i)[4], double* m, double* w) const { return s().template matrix_dk<4>(t, i, m, w); }
+  LAPLACE_HD bool matrix_d5(const double* t, const int (&i)[5], double* m, double* w) const { return s().template matrix_dk<5>(t, i, m, w); }
+  LAPLACE_HD bool matrix_d6(const double* t, const int (&i)[6], double* m, double* w) const { return s().template matrix_dk<6>(t, i, m, w); }
+  LAPLACE_HD double log_pdet_d1(const double* t, const int (&i)[1], double* w) const { return s().template log_pdet_dk<1>(t, i, w); }
+  LAPLACE_HD double log_pdet_d2(const double* t, const int (&i)[2], double* w) const { return s().template log_pdet_dk<2>(t, i, w); }
+  LAPLACE_HD double log_pdet_d3(const double* t, const int (&i)[3], double* w) const { return s().template log_pdet_dk<3>(t, i, w); }
+  LAPLACE_HD double log_pdet_d4(const double* t, const int (&i)[4], double* w) const { return s().template log_pdet_dk<4>(t, i, w); }
+  LAPLACE_HD double log_pdet_d5(const double* t, const int (&i)[5], double* w) const { return s().template log_pdet_dk<5>(t, i, w); }
+  LAPLACE_HD double log_pdet_d6(const double* t, const int (&i)[6], double* w) const { return s().template log_pdet_dk<6>(t, i, w); }
+
+ private:
+  LAPLACE_HD const S& s() const { return static_cast<const S&>(*this); }
+};
+
+template <class S>
+concept psdmat_structure = requires(const S s, const double* t, double* m, double* w, const int (&i1)[1], const int (&i6)[6]) {
+  { s.dim } -> std::convertible_to<int>;
+  { s.n_params() } -> std::convertible_to<int>;
+  { s.scratch_size() } -> std::convertible_to<int>;
+  { s.rank() } -> std::convertible_to<int>;
+  s.matrix(t, m, w);
+  { s.log_pdet(t, w) } -> std::same_as<double>;
+  { s.matrix_d1(t, i1, m, w) } -> std::same_as<bool>;
+  { s.matrix_d6(t, i6, m, w) } -> std::same_as<bool>;
+  { s.log_pdet_d1(t, i1, w) } -> std::same_as<double>;
+  { s.log_pdet_d6(t, i6, w) } -> std::same_as<double>;
+};
+
 namespace detail_pdmat {
 
 namespace m = laplace::math;

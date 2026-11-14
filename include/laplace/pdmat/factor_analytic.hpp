@@ -38,37 +38,9 @@
 #pragma once
 
 #include <laplace/pdmat/core.hpp>
+#include <laplace/pdmat/detail/loadings.hpp>
 
 namespace laplace::pdmat {
-
-namespace detail_pdmat {
-
-// in-place Cholesky of the full d x d row-major A (lower part used and
-// overwritten, the strict upper part ignored)
-LAPLACE_HD void fa_cholesky(int d, double* A) {
-  for (int j = 0; j < d; ++j) {
-    double s = A[j * d + j];
-    for (int k = 0; k < j; ++k) s -= A[j * d + k] * A[j * d + k];
-    const double r = Kokkos::sqrt(s);
-    A[j * d + j] = r;
-    for (int i = j + 1; i < d; ++i) {
-      double t = A[i * d + j];
-      for (int k = 0; k < j; ++k) t -= A[i * d + k] * A[j * d + k];
-      A[i * d + j] = t / r;
-    }
-  }
-}
-
-// z = R^-1 b, R lower triangular d x d row-major
-LAPLACE_HD void fa_forward(int d, const double* R, const double* b, double* z) {
-  for (int i = 0; i < d; ++i) {
-    double s = b[i];
-    for (int k = 0; k < i; ++k) s -= R[i * d + k] * z[k];
-    z[i] = s / R[i * d + i];
-  }
-}
-
-}  // namespace detail_pdmat
 
 /**
  * \ingroup pdmat
@@ -287,32 +259,7 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
       return true;
     }
     if (idx[K - 1] >= nl) return false;  // a t with a loading
-    const int v1 = idx[0], v2 = idx[K - 1];
-    int m1 = 0;
-    for (int k = 0; k < K; ++k) {
-      if (idx[k] != v1 && idx[k] != v2) return false;
-      m1 += idx[k] == v1;
-    }
-    int r1, c1, r2, c2;
-    loading_position(v1, r1, c1);
-    if (v1 == v2) {  // M_rr and M_rj, j > c, j != r
-      const double drr = r1 == c1 ? detail_pdmat::ipow(2.0, K) * detail_pdmat::m::exp(2.0 * theta[v1])
-                                  : (K == 1 ? 2.0 * theta[v1] : (K == 2 ? 2.0 : 0.0));
-      const double dk = loading_d(theta, v1, K);
-      if (drr == 0.0 && dk == 0.0) return false;
-      detail_pdmat::fill_zero(m, packed_size(p));
-      m[packed_index(r1, r1)] = drr;
-      for (int j = c1; j < p; ++j)
-        if (j != r1) m[r1 > j ? packed_index(r1, j) : packed_index(j, r1)] = dk * loading_value(theta, j, c1);
-      return true;
-    }
-    loading_position(v2, r2, c2);
-    if (c1 != c2) return false;
-    const double a = loading_d(theta, v1, m1), b = loading_d(theta, v2, K - m1);
-    if (a == 0.0 || b == 0.0) return false;
-    detail_pdmat::fill_zero(m, packed_size(p));
-    m[packed_index(r2, r1)] = a * b;  // r2 > r1: same column, later row
-    return true;
+    return tz().template gram_dk<K>(theta, idx, m);
   }
 
   /**
@@ -348,20 +295,12 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
     constexpr int NM = 1 << K;
     const work s = carve(w);
     bool cnz[NM], xnz[NM];
-    masks<K>(theta, idx, s, cnz, xnz);
-    const int full = NM - 1, rest = full ^ 1;
-    double r = 0.0;
-    for (int T = rest;; T = (T - 1) & rest) {
-      const int U = 1 | (rest ^ T);
-      if (xnz[T] && cnz[U]) {
-        const double* X = s.X + T * d * d;
-        const double* C = s.C + U * d * d;
-        for (int a = 0; a < d; ++a)
-          for (int b = 0; b < d; ++b) r += X[a * d + b] * C[b * d + a];
-      }
-      if (T == 0) break;
-    }
-    return psi_part + r;
+    const detail_pdmat::trapezoid_loadings z = tz();
+    z.load_lambda(theta, s.lam);
+    load_em2t(theta, s.em2t);
+    detail_pdmat::loadings_gram_masks<K>(z, theta, idx, s.lam, s.em2t, true, [&](int v) { return param_row(v); }, s.C, cnz, s.u, s.v);
+    detail_pdmat::log_det_masks_inverse<K>(d, s.C, cnz, s.R, s.tmp, s.X, xnz);
+    return psi_part + detail_pdmat::log_det_masks_sum<K>(d, s.C, cnz, s.X, xnz);
   }
 
   /**
@@ -500,42 +439,16 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
     return s;
   }
 
-  // first parameter of row i
-  LAPLACE_HD int row_offset(int i) const {
-    const int d = n_factors;
-    return i <= d ? i * (i + 1) / 2 : d * (d + 1) / 2 + (i - d) * d;
-  }
-  // row and column of the loading v < n_loadings()
-  LAPLACE_HD void loading_position(int v, int& r, int& c) const {
-    r = 0;
-    while (row_offset(r + 1) <= v) ++r;
-    c = v - row_offset(r);
-  }
+  LAPLACE_HD detail_pdmat::trapezoid_loadings tz() const { return {dim, n_factors}; }
   // the row of parameter v (a loading of that row, or its t)
   LAPLACE_HD int param_row(int v) const {
     const int nl = n_loadings();
     if (v >= nl) return v - nl;
     int r, c;
-    loading_position(v, r, c);
+    tz().loading_position(v, r, c);
     return r;
   }
-  // Lambda_jc, c <= min(j, d - 1)
-  LAPLACE_HD double loading_value(const double* theta, int j, int c) const {
-    const double x = theta[row_offset(j) + c];
-    return j == c ? detail_pdmat::m::exp(x) : x;
-  }
-  // the derivative of order n >= 0 of the loading v in its own parameter
-  LAPLACE_HD double loading_d(const double* theta, int v, int n) const {
-    int r, c;
-    loading_position(v, r, c);
-    if (r == c) return detail_pdmat::m::exp(theta[v]);
-    return n == 0 ? theta[v] : (n == 1 ? 1.0 : 0.0);
-  }
-  LAPLACE_HD void load_lambda(const double* theta, double* lam) const {
-    const int p = dim, d = n_factors;
-    for (int i = 0; i < p; ++i)
-      for (int k = 0; k < d; ++k) lam[i * d + k] = k <= i ? loading_value(theta, i, k) : 0.0;
-  }
+  LAPLACE_HD void load_lambda(const double* theta, double* lam) const { tz().load_lambda(theta, lam); }
   LAPLACE_HD void load_em2t(const double* theta, double* em2t) const {
     const int nl = n_loadings();
     for (int i = 0; i < dim; ++i) em2t[i] = detail_pdmat::m::exp(-2.0 * theta[nl + i]);
@@ -549,107 +462,6 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
         for (int i = 0; i < p; ++i) t += s.em2t[i] * s.lam[i * d + a] * s.lam[i * d + b];
         c[a * d + b] = (a == b ? 1.0 : 0.0) + t;
       }
-  }
-  // the derivative of lambda_r along the loadings sl[0..n-1] of row r into
-  // out (d values); false when it is zero
-  LAPLACE_HD bool lambda_row_d(const double* theta, const work& s, int r, const int* sl, int n, double* out) const {
-    const int d = n_factors;
-    if (n == 0) {
-      for (int k = 0; k < d; ++k) out[k] = s.lam[r * d + k];
-      return true;
-    }
-    for (int k = 1; k < n; ++k)
-      if (sl[k] != sl[0]) return false;
-    const double x = loading_d(theta, sl[0], n);
-    if (x == 0.0) return false;
-    int rr, c;
-    loading_position(sl[0], rr, c);
-    for (int k = 0; k < d; ++k) out[k] = k == c ? x : 0.0;
-    return true;
-  }
-
-  // For every mask T of the tuple: C[T] with its nonzero flag, then X[T] by
-  // the recursion.
-  template <int K>
-  LAPLACE_HD void masks(const double* theta, const int (&idx)[K], const work& s, bool* cnz, bool* xnz) const {
-    constexpr int NM = 1 << K;
-    const int d = n_factors, dd = d * d, nl = n_loadings();
-    load_lambda(theta, s.lam);
-    load_em2t(theta, s.em2t);
-    build_c(s, s.C);
-    cnz[0] = true;
-    for (int T = 1; T < NM; ++T) {
-      int r = -1, nt = 0, nsl = 0, sl[K];
-      bool one_row = true;
-      for (int q = 0; q < K; ++q)
-        if (T & (1 << q)) {
-          const int rq = param_row(idx[q]);
-          if (r < 0) r = rq;
-          one_row = one_row && rq == r;
-          if (idx[q] >= nl) ++nt;
-          else sl[nsl++] = idx[q];
-        }
-      cnz[T] = false;
-      if (!one_row) continue;
-      const double f = detail_pdmat::ipow(-2.0, nt) * s.em2t[r];
-      // C[T] = f sum over the splits of sl of d lambda d lambda^T
-      double* ct = s.C + T * dd;
-      for (int e = 0; e < dd; ++e) ct[e] = 0.0;
-      double *u = s.u, *v = s.v;
-      for (int A = 0; A < (1 << nsl); ++A) {
-        int sa[K], sb[K], na = 0, nb = 0;
-        for (int k = 0; k < nsl; ++k) (A & (1 << k) ? sa[na++] : sb[nb++]) = sl[k];
-        if (!lambda_row_d(theta, s, r, sa, na, u) || !lambda_row_d(theta, s, r, sb, nb, v)) continue;
-        cnz[T] = true;
-        for (int a = 0; a < d; ++a)
-          for (int b = 0; b < d; ++b) ct[a * d + b] += f * u[a] * v[b];
-      }
-    }
-    // X[0] = C^-1 = Y^T Y, Y = R^-1
-    for (int e = 0; e < dd; ++e) s.R[e] = s.C[e];
-    detail_pdmat::fa_cholesky(d, s.R);
-    double* Y = s.tmp;  // d x d (p >= d)
-    for (int j = 0; j < d; ++j) {
-      for (int i = 0; i < j; ++i) Y[i * d + j] = 0.0;
-      Y[j * d + j] = 1.0 / s.R[j * d + j];
-      for (int i = j + 1; i < d; ++i) {
-        double t = 0.0;
-        for (int k = j; k < i; ++k) t += s.R[i * d + k] * Y[k * d + j];
-        Y[i * d + j] = -t / s.R[i * d + i];
-      }
-    }
-    for (int a = 0; a < d; ++a)
-      for (int b = 0; b < d; ++b) {
-        double t = 0.0;
-        for (int k = a > b ? a : b; k < d; ++k) t += Y[k * d + a] * Y[k * d + b];
-        s.X[a * d + b] = t;
-      }
-    xnz[0] = true;
-    double* acc = s.tmp;
-    for (int Q = 1; Q < NM; ++Q) {
-      xnz[Q] = false;
-      for (int e = 0; e < dd; ++e) acc[e] = 0.0;
-      for (int T = Q; T != 0; T = (T - 1) & Q) {
-        const int Rm = Q ^ T;
-        if (!cnz[T] || !xnz[Rm]) continue;
-        xnz[Q] = true;
-        const double* ct = s.C + T * dd;
-        const double* xr = s.X + Rm * dd;
-        for (int a = 0; a < d; ++a)
-          for (int k = 0; k < d; ++k) {
-            const double c = ct[a * d + k];
-            for (int b = 0; b < d; ++b) acc[a * d + b] += c * xr[k * d + b];
-          }
-      }
-      if (!xnz[Q]) continue;
-      double* xq = s.X + Q * dd;
-      for (int a = 0; a < d; ++a)
-        for (int b = 0; b < d; ++b) {
-          double t = 0.0;
-          for (int k = 0; k < d; ++k) t += s.X[a * d + k] * acc[k * d + b];
-          xq[a * d + b] = -t;
-        }
-    }
   }
 };
 
