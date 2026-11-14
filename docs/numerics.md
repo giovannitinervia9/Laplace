@@ -4586,3 +4586,120 @@ default and an explicit rank tolerance, the empty set of constraints
 a NaN in the lower triangle, a zero on a triangular diagonal; a NaN in the
 upper triangle of a symmetric input is not read) and the exceptions for
 wrong dimensions.
+
+## Toeplitz correlation matrices: toeplitz_pdmat
+
+**What.** `toeplitz_pdmat` (`include/laplace/pdmat/toeplitz.hpp`): the p x p
+Toeplitz correlation matrix M_ij = m_|i-j|, m_0 = 1, with q = p - 1
+parameters, the partial autocorrelations phi_k = tanh(theta_(k-1)),
+k = 1..p-1. Every real theta gives a positive definite M. Unit diagonal, so
+`unit_diagonal_scaled_pdmat<toeplitz_pdmat>` is a Toeplitz correlation with
+heterogeneous variances. Design decided with Giovanni on 2026-11-14: closed
+log det and M^-1, L supplied, derivatives over the sub-masks of the tuple,
+p = 1 allowed (q = 0).
+
+**How.** c_k = sech(theta_(k-1)), v_k = prod_(j<=k) c_j^2 (the variance of the
+prediction errors of order k).
+- log det M = -2 sum_k (p - k) log cosh theta_(k-1); order K:
+  -2 (p - 1 - a) tanh^(K-1)(theta_a) on a tuple of the one index a, 0 on a
+  mixed tuple.
+- M^-1 = A^T V^-1 A, A unit lower triangular with the Durbin-Levinson
+  coefficients (A_(t,t-j) = -phi_(t,j)), V = diag(v); 1/v_t =
+  prod_(a<t) cosh^2 theta_a with closed derivatives (2^(n-1) sinh or cosh of
+  2 theta), never a division.
+- M and L by the normalized lattice: the forward and backward prediction
+  errors divided by v_k^(1/2) satisfy, per order, the orthogonal rotation
+  E_(k-1)(t) = c_k E_k(t) + phi_k B_(k-1)(t-1),
+  B_k(t) = c_k B_(k-1)(t-1) - phi_k E_k(t); L_ts is the coefficient of the
+  standardized innovation eps_s = E_s(s) in x_t, and m_t = L_t0.
+- Derivatives: every quantity keeps its derivatives along the 2^K sub-masks
+  of the tuple, products by Leibniz over the subsets (3^K per product);
+  masks holding an index >= t are zero at time or stage t and skipped. About
+  2 p^2 products for M, 2 p^3/3 for L, p^3/6 for M^-1. Scratch
+  64 (p^2 + 3p - 2) doubles (0 at p = 1).
+
+**The route for M, measured.** The first version computed m by the
+Durbin-Levinson recursion, m_k = phi_k v_(k-1) + sum_j phi_(k-1,j) m_(k-j),
+and L = A^-1 V^(1/2). The derivative of m_n along phi_k is v_(k-1) times a
+polynomial in phi (SymPy, p <= 6), but the recursion forms it as a
+difference of terms of order one. At the steep point (theta_0 = 6,
+1 - phi_1^2 = 2.5e-5, p = 6) its derivatives of M along theta_2..theta_4 lost
+1.4e7 to 6.0e7 ulpN (up to 5466 ulp of max |M|), those of L up to 2.1e5
+ulpN, and tr(M^-1 dM/dtheta_a) missed the closed d log det/dtheta_a by up to
+1.2e-6 relative. In the lattice every small factor is a product of c's. The
+first derivatives of m at that point in double, against mpmath (dual
+numbers): Durbin-Levinson 7.5, 1.3e4, 2.8e5, 5.0e7, 4.1 ulpN along
+theta_0..theta_4, the lattice 0.84, 0.25, 1.6, 3.3, 4.7. With the lattice in
+the code the trace agrees with the closed form to 6.6e-9, 4.1e-11, 4.1e-12,
+3.6e-14, 2.7e-15 (along theta_0..theta_4; the residue along theta_0 is the
+trace's own conditioning, M^-1 at kappa(M) = 1.2e14). M^-1 by
+A^T V^-1 A was accurate in both versions.
+
+**Measurement.** References `pdmat_toeplitz.csv`
+(`tools/reference/pdmat_toeplitz.py`, 18568 values): m from the definition
+of the partial autocorrelation (the last coefficient of the solution of the
+Yule-Walker system of order k, affine in m_k, two `mp.lu_solve`), not
+from the recursion; M^-1, L, log det by `mp.inverse`, `mp.cholesky`,
+`mp.det`; derivatives by tensor products of central differences at 640 bits,
+steps 2^-60 and 2^-70, which agree to 1.3e-35 relative. Points: p in
+{1, 2, 3, 4, 6}; a random theta (N(0, 0.6^2)), a spread one (+-1.5) and a
+steep one (6, then -+2.5); kappa(M) at p = 2, 3, 4, 6: random 1.2, 1.3, 34,
+16; spread 20, 410, 8.2e3, 3.1e6; steep 1.6e5, 2.7e7, 4.5e9, 1.2e14. Tuples:
+all of orders 1 and 2, the pure ones and up to 6 mixed ones of orders 3-6.
+Errors as for the other structures (ulpN; relative ulp of max(|ref|, 1) for
+log det). Worst over the points, orders 0..6, gcc/OpenMP / CUDA:
+
+| K | M | M^-1 | L | log det |
+|---|---|---|---|---|
+| 0 | 1.28 / 1.28 | 9.70 / 2.28 | 1.81 / 1.81 | 1.37 / 1.37 |
+| 1 | 7.38 / 7.38 | 9.05 / 3.35 | 4.45 / 4.16 | 0.83 / 0.62 |
+| 2 | 7.50 / 7.76 | 9.56 / 4.01 | 5.24 / 5.24 | 1.16 / 1.16 |
+| 3 | 126 / 122 | 9.23 / 3.87 | 6.48 / 6.52 | 2.04 / 2.04 |
+| 4 | 108 / 113 | 9.56 / 4.50 | 7.52 / 7.52 | 12.6 / 2.76 |
+| 5 | 151 / 135 | 9.23 / 5.41 | 10.9 / 10.3 | 3.39 / 3.39 |
+| 6 | 163 / 56.4 | 10.0 / 13.9 | 10.8 / 9.66 | 22.8 / 19.9 |
+
+The M figures from order 3 on are at the random p = 4 point along mixed
+tuples (1 1 2, 0 1 1 2, ...), where M's derivative is small next to L's
+(column 0 of L carries L's absolute error, M's normwise measure divides by
+column 0 only); in ulps of max |M| they are 35, 135, 284, 3418 (orders 3-6,
+gcc),
+the growth of the derivatives with K. The log det at orders 4 and 6 (gcc) is
+-2 (p - 1 - a) tanh^(K-1)(theta_a) near a zero of the scalar function: order 4
+at theta_0 = -0.68 (tanh^(3) vanishes at -0.658), order 6 at theta_3 = 0.40
+(tanh^(5) vanishes at 0.421). On CUDA the same
+pattern, with M^-1 lower (13.9 at order 6, 2.3 to 5.4 below) and M at order 6
+56.4. Central differences of
+order K - 1 agree with order K within 7.7e-4 of the tolerance (1e-6 of the
+largest entries). The AR(1) twin (theta = (t, 0, ..., 0) against ar1_pdmat,
+p = 2..6, t in {-3, -0.4, 0, 0.8, 2.5}) passes the test's tolerances, 1e-15 at
+order 0 and 1e-13 at orders 1-6, relative to the largest entry.
+
+ns per call on one gcc thread (`benchmarks/pdmat_toeplitz.cpp`, theta_k =
+0.1 x + 0.05 k, x uniform in [-3, 3]); order 6 along the pure tuple of
+theta_0, the dearest (no stage is skipped), and of the last parameter:
+
+| p | M, K = 0 | M, K = 6 (first / last) | M^-1, K = 0 | M^-1, K = 6 (first / last) | L, K = 0 | L, K = 6 (first / last) | log det, K = 0 |
+|---|---|---|---|---|---|---|---|
+| 3 | 109 | 4105 / 2938 | 125 | 2837 / 2232 | 119 | 10716 / 13534 | 54 |
+| 6 | 337 | 32201 / 12272 | 558 | 20296 / 10168 | 522 | 145385 / 66399 | 135 |
+| 10 | 543 | 71330 / 15771 | 1221 | 40282 / 16055 | 999 | 395305 / 117878 | 244 |
+
+On CUDA (RTX 4070 SUPER, one call per thread, 20000 calls; 5000 at p = 10),
+ns per call at order 0 / order 6 along theta_0: M 2.4 / 314, 5.7 / 1644,
+21.9 / 5797; M^-1 2.2 / 169, 5.5 / 942, 25.8 / 3988; L 3.5 / 881,
+14.0 / 6897, 77.0 / 42370; log det 2.1, 3.2, 11.1 (p = 3, 6, 10).
+
+L costs about 2 p^3/3 products against the p^3/6 of A^-1 V^(1/2): at p = 10,
+order 6 along theta_0, 0.40 ms on one gcc thread against about 0.06 ms for
+the Durbin-Levinson L (64223 ns, measured in a run with other processes
+active), the price of the accuracy above. A tuple with repeated indices recomputes equal sub-masks
+(64 where prod (m_v + 1) = 7 would do for a pure tuple); merging them is the
+known ceiling, as for the generic route of unstructured_pdmat.
+
+**Open.** The merging of equal sub-masks, if a model needs order 6 of L at
+p >= 10.
+
+**Chosen.** The lattice for M and L, A^T V^-1 A for M^-1; tested in
+`tests/pdmat/test_toeplitz.cpp` on gcc and CUDA, bounds 1.5 times the larger
+measured error.

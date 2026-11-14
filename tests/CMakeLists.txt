@@ -53,6 +53,7 @@ set(LAPLACE_TEST_SOURCES
   pdmat/test_pilot.cpp
   pdmat/test_unstructured.cpp
   pdmat/test_unit_diagonal_scaled.cpp
+  pdmat/test_toeplitz.cpp
   basis/test_bspline.cpp
   basis/test_fourier.cpp
   basis/test_legendre.cpp

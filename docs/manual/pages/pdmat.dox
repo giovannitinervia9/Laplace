@@ -10,10 +10,11 @@ A structured matrix maps \f$q\f$ real, unconstrained parameters \f$\theta = (\th
 
 The dimension \f$p\f$ is stored in the runtime field `dim`, and the parameter count \f$q\f$ is returned by `n_params()`. Each structure is a lightweight struct designed to be copied by value into Kokkos parallel kernels.
 
-Six structures are implemented:
+Seven structures are implemented:
 - \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": diagonal matrix with \f$p\f$ unconstrained parameters \f$\theta_i = \log \sigma_i\f$ such that \f$M_{ii} = \sigma_i^2 = e^{2\theta_i}\f$.
 - \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": equicorrelation matrix with 1 unconstrained parameter mapped to correlation \f$\rho \in (-1/(p - 1), 1)\f$.
 - \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": first-order autoregressive correlation matrix with 1 unconstrained parameter mapped to correlation \f$\rho = \tanh\theta \in (-1, 1)\f$.
+- \ref laplace::pdmat::toeplitz_pdmat "toeplitz_pdmat": Toeplitz correlation matrix with \f$q = p - 1\f$ unconstrained parameters mapped to partial autocorrelations \f$\varphi_k = \tanh\theta_{k-1} \in (-1, 1)\f$ (\f$k = 1, \dots, p - 1\f$).
 - \ref laplace::pdmat::unstructured_pdmat "unstructured_pdmat": unstructured positive definite matrix or correlation matrix parameterized by a coupled bijector \c B (\ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector", \ref laplace::bijector::matrix_log_bijector "matrix_log_bijector", or \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector").
 - \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat": unstructured correlation matrix using partial correlations (\c unstructured_pdmat with \ref laplace::bijector::partial_corr_bijector "partial_corr_bijector").
 - \ref laplace::pdmat::unit_diagonal_scaled_pdmat "unit_diagonal_scaled_pdmat\<R\>": diagonal scaling of a unit-diagonal structure \c R with \f$p\f$ scale parameters \f$s_i = \log\sigma_i\f$ (or 1 with `common_scale`) such that \f$M = D R D\f$ with \f$D = \operatorname{diag}(e^{s_0}, \dots, e^{s_{p-1}})\f$.
@@ -48,9 +49,9 @@ Each structure type provides:
 - **Scratch size.** Evaluated by `scratch_size()`, returning the number of doubles of caller-provided scratch buffer `w` required by functions of the structure (0 for diagonal, compound symmetry, and AR(1)).
 - **Descriptors.** Compile-time boolean constants:
   - `unit_diagonal`: indicates whether \f$M_{ii} = 1\f$ for all \f$i\f$.
-  - `closed_inverse`: indicates whether an exact closed-form inverse is implemented (true for diagonal, compound symmetry, AR(1), and unstructured with `matrix_log_bijector`; false when evaluated via the generic route from the Cholesky factor).
-  - `closed_factor`: indicates whether an exact closed-form Cholesky factor is implemented (available for all except `matrix_log_bijector`).
-  - `has_density`: indicates whether \f$\theta \mapsto M\f$ is a bijection onto its image and supplies `log_jacobian()` and its derivatives (true for `unstructured_pdmat`, false for the three pilot structures).
+  - `closed_inverse`: indicates whether an exact closed-form inverse is implemented (true for diagonal, compound symmetry, AR(1), Toeplitz, and unstructured with `matrix_log_bijector`; false when evaluated via the generic route from the Cholesky factor).
+  - `closed_factor`: indicates whether an exact closed-form Cholesky factor is implemented (available for diagonal, compound symmetry, AR(1), Toeplitz, and unstructured with log-Cholesky and partial correlation; false only for `matrix_log_bijector`).
+  - `has_density`: indicates whether \f$\theta \mapsto M\f$ is a bijection onto its image and supplies `log_jacobian()` and its derivatives (true for `unstructured_pdmat`, false for diagonal, compound symmetry, AR(1), and Toeplitz).
 - **Concept.** The full interface is formalized in the C++20 concept \ref laplace::pdmat::pdmat_structure "pdmat_structure".
 
 The named derivative functions are exposed through the CRTP base template \ref laplace::pdmat::pdmat_orders "pdmat_orders":
@@ -64,6 +65,7 @@ The named derivative functions are exposed through the CRTP base template \ref l
 
 Each structure enforces the constraint of its natural parameter:
 - In \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": \f$\rho = \tanh\theta\f$, mapping \f$\theta \in \mathbb{R}\f$ to \f$\rho \in (-1, 1)\f$.
+- In \ref laplace::pdmat::toeplitz_pdmat "toeplitz_pdmat": \f$\varphi_k = \tanh\theta_{k-1}\f$ for \f$k = 1, \dots, p - 1\f$, mapping \f$\theta_{k-1} \in \mathbb{R}\f$ to the partial autocorrelation of lag \f$k\f$, \f$\varphi_k \in (-1, 1)\f$.
 - In \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": \f$\rho = a + (1 - a)\operatorname{expit}(\theta)\f$ with \f$a = -1/(p - 1)\f$ and \f$\operatorname{expit}(\theta) = 1/(1 + e^{-\theta})\f$, mapping \f$\theta \in \mathbb{R}\f$ to the open interval \f$(-1/(p - 1), 1)\f$, which is precisely the region where \f$M\f$ is positive definite.
 - In \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": \f$\theta_i = \log \sigma_i\f$, mapping \f$\theta_i \in \mathbb{R}\f$ to \f$M_{ii} = \sigma_i^2 = e^{2\theta_i} > 0\f$.
 
@@ -256,6 +258,113 @@ The matrix \f$M\f$, the Cholesky factor \f$L\f$, and the log-Jacobian are identi
 | Matrix logarithm, \f$p = 3\f$ | 474 ns | 9493 ns | 169617 ns | 4.6 ns |
 | Matrix logarithm, \f$p = 4\f$ | 1123 ns | 11915 ns | 296256 ns | 3.0 ns |
 
+## Toeplitz structure
+
+In \ref laplace::pdmat::toeplitz_pdmat "toeplitz_pdmat", \f$M(\theta)\f$ is the \f$p \times p\f$ Toeplitz correlation matrix with entries:
+\f[
+M_{ij} = m_{|i - j|}, \quad m_0 = 1
+\f]
+parameterized by \f$q = p - 1\f$ unconstrained real parameters \f$\theta = (\theta_0, \dots, \theta_{p-2})^\top \in \mathbb{R}^{p-1}\f$.
+The partial autocorrelation of lag \f$k\f$ is:
+\f[
+\varphi_k = \tanh\theta_{k-1}, \quad k = 1, \dots, p - 1
+\f]
+so \f$\theta_0\f$ is the parameter of lag 1.
+The partial autocorrelation \f$\varphi_k\f$ is defined as the last coefficient of the best linear predictor of \f$x_k\f$ from \f$x_{k-1}, \dots, x_0\f$ for a stationary sequence with correlations \f$m\f$, equivalently the correlation of \f$x_t\f$ and \f$x_{t-k}\f$ given the intermediate values \f$x_{t-1}, \dots, x_{t-k+1}\f$.
+Every real parameter vector \f$\theta\f$ yields a symmetric positive definite matrix \f$M\f$, and every positive definite Toeplitz correlation matrix is reached.
+The structure has `unit_diagonal = true`, `closed_inverse = true`, `closed_factor = true`, and `has_density = false` (no log-Jacobian, as there are fewer parameters than entries).
+Because the structure has unit diagonal, \ref laplace::pdmat::unit_diagonal_scaled_pdmat "unit_diagonal_scaled_pdmat\<toeplitz_pdmat\>" accepts it, representing a Toeplitz correlation matrix with heterogeneous diagonal variances (\f$M_{ij} = e^{s_i + s_j} R_{ij}\f$).
+
+For \f$p = 1\f$, \f$q = 0\f$, \f$M = M^{-1} = L = [1]\f$, \f$\log \det M = 0\f$, and `scratch_size()` returns 0; there are no parameter tuples and all derivative functions return `false` (or \f$0.0\f$ for log-determinant).
+For \f$p = 2\f$, \f$M_{10} = \tanh\theta_0\f$, matching the matrix of \ref laplace::pdmat::ar1_pdmat "ar1_pdmat" with \f$p = 2\f$.
+With \f$\theta = (t, 0, \dots, 0)^\top\f$, the structure evaluates to the AR(1) correlation matrix \f$(\tanh t)^{|i - j|}\f$ for every dimension \f$p\f$; automated tests check it against \ref laplace::pdmat::ar1_pdmat "ar1_pdmat" for \f$p \in \{2, \dots, 6\}\f$ across orders 0 to 6, with tolerances of \f$10^{-15}\f$ at order 0 and \f$10^{-13}\f$ at orders 1–6, relative to the largest entry.
+
+Let:
+\f[
+c_k = \operatorname{sech}\theta_{k-1} = (1 - \varphi_k^2)^{1/2}, \quad v_k = \prod_{j=1}^k c_j^2 \quad (v_0 = 1)
+\f]
+where \f$v_k\f$ is the variance of the forward and backward prediction errors of order \f$k\f$.
+
+- **Matrix value and Cholesky factor.** Evaluated via the normalized lattice.
+  For a stationary sequence \f$x_t\f$ with correlations \f$m\f$, let \f$e_k(t)\f$ and \f$b_k(t)\f$ denote the forward and backward prediction errors of order \f$k\f$ (\f$x_t\f$ less its linear projection on \f$x_{t-1}, \dots, x_{t-k}\f$, and \f$x_{t-k}\f$ less its linear projection on \f$x_{t-k+1}, \dots, x_t\f$), both having variance \f$v_k\f$.
+  Their standardized counterparts are \f$E_k(t) = e_k(t)/v_k^{1/2}\f$ and \f$B_k(t) = b_k(t)/v_k^{1/2}\f$, with standardized innovations \f$\varepsilon_t = E_t(t)\f$.
+  The Durbin-Levinson lattice solved for lower orders gives the orthogonal rotation:
+  \f[
+  E_{k-1}(t) = c_k E_k(t) + \varphi_k B_{k-1}(t-1), \qquad
+  B_k(t) = c_k B_{k-1}(t-1) - \varphi_k E_k(t)
+  \f]
+  which is orthogonal since \f$c_k^2 + \varphi_k^2 = 1\f$.
+  At each time \f$t\f$, the recurrence runs downward for \f$k = t, \dots, 1\f$ from \f$E_t(t) = \varepsilon_t\f$ to \f$E_0(t) = B_0(t) = x_t\f$, storing \f$B_k(t)\f$ for time \f$t + 1\f$.
+  The entry \f$L_{ts}\f$ of the lower Cholesky factor \f$L\f$ is the coefficient of \f$\varepsilon_s\f$ in \f$x_t\f$, obtained by running the same rotations from 1 at time \f$s\f$; the correlation entries are given by \f$m_t = L_{t0}\f$.
+  Evaluating \f$m\f$ by the Durbin-Levinson recursion \f$m_k = \varphi_k v_{k-1} + \sum_j \varphi_{k-1,j} m_{k-j}\f$ forms the derivative of \f$m_n\f$ along \f$\varphi_k\f$ (which is \f$v_{k-1}\f$ times a polynomial in \f$\varphi\f$) as a difference of terms of order one. At the steep test point (\f$\theta_0 = 6\f$, \f$1 - \varphi_1^2 = 2.5 \times 10^{-5}\f$, \f$p = 6\f$), the Durbin-Levinson recursion loses \f$1.4 \times 10^7\f$ to \f$6.0 \times 10^7\f$ ulpN on derivatives of \f$M\f$ along \f$\theta_2, \dots, \theta_4\f$ (first derivatives of \f$m\f$: 7.5, \f$1.3 \times 10^4\f$, \f$2.8 \times 10^5\f$, \f$5.0 \times 10^7\f$, 4.1 ulpN along \f$\theta_0, \dots, \theta_4\f$) and up to \f$2.1 \times 10^5\f$ ulpN on \f$L\f$, with \f$\operatorname{tr}(M^{-1}\mathrm{d}M/\mathrm{d}\theta_a)\f$ missing \f$\mathrm{d}\log\det M/\mathrm{d}\theta_a\f$ by up to \f$1.2 \times 10^{-6}\f$ relative. By contrast, the normalized lattice maintains each small factor as a product of \f$c\f$ factors, yielding first derivatives of \f$m\f$ accurate to 0.84, 0.25, 1.6, 3.3, and 4.7 ulpN, with the trace agreeing with the closed derivative to \f$6.6 \times 10^{-9}\f$, \f$4.1 \times 10^{-11}\f$, \f$4.1 \times 10^{-12}\f$, \f$3.6 \times 10^{-14}\f$, and \f$2.7 \times 10^{-15}\f$ (the residue along \f$\theta_0\f$ reflecting the condition number \f$\kappa(M) = 1.2 \times 10^{14}\f$).
+- **Matrix inverse.** Evaluated from the Durbin-Levinson autoregressive coefficients:
+  \f[
+  \varphi_{k,k} = \varphi_k, \qquad \varphi_{k,j} = \varphi_{k-1,j} - \varphi_k \varphi_{k-1,k-j} \quad (1 \le j < k)
+  \f]
+  Let \f$A\f$ be the unit lower-triangular matrix with \f$A_{t, t-j} = -\varphi_{t, j}\f$ for \f$1 \le j \le t\f$ and \f$V = \operatorname{diag}(v_0, \dots, v_{p-1})\f$.
+  Then \f$A M A^\top = V\f$, so \f$M^{-1} = A^\top V^{-1} A\f$, with packed lower-triangular entries:
+  \f[
+  M^{-1}_{ij} = \sum_{t \ge i} \frac{A_{ti} A_{tj}}{v_t} \quad (i \ge j)
+  \f]
+  where \f$1/v_t = \prod_{a < t} \cosh^2\theta_a\f$ has derivatives evaluated in closed form without divisions.
+- **Log-determinant.** Evaluated in closed form:
+  \f[
+  \log \det M = \sum_{k=1}^{p-1} (p - k)\log(1 - \varphi_k^2) = -2 \sum_{k=1}^{p-1} (p - k)\log\cosh\theta_{k-1}
+  \f]
+  For a sorted tuple of \f$K\f$ parameter indices, if all indices equal \f$a\f$, the partial derivative of order \f$K\f$ is:
+  \f[
+  \frac{\partial^K \log \det M}{\partial\theta_a^K} = -2(p - 1 - a)\tanh^{(K-1)}(\theta_a)
+  \f]
+  and is \f$0.0\f$ on any mixed tuple with distinct indices. The scalar functions \f$\log\cosh\f$ and \f$\tanh^{(K-1)}\f$ are evaluated by the stable formulations described under \ref laplace::pdmat::ar1_pdmat "ar1_pdmat".
+- **Derivatives of matrix, inverse, and Cholesky factor.**
+  Using the subset notation \f$X[S]\f$ of the section "Unstructured matrices" above, every quantity in the lattice rotations and autoregressive recursion maintains its partial derivatives along all \f$2^K\f$ sub-masks of the sorted tuple \f$i_1 \le \dots \le i_K\f$.
+  Products \f$fg\f$ are differentiated by Leibniz's rule:
+  \f[
+  (fg)[S] = \sum_{T \subseteq S} f[T]\,g[S \setminus T]
+  \f]
+  The elementary factors have closed-form derivatives in \f$\theta\f$:
+  \f[
+  \frac{\mathrm{d}^n}{\mathrm{d}\theta^n}\cosh^2\theta = \begin{cases} 2^{n-1}\sinh(2\theta) & n \ge 1 \text{ odd} \\ 2^{n-1}\cosh(2\theta) & n \ge 2 \text{ even} \end{cases}
+  \f]
+  while derivatives of \f$\tanh\theta\f$ and \f$\operatorname{sech}\theta\f$ follow the recurrence of \ref laplace::pdmat::ar1_pdmat "ar1_pdmat".
+  A quantity at time or stage \f$t\f$ depends only on \f$\theta_0, \dots, \theta_{t-1}\f$; any sub-mask containing a parameter index \f$\ge t\f$ evaluates to zero and is skipped.
+  Differentiating order \f$K\f$ requires approximately \f$3^K\f$ operations per product, totaling about \f$2 p^2\f$ products for \f$M\f$, \f$2 p^3 / 3\f$ products for \f$L\f$, and \f$p^3 / 6\f$ products for \f$M^{-1}\f$.
+  For \f$p \ge 2\f$, no matrix derivative is structurally zero: `matrix_dk()`, `inverse_dk()`, and `cholesky_dk()` always return `true` (returning `false` only for \f$p = 1\f$).
+- **Scratch size.** `scratch_size()` returns \f$64(p^2 + 3p - 2)\f$ doubles for \f$p \ge 2\f$, and 0 for \f$p = 1\f$.
+- **Accuracy of Toeplitz matrices.** Reference values were computed from the definition of the partial autocorrelation in mpmath at 640 bits (`tools/reference/pdmat_toeplitz.py`, 18568 values) from two linear solves for \f$m\f$, with derivatives computed by tensor products of central differences with steps \f$2^{-60}\f$ and \f$2^{-70}\f$ agreeing to \f$1.3 \times 10^{-35}\f$ relative.
+  Evaluation points comprise \f$p \in \{1, 2, 3, 4, 6\}\f$; for \f$p \ge 2\f$, a random \f$\theta\f$ (\f$\mathcal{N}(0, 0.6^2)\f$), a spread \f$\theta\f$ (\f$\pm 1.5\f$ alternating), and a steep \f$\theta\f$ (\f$\theta_0 = 6\f$, then \f$-2.5, +2.5, \dots\f$ alternating). The condition number \f$\kappa(M)\f$ at \f$p \in \{2, 3, 4, 6\}\f$ is: random 1.2, 1.3, 34, 16; spread 20, 410, \f$8.2 \times 10^3\f$, \f$3.1 \times 10^6\f$; steep \f$1.6 \times 10^5\f$, \f$2.7 \times 10^7\f$, \f$4.5 \times 10^9\f$, \f$1.2 \times 10^{14}\f$.
+  Tuples comprise all tuples of orders 1 and 2, and the pure tuples and up to 6 mixed tuples for orders 3 to 6.
+  Worst error over the evaluation points, orders 0 to 6, gcc/OpenMP / CUDA (RTX 4070 SUPER):
+
+| \f$K\f$ | \f$M\f$ | \f$M^{-1}\f$ | \f$L\f$ | \f$\log \det M\f$ |
+|---|---|---|---|---|
+| 0 | 1.28 / 1.28 ulpN | 9.70 / 2.28 ulpN | 1.81 / 1.81 ulpN | 1.37 / 1.37 ulp |
+| 1 | 7.38 / 7.38 ulpN | 9.05 / 3.35 ulpN | 4.45 / 4.16 ulpN | 0.83 / 0.62 ulp |
+| 2 | 7.50 / 7.76 ulpN | 9.56 / 4.01 ulpN | 5.24 / 5.24 ulpN | 1.16 / 1.16 ulp |
+| 3 | 126 / 122 ulpN | 9.23 / 3.87 ulpN | 6.48 / 6.52 ulpN | 2.04 / 2.04 ulp |
+| 4 | 108 / 113 ulpN | 9.56 / 4.50 ulpN | 7.52 / 7.52 ulpN | 12.6 / 2.76 ulp |
+| 5 | 151 / 135 ulpN | 9.23 / 5.41 ulpN | 10.9 / 10.3 ulpN | 3.39 / 3.39 ulp |
+| 6 | 163 / 56.4 ulpN | 10.0 / 13.9 ulpN | 10.8 / 9.66 ulpN | 22.8 / 19.9 ulp |
+
+  The \f$M\f$ figures from order 3 on occur at the random \f$p = 4\f$ point along mixed tuples (such as (1, 1, 2) and (0, 1, 1, 2)), where \f$M\f$'s derivative is small next to \f$L\f$'s (column 0 of \f$L\f$ carries \f$L\f$'s absolute error, while \f$M\f$'s normwise measure divides by column 0 only); in ulps of \f$\max_{i,j} |M_{ij}|\f$ they are 35, 135, 284, 3418 (orders 3–6, gcc).
+  On gcc, the log-determinant errors at orders 4 and 6 occur near a zero of the scalar function: order 4 at \f$\theta_0 = -0.68\f$ (\f$\tanh^{(3)}\f$ vanishes at \f$-0.658\f$), order 6 at \f$\theta_3 = 0.40\f$ (\f$\tanh^{(5)}\f$ vanishes at \f$0.421\f$).
+  Central differences of order \f$K - 1\f$ agree with order \f$K\f$ within \f$7.7 \times 10^{-4}\f$ of the tolerance (\f$10^{-6}\f$ of the largest entries).
+  Test bounds in automated regression tests (`tests/pdmat/test_toeplitz.cpp`) are set to 1.5 times the larger of the measured errors on gcc/OpenMP and CUDA, rounded up; for orders 0 to 6 they are 2, 12, 12, 190, 169, 228, 244 ulpN for \f$M\f$; 15, 14, 15, 14, 15, 14, 21 ulpN for \f$M^{-1}\f$; 3, 7, 8, 10, 12, 17, 17 ulpN for \f$L\f$; and 3, 2, 2, 4, 19, 6, 35 ulp for \f$\log \det M\f$.
+- **Timings of Toeplitz matrices.**
+  Timings measured in `benchmarks/pdmat_toeplitz.cpp` for parameter coordinates \f$\theta_k = 0.1 x + 0.05 k\f$ with \f$x\f$ sampled uniformly from \f$[-3, 3]\f$, on one gcc thread, in nanoseconds per call, for order 0 and for order 6 along the pure tuple of \f$\theta_0\f$ (no stage skipped) and of the last parameter:
+
+| \f$p\f$ | \f$M\f$ (\f$K=0\f$) | \f$M\f$ (\f$K=6\f$, first / last) | \f$M^{-1}\f$ (\f$K=0\f$) | \f$M^{-1}\f$ (\f$K=6\f$, first / last) | \f$L\f$ (\f$K=0\f$) | \f$L\f$ (\f$K=6\f$, first / last) | \f$\log \det M\f$ (\f$K=0\f$) |
+|---|---|---|---|---|---|---|---|
+| 3 | 109 ns | 4105 ns / 2938 ns | 125 ns | 2837 ns / 2232 ns | 119 ns | 10716 ns / 13534 ns | 54 ns |
+| 6 | 337 ns | 32201 ns / 12272 ns | 558 ns | 20296 ns / 10168 ns | 522 ns | 145385 ns / 66399 ns | 135 ns |
+| 10 | 543 ns | 71330 ns / 15771 ns | 1221 ns | 40282 ns / 16055 ns | 999 ns | 395305 ns / 117878 ns | 244 ns |
+
+  On CUDA (RTX 4070 SUPER, one call per thread), timings in nanoseconds per call at order 0 / order 6 along \f$\theta_0\f$:
+  - \f$M\f$: 2.4 ns / 314 ns (\f$p = 3\f$), 5.7 ns / 1644 ns (\f$p = 6\f$), 21.9 ns / 5797 ns (\f$p = 10\f$)
+  - \f$M^{-1}\f$: 2.2 ns / 169 ns (\f$p = 3\f$), 5.5 ns / 942 ns (\f$p = 6\f$), 25.8 ns / 3988 ns (\f$p = 10\f$)
+  - \f$L\f$: 3.5 ns / 881 ns (\f$p = 3\f$), 14.0 ns / 6897 ns (\f$p = 6\f$), 77.0 ns / 42370 ns (\f$p = 10\f$)
+  - \f$\log \det M\f$: 2.1 ns (\f$p = 3\f$), 3.2 ns (\f$p = 6\f$), 11.1 ns (\f$p = 10\f$)
+
 ## Scaled unit diagonal structure
 
 The class template \ref laplace::pdmat::unit_diagonal_scaled_pdmat "unit_diagonal_scaled_pdmat\<R\>" scales an underlying structure \c R having unit diagonal by a diagonal matrix:
@@ -263,7 +372,7 @@ The class template \ref laplace::pdmat::unit_diagonal_scaled_pdmat "unit_diagona
 M = D R D, \quad D = \operatorname{diag}(e^{s_0}, \dots, e^{s_{p-1}})
 \f]
 with log-scale parameters \f$s_i = \log\sigma_i\f$.
-The template argument \c R must satisfy \ref laplace::pdmat::pdmat_structure "pdmat_structure" and have `unit_diagonal = true` (enforced at compile time by a C++20 requires clause; the compiler rejects any other structure).
+The template argument \c R must satisfy \ref laplace::pdmat::pdmat_structure "pdmat_structure" and have `unit_diagonal = true` (\ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat", \ref laplace::pdmat::ar1_pdmat "ar1_pdmat", \ref laplace::pdmat::toeplitz_pdmat "toeplitz_pdmat", or \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat", enforced at compile time by a C++20 requires clause; the compiler rejects any other structure).
 Without a unit diagonal the scales would not be identifiable: \f$D R D = (c D)(R / c^2)(c D)\f$ for every \f$c > 0\f$.
 
 The parameter vector is \f$\theta = (s_0, \dots, s_{p-1}, r)\f$, where \f$r\f$ comprises the \f$q_R\f$ parameters of \f$R\f$.
@@ -413,6 +522,7 @@ Kokkos::parallel_for(
 - \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": Diagonal positive definite matrix structure.
 - \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": Compound symmetry (equicorrelation) positive definite matrix structure.
 - \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": First-order autoregressive AR(1) positive definite correlation matrix structure.
+- \ref laplace::pdmat::toeplitz_pdmat "toeplitz_pdmat": Toeplitz positive definite correlation matrix structure.
 - \ref laplace::pdmat::unstructured_pdmat "unstructured_pdmat": Unstructured positive definite matrix structure parameterized by a coupled bijector.
 - \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat": Unstructured correlation matrix structure parameterized by partial correlations.
 - \ref laplace::pdmat::unit_diagonal_scaled_pdmat "unit_diagonal_scaled_pdmat\<R\>": Structure with unit diagonal scaled by a diagonal matrix.
