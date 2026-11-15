@@ -4722,11 +4722,11 @@ log det). Worst over the points, orders 0..6, gcc/OpenMP / CUDA:
 |---|---|---|---|---|
 | 0 | 1.28 / 1.28 | 9.70 / 2.28 | 1.81 / 1.81 | 1.37 / 1.37 |
 | 1 | 7.38 / 7.38 | 9.05 / 3.35 | 4.45 / 4.16 | 0.83 / 0.62 |
-| 2 | 7.50 / 7.76 | 9.56 / 4.01 | 5.24 / 5.24 | 1.16 / 1.16 |
-| 3 | 126 / 122 | 9.23 / 3.87 | 6.48 / 6.52 | 2.04 / 2.04 |
-| 4 | 108 / 113 | 9.56 / 4.50 | 7.52 / 7.52 | 12.6 / 2.76 |
-| 5 | 151 / 135 | 9.23 / 5.41 | 10.9 / 10.3 | 3.39 / 3.39 |
-| 6 | 163 / 56.4 | 10.0 / 13.9 | 10.8 / 9.66 | 22.8 / 19.9 |
+| 2 | 7.50 / 7.76 | 9.56 / 4.01 | 4.90 / 4.90 | 1.16 / 1.16 |
+| 3 | 126 / 126 | 9.23 / 3.87 | 6.52 / 6.52 | 2.04 / 2.04 |
+| 4 | 108 / 108 | 9.56 / 4.32 | 7.52 / 7.52 | 12.6 / 2.76 |
+| 5 | 151 / 162 | 9.23 / 6.59 | 10.9 / 10.9 | 3.39 / 3.39 |
+| 6 | 163 / 23.1 | 14.5 / 15.2 | 8.65 / 8.65 | 22.8 / 19.9 |
 
 The M figures from order 3 on are at the random p = 4 point along mixed
 tuples (1 1 2, 0 1 1 2, ...), where M's derivative is small next to L's
@@ -4737,8 +4737,8 @@ the growth of the derivatives with K. The log det at orders 4 and 6 (gcc) is
 -2 (p - 1 - a) tanh^(K-1)(theta_a) near a zero of the scalar function: order 4
 at theta_0 = -0.68 (tanh^(3) vanishes at -0.658), order 6 at theta_3 = 0.40
 (tanh^(5) vanishes at 0.421). On CUDA the same
-pattern, with M^-1 lower (13.9 at order 6, 2.3 to 5.4 below) and M at order 6
-56.4. Central differences of
+pattern, with M^-1 lower below order 6 (2.3 to 6.6) and 15.2 at order 6, and M at order 6
+23.1. Central differences of
 order K - 1 agree with order K within 7.7e-4 of the tolerance (1e-6 of the
 largest entries). The AR(1) twin (theta = (t, 0, ..., 0) against ar1_pdmat,
 p = 2..6, t in {-3, -0.4, 0, 0.8, 2.5}) passes the test's tolerances, 1e-15 at
@@ -4746,34 +4746,49 @@ order 0 and 1e-13 at orders 1-6, relative to the largest entry.
 
 ns per call on one gcc thread (`benchmarks/pdmat_toeplitz.cpp`, theta_k =
 0.1 x + 0.05 k, x uniform in [-3, 3]); order 6 along the pure tuple of
-theta_0, the dearest (no stage is skipped), and of the last parameter:
+theta_0 (no stage is skipped) and of the last parameter, after the merging of
+equal sub-masks below:
 
 | p | M, K = 0 | M, K = 6 (first / last) | M^-1, K = 0 | M^-1, K = 6 (first / last) | L, K = 0 | L, K = 6 (first / last) | log det, K = 0 |
 |---|---|---|---|---|---|---|---|
-| 3 | 109 | 4105 / 2938 | 125 | 2837 / 2232 | 119 | 10716 / 13534 | 54 |
-| 6 | 337 | 32201 / 12272 | 558 | 20296 / 10168 | 522 | 145385 / 66399 | 135 |
-| 10 | 543 | 71330 / 15771 | 1221 | 40282 / 16055 | 999 | 395305 / 117878 | 244 |
+| 3 | 73 | 1726 / 1637 | 113 | 1766 / 1764 | 82 | 2219 / 2149 | 49 |
+| 6 | 175 | 3194 / 2806 | 361 | 3680 / 3378 | 255 | 8380 / 6087 | 114 |
+| 10 | 375 | 6632 / 5000 | 737 | 8339 / 7492 | 824 | 32566 / 18363 | 222 |
 
 On CUDA (RTX 4070 SUPER, one call per thread, 20000 calls; 5000 at p = 10),
-ns per call at order 0 / order 6 along theta_0: M 2.4 / 314, 5.7 / 1644,
-21.9 / 5797; M^-1 2.2 / 169, 5.5 / 942, 25.8 / 3988; L 3.5 / 881,
-14.0 / 6897, 77.0 / 42370; log det 2.1, 3.2, 11.1 (p = 3, 6, 10).
+ns per call at order 0 / order 6 along theta_0, with the merging of equal
+sub-masks below: M 106 / 1995, 231 / 4016, 441 / 8370; M^-1 112 / 2175,
+299 / 4447, 670 / 9979; L 126 / 2729, 341 / 11132, 1085 / 43989; log det
+39.6, 82.2, 144 at order 0 and 49 at order 6 (p = 3, 6, 10).
 
 L costs about 2 p^3/3 products against the p^3/6 of A^-1 V^(1/2): at p = 10,
-order 6 along theta_0, 0.40 ms on one gcc thread against about 0.06 ms for
-the Durbin-Levinson L (64223 ns, measured in a run with other processes
-active), the price of the accuracy above. A tuple with repeated indices recomputes equal sub-masks
-(64 where prod (m_v + 1) = 7 would do for a pure tuple); merging them is the
-known ceiling, as for the generic route of unstructured_pdmat.
+order 6 along theta_0, 32 us on one gcc thread against about 0.06 ms for the
+Durbin-Levinson L (64223 ns, measured in a run with other processes active),
+the price of the accuracy above.
 
-**Open.** The merging of equal sub-masks, if a model needs order 6 of L at
-p >= 10.
+**Merging of equal sub-masks.** Equal indices of a tuple are interchangeable,
+so a mask S has the derivative of its class (how many positions of each group
+of equal indices it holds). Only the canonical mask of a class (the lowest
+positions of each group) is computed, the others copy it, and Leibniz's rule
+runs over the classes with the weights prod_g C(c_g, a_g) (c_g, a_g the sizes
+of S and of the sub-class in group g): prod (m_v + 1) terms instead of 2^|S|,
+28 instead of 729 at order 6 for a pure tuple. A tuple without repeated
+indices keeps the plain sum over subsets, since the table of classes costs
+more than it saves there. L at order 6, p = 10 / 20 / 50, one gcc thread
+(`ns` per call; a run with no other build): pure tuple 391 us -> 32 us,
+3.2 ms -> 0.25 ms, 49 ms -> 3.8 ms (12 times); two groups of three
+(0 0 0 1 1 1) 386 -> 82 us, 49 -> 9.9 ms at p = 50 (4.7 times); six distinct
+indices unchanged (329 -> 320 us, 48 -> 49 ms). At order 6 and p = 10 M
+fell from 53 to 6 us and M^-1 from 35 to 6.4 us along the pure tuple. The errors
+did not worsen beyond the table above (M^-1 at order 6 went from 10.0 to
+14.5 on gcc and from 13.9 to 15.2 on CUDA; L at order 6 from 10.8 / 9.66 to
+8.65 / 8.65): the sums run in another order and with integer weights.
 
 **Chosen.** The lattice for M and L, A^T V^-1 A for M^-1; tested in
 `tests/pdmat/test_toeplitz.cpp` on gcc and CUDA, bounds 1.5 times the larger
 measured error.
 
-**Test bounds.** The bounds of `tests/pdmat/test_toeplitz.cpp` are 1.5 times the larger of the measured errors on gcc/OpenMP and CUDA, rounded up; for orders 0 to 6 they are 2, 12, 12, 190, 169, 228, 244 ulpN for M; 15, 14, 15, 14, 15, 14, 21 ulpN for M^-1; 3, 7, 8, 10, 12, 17, 17 ulpN for L; and 3, 2, 2, 4, 19, 6, 35 ulp for log det M.
+**Test bounds.** The bounds of `tests/pdmat/test_toeplitz.cpp` are 1.5 times the larger of the measured errors on gcc/OpenMP and CUDA, rounded up; for orders 0 to 6 they are 2, 12, 12, 190, 163, 244, 244 ulpN for M; 15, 14, 15, 14, 15, 14, 23 ulpN for M^-1; 3, 7, 8, 10, 12, 17, 13 ulpN for L; and 3, 2, 2, 4, 19, 6, 35 ulp for log det M.
 
 ## Factor-analytic matrices: factor_analytic_pdmat
 

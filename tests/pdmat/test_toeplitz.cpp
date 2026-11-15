@@ -236,10 +236,10 @@ void pdmat_toeplitz_mpmath_case() {
   }
 
   // bounds on ulpN / ulp, [quantity][order]: the larger of the errors measured
-  // on 2026-11-14 on gcc/OpenMP and CUDA, times 1.5, rounded up
-  const double bound[4][7] = {{2, 12, 12, 190, 169, 228, 244},
-                              {15, 14, 15, 14, 15, 14, 21},
-                              {3, 7, 8, 10, 12, 17, 17},
+  // on 2026-11-15 on gcc/OpenMP and CUDA, times 1.5, rounded up
+  const double bound[4][7] = {{2, 12, 12, 190, 163, 244, 244},
+                              {15, 14, 15, 14, 15, 14, 23},
+                              {3, 7, 8, 10, 12, 17, 13},
                               {3, 2, 2, 4, 19, 6, 35}};
   const bool print = std::getenv("LAPLACE_PRINT_ERRORS") != nullptr;
   for (int q = 0; q < 4; ++q)

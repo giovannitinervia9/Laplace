@@ -38,7 +38,10 @@
 // derivatives along the 2^K sub-masks of the tuple, and each product is
 // differentiated by Leibniz's rule over the subsets (as cholesky_subtuple in
 // bijector/coupled.hpp); the elementary factors tanh, sech and cosh^2 of
-// theta_a have their derivatives written directly in theta. A quantity of time
+// theta_a have their derivatives written directly in theta. Equal indices of the
+// tuple are interchangeable, so only one mask of each class is computed (see
+// classes below): a tuple with repeated indices costs prod (m_v + 1) masks, m_v
+// the multiplicities, and a pure tuple of order K only K + 1. A quantity of time
 // or stage t depends on theta_0..theta_(t-1) only, so a mask that holds a later
 // index is zero and is not computed. At order K each product costs about 3^K
 // operations: about 2 p^2 products for M, 2 p^3/3 for L, p^3/6 for M^-1.
@@ -75,6 +78,76 @@ LAPLACE_HD_FORCEINLINE int order_on(const int* idx, int K, int S, int a) {
     }
   return n;
 }
+
+// Equal indices of the tuple are interchangeable: a mask S has the derivative of
+// its class (how many positions of each group of equal indices it holds), so only
+// the canonical mask of a class (the lowest positions of each group) is computed
+// and the others copy it (rep[S] <= S). Leibniz's rule over the classes: a
+// canonical S sums over the sub-classes T of S with weight prod_g C(c_g, a_g), c_g
+// and a_g the sizes of S and T in group g: prod_g (c_g + 1) terms instead of 2^|S|.
+LAPLACE_HD_FORCEINLINE int bit_count(int m) {
+  int n = 0;
+  for (; m; m &= m - 1) ++n;
+  return n;
+}
+// the n lowest set bits of m
+LAPLACE_HD_FORCEINLINE int lowest_bits(int m, int n) {
+  int r = 0;
+  for (; n > 0; --n, m &= m - 1) r |= m & -m;
+  return r;
+}
+LAPLACE_HD_FORCEINLINE int binomial(int n, int k) {
+  int r = 1;
+  for (int i = 1; i <= k; ++i) r = r * (n - k + i) / i;
+  return r;
+}
+LAPLACE_HD constexpr int pow3(int K) { return K == 0 ? 1 : 3 * pow3(K - 1); }
+
+template <int K>
+struct classes {
+  static constexpr int NM = 1 << K, NT = pow3(K);
+  unsigned char rep[NM];
+  short start[NM + 1];
+  unsigned char T[NT], w[NT];
+  bool distinct = false;  // no repeated index: every class is one mask, the plain subset sum is cheaper
+
+  LAPLACE_HD explicit classes(const int* idx) {
+    int gm[K > 0 ? K : 1] = {}, ng = 0;
+    for (int q = 0; q < K; ++q) {
+      if (q > 0 && idx[q] == idx[q - 1]) gm[ng - 1] |= 1 << q;
+      else gm[ng++] = 1 << q;
+    }
+    distinct = ng == K;
+    int n = 0;
+    for (int S = 0; S < NM; ++S) {
+      int r = 0;
+      for (int g = 0; g < ng; ++g) r |= lowest_bits(gm[g], bit_count(S & gm[g]));
+      rep[S] = (unsigned char)r;
+      start[S] = (short)n;
+      if (r != S || distinct) continue;
+      for (int t = S;; t = (t - 1) & S) {
+        int wt = 1;
+        bool ok = true;
+        for (int g = 0; g < ng && ok; ++g) {
+          const int a = bit_count(t & gm[g]), c = bit_count(S & gm[g]);
+          ok = (t & gm[g]) == lowest_bits(S & gm[g], a);
+          wt *= binomial(c, a);
+        }
+        if (ok) T[n] = (unsigned char)t, w[n++] = (unsigned char)wt;
+        if (t == 0) break;
+      }
+    }
+    start[NM] = (short)n;
+  }
+
+  // d_S (f g) for a canonical S, f and g with all their masks filled
+  LAPLACE_HD_FORCEINLINE double lb(const double* f, const double* g, int S) const {
+    if (distinct) return dc::leibniz(f, g, S);
+    double s = 0.0;
+    for (int i = start[S]; i < start[S + 1]; ++i) s += double(w[i]) * (f[T[i]] * g[S ^ T[i]]);
+    return s;
+  }
+};
 
 enum class elementary { tanh, cosh2, sech };
 
@@ -115,12 +188,13 @@ LAPLACE_HD void fill_elementary(int p, const double* theta, const int* idx, elem
 
 // c_t = prod_(a<t) f(theta_a), t = 0..p-1, from e of fill_elementary
 template <int K>
-LAPLACE_HD void product_chain(int p, const int* idx, const double* e, double* c) {
+LAPLACE_HD void product_chain(int p, const int* idx, const classes<K>& cl, const double* e, double* c) {
   constexpr int NM = 1 << K;
   for (int S = 0; S < NM; ++S) c[S] = S == 0 ? 1.0 : 0.0;
   for (int t = 1; t < p; ++t) {
     const int low = below_mask(idx, K, t);
-    for (int S = 0; S < NM; ++S) c[t * NM + S] = (S & ~low) ? 0.0 : dc::leibniz(c + (t - 1) * NM, e + (t - 1) * NM, S);
+    for (int S = 0; S < NM; ++S)
+      c[t * NM + S] = (S & ~low) ? 0.0 : cl.rep[S] != S ? c[t * NM + cl.rep[S]] : cl.lb(c + (t - 1) * NM, e + (t - 1) * NM, S);
   }
 }
 
@@ -129,7 +203,7 @@ LAPLACE_HD_FORCEINLINE int row_start(int k) { return k * (k - 1) / 2; }
 
 // the Durbin-Levinson coefficients: r[(row_start(k) + j - 1) NM + S] = d_S phi_(k,j)
 template <int K>
-LAPLACE_HD void coefficients(int p, const int* idx, const double* phi, double* r) {
+LAPLACE_HD void coefficients(int p, const int* idx, const classes<K>& cl, const double* phi, double* r) {
   constexpr int NM = 1 << K;
   for (int k = 1; k < p; ++k) {
     const int low = below_mask(idx, K, k);
@@ -142,7 +216,11 @@ LAPLACE_HD void coefficients(int p, const int* idx, const double* phi, double* r
         continue;
       }
       R[(k - 1) * NM + S] = f[S];
-      for (int j = 1; j < k; ++j) R[(j - 1) * NM + S] = Rp[(j - 1) * NM + S] - dc::leibniz(f, Rp + (k - j - 1) * NM, S);
+      if (cl.rep[S] != S) {
+        for (int j = 1; j < k; ++j) R[(j - 1) * NM + S] = R[(j - 1) * NM + cl.rep[S]];
+        continue;
+      }
+      for (int j = 1; j < k; ++j) R[(j - 1) * NM + S] = Rp[(j - 1) * NM + S] - cl.lb(f, Rp + (k - j - 1) * NM, S);
     }
   }
 }
@@ -155,7 +233,7 @@ LAPLACE_HD constexpr int scratch_entries(int p) { return 2 * (p - 1) + p * (p - 
 // = d_F L_ts, t = s..p-1. B holds B_k at the previous time, k = 0..p-1, and
 // E, En the forward error before and after a rotation, each with its NM masks.
 template <int K>
-LAPLACE_HD void lattice_column(int p, int s, const int* idx, const double* phi, const double* c, double* B, double* E,
+LAPLACE_HD void lattice_column(int p, int s, const int* idx, const classes<K>& cl, const double* phi, const double* c, double* B, double* E,
                                double* En, double* out) {
   constexpr int NM = 1 << K, F = NM - 1;
   for (int e = 0; e < s * NM; ++e) B[e] = 0.0;
@@ -172,8 +250,12 @@ LAPLACE_HD void lattice_column(int p, int s, const int* idx, const double* phi, 
           bn[S] = En[S] = 0.0;
           continue;
         }
-        bn[S] = dc::leibniz(g, b, S) - dc::leibniz(f, E, S);
-        En[S] = dc::leibniz(g, E, S) + dc::leibniz(f, b, S);
+        if (cl.rep[S] != S) {
+          bn[S] = bn[cl.rep[S]], En[S] = En[cl.rep[S]];
+          continue;
+        }
+        bn[S] = cl.lb(g, b, S) - cl.lb(f, E, S);
+        En[S] = cl.lb(g, E, S) + cl.lb(f, b, S);
       }
       double* x = E;
       E = En, En = x;
@@ -187,13 +269,14 @@ LAPLACE_HD void lattice_column(int p, int s, const int* idx, const double* phi, 
 template <int K>
 LAPLACE_HD void matrix_masks(int p, const double* theta, const int* idx, double* out, double* w) {
   constexpr int NM = 1 << K;
+  const classes<K> cl(idx);
   double* phi = w;
   double* c = phi + (p - 1) * NM;
   double* B = c + (p - 1) * NM;
   double* E = B + p * NM;
   fill_elementary<K>(p, theta, idx, elementary::tanh, phi);
   fill_elementary<K>(p, theta, idx, elementary::sech, c);
-  lattice_column<K>(p, 0, idx, phi, c, B, E, E + NM, out);
+  lattice_column<K>(p, 0, idx, cl, phi, c, B, E, E + NM, out);
   for (int k = 0; k < p; ++k)
     for (int j = 1; j + k < p; ++j) out[packed_index(j + k, j)] = out[packed_index(k, 0)];
 }
@@ -202,6 +285,7 @@ LAPLACE_HD void matrix_masks(int p, const double* theta, const int* idx, double*
 template <int K>
 LAPLACE_HD void inverse_masks(int p, const double* theta, const int* idx, double* out, double* w) {
   constexpr int NM = 1 << K, F = NM - 1;
+  const classes<K> cl(idx);
   double* phi = w;
   double* c = phi + (p - 1) * NM;
   double* r = c + (p - 1) * NM;
@@ -209,20 +293,20 @@ LAPLACE_HD void inverse_masks(int p, const double* theta, const int* idx, double
   double* G = iv + 2 * p * NM;         // G_tj = A_tj / v_t, j < t
   fill_elementary<K>(p, theta, idx, elementary::tanh, phi);
   fill_elementary<K>(p, theta, idx, elementary::cosh2, c);
-  coefficients<K>(p, idx, phi, r);
-  product_chain<K>(p, idx, c, iv);
+  coefficients<K>(p, idx, cl, phi, r);
+  product_chain<K>(p, idx, cl, c, iv);
   for (int t = 1; t < p; ++t) {
     const int low = below_mask(idx, K, t);
     for (int j = 0; j < t; ++j) {
       double* g = G + dc::strict(t, j) * NM;
       const double* a = r + (row_start(t) + t - j - 1) * NM;
-      for (int S = 0; S < NM; ++S) g[S] = (S & ~low) ? 0.0 : -dc::leibniz(a, iv + t * NM, S);
+      for (int S = 0; S < NM; ++S) g[S] = (S & ~low) ? 0.0 : cl.rep[S] != S ? g[cl.rep[S]] : -cl.lb(a, iv + t * NM, S);
     }
   }
   for (int i = 0; i < p; ++i)
     for (int j = 0; j <= i; ++j) {
       double x = i == j ? iv[i * NM + F] : G[dc::strict(i, j) * NM + F];
-      for (int t = i + 1; t < p; ++t) x -= dc::leibniz(r + (row_start(t) + t - i - 1) * NM, G + dc::strict(t, j) * NM, F);
+      for (int t = i + 1; t < p; ++t) x -= cl.lb(r + (row_start(t) + t - i - 1) * NM, G + dc::strict(t, j) * NM, F);
       out[packed_index(i, j)] = x;
     }
 }
@@ -231,13 +315,14 @@ LAPLACE_HD void inverse_masks(int p, const double* theta, const int* idx, double
 template <int K>
 LAPLACE_HD void cholesky_masks(int p, const double* theta, const int* idx, double* out, double* w) {
   constexpr int NM = 1 << K;
+  const classes<K> cl(idx);
   double* phi = w;
   double* c = phi + (p - 1) * NM;
   double* B = c + (p - 1) * NM;
   double* E = B + p * NM;
   fill_elementary<K>(p, theta, idx, elementary::tanh, phi);
   fill_elementary<K>(p, theta, idx, elementary::sech, c);
-  for (int s = 0; s < p; ++s) lattice_column<K>(p, s, idx, phi, c, B, E, E + NM, out);
+  for (int s = 0; s < p; ++s) lattice_column<K>(p, s, idx, cl, phi, c, B, E, E + NM, out);
 }
 
 }  // namespace detail_toeplitz
