@@ -185,3 +185,6 @@ parent here, in tree order; the module pages define their groups without
 \brief Distributions on the non-negative integers. */
 /** \addtogroup distrib_poisson
 \ingroup distrib_discrete */
+
+/** \defgroup optimizers Optimizers
+\brief Objectives, stopping rules, line searches and the dense curvature solver for unconstrained minimization on the host. */

@@ -102,3 +102,7 @@ target_compile_definitions(pdmat_weighted_sum PRIVATE LAPLACE_REFERENCE_DIR="${P
 laplace_kokkos_sources(pdmat_ws_state.cpp)
 add_executable(pdmat_ws_state pdmat_ws_state.cpp)
 target_link_libraries(pdmat_ws_state PRIVATE Laplace::laplace Laplace::dense)
+
+laplace_kokkos_sources(optimizers_foundations.cpp)
+add_executable(optimizers_foundations optimizers_foundations.cpp)
+target_link_libraries(optimizers_foundations PRIVATE Laplace::dense)

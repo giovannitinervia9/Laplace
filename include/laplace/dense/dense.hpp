@@ -132,6 +132,93 @@ dense_decomposition_status triangular_solve(const TView& T, const BView& B, dens
 
 /**
  * \ingroup dense
+ * \brief In-place linear solve from an existing Cholesky factor.
+ *
+ * Solves \f$A X = B\f$ in place on the \f$n \times k\f$ matrix \f$B\f$ for \f$A = L L^\top\f$ by two triangular solves: \f$L Y = B\f$ followed by \f$L^\top X = Y\f$.
+ * Only the lower triangle of \f$L\f$ is read.
+ *
+ * \param L Input \f$n \times n\f$ lower-triangular Cholesky factor (lower triangle read).
+ * \param B Input and output \f$n \times k\f$ matrix overwritten with \f$X\f$.
+ * \return dense_decomposition_status with `rank = n` on success.
+ *
+ * Fails with `dense_failure::singular` if any diagonal entry of \f$L\f$ is zero, or `dense_failure::non_finite_input` if any read entry of \f$L\f$ or \f$B\f$ is non-finite.
+ * Throws `std::invalid_argument` if \f$L\f$ is not square or \f$B\f$ does not have \f$n\f$ rows; see \ref dense for View conventions.
+ *
+ * \see \ref dense, cholesky_decomposition(), triangular_solve(), spd_solve(), dense_decomposition_status, dense_failure
+ */
+// Solves A X = B in place on B (n x k) for A = L L^T, L the factor of
+// cholesky_decomposition: two triangular solves. Fails with singular when a
+// diagonal entry of L is zero.
+template <class LView, class BView>
+dense_decomposition_status cholesky_solve(const LView& L, const BView& B) {
+  detail::require_input_matrix<LView>();
+  detail::require_output_matrix<BView>();
+  return detail::cholesky_solve(detail::input_ref(L), detail::output_ref(B));
+}
+
+/**
+ * \ingroup dense
+ * \brief In-place linear solve for a symmetric positive definite matrix.
+ *
+ * Factorizes \f$A = L L^\top\f$ via cholesky_decomposition() and solves \f$A X = B\f$ in place on \f$B\f$ via cholesky_solve().
+ * Only the lower triangle of \f$A\f$ is read.
+ *
+ * \param A Input \f$n \times n\f$ symmetric positive definite matrix (lower triangle read).
+ * \param L Output \f$n \times n\f$ lower-triangular Cholesky factor.
+ * \param B Input and output \f$n \times k\f$ matrix overwritten with \f$X\f$.
+ * \return dense_decomposition_status with `rank = n` on success.
+ *
+ * Fails with `dense_failure::not_positive_definite` if \f$A\f$ is not positive definite, or `dense_failure::non_finite_input` if any read entry is non-finite.
+ * Throws `std::invalid_argument` for incompatible shapes; see \ref dense for View conventions.
+ *
+ * Measured worst forward error over \f$n \le 200\f$ and \f$\kappa_2 \le 10^{12}\f$ is \f$0.336\,\kappa_2 \varepsilon\f$ on gcc and CUDA (test bound \f$0.5\,\kappa_2 \varepsilon\f$).
+ *
+ * \see \ref dense, cholesky_decomposition(), cholesky_solve(), cholesky_condition_estimate(), dense_decomposition_status, dense_failure
+ */
+// Solves A X = B in place on B (n x k) for symmetric positive definite A
+// (lower triangle read): the factor goes to L (n x n, as
+// cholesky_decomposition), then cholesky_solve. Fails with
+// not_positive_definite when A is not positive definite.
+template <class AView, class LView, class BView>
+dense_decomposition_status spd_solve(const AView& A, const LView& L, const BView& B) {
+  const dense_decomposition_status status = cholesky_decomposition(A, L);
+  if (!status.success) return status;
+  return cholesky_solve(L, B);
+}
+
+/**
+ * \ingroup dense
+ * \brief Estimate of the 1-norm condition number from a Cholesky factor.
+ *
+ * Estimates \f$\kappa_1(A) = \|A\|_1 \|A^{-1}\|_1\f$ for an \f$n \times n\f$ symmetric positive definite matrix \f$A\f$ (lower triangle read) and its Cholesky factor \f$L\f$ in \f$O(n^2)\f$ operations.
+ * Computes \f$\|A\|_1\f$ exactly from the lower triangle and \f$\|A^{-1}\|_1\f$ by Higham's refinement of Hager's method using at most five sign-vector solves and, for \f$n > 1\f$, one solve with \f$x_i = (-1)^i (1 + i / (n - 1))\f$ (0-based \f$i\f$).
+ *
+ * \param A Input \f$n \times n\f$ symmetric matrix (lower triangle read).
+ * \param L Input \f$n \times n\f$ lower-triangular Cholesky factor of \f$A\f$.
+ * \return Estimate of \f$\kappa_1(A)\f$, at most \f$\kappa_1(A)\f$ up to rounding; `0.0` when \f$n = 0\f$, quiet NaN if the lower triangle of \f$A\f$ is non-finite, or \f$+\infty\f$ if \f$L\f$ has a zero or non-finite diagonal entry.
+ *
+ * Throws `std::invalid_argument` if \f$A\f$ is not square or \f$L\f$ does not match its shape; see \ref dense for View conventions.
+ *
+ * Measured ratio to exact \f$\kappa_1(A)\f$ lies in \f$[0.609, 1.0001]\f$ on gcc (\f$n \in [5, 300]\f$, \f$\kappa_2 \in [10^2, 10^{13}]\f$) and \f$[0.859, 1.00002]\f$ in tests on gcc and CUDA.
+ *
+ * \see \ref dense, cholesky_decomposition(), spd_solve()
+ */
+// An estimate of the 1-norm condition number kappa_1(A) = |A|_1 |A^-1|_1 of a
+// symmetric positive definite A (lower triangle read) from its Cholesky factor
+// L: |A|_1 is exact, |A^-1|_1 is Higham's estimate (Higham 1988, the method of
+// LAPACK's dlacn2) from at most six solves with L, O(n^2) after the
+// factorization. The estimate never exceeds kappa_1(A) beyond rounding.
+// Returns inf when L has a zero or non-finite diagonal entry, NaN when the
+// lower triangle of A is not finite, 0 when n = 0.
+template <class AView, class LView>
+double cholesky_condition_estimate(const AView& A, const LView& L) {
+  detail::require_input_matrix<AView>();
+  detail::require_input_matrix<LView>();
+  return detail::cholesky_condition_estimate(detail::input_ref(A), detail::input_ref(L));
+}
+
+/**
+ * \ingroup dense
  * \brief Column-pivoted QR decomposition.
  *
  * Computes \f$A P = Q R\f$ for an \f$m \times n\f$ matrix \f$A\f$ with \f$p = \min(m, n)\f$, where column \f$j\f$ of \f$Q R\f$ equals column \f$\operatorname{perm}[j]\f$ of \f$A\f$.

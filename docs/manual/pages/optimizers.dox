@@ -1,0 +1,155 @@
+/**
+\addtogroup optimizers
+
+The `laplace::optimizers` module provides the pieces of unconstrained minimization on the host: the objective concepts (`<laplace/optimizers/objective.hpp>`), the report of a run (`report.hpp`), the stopping rules (`stop_rules.hpp`), two line searches (`line_search.hpp`), the dense curvature solver (`dense_curvature_solver.hpp`) and `minimize()` (`minimize.hpp`), all in the same directory. They are header-only templates that run on the host; none is marked `LAPLACE_HD`. A program that uses `dense_curvature_solver` links `Laplace::dense`. On the standard test problems the line searches accept a step within 13 evaluations along \f$-g\f$ and within one along a Newton direction.
+
+## Objectives
+
+An objective is any type with the members that the concepts require; there is no base class. The point \f$x \in \mathbb{R}^n\f$, without constraints, is a read-only host View, \ref laplace::optimizers::optimizer_point "optimizer_point". Gradients and directions are writable host Views of \f$n\f$ entries, \ref laplace::optimizers::optimizer_vector "optimizer_vector", and a symmetric curvature matrix \f$H\f$ is an \f$n \times n\f$ column-major host View, \ref laplace::optimizers::dense_curvature_matrix "dense_curvature_matrix".
+
+The objective concepts form a refinement ladder where each member returns \f$f(x)\f$ and evaluates everything requested in one pass, computing derivatives only when asked:
+- \ref laplace::optimizers::value_objective "value_objective": requires `double value(x)` returning \f$f(x)\f$.
+- \ref laplace::optimizers::gradient_objective "gradient_objective": refines `value_objective` with `double value_gradient(x, g)`, returning \f$f(x)\f$ and writing the gradient (or subgradient) \f$g = \nabla f(x)\f$ into `g`.
+- \ref laplace::optimizers::curvature_objective "curvature_objective": refines `gradient_objective` with member type `curvature_type` (currently `dense_curvature_matrix`) and `double value_gradient_curvature(x, g, H)`, returning \f$f(x)\f$ and writing \f$g\f$ and the symmetric matrix \f$H\f$.
+
+Whether \f$H\f$ is the observed Hessian or an expected information is the objective's choice. A non-finite value means that the objective cannot be evaluated at \f$x\f$: the line searches refuse such a trial point, without an error.
+
+The \ref laplace::optimizers::composite_objective "composite_objective" concept refines `gradient_objective` for separable sums \f$f = f_{\mathrm{s}} + r\f$. Here `value()` and `value_gradient()` evaluate the smooth term \f$f_{\mathrm{s}}\f$ alone, and \f$r(x) = \sum_b r_b(x_b)\f$ is separable in blocks \f$b\f$. It requires `nonsmooth_value(x)` for the non-smooth term, `nonsmooth_block_count()`, `nonsmooth_prox(v, t, z)` writing \f$z = \operatorname{prox}_{t r}(v) = \arg\min_z (r(z) + \|z - v\|^2 / (2t))\f$ for proximal step \f$t > 0\f$, and `weak_convexity_constant(b)` returning \f$\rho_b \ge 0\f$ such that \f$r_b + \rho_b \|x_b\|^2 / 2\f$ is convex (\f$0\f$ when \f$r_b\f$ is convex). The proximal operator is exact only when \f$t \rho_b < 1\f$; only the concept exists in this module.
+
+## Report and status
+
+A run returns an \ref laplace::optimizers::optimizer_report "optimizer_report", which says why it stopped, where, and at what cost. The reason is an \ref laplace::optimizers::optimizer_status "optimizer_status". Two values are successes: `converged`, when a stationarity rule held at its tolerance, and `converged_at_resolution`, when the stationarity measure fell below the resolution of the objective, about \f$\varepsilon |f|\f$, so that no smaller decrease can be verified. Here \f$\varepsilon = 2^{-52}\f$ is the machine epsilon of double precision. The other six are `stopped_on_change`, `stalled`, `iteration_budget`, `evaluation_budget`, `line_search_failed` and `start_not_admissible`, each described in its entry. \ref laplace::optimizers::optimizer_succeeded "optimizer_succeeded()" is true for the two successes only, and \ref laplace::optimizers::curvature_factorization "curvature_factorization" reports the outcome of the last factorization of the curvature.
+
+An `optimizer_report` stores the status, the last accepted point with its value and gradient, the decrement, the outcome of the last factorization, the iterations, the evaluation counts and the elapsed time.The `decrement` is the decrease predicted by the next step in the objective's units: \f$\frac{1}{2} g^\top H^{-1} g\f$ when curvature is used, \f$\frac{1}{2} g^\top B g\f$ for a method whose next direction is \f$d = -B g\f$ with inverse-curvature model \f$B\f$, and quiet NaN when neither is available. Evaluation counts are stored in `value_evaluations`, `gradient_evaluations`, and `curvature_evaluations`. Calling `value_gradient()` adds one to `value_evaluations` and one to `gradient_evaluations`, and `value_gradient_curvature()` adds one to each of the three counters.
+
+An optional \ref laplace::optimizers::optimizer_trace "optimizer_trace" callback (`std::function<void(const optimizer_trace_point&)>`) receives an \ref laplace::optimizers::optimizer_trace_point "optimizer_trace_point" once per accepted iteration; the Views it receives are valid during the call only.
+
+## Stopping rules
+
+A stopping rule is any type modeling \ref laplace::optimizers::stop_rule "stop_rule", providing `static constexpr unsigned needs` and `stop_verdict verdict(const stop_rule_input&) const`. The `needs` bitmask combines \ref laplace::optimizers::stop_needs_gradient "stop_needs_gradient", \ref laplace::optimizers::stop_needs_decrement "stop_needs_decrement", and \ref laplace::optimizers::stop_needs_previous "stop_needs_previous"; the value and the iteration are always available. The concept `stop_rule_for<R, provided>` holds when rule `R` requires no bit outside `provided`, rejecting incompatible rules at compile time.
+
+Verdicts in \ref laplace::optimizers::stop_verdict "stop_verdict" are ordered from weakest to strongest: `none`, `stopped_on_change`, `converged_at_resolution`, and `converged`. Each call receives a \ref laplace::optimizers::stop_rule_input "stop_rule_input" with the quantities of the iteration. Its previous fields are valid only when `has_previous` is `true`, and `gradient` is empty and `decrement` is quiet NaN when not provided by the method; the section "Report and status" above defines the decrement.
+
+The module provides four rules:
+- \ref laplace::optimizers::decrement_stop_rule "decrement_stop_rule": returns `converged` when \f$\delta \le \tau\f$ for predicted decrease \f$\delta\f$ and `tolerance` \f$\tau\f$ (default \f$10^{-6}\f$), `converged_at_resolution` when \f$\delta \le m_{\mathrm{res}} \varepsilon |f|\f$ for `resolution_multiple` \f$m_{\mathrm{res}}\f$ (default \f$1\f$), and `none` otherwise (including when \f$\delta\f$ is NaN).
+- \ref laplace::optimizers::gradient_stop_rule "gradient_stop_rule": returns `converged` when \f$\sigma \max_i |g_i| \le \tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} |f|\f$, with defaults `absolute_tolerance` \f$\tau_{\mathrm{abs}} = 10^{-6}\f$, `relative_tolerance` \f$\tau_{\mathrm{rel}} = 0\f$, and caller-chosen `scale` \f$\sigma = 1\f$ (such as \f$1 / n\f$ for a per-observation gradient).
+- \ref laplace::optimizers::objective_change_stop_rule "objective_change_stop_rule": returns `stopped_on_change` when `has_previous` is `true` and \f$|f - f_{\mathrm{prev}}| \le \tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} |f_{\mathrm{prev}}|\f$ (defaults \f$\tau_{\mathrm{abs}} = 10^{-12}\f$, \f$\tau_{\mathrm{rel}} = 0\f$).
+- \ref laplace::optimizers::parameter_change_stop_rule "parameter_change_stop_rule": returns `stopped_on_change` when `has_previous` is `true` and \f$\max_i |x_i - x_{\mathrm{prev}, i}| \le \tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} \max_i |x_{\mathrm{prev}, i}|\f$ (defaults \f$\tau_{\mathrm{abs}} = 10^{-10}\f$, \f$\tau_{\mathrm{rel}} = 0\f$).
+
+Only the stationarity rules, on the decrement and on the gradient, may declare convergence. The combinator \ref laplace::optimizers::any_of "any_of(...)" builds an \ref laplace::optimizers::any_of_stop_rule "any_of_stop_rule" returning the strongest verdict among its rules, or `none` when given zero rules. The combinator \ref laplace::optimizers::all_of "all_of(...)" builds an \ref laplace::optimizers::all_of_stop_rule "all_of_stop_rule" returning the weakest verdict across at least one rule, so combining a convergence rule with a change rule yields `stopped_on_change`. Their `needs` is the union of their rules' needs.
+
+## Line searches
+
+Given a point \f$x\f$, its value \f$f(x)\f$, its gradient \f$g\f$ and a direction \f$d\f$, a line search studies \f$\phi(s) = f(x + s d)\f$ for steps \f$s > 0\f$. The slope \f$\phi'(0) = g^\top d\f$ must be negative and finite, or the search fails at once with `not_descent_direction`. Sufficient decrease requires \f$\phi(s) - \phi(0) \le c_1 s \phi'(0)\f$, and strong curvature requires \f$|\phi'(s)| \le c_2 |\phi'(0)|\f$. Sufficient decrease is evaluated as the difference \f$\phi(s) - \phi(0)\f$ because the sum \f$\phi(0) + c_1 s \phi'(0)\f$ rounds to \f$\phi(0)\f$ once \f$c_1 s |\phi'(0)|\f$ falls below the rounding unit of \f$\phi(0)\f$ and would accept a step that decreases nothing.
+
+The \ref laplace::optimizers::armijo_line_search "armijo_line_search" struct backtracks by safeguarded interpolation (Dennis and Schnabel, 1996, Algorithm A6.3.1), using value evaluations only. Its default settings are `sufficient_decrease` \f$c_1 = 10^{-4}\f$, `min_shrink` \f$0.1\f$, `max_shrink` \f$0.5\f$, `max_evaluations` \f$60\f$, and `resolution` \f$0\f$. On the first backtrack it computes the minimizer of the quadratic through \f$\phi(0)\f$, \f$\phi'(0)\f$, and \f$\phi(s)\f$, and on subsequent backtracks the minimizer of the cubic through \f$\phi(0)\f$, \f$\phi'(0)\f$, and the last two trial values, kept in \f$[0.1 s,\, 0.5 s]\f$ with the default bounds. On acceptance, `x_trial` holds \f$x + s d\f$.
+
+The \ref laplace::optimizers::wolfe_line_search "wolfe_line_search" struct enforces both sufficient decrease and strong curvature by bracketing and zoom (Nocedal and Wright, 2006, Algorithms 3.5 and 3.6, eq. 3.59; Moré and Thuente, 1994). Its default settings are `sufficient_decrease` \f$c_1 = 10^{-4}\f$, `curvature` \f$c_2 = 0.9\f$, `max_evaluations` \f$30\f$, and `resolution` \f$0\f$. Let \f$s_{\mathrm{lo}}\f$ denote the bracket endpoint satisfying sufficient decrease with the lowest objective value seen, and \f$s_{\mathrm{hi}}\f$ the opposite bracket endpoint. Bracketing extrapolates using the cubic minimizer clamped to \f$[s + 1.1(s - s_{\mathrm{lo}}),\, s + 4(s - s_{\mathrm{lo}})]\f$. Inside zoom, the next trial is the cubic minimizer unless \f$\phi(s_{\mathrm{hi}}) > \phi(s_{\mathrm{lo}})\f$. When the value rose at \f$s_{\mathrm{hi}}\f$, zoom selects the cubic minimizer if it is closer to \f$s_{\mathrm{lo}}\f$ than the minimizer of the quadratic through \f$\phi(s_{\mathrm{lo}})\f$, \f$\phi'(s_{\mathrm{lo}})\f$, and \f$\phi(s_{\mathrm{hi}})\f$, and otherwise their mean. Each zoom trial stays a tenth of the bracket from either end. Every trial evaluates both value and gradient; on acceptance, `x_trial` and `g_trial` hold the accepted point and its gradient and `slope` holds \f$\phi'(s)\f$.
+
+Both searches treat a non-finite trial value (or non-finite slope in Wolfe) as a refused point counted in `refused_evaluations`. Armijo multiplies the step by `max_shrink` without interpolating through the refused point. Wolfe halves the step toward the last finite trial during bracketing, or replaces \f$s_{\mathrm{hi}}\f$ with the refused step and bisects during zoom. When `resolution` \f$> 0\f$, the search checks whether \f$s_0 |\phi'(0)|\f$ at the initial step \f$s_0\f$ is strictly less than `resolution` before any evaluation and fails with `below_resolution` (never inside backtracking). A trial point equal to `x` in every coordinate in either search, or a Wolfe bracket narrower than \f$4\varepsilon\f$ times the larger endpoint, fails with `step_below_rounding` and is never accepted. The budget `max_evaluations` ends a search with `evaluation_budget`. Both searches return a \ref laplace::optimizers::line_search_result "line_search_result", whose `outcome` is a \ref laplace::optimizers::line_search_outcome "line_search_outcome".
+
+The table gives the evaluations measured from the standard starting points with initial step \f$1\f$. The quadratics have \f$n = 10\f$ and condition \f$\kappa_2\f$, the ratio of the largest to the smallest eigenvalue of their Hessian. The last row uses the Newton direction \f$-H(x_0)^{-1} g\f$ on every problem whose \f$H(x_0)\f$ is positive definite. See `docs/numerics.md`.
+
+| Problem | Direction | Armijo evaluations | Wolfe evaluations |
+|---|---|---|---|
+| Rosenbrock (\f$n = 2\f$ and \f$100\f$) | \f$-g\f$ | 5 | 5 |
+| Powell singular | \f$-g\f$ | 6 | 4 |
+| Beale | \f$-g\f$ | 3 | 3 |
+| Brown badly scaled | \f$-g\f$ | 2 | 2 |
+| Helical valley | \f$-g\f$ | 4 | 4 |
+| Wood | \f$-g\f$ | 10 | 6 |
+| Quadratic, \f$\kappa_2 = 10^2\f$ | \f$-g\f$ | 3 | 3 |
+| Quadratic, \f$\kappa_2 = 10^6\f$ | \f$-g\f$ | 7 | 7 |
+| Quadratic, \f$\kappa_2 = 10^{12}\f$ | \f$-g\f$ | 13 | 13 |
+| Positive-definite start | \f$-H(x_0)^{-1} g\f$ | 1 | 1 |
+
+## Dense curvature solver
+
+The \ref laplace::optimizers::dense_curvature_solver "dense_curvature_solver" class applies the Cholesky routines of \ref dense to matrices of a fixed size `n`. Calling `factorize(H)` or `factorize_shifted(H, lambda)` reads only the lower triangle of `H` without modifying `H`, computes the Cholesky factor of \f$H\f$ or \f$H + \lambda I\f$, and returns a `curvature_factorization` code (also returned by `last_factorization()`). Incompatible matrix dimensions throw `std::invalid_argument`.
+
+After a `positive_definite` factorization, `newton_direction(g, d)` computes \f$d = -(H + \lambda I)^{-1} g\f$ and returns `true`; if the last factorization did not succeed or the solve fails, it leaves `d` untouched and returns `false`. Calling `condition_estimate()` returns the \ref dense 1-norm condition estimate \f$\kappa_1\f$ of the last factorized matrix, or \f$+\infty\f$ when `last_factorization()` is not `positive_definite`. The trait `curvature_solver_for<H>::type` maps a curvature matrix type to its solver (`dense_curvature_solver` for `dense_curvature_matrix`). The test checks both solves with a relative tolerance of \f$10^{-14}\f$, and the outcomes on an indefinite and on a non-finite matrix.
+
+## Running an optimizer
+
+The concept \ref laplace::optimizers::optimizer_for "optimizer_for\<Optimizer, Objective\>" holds when `optimizer.run(objective, x0)` returns an `optimizer_report`. The free function \ref laplace::optimizers::minimize "minimize(optimizer, objective, x0)" forwards to `optimizer.run(objective, x0)`. A maximum of \f$f\f$ is found by minimizing \f$-f\f$.
+
+## Example
+
+The example evaluates the value and the gradient of \f$f(x) = \frac{1}{2} \|x\|^2\f$ in two variables and runs an Armijo line search along \f$-g\f$, on the host, after `Kokkos::initialize`.
+
+```cpp
+#include <laplace/optimizers/line_search.hpp>
+
+struct quadratic_objective {
+  double value(const laplace::optimizers::optimizer_point& x) const {
+    return 0.5 * (x(0) * x(0) + x(1) * x(1));
+  }
+  double value_gradient(const laplace::optimizers::optimizer_point& x,
+                        const laplace::optimizers::optimizer_vector& g) const {
+    g(0) = x(0);
+    g(1) = x(1);
+    return value(x);
+  }
+};
+
+bool armijo_example() {
+  constexpr int n = 2;
+  laplace::optimizers::optimizer_vector x("x", n), g("g", n), d("d", n), x_trial("x_trial", n);
+  x(0) = 3.0;
+  x(1) = -4.0;
+  quadratic_objective objective;
+  const double fx = objective.value_gradient(x, g);
+  for (int i = 0; i < n; ++i) d(i) = -g(i);
+  const laplace::optimizers::armijo_line_search search;
+  const laplace::optimizers::line_search_result r = search.search(objective, x, fx, g, d, 1.0, x_trial);
+  return r.accepted();  // step 1, value 0: the minimizer
+}
+```
+
+## Module functions and types
+
+In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::optimizer_point "optimizer_point"
+- \ref laplace::optimizers::optimizer_vector "optimizer_vector"
+- \ref laplace::optimizers::dense_curvature_matrix "dense_curvature_matrix"
+- \ref laplace::optimizers::value_objective "value_objective"
+- \ref laplace::optimizers::gradient_objective "gradient_objective"
+- \ref laplace::optimizers::curvature_objective "curvature_objective"
+- \ref laplace::optimizers::composite_objective "composite_objective"
+- \ref laplace::optimizers::optimizer_status "optimizer_status"
+- \ref laplace::optimizers::optimizer_succeeded "optimizer_succeeded()"
+- \ref laplace::optimizers::curvature_factorization "curvature_factorization"
+- \ref laplace::optimizers::optimizer_report "optimizer_report"
+- \ref laplace::optimizers::optimizer_trace_point "optimizer_trace_point"
+- \ref laplace::optimizers::optimizer_trace "optimizer_trace"
+- \ref laplace::optimizers::stop_needs_gradient "stop_needs_gradient"
+- \ref laplace::optimizers::stop_needs_decrement "stop_needs_decrement"
+- \ref laplace::optimizers::stop_needs_previous "stop_needs_previous"
+- \ref laplace::optimizers::stop_verdict "stop_verdict"
+- \ref laplace::optimizers::stop_rule_input "stop_rule_input"
+- \ref laplace::optimizers::stop_rule "stop_rule"
+- \ref laplace::optimizers::stop_rule_for "stop_rule_for"
+- \ref laplace::optimizers::decrement_stop_rule "decrement_stop_rule"
+- \ref laplace::optimizers::gradient_stop_rule "gradient_stop_rule"
+- \ref laplace::optimizers::objective_change_stop_rule "objective_change_stop_rule"
+- \ref laplace::optimizers::parameter_change_stop_rule "parameter_change_stop_rule"
+- \ref laplace::optimizers::any_of_stop_rule "any_of_stop_rule"
+- \ref laplace::optimizers::all_of_stop_rule "all_of_stop_rule"
+- \ref laplace::optimizers::any_of "any_of()"
+- \ref laplace::optimizers::all_of "all_of()"
+- \ref laplace::optimizers::line_search_outcome "line_search_outcome"
+- \ref laplace::optimizers::line_search_result "line_search_result"
+- \ref laplace::optimizers::armijo_line_search "armijo_line_search"
+- \ref laplace::optimizers::wolfe_line_search "wolfe_line_search"
+- \ref laplace::optimizers::dense_curvature_solver "dense_curvature_solver"
+- \ref laplace::optimizers::curvature_solver_for "curvature_solver_for"
+- \ref laplace::optimizers::optimizer_for "optimizer_for"
+- \ref laplace::optimizers::minimize "minimize()"
+
+## References
+
+- J. E. Dennis and R. B. Schnabel (1996), Numerical Methods for Unconstrained Optimization and Nonlinear Equations, Society for Industrial and Applied Mathematics. https://doi.org/10.1137/1.9781611971200
+- J. J. Moré and D. J. Thuente (1994), Line search algorithms with guaranteed sufficient decrease, ACM Transactions on Mathematical Software, 20(3), 286–307. https://doi.org/10.1145/192115.192132
+- J. Nocedal and S. J. Wright (2006), Numerical Optimization, 2nd edition, Springer. https://doi.org/10.1007/978-0-387-40065-5
+
+*/

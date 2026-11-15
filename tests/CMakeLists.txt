@@ -65,6 +65,7 @@ set(LAPLACE_TEST_SOURCES
   basis/test_transform.cpp
   basis/test_tensor.cpp
   dense/test_dense.cpp
+  optimizers/test_optimizers.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

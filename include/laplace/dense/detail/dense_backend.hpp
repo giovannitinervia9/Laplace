@@ -40,6 +40,10 @@ dense_decomposition_status svd(const_matrix_ref A, matrix_ref U, vector_ref s, m
 dense_decomposition_status symmetric_eigen(const_matrix_ref A, vector_ref w, matrix_ref V);
 dense_decomposition_status generalized_symmetric_eigen(const_matrix_ref A, const_matrix_ref B,
                                                        vector_ref w, matrix_ref V);
+dense_decomposition_status cholesky_solve(const_matrix_ref L, matrix_ref B);
+// The 1-norm condition of A from its Cholesky factor L; inf when the factor
+// has a zero or non-finite diagonal entry, NaN when A is not finite.
+double cholesky_condition_estimate(const_matrix_ref A, const_matrix_ref L);
 // V (n x n, column-major, ld n) receives the right singular vectors of C; the
 // status gives the rank r of C, and columns r..n-1 of V span its null space.
 dense_decomposition_status null_space(const_matrix_ref C, double* V, double relative_tolerance);

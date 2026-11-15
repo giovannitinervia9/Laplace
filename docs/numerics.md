@@ -5437,3 +5437,96 @@ applying it factored by mode products if a product that large is needed.
 scratch if that memory matters.
 
 **Chosen.** As written.
+
+## Optimizer foundations: condition estimate and line searches
+
+**What.** Two pieces under the optimizers of phase 6. In `laplace::dense`,
+`cholesky_solve(L, B)`, `spd_solve(A, L, B)` and
+`cholesky_condition_estimate(A, L)`, which estimates the 1-norm condition
+number kappa_1(A) = |A|_1 |A^-1|_1 of a symmetric positive definite A from its
+Cholesky factor L. In `laplace::optimizers`, `armijo_line_search` and
+`wolfe_line_search` (`include/laplace/optimizers/line_search.hpp`).
+
+**How.** |A|_1 is computed exactly from the lower triangle. |A^-1|_1 is
+Higham's estimate (Higham 1988, ACM TOMS 14, Algorithm 4.1, the iteration of
+LAPACK's dlacn2): a power-like iteration on sign vectors with at most five
+solves, then one solve with the alternating vector
+x_i = (-1)^i (1 + i / (n - 1)), keeping the largest of the norms found. Every
+norm it computes is |A^-1 x|_1 for some x with |x|_1 = 1, so the estimate
+never exceeds |A^-1|_1 beyond rounding. Each solve is two triangular solves
+with L, O(n^2).
+
+Armijo: sufficient decrease phi(s) - phi(0) <= c1 s phi'(0), with
+phi(s) = f(x + s d) and c1 = 1e-4, by backtracking: the minimizer of the
+quadratic through phi(0), phi'(0) and phi(s) at the first backtrack, of the
+cubic through the last two trial values afterwards (Dennis and Schnabel 1996,
+A6.3.1), kept within [0.1 s, 0.5 s]. Strong Wolfe: also
+|phi'(s)| <= c2 |phi'(0)| with c2 = 0.9, by bracketing and zoom (Nocedal and
+Wright 2006, Algorithms 3.5 and 3.6). Extrapolation is the cubic minimizer
+kept within [s + 1.1 (s - s_lo), s + 4 (s - s_lo)]; inside the bracket, when
+the value rose at the far end, the cubic minimizer if it is closer to the
+low end than the minimizer of the quadratic through phi(s_lo), phi'(s_lo)
+and phi(s_hi), otherwise their mean (case 1 of More and Thuente 1994), and
+the result is kept at least a tenth of the bracket from either end. A
+non-finite value or slope is a refused trial point: the step is halved
+towards the last finite point and never interpolated through. A trial point
+equal to x in every coordinate ends the search as a failure (step below
+rounding).
+
+**Measured** (`benchmarks/optimizers_foundations.cpp`, gcc, one thread).
+Estimate over exact kappa_1, A = Q diag(lambda) Q^T with lambda log-spaced
+from 1 to kappa and Q the eigenvectors of a pseudo-random symmetric matrix,
+exact kappa_1 from Q diag(1 / lambda) Q^T, five matrices per cell (min, max):
+
+| n | kappa 1e2 | 1e6 | 1e10 | 1e13 |
+|---|---|---|---|---|
+| 5 | 0.726, 1.000 | 1.000, 1.000 | 1.000, 1.000 | 1.000, 1.000 |
+| 20 | 0.736, 1.000 | 1.000, 1.000 | 1.000, 1.000 | 1.000, 1.000 |
+| 100 | 0.703, 0.924 | 0.799, 1.000 | 0.672, 1.000 | 0.663, 0.977 |
+| 300 | 0.806, 0.901 | 0.668, 0.946 | 0.647, 0.949 | 0.609, 0.956 |
+
+All in [0.609, 1.0001]; the excess over 1 is rounding of the solves at
+kappa 1e13. Time in ms per call (kappa 1e6):
+
+| n | Cholesky | estimate | inverse by n solves |
+|---|---|---|---|
+| 10 | 0.00028 | 0.00073 | 0.00056 |
+| 100 | 0.029 | 0.016 | 0.129 |
+| 500 | 2.43 | 0.31 | 10.7 |
+| 1000 | 16.0 | 1.21 | 82.4 |
+
+Evaluations of the line searches from the standard starts, initial step 1
+(Newton: the Cholesky direction where H(x0) is positive definite):
+
+| problem | direction | Armijo | Wolfe |
+|---|---|---|---|
+| Rosenbrock (n = 2 and 100) | -g | 5 | 5 |
+| Powell singular | -g | 6 | 4 |
+| Beale | -g | 3 | 3 |
+| Brown badly scaled | -g | 2 | 2 |
+| helical valley | -g | 4 | 4 |
+| Wood | -g | 10 | 6 |
+| quadratic n = 10, kappa 1e2 / 1e6 / 1e12 | -g | 3 / 7 / 13 | 3 / 7 / 13 |
+| every problem with H(x0) positive definite | Newton | 1 | 1 |
+
+**What it says.** The estimate errs on the small side by at most a factor
+1.65 here. It costs a thirty-fourth of the inverse at n = 500, an eighth of
+the factorization at n = 500 and a thirteenth at n = 1000; at n = 10 it costs
+about two and a half factorizations, 0.7 us. The step needed
+on the kappa 1e12 quadratic along -g is 1e-12, and both searches reach it in
+13 evaluations, the number that the 0.1 lower bound on each shrink allows.
+
+Two defects were found and repaired while measuring. The first version of
+the zoom used the cubic alone and bisected whenever the interpolated step
+fell outside the safeguarded interval, instead of moving it to the nearest
+end of the interval: 19 evaluations on the kappa 1e6 quadratic and a failure
+after 30 on kappa 1e12 (now 7 and 13). The quadratic of case 1 took Wolfe
+from 8 to 5 evaluations on Rosenbrock, 7 to 4 on Powell and 9 to 6 on Wood. And sufficient decrease written as
+phi(s) <= phi(0) + c1 s phi'(0) accepted a step on a constant objective at
+s = 1e-12, where c1 s phi'(0) is below the rounding of phi(0) and the sum
+rounds to phi(0); the difference form refuses it, and the search ends as step
+below rounding.
+
+**Open.** The tolerances and constants (c1, c2, the shrink interval, the
+budgets of 60 and 30 evaluations) are the textbook values and wait for the
+methods of wave 1 to measure them.

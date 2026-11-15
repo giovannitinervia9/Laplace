@@ -116,6 +116,79 @@ dense_decomposition_status triangular_solve(const_matrix_ref T, matrix_ref B, de
   return success(T.rows);
 }
 
+// (L L^T)^-1 B in place: L y = b, then L^T x = y.
+dense_decomposition_status cholesky_solve(const_matrix_ref L, matrix_ref B) {
+  require_square("cholesky_solve", "L", L);
+  if (B.rows != L.rows)
+    wrong_dimensions("cholesky_solve", "B has " + std::to_string(B.rows) + " rows, L is " + shape(L.rows, L.cols));
+  const dense_decomposition_status first = triangular_solve(L, B, dense_triangle::lower, dense_operation::identity);
+  if (!first.success) return first;
+  return triangular_solve(L, B, dense_triangle::lower, dense_operation::transpose);
+}
+
+// kappa_1(A) = |A|_1 |A^-1|_1, with |A^-1|_1 estimated by Higham's
+// refinement of Hager's method (Higham 1988, ACM TOMS 14, Algorithm 4.1; the
+// iteration of LAPACK's dlacn2): at most five solves of the power-like
+// iteration on sign vectors plus one with the alternating vector
+// x_i = (-1)^i (1 + i / (n - 1)). A^-1 is symmetric, so the transposed solves
+// of the general method are the same solves. Each solve is two triangular
+// solves with L, O(n^2).
+double cholesky_condition_estimate(const_matrix_ref A, const_matrix_ref L) {
+  require_square("cholesky_condition_estimate", "A", A);
+  require_shape("cholesky_condition_estimate", "L", L, A.rows, A.rows);
+  const int n = A.rows;
+  if (n == 0) return 0.0;
+  const const_matrix_map a = map(A), l = map(L);
+  if (!lower_is_finite(a)) return std::numeric_limits<double>::quiet_NaN();
+  for (int i = 0; i < n; ++i)
+    if (!(std::isfinite(l(i, i)) && l(i, i) != 0.0)) return std::numeric_limits<double>::infinity();
+  // |A|_1 of the symmetric A from its lower triangle
+  double a_norm = 0.0;
+  for (int j = 0; j < n; ++j) {
+    double column = 0.0;
+    for (int i = 0; i < n; ++i) column += std::abs(i >= j ? a(i, j) : a(j, i));
+    a_norm = std::max(a_norm, column);
+  }
+  const auto lower = l.triangularView<Eigen::Lower>();
+  auto solve = [&](Eigen::VectorXd& x) {
+    lower.solveInPlace(x);
+    lower.transpose().solveInPlace(x);
+  };
+  auto sign = [](double v) { return v >= 0.0 ? 1.0 : -1.0; };
+  Eigen::VectorXd x = Eigen::VectorXd::Constant(n, 1.0 / n);
+  solve(x);
+  double estimate = x.lpNorm<1>();
+  if (n > 1) {
+    Eigen::VectorXd xi = x.unaryExpr(sign);
+    x = xi;
+    solve(x);
+    Eigen::Index j = 0;
+    x.cwiseAbs().maxCoeff(&j);
+    for (int iteration = 2; iteration <= 5; ++iteration) {
+      x.setZero();
+      x(j) = 1.0;
+      solve(x);
+      const double previous = estimate;
+      estimate = x.lpNorm<1>();
+      const Eigen::VectorXd xi_new = x.unaryExpr(sign);
+      if (xi_new == xi || estimate <= previous) {
+        estimate = std::max(estimate, previous);
+        break;
+      }
+      xi = xi_new;
+      x = xi;
+      solve(x);
+      const Eigen::Index j_last = j;
+      x.cwiseAbs().maxCoeff(&j);
+      if (x(j_last) == std::abs(x(j))) break;
+    }
+    for (int i = 0; i < n; ++i) x(i) = (i % 2 == 0 ? 1.0 : -1.0) * (1.0 + double(i) / (n - 1));
+    solve(x);
+    estimate = std::max(estimate, 2.0 * x.lpNorm<1>() / (3.0 * n));
+  }
+  return a_norm * estimate;
+}
+
 dense_decomposition_status pivoted_qr(const_matrix_ref A, matrix_ref Q, matrix_ref R, int_vector_ref perm,
                                       double relative_tolerance) {
   const int m = A.rows, n = A.cols, p = std::min(m, n);
