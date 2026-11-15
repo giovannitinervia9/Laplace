@@ -1,4 +1,4 @@
-// betabinom1_distrib (laplace::distrib): the beta-binomial of mean proportion mu in (0, 1) and
+// betabinom_distrib (laplace::distrib): the beta-binomial of mean proportion mu in (0, 1) and
 // dispersion sigma > 0 with a known size n (a trailing field of the struct, not a parameter), on
 // y = 0, 1, ..., n. With a = mu / sigma and b = (1 - mu) / sigma,
 //
@@ -181,7 +181,7 @@ LAPLACE_HD void logpmf_dk_sums(double mu, double sigma, double n, double y, doub
 //
 // Checked symbolically (the six log-gammas cancel, so only an identity among logarithms is left)
 // and against the definition at 60 digits, 3.9e-55 relative over 60 points, non-integer y and n
-// among them (tools/reference/distrib_betabinom1.py).
+// among them (tools/reference/distrib_betabinom.py).
 //
 // Nothing in it is a difference of large terms. l_binom is Loader's own form (binomial.hpp), so
 // the pair log C(n, y) and y log mu + (n - y) log(1 - mu), each of the size of n log n and
@@ -397,7 +397,7 @@ LAPLACE_HD void logpmf_dk_stirling(double mu, double sigma, double n, double y, 
 }  // namespace detail_betabinom
 
 /**
- * \ingroup distrib_betabinom1
+ * \ingroup distrib_betabinom
  * \brief Beta-binomial distribution with known size \f$n\f$, parameterized by the mean proportion
  * \f$\mu \in (0, 1)\f$ and the dispersion \f$\sigma > 0\f$.
  *
@@ -408,9 +408,9 @@ LAPLACE_HD void logpmf_dk_stirling(double mu, double sigma, double n, double y, 
  * the integer shifts (regular at that limit) or, above size cuts where
  * \f$10\sigma \le \min(\mu, 1 - \mu)\f$, by a bounded-cost form through Stirling's error; the size
  * is a data constant, a trailing field not counted in \c n_params and not listed in \c params.
- * \see distrib_betabinom1, distrib_core, stirling
+ * \see distrib_betabinom, distrib_core, stirling
  */
-struct betabinom1_distrib {
+struct betabinom_distrib {
   /// Mean proportion \f$\mu \in (0, 1)\f$.
   double mu;
   /// Dispersion \f$\sigma \in (0, \infty)\f$; the binomial distribution is the limit \f$\sigma \to 0\f$.
@@ -428,7 +428,7 @@ struct betabinom1_distrib {
       {"sigma", 0.0, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth}};
 
   /**
-   * \ingroup distrib_betabinom1
+   * \ingroup distrib_betabinom
    * \brief Evaluates the log-mass \f$\log p(y; \mu, \sigma)\f$.
    *
    * Evaluates paired sums over the integer shifts for \f$n \le 8\f$ or outside
@@ -437,7 +437,7 @@ struct betabinom1_distrib {
    * Returns \f$-\infty\f$ when \f$y\f$ is not an integer in \f$\{0, \dots, n\}\f$.
    * \param y Observation point.
    * \return Log-mass value.
-   * \see distrib_betabinom1, logpmf_dk()
+   * \see distrib_betabinom, logpmf_dk()
    */
   LAPLACE_HD double logpmf(double y) const {
     const double n = size;
@@ -447,7 +447,7 @@ struct betabinom1_distrib {
   }
 
   /**
-   * \ingroup distrib_betabinom1
+   * \ingroup distrib_betabinom
    * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log p(y; \mu, \sigma)\f$.
    *
    * Component \f$b\f$ of the packed tensor holds \f$\partial^K \log p / \partial\mu^{K-b}
@@ -488,26 +488,26 @@ struct betabinom1_distrib {
   LAPLACE_HD sym_tensor<2, 6> logpmf_d6(double y) const { return logpmf_dk<6>(y); }
   /** @} */
 
-  /// \ingroup distrib_betabinom1
+  /// \ingroup distrib_betabinom
   /// \brief Lower bound of the support (0).
   LAPLACE_HD double support_lower() const { return 0.0; }
-  /// \ingroup distrib_betabinom1
+  /// \ingroup distrib_betabinom
   /// \brief Upper bound of the support (the size \f$n\f$).
   LAPLACE_HD double support_upper() const { return size; }
-  /// \ingroup distrib_betabinom1
+  /// \ingroup distrib_betabinom
   /// \brief Central location (the mean \f$n\mu\f$).
   LAPLACE_HD double center() const { return size * mu; }
-  /// \ingroup distrib_betabinom1
+  /// \ingroup distrib_betabinom
   /// \brief Typical spread \f$\sqrt{n\mu(1-\mu)(1 + (n-1)\sigma/(1+\sigma))}\f$.
   LAPLACE_HD double scale() const {
     return Kokkos::sqrt(size * mu * (1.0 - mu) * (1.0 + (size - 1.0) * sigma / (1.0 + sigma)));
   }
-  /// \ingroup distrib_betabinom1
+  /// \ingroup distrib_betabinom
   /// \brief Non-smooth points in the parameters (none).
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
 
   /**
-   * \ingroup distrib_betabinom1
+   * \ingroup distrib_betabinom
    * \brief Starting value from a sample summary: \f$\mu = \bar{y}/n\f$ (`s.mean`) and the moment
    * estimate of \f$\sigma\f$ from the sample variance (`s.variance`).
    *
@@ -517,10 +517,10 @@ struct betabinom1_distrib {
    * no overdispersion starts near the binomial limit instead of at an end of the domain, and a size
    * of 1 (where \f$\sigma\f$ is not identified) starts at \f$\sigma = 10^{-4}\f$.
    * \param s Sample summary computed by summarize_sample().
-   * \return A \c betabinom1_distrib preserving \c size, with both parameters strictly inside their domains.
+   * \return A \c betabinom_distrib preserving \c size, with both parameters strictly inside their domains.
    * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
    */
-  betabinom1_distrib start_value(const distrib_sample_summary& s) const {
+  betabinom_distrib start_value(const distrib_sample_summary& s) const {
     const double m = start_inside(s.mean / size, params[0]);
     const double v0 = size * m * (1.0 - m);
     double rho = size > 1.0 ? (s.variance / v0 - 1.0) / (size - 1.0) : 1e-4;

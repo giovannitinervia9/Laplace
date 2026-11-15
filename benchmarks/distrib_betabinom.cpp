@@ -1,16 +1,16 @@
-// Speed of betabinom1_distrib (include/laplace/distrib/betabinom1.hpp): the log-mass, its
+// Speed of betabinom_distrib (include/laplace/distrib/betabinom.hpp): the log-mass, its
 // derivatives of orders 1 and 6, the cdf and the derivatives of log F by the generic summation
 // route, and the expected information and its second derivative by the generic sum over the
 // support. The family has two routes, the sums over the integer shifts and the form of bounded cost
 // through Stirling's error, and the members take whichever of them the size calls for, so the
 // lines of the first block are read against n and the last block times the two routes side by side
 // at the same points. ns per call on one host thread (Serial) and on the default execution space.
-// The accuracy is measured by tests/distrib/test_betabinom1.cpp.
+// The accuracy is measured by tests/distrib/test_betabinom.cpp.
 //
-//   distrib_betabinom1
+//   distrib_betabinom
 #include "measure.hpp"
 
-#include <laplace/distrib/betabinom1.hpp>
+#include <laplace/distrib/betabinom.hpp>
 #include <laplace/distrib/generic_cdf.hpp>
 #include <laplace/distrib/generic_info.hpp>
 
@@ -24,10 +24,10 @@ namespace {
 // the quantity by a code; the size is a field of the functor, since the timing arguments carry
 // three doubles and the size is fixed along a line
 template <int WHAT>
-struct betabinom1_f {
+struct betabinom_f {
   double size;
   KOKKOS_INLINE_FUNCTION double operator()(double y, double mu, double sigma) const {
-    const ld::betabinom1_distrib d{mu, sigma, size};
+    const ld::betabinom_distrib d{mu, sigma, size};
     if constexpr (WHAT == 0) return d.logpmf(y);
     else if constexpr (WHAT == 1) {
       // one call, both components summed: two calls each using one component let the compiler drop
@@ -70,24 +70,24 @@ void size_lines(double mu, double sigma, double size, int n, bool heavy) {
     return bench::Args{std::floor(u(g) * (size + 1.0)), mu, sigma};
   });
   char what[96], name[48];
-  std::snprintf(name, sizeof name, "betabinom1(%.3g, %.3g; n = %.0f)", mu, sigma, size);
+  std::snprintf(name, sizeof name, "betabinom(%.3g, %.3g; n = %.0f)", mu, sigma, size);
   const char* q[7] = {"log p", "log p d1", "log p d6", "log F (sum)", "log F d2 (sum)", "info (sum)",
                       "info d2 (sum)"};
   std::snprintf(what, sizeof what, "%s %s", name, q[0]);
-  time_line(what, betabinom1_f<0>{size}, t);
+  time_line(what, betabinom_f<0>{size}, t);
   std::snprintf(what, sizeof what, "%s %s", name, q[1]);
-  time_line(what, betabinom1_f<1>{size}, t);
+  time_line(what, betabinom_f<1>{size}, t);
   std::snprintf(what, sizeof what, "%s %s", name, q[2]);
-  time_line(what, betabinom1_f<2>{size}, t);
+  time_line(what, betabinom_f<2>{size}, t);
   if (!heavy) return;  // the cdf and the information are sums over the support of sums over it
   std::snprintf(what, sizeof what, "%s %s", name, q[3]);
-  time_line(what, betabinom1_f<3>{size}, t, 1);
+  time_line(what, betabinom_f<3>{size}, t, 1);
   std::snprintf(what, sizeof what, "%s %s", name, q[4]);
-  time_line(what, betabinom1_f<4>{size}, t, 1);
+  time_line(what, betabinom_f<4>{size}, t, 1);
   std::snprintf(what, sizeof what, "%s %s", name, q[5]);
-  time_line(what, betabinom1_f<5>{size}, t, 1);
+  time_line(what, betabinom_f<5>{size}, t, 1);
   std::snprintf(what, sizeof what, "%s %s", name, q[6]);
-  time_line(what, betabinom1_f<6>{size}, t, 1);
+  time_line(what, betabinom_f<6>{size}, t, 1);
 }
 
 // the two routes at the same point, to read where their costs cross
@@ -112,17 +112,17 @@ struct route_f {
 void route_lines(double mu, double sigma, double size, int n) {
   const auto t = bench::make_time_args(n, [&] { return bench::Args{std::floor(mu * size) + 1.0, mu, sigma}; });
   char what[96];
-  std::snprintf(what, sizeof what, "betabinom1 n = %.0f log p sums", size);
+  std::snprintf(what, sizeof what, "betabinom n = %.0f log p sums", size);
   time_line(what, route_f<0, false>{size}, t);
-  std::snprintf(what, sizeof what, "betabinom1 n = %.0f log p stirling", size);
+  std::snprintf(what, sizeof what, "betabinom n = %.0f log p stirling", size);
   time_line(what, route_f<0, true>{size}, t);
-  std::snprintf(what, sizeof what, "betabinom1 n = %.0f d1 sums", size);
+  std::snprintf(what, sizeof what, "betabinom n = %.0f d1 sums", size);
   time_line(what, route_f<1, false>{size}, t);
-  std::snprintf(what, sizeof what, "betabinom1 n = %.0f d1 stirling", size);
+  std::snprintf(what, sizeof what, "betabinom n = %.0f d1 stirling", size);
   time_line(what, route_f<1, true>{size}, t);
-  std::snprintf(what, sizeof what, "betabinom1 n = %.0f d6 sums", size);
+  std::snprintf(what, sizeof what, "betabinom n = %.0f d6 sums", size);
   time_line(what, route_f<6, false>{size}, t);
-  std::snprintf(what, sizeof what, "betabinom1 n = %.0f d6 stirling", size);
+  std::snprintf(what, sizeof what, "betabinom n = %.0f d6 stirling", size);
   time_line(what, route_f<6, true>{size}, t);
 }
 

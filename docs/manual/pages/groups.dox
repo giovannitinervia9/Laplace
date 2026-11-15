@@ -197,7 +197,7 @@ parent here, in tree order; the module pages define their groups without
 \ingroup distrib_discrete */
 /** \addtogroup distrib_negbin2
 \ingroup distrib_discrete */
-/** \addtogroup distrib_betabinom1
+/** \addtogroup distrib_betabinom
 \ingroup distrib_discrete */
 /** \addtogroup distrib_pig
 \ingroup distrib_discrete */

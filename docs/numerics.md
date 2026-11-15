@@ -5496,7 +5496,7 @@ in the parameters of log F(y) and log(1 - F(y)) for any discrete distribution,
 with the dispatchers `distrib_log_cdf_dk<K>` and `distrib_log_ccdf_dk<K>`,
 which take the distribution's own `log_cdf_dK` member when it has one. One
 route serves the five discrete families whose cdf has no closed derivative
-(binomial, negbin1, negbin2, betabinom1, pig), in place of the mixed (a, x)
+(binomial, negbin1, negbin2, betabinom, pig), in place of the mixed (a, x)
 derivatives of the incomplete beta that two of them would need
 (decided with Giovanni on 2026-11-15, `note/piano_distrib_discrete.md`).
 
@@ -6606,18 +6606,18 @@ zero of the value would need an expansion of sqrt(pi/2) erfcx(x / sqrt 2) - 1
 around x = 0.30246, and nothing asks for it, since the quantity is used
 additively.
 
-## The beta-binomial and the Poisson-inverse Gaussian: betabinom1 and pig
+## The beta-binomial and the Poisson-inverse Gaussian: betabinom and pig
 
-**What.** `betabinom1_distrib` (mean proportion mu in (0, 1), dispersion sigma > 0, known size n)
+**What.** `betabinom_distrib` (mean proportion mu in (0, 1), dispersion sigma > 0, known size n)
 and `pig_distrib` (mean mu > 0, shape alpha > 0), the last two of the seven discrete families of
-phase 4 (`include/laplace/distrib/betabinom1.hpp`, `pig.hpp`). Each writes the log-mass with its six
+phase 4 (`include/laplace/distrib/betabinom.hpp`, `pig.hpp`). Each writes the log-mass with its six
 derivative orders; the Poisson-inverse Gaussian also writes its expected information, which is
 diagonal in this parametrization. Neither has a closed cumulative function, so the value of F, the
 derivatives of log F and log(1 - F), the quantile and the random numbers come from
 `generic_cdf.hpp`, `generic_quantile.hpp` and `generic_rng.hpp`, and the beta-binomial takes its
 expected information from `generic_info.hpp` as well, where the finite support makes the sum exact.
 
-### betabinom1
+### betabinom
 
 **How, the form.** With a = mu/sigma and b = (1 - mu)/sigma,
 
@@ -6867,7 +6867,7 @@ file holds the mass only, for the reason in the next section.
 
 ### Forms checked before transcription
 
-`tools/reference/distrib_betabinom1.py` and `tools/reference/distrib_pig.py` check every form with
+`tools/reference/distrib_betabinom.py` and `tools/reference/distrib_pig.py` check every form with
 SymPy or against mpmath before it is written in C++, and exit non-zero on any disagreement:
 
 - the shift identity and its derivatives to order 6, and Loader's form of log C(n, y) (SymPy,
@@ -6886,7 +6886,7 @@ SymPy or against mpmath before it is written in C++, and exit non-zero on any di
 
 ### References and the measured accuracy
 
-`distrib_betabinom1.py` writes 4072 rows (kind 0 the log-mass and its six orders, 2490 rows; kinds
+`distrib_betabinom.py` writes 4072 rows (kind 0 the log-mass and its six orders, 2490 rows; kinds
 1 and 2 log F and log(1 - F) by summing the mass, 1582 rows; fifteen (mu, sigma, n) with sigma from
 1e-6 to 1e3, mu from 0.02 to 0.98 and n from 1 to 1e5, five of them inside the region of the route
 of bounded cost and on the two sides of its cut) and `distrib_pig.py` 1532 rows (the mass only; ten (mu, alpha)
@@ -6897,19 +6897,19 @@ value would be a numerical derivative of a sum of Bessel functions at a raised w
 measured at about a second a component at order 4 on the light-tailed parameters and without bound
 at the heavy end; what the library computes there is the generic summation route, measured in its
 own section, and the test checks it against 5-point differences to order 3. For the same reason
-betabinom1's cumulative rows stop at n = 50. mpmath's own Bessel function is slow where its order
+betabinom's cumulative rows stop at n = 50. mpmath's own Bessel function is slow where its order
 and its argument are close (6.5 s for one value at (1e3, 1e3, y = 1e3) against 0.03 s at y = 1175),
 which is a property of the reference route and not of the library's, whose cost does not depend on
 y at all; the counts in that band are left out of the grid.
 
 The error is the library value minus the mpmath value, in ulps of the largest component of the same
 order at the same point, which is how every family with genuine zeros in its tensors is measured.
-Worst ulp over the whole file, per order. betabinom1 is read per route, because the two fail
+Worst ulp over the whole file, per order. betabinom is read per route, because the two fail
 differently: where the sums are taken the error follows the size by the law above, so the figure is
 divided by (n/50)^(3/2); where the form of bounded cost is taken it does not follow the size at all,
 so the figure is raw.
 
-| order | betabinom1 sums, / (n/50)^(3/2) | betabinom1 Stirling, raw | pig |
+| order | betabinom sums, / (n/50)^(3/2) | betabinom Stirling, raw | pig |
 |---|---|---|---|
 | 0 (the value) | 63.3 | 520 | 6.24 |
 | 1 | 98.2 | 1.83e3 | 1577 |
@@ -6927,16 +6927,16 @@ large size the two are each of the size of n while the log-mass is not. At n = 1
 is within 64.6 ulp, so this is a corner of n = 1e5 and not of the route. The pig's order-1 figure is
 the one Poisson-limit corner named above; every other order is below 201 ulp at counts from 0 to
 3000 and shapes from 1e-3 to 1e3. The two builds agree everywhere within a few ulp, so the table
-gives one figure for both. betabinom1's cumulative rows, which measure the generic summation route
+gives one figure for both. betabinom's cumulative rows, which measure the generic summation route
 and not this family, run from 34 ulp at order 0 to 4.1e6 at order 6, the worst at mu = 0.02 and
 mu = 0.98, where the mass sits at one end of the support.
 
 ### Speed
 
 ns per call on one host thread (Serial) and on four OpenMP threads, from
-`benchmarks/distrib_betabinom1.cpp` and `benchmarks/distrib_pig.cpp` (Serial figures):
+`benchmarks/distrib_betabinom.cpp` and `benchmarks/distrib_pig.cpp` (Serial figures):
 
-| quantity | betabinom1 n = 10 | n = 100 | n = 1e3 | n = 1e4 | pig(3.5, 2) | pig(1, 1e3) |
+| quantity | betabinom n = 10 | n = 100 | n = 1e3 | n = 1e4 | pig(3.5, 2) | pig(1, 1e3) |
 |---|---|---|---|---|---|---|
 | log p | 520 | 3709 | 36070 | 359906 | 252 | 271 |
 | log p, order 1 | 18.5 | 198 | 1803 | 18150 | 22.6 | 15.6 |
@@ -6947,5 +6947,5 @@ ns per call on one host thread (Serial) and on four OpenMP threads, from
 The pig's cost does not follow the count, which is what the walk from the largest term buys: at
 (mu, alpha) = (10, 1) the value costs 553, 320, 313, 309, 303, 304 and 307 ns at y = 1, 10, 1e2,
 1e3, 1e4, 1e5 and 1e6, and the order-6 tensor 2131 to 2232 ns over the same counts. For scale,
-negbin2's order-6 tensor is 16 us. betabinom1's cost is proportional to n in every quantity, and the
+negbin2's order-6 tensor is 16 us. betabinom's cost is proportional to n in every quantity, and the
 generic sums over the support are sums of sums, so they cost n^2.

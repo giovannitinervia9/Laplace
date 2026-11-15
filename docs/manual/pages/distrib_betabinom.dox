@@ -1,9 +1,9 @@
 /**
-\defgroup distrib_betabinom1 Beta-binomial
+\defgroup distrib_betabinom Beta-binomial
 \ingroup distrib
 \brief Discrete count distribution with known size, mean proportion \f$\mu \in (0, 1)\f$, and dispersion \f$\sigma > 0\f$, evaluating the log-mass and its derivatives to order six via shift sums and a bounded-cost Stirling form.
 
-Defined in `<laplace/distrib/betabinom1.hpp>` as \ref laplace::distrib::betabinom1_distrib "betabinom1_distrib", this module evaluates the beta-binomial log-mass and its parameter derivatives to order \f$6\f$. Every method is marked `LAPLACE_HD` so evaluators run on host CPUs and inside Kokkos device kernels. See \ref distrib_core "distrib_core" for the shared interface and `sym_tensor` storage. Cumulative functions, derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$, expected Fisher information with its derivatives, quantiles, and random variates all come from \ref distrib_generic "the generic routes". Against high-precision reference values the shift sums stay within \f$63.3\f$ ulp for sizes \f$n \le 50\f$, and the bounded-cost form within \f$64.6\f$ ulp at \f$n = 10^4\f$, \f$\sigma = 0.01\f$, where the sums have reached \f$2.2 \times 10^5\f$.
+Defined in `<laplace/distrib/betabinom.hpp>` as \ref laplace::distrib::betabinom_distrib "betabinom_distrib", this module evaluates the beta-binomial log-mass and its parameter derivatives to order \f$6\f$. Every method is marked `LAPLACE_HD` so evaluators run on host CPUs and inside Kokkos device kernels. See \ref distrib_core "distrib_core" for the shared interface and `sym_tensor` storage. Cumulative functions, derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$, expected Fisher information with its derivatives, quantiles, and random variates all come from \ref distrib_generic "the generic routes". Against high-precision reference values the shift sums stay within \f$63.3\f$ ulp for sizes \f$n \le 50\f$, and the bounded-cost form within \f$64.6\f$ ulp at \f$n = 10^4\f$, \f$\sigma = 0.01\f$, where the sums have reached \f$2.2 \times 10^5\f$.
 
 ## Classic form and reparametrization
 
@@ -17,7 +17,7 @@ In these parameters, the mean is \f$n\mu\f$, the variance is \f$n\mu(1 - \mu)\le
 
 ## Parameters, domain, and regularity
 
-Struct `betabinom1_distrib` sets `kind = distrib_kind::discrete` and `n_params = 2`. The descriptors in `params` give `mu` the open domain \f$(0, 1)\f$ and `sigma` the open domain \f$(0, \infty)\f$. Both declare the log-mass and cumulative functions infinitely smooth, with no kink (`param_kinks()` returns an empty set) and a fixed support from \f$0\f$ to \f$n\f$. Member `center()` returns the mean \f$n\mu\f$, and `scale()` returns the standard deviation \f$\sqrt{n\mu(1 - \mu)\left(1 + \frac{(n - 1)\sigma}{1 + \sigma}\right)}\f$. Off the support, and at any non-integer \f$y\f$, `logpmf()` returns \f$-\infty\f$. Parameter derivatives of order \f$K \in \{1, \dots, 6\}\f$ are packed in `sym_tensor<2, K>`, whose component \f$q\f$ holds \f$\partial^K \ell / \partial \mu^{K - q} \partial \sigma^q\f$ (\ref distrib_core "distrib_core").
+Struct `betabinom_distrib` sets `kind = distrib_kind::discrete` and `n_params = 2`. The descriptors in `params` give `mu` the open domain \f$(0, 1)\f$ and `sigma` the open domain \f$(0, \infty)\f$. Both declare the log-mass and cumulative functions infinitely smooth, with no kink (`param_kinks()` returns an empty set) and a fixed support from \f$0\f$ to \f$n\f$. Member `center()` returns the mean \f$n\mu\f$, and `scale()` returns the standard deviation \f$\sqrt{n\mu(1 - \mu)\left(1 + \frac{(n - 1)\sigma}{1 + \sigma}\right)}\f$. Off the support, and at any non-integer \f$y\f$, `logpmf()` returns \f$-\infty\f$. Parameter derivatives of order \f$K \in \{1, \dots, 6\}\f$ are packed in `sym_tensor<2, K>`, whose component \f$q\f$ holds \f$\partial^K \ell / \partial \mu^{K - q} \partial \sigma^q\f$ (\ref distrib_core "distrib_core").
 
 ## Formulas and cancellation-free evaluation
 
@@ -49,7 +49,7 @@ Because only the log-mass and its six derivative orders are supplied directly, c
 
 ## Accuracy and limits
 
-The \f$4072\f$ reference rows of `tools/reference/distrib_betabinom1.py` are evaluated with mpmath (The mpmath development team, 2023) from forms checked with SymPy (Meurer and others, 2017) over \f$\mu \in [0.02, 0.98]\f$, \f$\sigma \in [10^{-6}, 10^3]\f$, and \f$n \in [1, 10^5]\f$, with cumulative rows stopping at \f$n = 50\f$. Errors are measured inside Kokkos kernels on `gcc` and `CUDA` in ulps of the largest component of the same order at the same point, since every tensor of a given order has genuine zeros in \f$y\f$ and in the parameters (see \ref accuracy "How accuracy is measured"), and both builds agree within a few ulp.
+The \f$4072\f$ reference rows of `tools/reference/distrib_betabinom.py` are evaluated with mpmath (The mpmath development team, 2023) from forms checked with SymPy (Meurer and others, 2017) over \f$\mu \in [0.02, 0.98]\f$, \f$\sigma \in [10^{-6}, 10^3]\f$, and \f$n \in [1, 10^5]\f$, with cumulative rows stopping at \f$n = 50\f$. Errors are measured inside Kokkos kernels on `gcc` and `CUDA` in ulps of the largest component of the same order at the same point, since every tensor of a given order has genuine zeros in \f$y\f$ and in the parameters (see \ref accuracy "How accuracy is measured"), and both builds agree within a few ulp.
 
 | Quantity | Worst measured (ulp) | Test bound (ulp) |
 | --- | --- | --- |
@@ -60,18 +60,18 @@ The \f$4072\f$ reference rows of `tools/reference/distrib_betabinom1.py` are eva
 
 Each row lists the value first, then the orders \f$1\f$ to \f$6\f$. The two routes are bounded apart because they fail differently: the shift sums accumulate \f$n + 1\f$ roundings, so their error follows the size, while the bounded-cost form does not follow the size at all. Its three wider figures are the value and its first two orders at \f$n = 10^5\f$, \f$\sigma = 0.01\f$, where splitting the log-mass into the binomial's and a correction leaves two pieces each of the size of \f$n\f$ in the tail while the log-mass is not; at \f$n = 10^4\f$ the whole tensor stays within \f$64.6\f$ ulp.
 
-Measured at the same points, the shift sums alone reach \f$7.91 \times 10^4\f$ to \f$2.23 \times 10^5\f$ ulp at \f$n = 10^4\f$, \f$\sigma = 0.01\f$, where the bounded-cost route measures \f$64.6\f$, and \f$1.5 \times 10^4\f$ at \f$n = 1000\f$ where it measures \f$51.6\f$. The worst generic cumulative errors sit at \f$\mu = 0.02\f$ and \f$\mu = 0.98\f$. In `tests/distrib/test_betabinom1.cpp`, checks test normalization with tolerance \f$10^{-12}\f$, the binomial limit at \f$\sigma \in \{10^{-12}, 10^{-8}\}\f$, and the two routes against each other with tolerances of \f$10^{-14}\f$ to \f$10^{-10}\f$ where both hold. The test also checks `logpmf_dk()` against 5-point differences with tolerance \f$10^{-7}\f$, generic `expected_info()` against score variance with \f$10^{-9}\f$ (and \f$10^{-12}\f$ on \f$I_{\mu\sigma} = 0\f$ at \f$\mu = 1/2\f$), generic information and cumulative differences with \f$10^{-6}\f$ and \f$10^{-5}\f$, and `start_value()` inversion with \f$10^{-13}\f$ in \f$\mu\f$ and \f$10^{-11}\f$ in \f$\sigma\f$. Above \f$10\sigma = \min(\mu, 1 - \mu)\f$, only the shift sums are available, so error and cost grow with \f$n\f$ (reaching about \f$1.5 \times 10^4\f$ ulp at \f$n = 1000\f$, \f$\sigma = 1\f$) and generic support sums scale as \f$n^2\f$; see `docs/numerics.md`.
+Measured at the same points, the shift sums alone reach \f$7.91 \times 10^4\f$ to \f$2.23 \times 10^5\f$ ulp at \f$n = 10^4\f$, \f$\sigma = 0.01\f$, where the bounded-cost route measures \f$64.6\f$, and \f$1.5 \times 10^4\f$ at \f$n = 1000\f$ where it measures \f$51.6\f$. The worst generic cumulative errors sit at \f$\mu = 0.02\f$ and \f$\mu = 0.98\f$. In `tests/distrib/test_betabinom.cpp`, checks test normalization with tolerance \f$10^{-12}\f$, the binomial limit at \f$\sigma \in \{10^{-12}, 10^{-8}\}\f$, and the two routes against each other with tolerances of \f$10^{-14}\f$ to \f$10^{-10}\f$ where both hold. The test also checks `logpmf_dk()` against 5-point differences with tolerance \f$10^{-7}\f$, generic `expected_info()` against score variance with \f$10^{-9}\f$ (and \f$10^{-12}\f$ on \f$I_{\mu\sigma} = 0\f$ at \f$\mu = 1/2\f$), generic information and cumulative differences with \f$10^{-6}\f$ and \f$10^{-5}\f$, and `start_value()` inversion with \f$10^{-13}\f$ in \f$\mu\f$ and \f$10^{-11}\f$ in \f$\sigma\f$. Above \f$10\sigma = \min(\mu, 1 - \mu)\f$, only the shift sums are available, so error and cost grow with \f$n\f$ (reaching about \f$1.5 \times 10^4\f$ ulp at \f$n = 1000\f$, \f$\sigma = 1\f$) and generic support sums scale as \f$n^2\f$; see `docs/numerics.md`.
 
 ## Kokkos usage
 
 ```cpp
 #include <Kokkos_Core.hpp>
-#include <laplace/distrib/betabinom1.hpp>
+#include <laplace/distrib/betabinom.hpp>
 
-void eval_betabinom1(Kokkos::View<const double*> y, Kokkos::View<double*> out, double mu,
+void eval_betabinom(Kokkos::View<const double*> y, Kokkos::View<double*> out, double mu,
                      double sigma, double size) {
-  const laplace::distrib::betabinom1_distrib d{mu, sigma, size};
-  Kokkos::parallel_for("betabinom1_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+  const laplace::distrib::betabinom_distrib d{mu, sigma, size};
+  Kokkos::parallel_for("betabinom_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
     out(i) = d.logpmf(y(i)) + d.logpmf_d1(y(i))[0];
   });
 }
@@ -79,7 +79,7 @@ void eval_betabinom1(Kokkos::View<const double*> y, Kokkos::View<double*> out, d
 
 ## Members
 
-Struct \ref laplace::distrib::betabinom1_distrib "betabinom1_distrib" implements \ref distrib_core "distrib_core" for `n_params = 2`: `mu`, `sigma`, `size`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `logpmf()`, `logpmf_d1()`..`logpmf_d6()`, `logpmf_dk()`, and `start_value()`.
+Struct \ref laplace::distrib::betabinom_distrib "betabinom_distrib" implements \ref distrib_core "distrib_core" for `n_params = 2`: `mu`, `sigma`, `size`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `logpmf()`, `logpmf_d1()`..`logpmf_d6()`, `logpmf_dk()`, and `start_value()`.
 
 ## References
 

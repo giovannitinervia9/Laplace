@@ -1,7 +1,7 @@
-"""SymPy check of the closed forms of betabinom1 and mpmath references of its log-mass, log F
+"""SymPy check of the closed forms of betabinom and mpmath references of its log-mass, log F
 and log(1 - F) derivatives in (mu, sigma) to total order 6.
 
-Usage (from the repository root):  python -I tools/reference/distrib_betabinom1.py
+Usage (from the repository root):  python -I tools/reference/distrib_betabinom.py
 
 The beta-binomial of mean proportion mu in (0, 1) and dispersion sigma > 0 with a known size n
 has, with a = mu / sigma and b = (1 - mu) / sigma,
@@ -27,7 +27,7 @@ the header uses:
     each sum of terms of one sign;
   - Loader's form of log C(n, y) with Stirling's error.
 
-Part 2, mpmath (tests/data/reference/distrib_betabinom1.csv), one row per value:
+Part 2, mpmath (tests/data/reference/distrib_betabinom.csv), one row per value:
     kind (0 log p, 1 log F, 2 log(1 - F)), y, mu, sigma, size, K, b, hi, lo
 with b the number of derivatives in sigma (K - b in mu) and y, mu, sigma, size, hi, lo as
 hexadecimal doubles. The mass rows are mpmath evaluations of the symbolic derivatives of the
@@ -42,7 +42,7 @@ from pathlib import Path
 import mpmath
 import sympy as sp
 
-OUT = Path(__file__).resolve().parents[2] / "tests" / "data" / "reference" / "distrib_betabinom1.csv"
+OUT = Path(__file__).resolve().parents[2] / "tests" / "data" / "reference" / "distrib_betabinom.csv"
 MAXK = 6
 AGREE = mpmath.mpf(2) ** -80
 
@@ -330,7 +330,7 @@ def main():
             f.writelines(lines)
             n_rows += len(lines)
             dropped += dr
-    print(f"distrib_betabinom1.csv: {n_rows} rows ({dropped} dropped)")
+    print(f"distrib_betabinom.csv: {n_rows} rows ({dropped} dropped)")
 
 
 if __name__ == "__main__":
