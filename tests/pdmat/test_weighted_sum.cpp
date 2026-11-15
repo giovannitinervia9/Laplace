@@ -115,6 +115,24 @@ double log_pdet_any(const lp::weighted_sum_psdmat& s, const std::vector<int>& tu
   }
 }
 
+// the same derivatives read from one evaluated state
+double log_pdet_at_any(const lp::weighted_sum_psdmat& s, const std::vector<int>& tup, double* w) {
+  auto pick = [&](auto k) {
+    constexpr int K = decltype(k)::value;
+    int idx[K];
+    for (int q = 0; q < K; ++q) idx[q] = tup[q];
+    return s.template log_pdet_dk_at<K>(idx, w);
+  };
+  switch (tup.size()) {
+    case 1: return pick(std::integral_constant<int, 1>{});
+    case 2: return pick(std::integral_constant<int, 2>{});
+    case 3: return pick(std::integral_constant<int, 3>{});
+    case 4: return pick(std::integral_constant<int, 4>{});
+    case 5: return pick(std::integral_constant<int, 5>{});
+    default: return pick(std::integral_constant<int, 6>{});
+  }
+}
+
 // bounds in ulps of max(|ref|, 1), per case and order 0..6: the measured
 // worst (gcc, 2026-11-14) times about 4
 double ulp_bound(const std::string& name, int order) {
@@ -265,4 +283,26 @@ TEST_CASE("weighted_sum_psdmat: rejected inputs") {
   CHECK_THROWS_AS(lp::weighted_sum_psdmat(std::vector<host_matrix>{}), std::invalid_argument);
   CHECK_THROWS_AS(lp::weighted_sum_psdmat(std::vector<host_matrix>{a, b}), std::invalid_argument);
   CHECK_THROWS_AS(lp::weighted_sum_psdmat(std::vector<host_matrix>{a, c}), std::invalid_argument);
+}
+
+TEST_CASE("weighted_sum_psdmat: one evaluated state serves every order") {
+  const auto cases = read_cases();
+  const auto refs = read_refs();
+  std::map<std::string, lp::weighted_sum_psdmat> structs;
+  for (const auto& [name, c] : cases) structs.emplace(name, lp::weighted_sum_psdmat(c.S));
+  std::vector<double> w, w2;
+  for (const auto& r : refs) {
+    const auto& s = structs.at(r.name);
+    w.assign(s.scratch_size(), 0.0);
+    w2.assign(s.scratch_size(), 0.0);
+    const double v = s.log_pdet_state(r.theta.data(), w.data());
+    CHECK(v == s.log_pdet(r.theta.data(), w2.data()));
+    if (r.tup.empty()) continue;
+    // read twice: the state is not consumed; both equal the per-call value bit for bit
+    const double a = log_pdet_at_any(s, r.tup, w.data());
+    const double b = log_pdet_at_any(s, r.tup, w.data());
+    const double c = log_pdet_any(s, r.tup, r.theta.data(), w2.data());
+    CHECK(a == c);
+    CHECK(b == c);
+  }
 }

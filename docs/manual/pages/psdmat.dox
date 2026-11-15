@@ -130,7 +130,9 @@ The loss that grows with the order comes from the alternating signs of the parti
 
 ### Speed
 
-Every call recomputes the transform. On one gcc thread, `log_pdet()` takes 8.2 microseconds at \f$p = 8\f$ and 218 at \f$p = 36\f$; `log_pdet_d6()` takes 55.9 and 718.
+The per-call functions recompute the transform on each call. On one gcc thread, `log_pdet()` takes 8.2 microseconds at \f$p = 8\f$ and 218 at \f$p = 36\f$; `log_pdet_d6()` takes 55.9 and 718.
+
+When evaluating a table of derivatives at one \f$\theta\f$, compute the state once with \ref laplace::pdmat::weighted_sum_psdmat::log_pdet_state "log_pdet_state()" and read every derivative from the same scratch buffer `w` with \ref laplace::pdmat::weighted_sum_psdmat::log_pdet_dk_at "log_pdet_dk_at()". This uses no extra memory and returns the same values bit for bit as the per-call functions. Measurements on one gcc thread cover tables of every sorted tuple of orders 0 to \f$K\f$, for \f$m\f$ penalties splitting the second-difference penalty of \f$p\f$ columns. Up to order 2, the gain ranges from 5.4 at \f$m = 2\f$, \f$p = 10\f$ to 15 at \f$m = 4\f$, \f$p = 20\f$, because the transform is the whole cost. Up to order 6, the gain is 1.4 at \f$m = 2\f$, \f$p = 10\f$ to 4.5 at \f$m = 2\f$, \f$p = 50\f$, because the partition sum over word traces dominates.
 
 ### Host evaluation
 

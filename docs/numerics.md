@@ -5118,11 +5118,32 @@ Speed (gcc, microseconds per call, one thread, theta = (9.2, 0, 4.6)):
 | te2 | 30 | 26 | 2 | 104 | 112 | 111 | 250 |
 | te3 | 36 | 28 | 3 | 218 | 233 | 235 | 718 |
 
-Every call repeats the transform: one restriction and one eigendecomposition
-per level, then Q^T S_j Q, the Cholesky factor and the B_j. A full table of
-derivatives at one theta repeats it for every tuple. Open: an evaluated
-state at one theta that serves every order, if a fit shows that the cost
-matters.
+Every `log_pdet_dk` call repeats the transform: one restriction and one
+eigendecomposition per level, then Q^T S_j Q, the Cholesky factor and the B_j.
+
+**One evaluated state per theta** (benchmarks/pdmat_ws_state.cpp, gcc, one
+thread). `log_pdet_state(t, w)` runs the transform once and leaves G_j, B_j and
+the Cholesky factor in the caller's scratch `w`; `log_pdet_dk_at<K>(idx, w)`
+then reads any derivative from it without changing it. No new memory (the
+scratch of `scratch_size()` doubles is the state) and the per-call functions
+are unchanged. The values equal the per-call ones bit for bit (tested on every
+reference point). Tables of all sorted tuples of orders 0 to K, microseconds,
+for m penalties that split the second-difference penalty of p columns by rows:
+
+| m, p | tuples (K<=6) | table K<=2, per call | from state | table K<=6, per call | from state |
+|---|---|---|---|---|---|
+| 2, 10 | 28 | 57 | 10 (x5.4) | 827 | 583 (x1.4) |
+| 2, 50 | 28 | 3167 | 530 (x6.0) | 18251 | 4040 (x4.5) |
+| 3, 20 | 84 | 529 | 55 (x9.6) | 7716 | 3258 (x2.4) |
+| 3, 50 | 84 | 6053 | 649 (x9.3) | 76720 | 24142 (x3.2) |
+| 4, 20 | 210 | 988 | 66 (x15) | 25086 | 11029 (x2.3) |
+| 4, 50 | 210 | 11131 | 772 (x14) | 261853 | 99748 (x2.6) |
+
+Up to order 2 the transform is the whole cost, so a table costs one
+transform: the gain is the number of tuples, 5 to 15. Up to order 6 the
+partition sum over the traces of the words dominates (33 to 82 per cent of the
+per-call table is the repeated transform), and the gain is 1.4 to 4.5. Open:
+the partition sums themselves, shared between tuples of one order.
 
 ## Basis transforms: constraints, orthonormalization, Demmler-Reinsch
 

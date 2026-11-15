@@ -98,3 +98,7 @@ laplace_kokkos_sources(pdmat_weighted_sum.cpp)
 add_executable(pdmat_weighted_sum pdmat_weighted_sum.cpp)
 target_link_libraries(pdmat_weighted_sum PRIVATE Laplace::laplace Laplace::dense)
 target_compile_definitions(pdmat_weighted_sum PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
+
+laplace_kokkos_sources(pdmat_ws_state.cpp)
+add_executable(pdmat_ws_state pdmat_ws_state.cpp)
+target_link_libraries(pdmat_ws_state PRIVATE Laplace::laplace Laplace::dense)

@@ -415,6 +415,59 @@ class weighted_sum_psdmat {
     return derivative(idx, w);
   }
 
+  /**
+   * \ingroup psdmat
+   * \brief Evaluates \f$\log\lvert M(\theta)\rvert_+\f$ and stores the shared state at \f$\theta\f$ in `w`.
+   *
+   * Host only. Runs the graded similarity transform, the Cholesky factor of \f$H\f$, and the
+   * matrices \f$B_j = H^{-1} G_j\f$ once (see \ref psdmat "the positive semidefinite structures page")
+   * and leaves them in `w`. The state is the scratch buffer itself, using no new memory. Any
+   * derivative at the same \f$\theta\f$ can then be read via `log_pdet_dk_at()`, while `log_pdet()`,
+   * `log_pdet_dk()`, and `log_pdet_d1()` to `log_pdet_d6()` remain unchanged and recompute the
+   * transform. Do not modify `w` or reuse it for another \f$\theta\f$ while reading the state.
+   * Returns quiet \c NaN if the transform fails to find \f$r\f$ columns or the Cholesky
+   * factorization of \f$H\f$ fails; the state is then invalid.
+   *
+   * \param t Array of \f$m\f$ parameters \f$\theta\f$.
+   * \param w Caller host scratch buffer of at least `scratch_size()` doubles, holding the state on success.
+   * \return Sum of logarithms of the \f$r\f$ nonzero eigenvalues of \f$M(\theta)\f$, or quiet \c NaN on failure.
+   *
+   * Accuracy: equals `log_pdet()` bit for bit on every reference point.
+   *
+   * \see log_pdet_dk_at(), log_pdet_dk(), log_pdet(), psdmat
+   */
+  double log_pdet_state(const double* t, double* w) const {
+    double logdet;
+    if (!transform(t, w, logdet, true)) return std::numeric_limits<double>::quiet_NaN();
+    return logdet;
+  }
+
+  /**
+   * \ingroup psdmat
+   * \brief Partial derivative of \f$\log\lvert M(\theta)\rvert_+\f$ of order \f$K\f$ from an evaluated state.
+   *
+   * Host only. Computes the partial derivative
+   * \f$\partial^K\log\lvert M(\theta)\rvert_+/(\partial\theta_{i_1}\cdots\partial\theta_{i_K})\f$
+   * along the sorted tuple `idx` \f$= (i_1, \dots, i_K)\f$ from the partition trace sum over the
+   * matrices \f$B_j\f$ left in `w` by `log_pdet_state()`. Reading does not modify the stored state,
+   * so any number of tuples can be read while `w` is not modified or reused for another \f$\theta\f$.
+   * If `log_pdet_state()` failed and returned quiet \c NaN, the state in `w` is invalid and
+   * `log_pdet_dk_at()` must not be called on it.
+   *
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param idx Sorted tuple of \f$K\f$ 0-based parameter indices in \f$\{0, \dots, m - 1\}\f$.
+   * \param w Caller host scratch buffer of at least `scratch_size()` doubles from a successful `log_pdet_state()`.
+   * \return Partial derivative value along `idx`.
+   *
+   * Accuracy: equals `log_pdet_dk()` bit for bit on every reference point.
+   *
+   * \see log_pdet_state(), log_pdet_dk(), log_pdet_d1(), psdmat
+   */
+  template <int K>
+  double log_pdet_dk_at(const int (&idx)[K], double* w) const {
+    return derivative(idx, w);
+  }
+
   /// \ingroup psdmat
   /// \brief Order-1 partial derivative \f$\partial M/\partial\theta_{i_1}\f$; forwards to `matrix_dk<1>()`.
   /// \param t Parameter array \f$\theta\f$. \param i Sorted index \f$i_1\f$. \param m Packed output buffer. \param w Scratch buffer.
