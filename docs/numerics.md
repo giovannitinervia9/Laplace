@@ -5755,7 +5755,7 @@ anything. Worst error in ulps, gcc and CUDA (one figure when they agree):
 | I and its derivatives to order 4 | 1.1 to 2.3 | 1.0 to 2.1 | 1.7 to 4.4 |
 | log F | 0.5 to 4.9 | 4.7 | 63.5 / 82.5 (value), 2.6 to 60.3 |
 | log(1 - F) | 0.5 to 2.6 | 4.3 | 1.1 to 7.1 |
-| F, 1 - F | exact | 79, 124 / 461 | — |
+| F, 1 - F | exact | 79, 124 / 461 | â€” |
 
 The derivatives of the mass are scored in ulps of the larger of their two
 terms, since near the mode they are small against both (the binomial's order 3
@@ -6605,3 +6605,347 @@ if the elastic net's profile shows these calls. The relative accuracy at the
 zero of the value would need an expansion of sqrt(pi/2) erfcx(x / sqrt 2) - 1
 around x = 0.30246, and nothing asks for it, since the quantity is used
 additively.
+
+## The beta-binomial and the Poisson-inverse Gaussian: betabinom1 and pig
+
+**What.** `betabinom1_distrib` (mean proportion mu in (0, 1), dispersion sigma > 0, known size n)
+and `pig_distrib` (mean mu > 0, shape alpha > 0), the last two of the seven discrete families of
+phase 4 (`include/laplace/distrib/betabinom1.hpp`, `pig.hpp`). Each writes the log-mass with its six
+derivative orders; the Poisson-inverse Gaussian also writes its expected information, which is
+diagonal in this parametrization. Neither has a closed cumulative function, so the value of F, the
+derivatives of log F and log(1 - F), the quantile and the random numbers come from
+`generic_cdf.hpp`, `generic_quantile.hpp` and `generic_rng.hpp`, and the beta-binomial takes its
+expected information from `generic_info.hpp` as well, where the finite support makes the sum exact.
+
+### betabinom1
+
+**How, the form.** With a = mu/sigma and b = (1 - mu)/sigma,
+
+    l = log C(n, y) + log B(y + a, n - y + b) - log B(a, b),   y = 0, ..., n.
+
+The two log-betas are of the size of (a + b) log(a + b) while their difference is of the size of
+one, so neither is ever formed. Both shifts y and n - y are integers, so the recurrence of the gamma
+function turns the difference into sums of logarithms, and in those the logarithms of sigma cancel,
+because y + (n - y) - n = 0:
+
+    l = log C(n, y) + sum_(i<y) log(mu + i sigma) + sum_(i<n-y) log(1 - mu + i sigma)
+                    - sum_(i<n) log(1 + i sigma).
+
+Every term is regular at sigma = 0, where the three sums vanish and the value is the binomial's
+log C(n, y) + y log mu + (n - y) log(1 - mu): the binomial limit needs no limit, no series and no
+branch. log C(n, y) is taken in Loader's form, (1/2) log(n / (2 pi y (n - y))) + delta(n) - delta(y)
+- delta(n - y) + n H(y/n) with delta Stirling's error and n H = -y log(y/n) - (n - y) log(1 - y/n),
+as in `binomial.hpp`.
+
+This is written in (mu, sigma) and not in (a, b): the derivatives in (a, b) composed with
+a = mu/sigma carry inner factors of the size of sigma^-(K+1) against a result of the size of one, a
+relative loss of sigma^-K at the binomial limit, which is the trap negbin1's shape chain has.
+
+**How, the three sums are paired.** They cancel against each other and each is far larger than the
+result once the size grows: at (mu, sigma, n) = (0.02, 0.25, 50) and y = 0 the second and the third
+are of the size of 100 while the log-mass is 0.4, and at n = 1e4 the three are of the size of 4e4
+against a result of the size of 10. Summed each over its own range and subtracted afterwards they
+lose that ratio: measured 651 ulp at the first point and 1.75e5 at the second. They are therefore
+walked in one pass over i = 0, ..., n - 1 and paired at each i, so that the error of a term is
+relative to that term's own contribution. The value takes one logarithm of the product of whichever
+of A = mu + i sigma and B = 1 - mu + i sigma is still in range over C = 1 + i sigma, which is also a
+third of the cost.
+
+**How, the derivatives.** Each logarithm is a logarithm of an affine function of (mu, sigma), so
+with K = p + q derivatives, p in mu and q in sigma,
+
+    d^K l = (-1)^(K-1) (K-1)! [ sum_(i<y) i^q / A^K + (-1)^p sum_(i<n-y) i^q / B^K
+                                - [p = 0] sum_(i<n) i^K / C^K ],
+
+the third sum entering the pure derivatives in sigma only, since C does not depend on mu. They are
+taken in the same one pass, and two of the pairings remove a cancellation of their own:
+
+- the pure derivatives in mu of odd order need 1/A^K - 1/B^K, whose two terms are equal at mu = 1/2
+  and within (1 - 2 mu)/(i sigma) of each other at every i once sigma is large, while their
+  difference is of the size of the result: measured **3.9e15 ulp** at order 5, mu = 1/2,
+  sigma = 1e3, n = 7, with the two sums taken apart. Since B - A = (1 - mu) - mu is exact and does
+  not depend on i,
+
+      1/A^K - 1/B^K = (B - A) sum_(j=0)^(K-1) A^-(K-j) B^-(j+1),
+
+  a sum of terms of one sign, exactly 0 at mu = 1/2;
+- the pure derivative in sigma takes i^K (1/A^K + 1/B^K - 1/C^K) at each i, with (i/C)^K formed as
+  a power of the ratio.
+
+**The error grows with the size, by a law.** What is left after the pairing is the n + 1 roundings
+of the pass itself, and over the reference sizes 1 to 1e4 the worst error follows (n/50)^(3/2)
+closely: dividing the worst ulp of each order by that factor leaves between 38 and 163 over every
+order and every size. The raw numbers are 1.7 to 63 ulp at n <= 50, 1.5e4 at n = 1e3 and 2.2e5 at
+n = 1e4. The test's bound for the mass carries the same factor, so that it stays tight at the sizes
+the family is normally used with.
+
+**What was tried and rejected.** Accumulating the sums as products of their positive terms, with one
+logarithm taken whenever the running product leaves [2^-512, 2^512]: it saves 11 per cent of the
+value at n = 1e4 (342 us against 385) and costs two orders of magnitude of accuracy, because the
+relative error of a product of n factors is n eps while n independent logarithms accumulate
+sqrt(n) eps.
+
+**The second route, of bounded cost (Giovanni, 2026-11-15: write it).** The sums cost n + 1 terms
+and their roundings grow by the law above, so the family also carries a form that costs the same at
+every size. Substituting lgamma(z) = (z - 1/2) log z - z + log sqrt(2 pi) + delta(z) in the six
+log-gammas of the definition gives, with Delta = y - n mu, A = mu + y sigma,
+B = 1 - mu + (n - y) sigma and C = 1 + n sigma, so that A + B = C exactly:
+
+    l = l_binom(mu; n, y)                                 the binomial log-mass, in Loader's form
+        + Delta [rho(w) - rho(v)],   rho(t) = D(1 + t)/t,
+          w = Delta sigma / (mu C),  v = -Delta sigma / ((1 - mu) C)
+        - (1/2) [log A - log mu + log B - log(1 - mu) - log C]
+        + [delta(A/sigma) + delta(B/sigma) - delta(C/sigma)]
+        - [delta(mu/sigma) + delta((1 - mu)/sigma) - delta(1/sigma)].
+
+Nothing in it is a difference of large terms. l_binom is Loader's own form (`binomial.hpp`), so the
+pair log C(n, y) and y log mu + (n - y) log(1 - mu), each of the size of n log n and cancelling to
+the size of one, is never formed. The two deviances are
+[bd0(A, mu C) + bd0(B, (1 - mu) C)] / sigma, taken through rho because 1 + w = A/(mu C) and
+1 + v = B/((1 - mu) C) exactly, and w and v have opposite signs, so the difference of the two rho is
+a sum of magnitudes. Every logarithm is a logarithm of an affine form. The two bracketed groups of
+Stirling errors are each of the size of sigma and their difference of the size of sigma^2, which is
+an absolute error of the size of eps and never a relative one.
+
+The derivatives are closed except for the two rho: d^(p+q) log A =
+(-1)^(p+q-1) (p+q-1)! y^q A^-(p+q) and likewise for the other four logarithms; w = (y/mu - n) g and
+v = ((n-y)/(1-mu) - n) g with g = sigma/C are each a function of mu times a function of sigma, so
+their partials are the product of the two factors'; and Delta is affine, so
+d^(p+q)(Delta F) = Delta F_(p,q) - n p F_(p-1,q). The Stirling errors are taken as the asymptotic
+series of `stirling.hpp` in the SMALL variable x = sigma/z, delta(z/sigma) = sum_j s_j x^(2j-1) with
+s_j = B_2j / (2j (2j-1)), and differentiated term by term in closed form, which is why the route
+holds only where that series does, that is where all six arguments are at least 10:
+**10 sigma <= min(mu, 1 - mu)**. Composing delta's own derivatives with z/sigma instead would carry
+inner factors of the size of sigma^-(q+1) against a result of the size of one, the same trap the
+(a, b) chain has; outside the region the series diverges and the route gives 1e36 to 1e180 ulp, so
+the guard is not a convenience.
+
+**Checked before transcription.** The six log-gammas cancel between the two sides, so what is left
+is an identity among logarithms; SymPy proves that one at three rational mu (it does not pull the
+constant out of log(c x + c), so the check is on the ratio of the two sides). The whole identity is
+then checked against the definition at 60 digits over 90 points, 6.6e-55 relative at worst, with
+non-integer y and n among them, which also shows that it needs no integer shift.
+
+**Which route each quantity takes.** The two routes' costs cross at a different size for the value
+than for a tensor (ns per call on one thread, sums against Stirling): the value at n = 8
+(366/361 there, 3230/253 at n = 160), the tensors at 120, 250, 420, 570, 700 and 800 for the orders
+1 to 6, the Stirling side costing 214, 460, 1040, 2200, 3400 and 6600 ns at every size. The cut is
+therefore n = 8 for the value and n = 160 for every derivative order. Above order 1 that is set by
+accuracy and not by cost: at n = 160 the sums have already reached about 940 ulp by the law above,
+where the Stirling route stays near 65 ulp at every size, and the price is at most five times the
+cost of a tensor between n = 160 and n = 800. Where both routes hold they agree to 1e-14 to 1e-10
+of the scale of the order (a test case, read as the Stirling route's own check below n = 50, where
+the sums are the accurate side, and as the sums' loss above it).
+
+**What it is worth.** Measured against the same references, in ulps of the largest component of the
+order: at n = 1e4, sigma = 0.01 the sums give 7.9e4 to 2.2e5 ulp and this route 64.6; at n = 1000,
+51.6 against 1.5e4; at n = 40 and n = 12, where the sums are already good, 4.11 and 10.2 against
+44.6 and 6.98. The value's cost falls from 178 us to 230 ns at n = 1e4 and the order-6 tensor's from
+63 to 6.5 us. A size of 1e5 is now in reach at all.
+
+**Two measurements inside the route.** (i) The composition it needs is of a function of ONE
+variable with one map of the two parameters, and `chain_rule_pair_dk` pays for the general case:
+`chain_rule_pair_scalar_dk` (chain_pair.hpp) replaces the multi-index over the outer arguments by
+one order, which takes the state from 210 to 84 doubles and one loop dimension away, and the
+order-6 composition from 3.6 to 0.7 us. The two agree to 1e-14 of the scale of the order, not bit
+for bit, because the scalar one takes the two binomial coefficients out of its innermost loop.
+(ii) A local table of the binomial coefficients in that innermost loop was measured and dropped: 49
+doubles have to be written to the stack at every call, where the product form stays in registers,
+and the order-6 composition went from 6.9 to 44 us.
+
+**What is open.** The region of the second route is set by the asymptotic branch of Stirling's
+error, so above 10 sigma = min(mu, 1 - mu) only the sums are available, and there their error still
+follows the law above: at n = 1000 and sigma = 1 it is about 1.5e4 ulp. The generic sums over the
+support are sums of sums, so the expected information and the cumulative derivatives cost n^2 where
+the sums route is taken: at n = 100 the information is 400 us on one thread.
+
+### pig
+
+**How, the form.** With s = sqrt(mu^2 + alpha^2),
+
+    p(y) = sqrt(2 alpha / pi) e^(s - mu) (mu alpha / (mu + s))^y K_(y - 1/2)(alpha) / y!,
+
+mean mu and variance mu + mu^2/(s - mu). The order of the Bessel function is always half an odd
+integer, so it is elementary: with m = max(y - 1, 0),
+
+    K_(y-1/2)(alpha) = sqrt(pi / (2 alpha)) e^-alpha sum_(k=0)^m (m+k)! / (k! (m-k)!) (2 alpha)^-k,
+
+a sum of positive terms, checked against mpmath's own Bessel function for y = 0..24, 40 and 60 and
+alpha from 1e-4 to 1e4 (worst 4.6e-60 relative, at 60 digits). Its square root of alpha cancels the
+mass's exactly, and the powers of alpha of the sum join the (mu alpha)^y, which leaves one
+exponential family in theta = log(2 alpha) over the shifted index j = y - k, which runs from 1 to y:
+
+    l = (s - mu - alpha) + y log mu - y log(mu + s) - y log 2 + log Q(theta) - loggamma(y + 1),
+    Q(theta) = sum_(j=1)^y a_j e^(j theta),   a_j = (2y - 1 - j)! / ((y - j)! (j - 1)!),
+
+with Q = 1 at y = 0, where the mass is e^(s - mu - alpha) exactly. **So no Bessel routine, no
+uniform (Debye) expansion and no generated table enters this family**, and the open point of the
+Bessel section, a closed form for half-integer orders which the Poisson-inverse Gaussian needs, is
+closed by not needing one.
+
+The terms are walked outwards from their largest, whose index j* is the root in [1, y] of
+j^2 - (2y - 1 + 2 alpha) j + 2 alpha y = 0, by the exact ratio
+a_(j+1) e^theta / a_j = 2 alpha (y - j) / (j (2y - 1 - j)), and the walk stops when a term falls
+below 2^-80 of the largest. j* is about alpha and the width of the weights about sqrt(alpha), so
+**the cost does not follow the count**: measured flat from y = 1 to y = 1e6 (table below).
+
+**How, the value.** Written as log Q - loggamma(y + 1) the mass keeps terms of the size of y log y
+while it is itself of the size of y log((mu + s) / (2 mu)), which the heavy-tailed end makes small:
+measured 2.6e5 ulp at (mu, alpha, y) = (1e3, 1e-3, 1e6). The four log-gammas of a_(j*) and of y! are
+therefore taken through Stirling's error: their linear parts sum to j* + 2, the coefficients of
+log y to -3/2, and the coefficient of log 2 to -(j* + 1/2) once 2y log 2 is taken out, which is
+exactly what the remaining y log(2 mu / (mu + s)) needs. What is left of the four arguments'
+logarithms is three log1p of arguments of the size of j*/y, and the one term of the size of y is
+-y log1p(alpha^2 / (2 mu (s + mu))):
+
+    l = (s - mu - alpha) + (j* + 2) - log(2 pi)
+        + delta(2y - j*) - delta(y - j* + 1) - delta(j*) - delta(y + 1)
+        - (3/2) log y - (j* + 1/2) log 2 - (j* - 1/2) log j*
+        + (2y - j* - 1/2) log1p(-j*/(2y)) - (y - j* + 1/2) log1p((1 - j*)/y)
+        - (y + 1/2) log1p(1/y) + j* log(2 alpha)
+        - y log1p(alpha^2/(2 mu (s + mu))) + log W,
+
+W the sum of the terms scaled by the largest. The constant s - mu - alpha is the log-mass at y = 0
+and cancels at both ends, so it is taken as mu^2/(s + alpha) - mu when alpha >= mu and as
+alpha^2/(s + mu) - alpha otherwise: in each the positive term is at most half the negative one. With
+the whole grouping the worst error on the grid of the measurement above falls from 2.6e5 ulp to
+3.8 ulp.
+
+**How, the derivatives in the mean.** The score in the mean is exactly
+
+    dl/dmu = c (y - mu),   c = 1/mu - 1/s,
+
+the terms of the size of y cancelling identically, which is also why I_mu_mu = c. The first order
+keeps that factored form, which is exactly 0 at y = mu. Above it the product is differentiated
+expanded instead,
+
+    d^(p+q) l / dmu^p dalpha^q = y c_(p-1,q) + m_(p-1,q),   m = mu / s,   p >= 1, p + q >= 2,
+
+because the factored form (y - mu) c_(p-1,q) - (p-1) c_(p-2,q) splits a result of the size of
+alpha^-(p-1) into terms of the size of one at the Poisson limit: measured 4.1e15 ulp on the order-6
+tensor at (mu, alpha, y) = (1, 1e3, 0), where the whole tensor is d^K s / dmu^K. The two forms are
+algebraically the same, since mu c_(p-1) + (p-1) c_(p-2) = -m_(p-1).
+
+Both c and m are functions of the one ratio alpha / mu, and which of its two powers is the small one
+decides the composition, because an inner map that is large makes every term of the chain large
+while the result is not. With h(x) = 1 - (1 + x)^(-1/2) and g(x) = (1 + x)^(-1/2) = 1 - h(x), whose
+derivatives are g^(n)(x) = (-1)^n (2n)!/(4^n n!) (1 + x)^(-1/2-n), the split is at alpha = mu:
+
+    alpha <= mu:  u = (alpha / mu)^2 <= 1,  c = h(u) / mu,           m = 1 - h(u),
+    alpha >  mu:  v = (mu / alpha)^2 < 1,   c = 1/mu - g(v) / alpha,  m = (mu / alpha) g(v).
+
+h's value is written x / (w (w + 1)), w = sqrt(1 + x), because 1/mu - 1/s loses everything when
+alpha is much smaller than mu. Taking the first branch everywhere gave 6.8e12 ulp at the same
+Poisson-limit point, every term of the chain for d^5 m / dmu^5 being of the size of 1e-3 against a
+result of 4.5e-14. In each branch the inner maps are products of a power of one parameter and a
+power of the other, so their partials are closed, and `chain_rule_pair_dk` composes them once per
+order.
+
+**How, the derivatives in the shape.** The pure derivative in alpha is
+s_(0,q) - [q = 1] - y (log(mu + s))_(0,q) plus the derivatives of log Q. Those are cumulants:
+d^q log Q / dtheta^q is the q-th cumulant of j under the weights a_j e^(j theta) / Q, taken from the
+central moments of the same walk (kappa_1 = <j> >= 1, so nothing cancels inside that block), and
+theta = log(2 alpha) composes them into alpha. Above the first order the derivatives of s are taken
+as d^q s / dalpha^q = mu^2 d^(q-2) (mu^2 + alpha^2)^(-3/2) / dalpha^(q-2), which is free of the
+cancellation that 1/s - alpha^2/s^3 has when alpha is much larger than mu, and at the first order
+alpha/s - 1 is taken as -mu^2 / (s (s + alpha)).
+
+**The expected information.** Measured with mpmath at 40 digits by summing the mass:
+I_mu_mu = 1/mu - 1/s = c exactly and I_mu_alpha = 0 exactly (the off-diagonal block 5.2e-28 to
+4.7e-44 of I_mu_mu at four (mu, alpha) with alpha >= mu, where the cut support sum holds the second
+moment). The member therefore supplies both of those closed, the derivatives of I_mu_mu being the
+partials of c already written, and takes only I_alpha_alpha and its derivatives from the generic sum
+over the support.
+
+**What is open.** (i) The generic support sum for I_alpha_alpha has no series at the Poisson limit;
+where it does not converge it returns NaN, as the generic route documents. (ii) One cancellation is
+left in the derivatives in alpha at the Poisson limit, between the first cumulant over alpha and
+y alpha / (s (mu + s)), which both tend to y / alpha: at (mu, alpha) = (1, 1e3) and y = 1 the first
+derivative is 5e-7 while those two terms are 1e-3, so the order-1 tensor is accurate to 1577 ulp of
+its own scale, that is to 2e-19 absolute. Every other order is below 201 ulp. (iii) The reference
+file holds the mass only, for the reason in the next section.
+
+### Forms checked before transcription
+
+`tools/reference/distrib_betabinom1.py` and `tools/reference/distrib_pig.py` check every form with
+SymPy or against mpmath before it is written in C++, and exit non-zero on any disagreement:
+
+- the shift identity and its derivatives to order 6, and Loader's form of log C(n, y) (SymPy,
+  exactly; the recurrence of the gamma function has to be applied by hand, since SymPy does not
+  reduce loggamma(z + k) - loggamma(z) on its own);
+- the half-integer Bessel identity, against mpmath's own Bessel function (4.6e-60 relative);
+- the Q form of the mass for y = 0, 1, 2 (SymPy, exactly; on the masses and not on their
+  logarithms, since SymPy reduces e^alpha (cosh alpha - sinh alpha) to 1 only inside a product);
+- the score in mu, dl/dmu = c (y - mu) (SymPy, exactly), and the Leibniz form of the derivatives
+  with an index in mu (orders 1 and 2 symbolically, orders 3 to 6 within 1.5e-191 relative at 200
+  digits on five (mu, alpha); the points keep |log(alpha/mu)| moderate, because c itself cancels
+  like (mu/alpha)^2 per order, which is what the split above exists for);
+- h with its derivatives, c = h(u)/mu, and the partials of the two inner maps (SymPy, exactly);
+- the cumulants of Q to order 6 and their conversion from the central moments (SymPy, exactly);
+- the two information identities above (mpmath at 40 digits).
+
+### References and the measured accuracy
+
+`distrib_betabinom1.py` writes 4072 rows (kind 0 the log-mass and its six orders, 2490 rows; kinds
+1 and 2 log F and log(1 - F) by summing the mass, 1582 rows; fifteen (mu, sigma, n) with sigma from
+1e-6 to 1e3, mu from 0.02 to 0.98 and n from 1 to 1e5, five of them inside the region of the route
+of bounded cost and on the two sides of its cut) and `distrib_pig.py` 1532 rows (the mass only; ten (mu, alpha)
+with alpha from 1e-3 to 1e3 against mu from 1e-3 to 1e4, and counts up to 3000). The mass rows are
+mpmath evaluations of the symbolic derivatives of the definitions, so no form of the section above
+enters them. The pig has no reference for its cumulative functions: without a closed form each
+value would be a numerical derivative of a sum of Bessel functions at a raised working precision,
+measured at about a second a component at order 4 on the light-tailed parameters and without bound
+at the heavy end; what the library computes there is the generic summation route, measured in its
+own section, and the test checks it against 5-point differences to order 3. For the same reason
+betabinom1's cumulative rows stop at n = 50. mpmath's own Bessel function is slow where its order
+and its argument are close (6.5 s for one value at (1e3, 1e3, y = 1e3) against 0.03 s at y = 1175),
+which is a property of the reference route and not of the library's, whose cost does not depend on
+y at all; the counts in that band are left out of the grid.
+
+The error is the library value minus the mpmath value, in ulps of the largest component of the same
+order at the same point, which is how every family with genuine zeros in its tensors is measured.
+Worst ulp over the whole file, per order. betabinom1 is read per route, because the two fail
+differently: where the sums are taken the error follows the size by the law above, so the figure is
+divided by (n/50)^(3/2); where the form of bounded cost is taken it does not follow the size at all,
+so the figure is raw.
+
+| order | betabinom1 sums, / (n/50)^(3/2) | betabinom1 Stirling, raw | pig |
+|---|---|---|---|
+| 0 (the value) | 63.3 | 520 | 6.24 |
+| 1 | 98.2 | 1.83e3 | 1577 |
+| 2 | 37.9 | 156 | 5.81 |
+| 3 | 48.3 | 23.6 | 10.4 |
+| 4 | 37.8 | 27.0 | 19.7 |
+| 5 | 28.3 | 22.7 | 99.6 |
+| 6 | 163 | 24.1 | 201 |
+
+The sums' raw worst is 63.3 ulp at n <= 50 and 1.5e4 at order 6 where the family is outside the
+Stirling region at n = 1000, and the law covers both. Every one of the Stirling route's own worsts
+above is at n = 1e5, sigma = 0.01, and the three that are not small are the value and its first two
+orders: that route splits the log-mass into the binomial's and a correction, and in the tail of a
+large size the two are each of the size of n while the log-mass is not. At n = 1e4 the whole tensor
+is within 64.6 ulp, so this is a corner of n = 1e5 and not of the route. The pig's order-1 figure is
+the one Poisson-limit corner named above; every other order is below 201 ulp at counts from 0 to
+3000 and shapes from 1e-3 to 1e3. The two builds agree everywhere within a few ulp, so the table
+gives one figure for both. betabinom1's cumulative rows, which measure the generic summation route
+and not this family, run from 34 ulp at order 0 to 4.1e6 at order 6, the worst at mu = 0.02 and
+mu = 0.98, where the mass sits at one end of the support.
+
+### Speed
+
+ns per call on one host thread (Serial) and on four OpenMP threads, from
+`benchmarks/distrib_betabinom1.cpp` and `benchmarks/distrib_pig.cpp` (Serial figures):
+
+| quantity | betabinom1 n = 10 | n = 100 | n = 1e3 | n = 1e4 | pig(3.5, 2) | pig(1, 1e3) |
+|---|---|---|---|---|---|---|
+| log p | 520 | 3709 | 36070 | 359906 | 252 | 271 |
+| log p, order 1 | 18.5 | 198 | 1803 | 18150 | 22.6 | 15.6 |
+| log p, order 6 | 41.6 | 384 | 3695 | 37319 | 2138 | 2111 |
+| log F (generic sum) | 1889 | 96287 | | | 78222 | 3710 |
+| information (generic sum) | 6150 | 399100 | | | 242655 | 11296 |
+
+The pig's cost does not follow the count, which is what the walk from the largest term buys: at
+(mu, alpha) = (10, 1) the value costs 553, 320, 313, 309, 303, 304 and 307 ns at y = 1, 10, 1e2,
+1e3, 1e4, 1e5 and 1e6, and the order-6 tensor 2131 to 2232 ns over the same counts. For scale,
+negbin2's order-6 tensor is 16 us. betabinom1's cost is proportional to n in every quantity, and the
+generic sums over the support are sums of sums, so they cost n^2.

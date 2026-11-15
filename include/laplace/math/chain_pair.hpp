@@ -1,7 +1,8 @@
 // The chain rule for a composition of two variables in two variables
 // (laplace::math), to total order 6:
 //
-//   chain_rule_pair_dk<K>(G, u0, u1)
+//   chain_rule_pair_dk<K>(G, u0, u1)         an outer function of two variables
+//   chain_rule_pair_scalar_dk<K>(f, u)       an outer function of one variable
 //
 // returns the symmetric tensor of order K in (x_0, x_1) of
 //
@@ -75,6 +76,25 @@ LAPLACE_HD constexpr int state_index(int K, int n, int b, int i, int j) {
   return state_base(K, n) + b * pair_count(K - n) + pair_index(i, j);
 }
 
+// The same state for an outer function of ONE variable: D[gamma][k] with k a single order instead
+// of a multi-index over two arguments. sum_(n <= K) (n + 1) (K - n + 1) doubles, 84 at K = 6
+// against the 210 of the pair version, and one loop dimension fewer.
+LAPLACE_HD constexpr int scalar_state_base(int K, int n) {
+  int b = 0;
+  for (int m = 0; m < n; ++m) b += (m + 1) * (K - m + 1);
+  return b;
+}
+
+LAPLACE_HD constexpr int scalar_state_size(int K) { return scalar_state_base(K, K + 1); }
+
+LAPLACE_HD constexpr int scalar_state_index(int K, int n, int b, int k) {
+  return scalar_state_base(K, n) + b * (K - n + 1) + k;
+}
+
+// C(n, k). A local table was measured and dropped: 49 doubles have to be written to the stack at
+// every call, where the product form stays in registers, and the order-6 composition went from
+// 6.9 to 44 microseconds. What the scalar recursion below does instead is to take the two
+// coefficients out of its innermost loop, where they do not depend on the outer order.
 LAPLACE_HD constexpr double binom(int n, int k) {
   if (k < 0 || k > n) return 0.0;
   double r = 1.0;
@@ -132,6 +152,57 @@ LAPLACE_HD void chain_rule_pair_dk(const double* G, const double* u0, const doub
         }
     }
   for (int b = 0; b <= K; ++b) out[b] = D[state_index(K, K, b, 0, 0)];
+}
+
+/**
+ * \ingroup chain_pair
+ * \brief Evaluates all partial derivatives of total order \f$K\f$ of \f$H(x_0, x_1) = f(u(x_0, x_1))\f$
+ * for an outer function of one variable.
+ *
+ * The specialization of chain_rule_pair_dk() to an outer function of a single argument, which is the
+ * common case when a distribution composes a one-variable function with one map of its two
+ * parameters. The recursion is the same, with the multi-index over the outer arguments replaced by
+ * one derivative order, so the state is \f$\sum_{n \le K} (n+1)(K-n+1)\f$ doubles (84 at \f$K = 6\f$
+ * against 210) and one loop dimension shorter. Every coefficient is a positive binomial, so the
+ * recursion introduces no cancellation of its own.
+ *
+ * \tparam K Total derivative order, with unchecked precondition \f$1 \le K \le 6\f$.
+ * \param f Input array of at least \f$K + 1\f$ doubles holding \f$f^{(k)}(u)\f$ for \f$0 \le k \le K\f$ (`f[0]` does not enter the result).
+ * \param u Input array of at least \f$(K + 1)(K + 2)/2\f$ doubles holding \f$\partial^{p+q} u / \partial x_0^p \partial x_1^q\f$ for \f$1 \le p + q \le K\f$ in the packed layout of \ref chain_pair (`u[0]` is never read).
+ * \param out Output array of at least \f$K + 1\f$ doubles receiving \f$\partial^K H / \partial x_0^{K-b} \partial x_1^b\f$ in `out[b]`.
+ *
+ * \par Domain and special values
+ * Unchecked preconditions require \f$1 \le K \le 6\f$ and the buffer sizes above; any NaN in a contributing derivative propagates to the affected entries of `out`.
+ *
+ * \par Measured accuracy
+ * Agrees with chain_rule_pair_dk() on the same inputs to within $10^{-14}$ of the scale of the order (the test checks every component of every order against it); the two do not agree bit for bit, because this one takes the two binomial coefficients out of its innermost loop and so sums the same terms in another order.
+ *
+ * \see chain_pair, chain_rule_pair_dk()
+ */
+template <int K>
+LAPLACE_HD void chain_rule_pair_scalar_dk(const double* f, const double* u, double* out) {
+  using namespace detail_chain_pair;
+  double D[scalar_state_size(K)];
+  for (int k = 0; k <= K; ++k) D[scalar_state_index(K, 0, 0, k)] = f[k];
+  for (int n = 1; n <= K; ++n)
+    for (int b = 0; b <= n; ++b) {
+      // one derivative in x_1 when there is one to take, else in x_0; gamma' is what is left
+      const int m = b > 0 ? 1 : 0;
+      const int pp = n - b - (m == 0 ? 1 : 0), qp = b - (m == 1 ? 1 : 0);
+      // the two binomials and the derivative of u do not depend on the outer order k, so the
+      // accumulation over (p, q) carries every k at once
+      double acc[K + 1];
+      for (int k = 0; k + n <= K; ++k) acc[k] = 0.0;
+      for (int p = 0; p <= pp; ++p)
+        for (int q = 0; q <= qp; ++q) {
+          const int ua = pp - p + (m == 0 ? 1 : 0), ub = qp - q + (m == 1 ? 1 : 0);
+          const double c = binom(pp, p) * binom(qp, q) * u[pair_index(ua, ub)];
+          const int base = scalar_state_index(K, p + q, q, 1);
+          for (int k = 0; k + n <= K; ++k) acc[k] += c * D[base + k];
+        }
+      for (int k = 0; k + n <= K; ++k) D[scalar_state_index(K, n, b, k)] = acc[k];
+    }
+  for (int b = 0; b <= K; ++b) out[b] = D[scalar_state_index(K, K, b, 0)];
 }
 
 }  // namespace laplace::math

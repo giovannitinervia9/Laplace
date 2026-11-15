@@ -1,0 +1,91 @@
+/**
+\defgroup distrib_betabinom1 Beta-binomial
+\ingroup distrib
+\brief Discrete count distribution with known size, mean proportion \f$\mu \in (0, 1)\f$, and dispersion \f$\sigma > 0\f$, evaluating the log-mass and its derivatives to order six via shift sums and a bounded-cost Stirling form.
+
+Defined in `<laplace/distrib/betabinom1.hpp>` as \ref laplace::distrib::betabinom1_distrib "betabinom1_distrib", this module evaluates the beta-binomial log-mass and its parameter derivatives to order \f$6\f$. Every method is marked `LAPLACE_HD` so evaluators run on host CPUs and inside Kokkos device kernels. See \ref distrib_core "distrib_core" for the shared interface and `sym_tensor` storage. Cumulative functions, derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$, expected Fisher information with its derivatives, quantiles, and random variates all come from \ref distrib_generic "the generic routes". Against high-precision reference values the shift sums stay within \f$63.3\f$ ulp for sizes \f$n \le 50\f$, and the bounded-cost form within \f$64.6\f$ ulp at \f$n = 10^4\f$, \f$\sigma = 0.01\f$, where the sums have reached \f$2.2 \times 10^5\f$.
+
+## Classic form and reparametrization
+
+The classic beta-binomial distribution (Johnson and others, 2005) models a binomial count \f$y \in \{0, 1, \dots, n\}\f$ of known size \f$n \ge 1\f$ whose success probability follows a beta distribution with shape parameters \f$a > 0\f$ and \f$b > 0\f$. Its mass is \f$P(Y = y) = \binom{n}{y} \mathrm{B}(y + a,\, n - y + b) / \mathrm{B}(a, b)\f$, where \f$\mathrm{B}\f$ denotes the beta function. Its mean is \f$\frac{n a}{a + b}\f$ and its variance is \f$\frac{n a b}{(a + b)^2}\left(1 + \frac{n - 1}{a + b + 1}\right)\f$.
+
+Laplace parametrizes the family by the mean proportion \f$\mu = \frac{a}{a + b} \in (0, 1)\f$ and the dispersion \f$\sigma = \frac{1}{a + b} > 0\f$, so that \f$a = \frac{\mu}{\sigma}\f$ and \f$b = \frac{1 - \mu}{\sigma}\f$:
+\f[
+P(Y = y) = \binom{n}{y} \frac{\mathrm{B}\!\left(y + \frac{\mu}{\sigma},\, n - y + \frac{1 - \mu}{\sigma}\right)}{\mathrm{B}\!\left(\frac{\mu}{\sigma},\, \frac{1 - \mu}{\sigma}\right)}, \qquad y \in \{0, 1, \dots, n\}.
+\f]
+In these parameters, the mean is \f$n\mu\f$, the variance is \f$n\mu(1 - \mu)\left(1 + \frac{(n - 1)\sigma}{1 + \sigma}\right)\f$, and the intraclass correlation of the \f$n\f$ trials is \f$\frac{\sigma}{1 + \sigma}\f$. As \f$\sigma \to 0\f$, the family tends to the \ref distrib_binomial "binomial distribution" of the same mean proportion \f$\mu\f$. As \f$\sigma \to \infty\f$, the whole mass concentrates on \f$0\f$ and \f$n\f$. The size \f$n\f$ is a known constant stored in the trailing field `size` as an integer in a `double`, excluded from `n_params` and `params` just as in `binomial_distrib`.
+
+## Parameters, domain, and regularity
+
+Struct `betabinom1_distrib` sets `kind = distrib_kind::discrete` and `n_params = 2`. The descriptors in `params` give `mu` the open domain \f$(0, 1)\f$ and `sigma` the open domain \f$(0, \infty)\f$. Both declare the log-mass and cumulative functions infinitely smooth, with no kink (`param_kinks()` returns an empty set) and a fixed support from \f$0\f$ to \f$n\f$. Member `center()` returns the mean \f$n\mu\f$, and `scale()` returns the standard deviation \f$\sqrt{n\mu(1 - \mu)\left(1 + \frac{(n - 1)\sigma}{1 + \sigma}\right)}\f$. Off the support, and at any non-integer \f$y\f$, `logpmf()` returns \f$-\infty\f$. Parameter derivatives of order \f$K \in \{1, \dots, 6\}\f$ are packed in `sym_tensor<2, K>`, whose component \f$q\f$ holds \f$\partial^K \ell / \partial \mu^{K - q} \partial \sigma^q\f$ (\ref distrib_core "distrib_core").
+
+## Formulas and cancellation-free evaluation
+
+The family provides two routes for the log-mass \f$\ell(\mu, \sigma; y)\f$ and its derivatives: paired sums over the integer shifts, and a bounded-cost form using Stirling's error (\ref stirling "stirling"; DLMF §5.11).
+
+In the shift-sums route, neither \f$\log\mathrm{B}(y + a, n - y + b)\f$ nor \f$\log\mathrm{B}(a, b)\f$ is ever formed. Each is of size \f$(a + b)\log(a + b)\f$ while their difference is of order one. Because both shifts \f$y\f$ and \f$n - y\f$ are integers, the gamma recurrence turns the difference into sums of logarithms in which \f$\log\sigma\f$ cancels via \f$y + (n - y) - n = 0\f$:
+\f[
+\ell(\mu, \sigma; y) = \log\binom{n}{y} + \sum_{i < y} \log(\mu + i\sigma) + \sum_{i < n - y} \log(1 - \mu + i\sigma) - \sum_{i < n} \log(1 + i\sigma).
+\f]
+Here \f$i\f$ runs over non-negative integers, and \f$\log\binom{n}{y}\f$ uses Loader's form (Loader, 2002; \ref distrib_binomial "distrib_binomial"). Every term is regular at \f$\sigma = 0\f$, where the three sums vanish and the value becomes the binomial's \f$\log\binom{n}{y} + y\log\mu + (n - y)\log(1 - \mu)\f$, needing no limit or series. Because the three sums cancel as \f$n\f$ grows, they are paired at each \f$i\f$ in one pass of cost proportional to \f$n\f$. For \f$K = p + q\f$ derivatives, \f$p\f$ in \f$\mu\f$ and \f$q\f$ in \f$\sigma\f$, differentiating term by term gives
+\f[
+\frac{\partial^K \ell}{\partial \mu^p \partial \sigma^q} = (-1)^{K - 1} (K - 1)! \left[ \sum_{i < y} \frac{i^q}{(\mu + i\sigma)^K} + (-1)^p \sum_{i < n - y} \frac{i^q}{(1 - \mu + i\sigma)^K} - [p = 0] \sum_{i < n} \frac{i^K}{(1 + i\sigma)^K} \right],
+\f]
+where `[p = 0]` equals \f$1\f$ if \f$p = 0\f$ and \f$0\f$ otherwise, so the third sum enters pure \f$\sigma\f$ derivatives only. Each sum has terms of one sign, and any cancellation happens between the three where the derivative is small; whenever \f$p\f$ is odd the combination of the first two sums is a difference whose two terms are equal at \f$\mu = 1/2\f$, so it is taken factored as \f$(1 - 2\mu)\sum_{j < K} (\mu + i\sigma)^{-(K - j)} (1 - \mu + i\sigma)^{-(j + 1)}\f$, which is exactly zero there. Evaluating directly in \f$(\mu, \sigma)\f$ rather than chaining through \f$(a, b)\f$ avoids inner factors of size \f$\sigma^{-(K+1)}\f$ against an order-one result, which lose \f$\sigma^{-K}\f$ relative digits near \f$\sigma = 0\f$ as in \ref distrib_negbin1 "the linear negative binomial".
+
+The second route avoids \f$n + 1\f$ terms and errors that grow with \f$n\f$. Substituting \f$\log\Gamma(z) = (z - \tfrac{1}{2})\log z - z + \log\sqrt{2\pi} + \delta(z)\f$ into the six log-gammas gives an identity in \f$\Delta = y - n\mu\f$, \f$A = \mu + y\sigma\f$, \f$B = 1 - \mu + (n - y)\sigma\f$, and \f$C = 1 + n\sigma\f$, where \f$A + B = C\f$ exactly:
+\f[
+\begin{aligned}
+\ell(\mu, \sigma; y) &= \ell_{\mathrm{binom}}(\mu; n, y) + \Delta\,\bigl[\rho(w) - \rho(v)\bigr] \\
+&\quad - \frac{1}{2}\bigl[\log A - \log\mu + \log B - \log(1 - \mu) - \log C\bigr] \\
+&\quad + \bigl[\delta(A/\sigma) + \delta(B/\sigma) - \delta(C/\sigma)\bigr] - \bigl[\delta(\mu/\sigma) + \delta((1 - \mu)/\sigma) - \delta(1/\sigma)\bigr],
+\end{aligned}
+\f]
+with \f$\rho(t) = D(1 + t)/t\f$, \f$D(z) = z\log z - z + 1\f$, \f$w = \Delta\sigma / (\mu C)\f$, and \f$v = -\Delta\sigma / ((1 - \mu) C)\f$. Here \f$\ell_{\mathrm{binom}}\f$ is Loader's binomial log-mass (\ref distrib_binomial "distrib_binomial"), so \f$\log\binom{n}{y}\f$ and \f$y\log\mu + (n - y)\log(1 - \mu)\f$ never cancel against each other. With \f$\operatorname{bd}_0(u_1, u_2) = u_1\log(u_1/u_2) - u_1 + u_2\f$, the two deviances are \f$[\operatorname{bd}_0(A, \mu C) + \operatorname{bd}_0(B, (1 - \mu) C)]/\sigma\f$; because \f$1 + w = A/(\mu C)\f$ and \f$1 + v = B/((1 - \mu) C)\f$ hold exactly and \f$w\f$ and \f$v\f$ have opposite signs, \f$\rho(w) - \rho(v)\f$ sums magnitudes. Every logarithm has an affine argument, and the two Stirling-error brackets are each of size \f$\sigma\f$ with difference of size \f$\sigma^2\f$, giving an absolute error of order machine epsilon \f$\varepsilon\f$.
+
+In this second route, derivatives are closed except for \f$\rho(w)\f$ and \f$\rho(v)\f$, because every inner map is affine or separable. The compositions with \f$\rho\f$ use \ref laplace::math::chain_rule_pair_scalar_dk "chain_rule_pair_scalar_dk()" (\ref chain_pair "chain_pair"). The Stirling errors expand via the asymptotic series of \ref stirling "stirling" in \f$\sigma / z\f$ differentiated term by term, so the route holds only where all six arguments are at least \f$10\f$, namely \f$10\sigma \le \min(\mu, 1 - \mu)\f$. Outside that region the route is never taken. Inside it, `logpmf()` switches at \f$n > 8\f$ and `logpmf_dk()` switches at \f$n > 160\f$. On one host thread, shift-sum and Stirling costs cross at \f$n = 8\f$ for the value (\f$366\f$ against \f$361\f$ ns; \f$3230\f$ against \f$253\f$ ns at \f$n = 160\f$) and at \f$n = 120, 250, 420, 570, 700, 800\f$ for orders \f$1\f$ to \f$6\f$, where Stirling costs \f$214, 460, 1040, 2200, 3400, 6600\f$ ns at every \f$n\f$. Above order \f$1\f$, the cut \f$n = 160\f$ is chosen for accuracy: at \f$n = 160\f$ the shift sums already reach about \f$940\f$ ulp, while Stirling stays near \f$65\f$ ulp.
+
+Because only the log-mass and its six derivative orders are supplied directly, cumulative values, log-cumulative derivatives, expected information with its derivatives, quantiles, and random variates come from \ref distrib_generic "the generic routes". Because the support is finite, the generic sums over it are exact rather than truncated. Member `start_value()` inverts the sample mean \f$\bar{y}\f$ and sample variance \f$s^2_y\f$ (\ref distrib_start "Starting values"). It sets \f$\mu = \bar{y} / n\f$ and \f$\sigma = r / (1 - r)\f$ from the intraclass correlation \f$r = (s^2_y / (n\mu(1 - \mu)) - 1)/(n - 1)\f$, clamped to \f$[10^{-4}, 1 - 10^{-4}]\f$ with \f$r = 10^{-4}\f$ at \f$n = 1\f$, and passes both through `start_inside()`.
+
+## Accuracy and limits
+
+The \f$4072\f$ reference rows of `tools/reference/distrib_betabinom1.py` are evaluated with mpmath (The mpmath development team, 2023) from forms checked with SymPy (Meurer and others, 2017) over \f$\mu \in [0.02, 0.98]\f$, \f$\sigma \in [10^{-6}, 10^3]\f$, and \f$n \in [1, 10^5]\f$, with cumulative rows stopping at \f$n = 50\f$. Errors are measured inside Kokkos kernels on `gcc` and `CUDA` in ulps of the largest component of the same order at the same point, since every tensor of a given order has genuine zeros in \f$y\f$ and in the parameters (see \ref accuracy "How accuracy is measured"), and both builds agree within a few ulp.
+
+| Quantity | Worst measured (ulp) | Test bound (ulp) |
+| --- | --- | --- |
+| `logpmf` and `logpmf_dk` where the shift sums are taken, divided by \f$\max(n/50, 1)^{3/2}\f$ | \f$63.3\f$; \f$98.2, 37.9, 48.3, 37.8, 28.3, 163\f$ | \f$95\f$; \f$150, 57, 73, 57, 43, 245\f$, carrying the same factor |
+| `logpmf` and `logpmf_dk` where the bounded-cost form is taken, raw | \f$520\f$; \f$1.83 \times 10^3, 156, 23.6, 27.0, 22.7, 24.1\f$ | \f$780\f$; \f$2750, 235, 36, 41, 35, 37\f$ |
+| Generic `log_cdf`, orders 0 to 6 (\f$n \le 50\f$) | \f$34\f$ to \f$4.1 \times 10^6\f$ | \f$85, 72, 51, 3400, 3.3 \times 10^4, 4.1 \times 10^5, 6.1 \times 10^6\f$ |
+| Generic `log_ccdf`, orders 0 to 6 (\f$n \le 50\f$) | \f$46\f$ to \f$2.5 \times 10^6\f$ | \f$70, 74, 110, 1500, 2.2 \times 10^4, 1.9 \times 10^5, 3.7 \times 10^6\f$ |
+
+Each row lists the value first, then the orders \f$1\f$ to \f$6\f$. The two routes are bounded apart because they fail differently: the shift sums accumulate \f$n + 1\f$ roundings, so their error follows the size, while the bounded-cost form does not follow the size at all. Its three wider figures are the value and its first two orders at \f$n = 10^5\f$, \f$\sigma = 0.01\f$, where splitting the log-mass into the binomial's and a correction leaves two pieces each of the size of \f$n\f$ in the tail while the log-mass is not; at \f$n = 10^4\f$ the whole tensor stays within \f$64.6\f$ ulp.
+
+Measured at the same points, the shift sums alone reach \f$7.91 \times 10^4\f$ to \f$2.23 \times 10^5\f$ ulp at \f$n = 10^4\f$, \f$\sigma = 0.01\f$, where the bounded-cost route measures \f$64.6\f$, and \f$1.5 \times 10^4\f$ at \f$n = 1000\f$ where it measures \f$51.6\f$. The worst generic cumulative errors sit at \f$\mu = 0.02\f$ and \f$\mu = 0.98\f$. In `tests/distrib/test_betabinom1.cpp`, checks test normalization with tolerance \f$10^{-12}\f$, the binomial limit at \f$\sigma \in \{10^{-12}, 10^{-8}\}\f$, and the two routes against each other with tolerances of \f$10^{-14}\f$ to \f$10^{-10}\f$ where both hold. The test also checks `logpmf_dk()` against 5-point differences with tolerance \f$10^{-7}\f$, generic `expected_info()` against score variance with \f$10^{-9}\f$ (and \f$10^{-12}\f$ on \f$I_{\mu\sigma} = 0\f$ at \f$\mu = 1/2\f$), generic information and cumulative differences with \f$10^{-6}\f$ and \f$10^{-5}\f$, and `start_value()` inversion with \f$10^{-13}\f$ in \f$\mu\f$ and \f$10^{-11}\f$ in \f$\sigma\f$. Above \f$10\sigma = \min(\mu, 1 - \mu)\f$, only the shift sums are available, so error and cost grow with \f$n\f$ (reaching about \f$1.5 \times 10^4\f$ ulp at \f$n = 1000\f$, \f$\sigma = 1\f$) and generic support sums scale as \f$n^2\f$; see `docs/numerics.md`.
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/betabinom1.hpp>
+
+void eval_betabinom1(Kokkos::View<const double*> y, Kokkos::View<double*> out, double mu,
+                     double sigma, double size) {
+  const laplace::distrib::betabinom1_distrib d{mu, sigma, size};
+  Kokkos::parallel_for("betabinom1_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpmf(y(i)) + d.logpmf_d1(y(i))[0];
+  });
+}
+```
+
+## Members
+
+Struct \ref laplace::distrib::betabinom1_distrib "betabinom1_distrib" implements \ref distrib_core "distrib_core" for `n_params = 2`: `mu`, `sigma`, `size`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `logpmf()`, `logpmf_d1()`..`logpmf_d6()`, `logpmf_dk()`, and `start_value()`.
+
+## References
+
+- N. L. Johnson, A. W. Kemp and S. Kotz (2005), Univariate Discrete Distributions, Wiley Series in Probability and Statistics. https://doi.org/10.1002/0471715816
+- C. Loader (2002), Fast and Accurate Computation of Binomial Probabilities, manuscript, Lucent Technologies, Murray Hill, NJ. https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §5.11 Asymptotic Expansions (Gamma Function), https://dlmf.nist.gov/5.11
+*/

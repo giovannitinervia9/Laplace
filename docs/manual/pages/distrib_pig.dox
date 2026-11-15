@@ -1,0 +1,97 @@
+/**
+\defgroup distrib_pig Poisson-inverse Gaussian
+\ingroup distrib
+\brief Discrete count distribution with mean \f$\mu > 0\f$ and shape \f$\alpha > 0\f$, diagonal expected information, and elementary log-mass evaluation.
+
+Defined in `<laplace/distrib/pig.hpp>` as \ref laplace::distrib::pig_distrib "pig_distrib", this module evaluates the Poisson-inverse Gaussian log-mass, its parameter derivatives to order \f$6\f$, and its closed expected Fisher information blocks with derivatives to order \f$4\f$. Every evaluator is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). Cumulative functions, derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$, quantiles, random numbers, and the shape block of the expected information come from \ref distrib_generic "the generic routes". Against high-precision reference values, the log-mass stays within \f$6.24\f$ ulp and derivatives of orders \f$2\f$ to \f$6\f$ stay within \f$201\f$ ulp, with one Poisson-limit corner reaching \f$1577\f$ ulp at order \f$1\f$.
+
+## Classic form and parametrization
+
+The Poisson-inverse Gaussian family arises as a Poisson distribution of mean \f$\mu Z\f$ mixed over an inverse Gaussian variable \f$Z\f$ of mean \f$1\f$ (\ref distrib_invgauss "inverse Gaussian"), giving a count distribution with a heavier tail than the negative binomial (\ref distrib_negbin2 "the quadratic negative binomial"). In the orthogonal parametrization of Heller, Couturier and Heritier (2019), written in terms of the mean \f$\mu > 0\f$, the shape \f$\alpha > 0\f$, and \f$s = \sqrt{\mu^2 + \alpha^2}\f$, the probability mass function is
+\f[
+P(Y = y) = \sqrt{\frac{2\alpha}{\pi}}\, e^{s - \mu} \left(\frac{\mu\alpha}{\mu + s}\right)^y \frac{K_{y - 1/2}(\alpha)}{y!}, \qquad y = 0, 1, 2, \dots,
+\f]
+where \f$K_\nu\f$ is the modified Bessel function of the second kind. The distribution has mean \f$\mu\f$ and variance \f$\mu + \mu^2 / (s - \mu)\f$. At fixed \f$\mu\f$, letting \f$\alpha \to \infty\f$ yields the Poisson distribution of mean \f$\mu\f$ (\ref distrib_poisson "distrib_poisson"), while \f$\alpha \to 0\f$ is the heavy-tailed end where the variance grows as \f$2\mu^3 / \alpha^2\f$.
+
+## Parameters, domain, and regularity
+
+Struct `pig_distrib` sets `kind = distrib_kind::discrete` and `n_params = 2`. Both `mu` and `alpha` have the open domain \f$(0, \infty)\f$ and report `infinitely_smooth` for both the log-mass and the cumulative functions, with no kink (`param_kinks()` returns an empty set) and a fixed support from \f$0\f$ to \f$+\infty\f$. Off the support, `logpmf()` returns \f$-\infty\f$. Member `center()` returns \f$\mu\f$, `scale()` returns the standard deviation \f$\sqrt{\mu + \mu^2/(s - \mu)}\f$, `radius()` returns \f$s\f$, and `excess()` returns \f$s - \mu = \alpha^2 / (s + \mu)\f$ so that the difference \f$s - \mu\f$ is never formed. Parameter derivatives are packed as `sym_tensor<2, K>`, whose component \f$b\f$ holds \f$\partial^K \ell / \partial\mu^{K - b} \partial\alpha^b\f$ (\ref distrib_core "distrib_core").
+
+## Formulas and cancellation-free evaluation
+
+Because the Bessel order \f$y - 1/2\f$ is always half an odd integer, \f$K_{y - 1/2}(\alpha)\f$ is elementary: with \f$m = \max(y - 1, 0)\f$,
+\f[
+K_{y - 1/2}(\alpha) = \sqrt{\frac{\pi}{2\alpha}}\, e^{-\alpha} \sum_{k=0}^{m} \frac{(m + k)!}{k!\,(m - k)!} (2\alpha)^{-k},
+\f]
+a sum of positive terms. Its \f$\sqrt{\alpha}\f$ factor cancels the mass's \f$\sqrt{\alpha}\f$ identically, so no Bessel routine (\ref bessel_k "bessel_k"), no uniform expansion, and no table is used. Setting \f$\theta = \log(2\alpha)\f$ and shifting the index to \f$j = y - k\f$ from \f$1\f$ to \f$y\f$ leaves one exponential family:
+\f[
+\ell = (s - \mu) - \alpha + y \log\mu - y \log(\mu + s) - y \log 2 + \log Q(\theta) - \log y!,
+\f]
+\f[
+Q(\theta) = \sum_{j=1}^{y} a_j e^{j\theta}, \qquad a_j = \frac{(2y - 1 - j)!}{(y - j)!\,(j - 1)!},
+\f]
+with \f$Q = 1\f$ at \f$y = 0\f$, where the mass is \f$e^{s - \mu - \alpha}\f$ exactly. For \f$y \ge 1\f$, `logpmf()` walks the terms of \f$Q\f$ outwards from the largest term, whose index \f$j^*\f$ is the root in \f$[1, y]\f$ of \f$j^2 - (2y - 1 + 2\alpha)j + 2\alpha y = 0\f$ adjusted to the larger neighbour, using the exact ratio \f$2\alpha(y - j) / (j(2y - 1 - j))\f$ and stopping when a term falls below \f$2^{-80}\f$ of the largest; the cost therefore tracks the width of the weights rather than \f$y\f$. To avoid \f$y \log y\f$ cancellation at large counts and small \f$\alpha\f$, the log-gammas at \f$j^*\f$ and \f$y!\f$ are grouped through Stirling's error (\ref stirling "stirling"), \f$\operatorname{log1p}\f$, and \f$s - \mu = \alpha^2/(s + \mu)\f$, while \f$s - \mu - \alpha\f$ is formed as \f$\mu^2/(s + \alpha) - \mu\f$ when \f$\alpha \ge \mu\f$ and \f$\alpha^2/(s + \mu) - \alpha\f$ otherwise.
+
+Pure derivatives in \f$\alpha\f$ use the fact that \f$\mathrm{d}^q \log Q / \mathrm{d}\theta^q\f$ is the \f$q\f$-th cumulant of \f$j\f$ under the weights \f$a_j e^{j\theta}/Q\f$, obtained from the central moments of the same outward walk and composed with \f$\theta = \log(2\alpha)\f$ via \ref faa_di_bruno "faa_di_bruno". The first cumulant is the mean of \f$j\f$, which is at least \f$1\f$, so nothing cancels inside that block. The remaining pure \f$\alpha\f$ terms come from \f$s\f$ and \f$\log(\mu + s)\f$, using
+\f[
+\frac{\mathrm{d}^q s}{\mathrm{d}\alpha^q} = \mu^2 \frac{\mathrm{d}^{q-2}}{\mathrm{d}\alpha^{q-2}} (\mu^2 + \alpha^2)^{-3/2}
+\f]
+for \f$q \ge 2\f$ (avoiding the cancellation in \f$1/s - \alpha^2/s^3\f$ when \f$\alpha \gg \mu\f$) and \f$-\mu^2 / (s(s + \alpha))\f$ for \f$\alpha/s - 1\f$ at \f$q = 1\f$.
+
+In the mean, the terms of the size of \f$y\f$ cancel identically, leaving the exact score
+\f[
+\frac{\partial \ell}{\partial \mu} = c\,(y - \mu), \qquad c = \frac{1}{\mu} - \frac{1}{s}.
+\f]
+The first order takes that product as it stands, which is exactly \f$0\f$ at \f$y = \mu\f$. Every higher derivative, with \f$p \ge 1\f$ differentiations in \f$\mu\f$ and \f$q\f$ in \f$\alpha\f$, takes it expanded,
+\f[
+\frac{\partial^{p+q}\ell}{\partial\mu^p \partial\alpha^q} = y\, c_{p-1,q} + m_{p-1,q}, \qquad m = \frac{\mu}{s},
+\f]
+which is algebraically the same as \f$(y - \mu) c_{p-1,q} - (p - 1) c_{p-2,q}\f$, since \f$\mu c_{p-1} + (p-1) c_{p-2} = -m_{p-1}\f$, but does not split a result of the size of \f$\alpha^{-(p-1)}\f$ into terms of the size of one at the Poisson limit. Here \f$c_{i,j} = \partial^{i+j} c / \partial\mu^i \partial\alpha^j\f$ and \f$m_{i,j}\f$ likewise. Both \f$c\f$ and \f$m\f$ are functions of the one ratio \f$\alpha/\mu\f$, and which of its two powers is the small one decides the composition, because an inner map that is large makes every term of the chain large while the result is not: with \f$h(x) = 1 - (1 + x)^{-1/2}\f$, written \f$x / (w(w+1))\f$ with \f$w = \sqrt{1 + x}\f$ so that \f$1/\mu - 1/s\f$ never cancels, and \f$g(x) = (1 + x)^{-1/2} = 1 - h(x)\f$, the split is at \f$\alpha = \mu\f$,
+\f[
+\alpha \le \mu: \quad c = \frac{h(u)}{\mu}, \quad m = 1 - h(u), \quad u = \left(\frac{\alpha}{\mu}\right)^2; \qquad
+\alpha > \mu: \quad c = \frac{1}{\mu} - \frac{g(v)}{\alpha}, \quad m = \frac{\mu}{\alpha} g(v), \quad v = \left(\frac{\mu}{\alpha}\right)^2.
+\f]
+In each branch the inner maps are products of a power of one parameter and a power of the other, so their partials are closed, and \ref chain_pair "chain_pair" composes them once per order.
+
+The expected Fisher information is diagonal: \f$I_{\mu\mu} = 1/\mu - 1/s = c\f$ and \f$I_{\mu\alpha} = 0\f$ are exact (the derivatives of \f$I_{\mu\mu}\f$ are the partials \f$c_{i,j}\f$ above), and only \f$I_{\alpha\alpha}\f$ and its derivatives come from the generic sum over the support (\ref distrib_generic "distrib_generic"). The cumulative function, derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$, quantiles, and random numbers are supplied by \ref distrib_generic "distrib_generic". Member `start_value()` inverts the moments, taking \f$\mu\f$ from the sample mean and \f$\alpha = \sqrt{d(d + 2\mu)}\f$ with \f$d = \mu^2 / (s^2_y - \mu)\f$, whose denominator is floored at \f$\mu / 100\f$ so that a sample with no overdispersion starts near the Poisson limit instead of at an end of the domain (\ref distrib_start "Starting values").
+
+## Accuracy and limits
+
+Against the \f$1532\f$ reference rows that `tools/reference/distrib_pig.py` computes with mpmath (The mpmath development team, 2023) from forms it first checks with SymPy (Meurer and others, 2017) -- the log-mass and its derivatives of orders \f$1\f$ to \f$6\f$ over \f$\mu \in [10^{-3}, 10^4]\f$, \f$\alpha \in [10^{-3}, 10^3]\f$ and counts up to \f$3000\f$, evaluated inside Kokkos kernels on the `gcc` and `CUDA` builds -- the errors stay within the test bounds below, and the two builds agree to three digits on every worst case. They are measured in ulps of the largest component of the same order at the same point, since every tensor of a given order has genuine zeros in \f$y\f$ and in the parameters (see \ref accuracy "How accuracy is measured").
+
+| Order | Worst measured (ulp) | Test bound (ulp) |
+| --- | --- | --- |
+| \f$0\f$ (`logpmf`) | \f$6.24\f$ | \f$10\f$ |
+| \f$1\f$ (`logpmf_d1`) | \f$1577\f$ | \f$2400\f$ |
+| \f$2\f$ (`logpmf_d2`) | \f$5.81\f$ | \f$10\f$ |
+| \f$3\f$ (`logpmf_d3`) | \f$10.4\f$ | \f$16\f$ |
+| \f$4\f$ (`logpmf_d4`) | \f$19.7\f$ | \f$30\f$ |
+| \f$5\f$ (`logpmf_d5`) | \f$99.6\f$ | \f$150\f$ |
+| \f$6\f$ (`logpmf_d6`) | \f$201\f$ | \f$310\f$ |
+
+Three limits apply. First, at the Poisson-limit corner \f$(\mu, \alpha) = (1, 10^3)\f$ and \f$y = 1\f$, the derivative in \f$\alpha\f$ is \f$5 \times 10^{-7}\f$ while its two cancelling terms (the first cumulant over \f$\alpha\f$ and \f$y\alpha / (s(\mu + s))\f$) are both \f$10^{-3}\f$, producing the \f$1577\f$ ulp peak (\f$2 \times 10^{-19}\f$ absolute). Second, the generic support sum for \f$I_{\alpha\alpha}\f$ and its derivatives has no series at the Poisson limit and returns quiet NaN where it does not converge. Third, the cumulative functions have no reference table; `tests/distrib/test_pig.cpp` checks `logpmf()` against the direct assembly with \ref bessel_k "log_bessel_k()" for \f$y < 30\f$ (tolerance \f$10^{-11}\f$), `expected_info()` against the score variance (\f$10^{-6}\f$), generic cumulative values against partial sums of the mass (\f$10^{-10}\f$), and generic cumulative derivatives up to order \f$3\f$ against 5-point finite differences (\f$10^{-5}\f$). See `docs/numerics.md` for full measurements.
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/pig.hpp>
+
+void eval_pig(Kokkos::View<const double*> y, Kokkos::View<double*> out, double mu, double alpha) {
+  const laplace::distrib::pig_distrib d{mu, alpha};
+  Kokkos::parallel_for("pig_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpmf(y(i)) + d.logpmf_d1(y(i))[0];
+  });
+}
+```
+
+## Members
+
+Struct \ref laplace::distrib::pig_distrib "pig_distrib" implements \ref distrib_core "distrib_core" for `n_params = 2`: `mu`, `alpha`, `radius()`, `excess()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `logpmf()`, `logpmf_d1()`..`logpmf_d6()`, `logpmf_dk()`, `expected_info()`, `expected_info_d1()`..`expected_info_d4()`, `expected_info_dk()`, and `start_value()`.
+
+## References
+
+- G. Z. Heller, D.-L. Couturier and S. R. Heritier (2019), Beyond mean modelling: Bias due to misspecification of dispersion in Poisson-inverse Gaussian regression, Biometrical Journal, 61(2), 333–342. https://doi.org/10.1002/bimj.201700218
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

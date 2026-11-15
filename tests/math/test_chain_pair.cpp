@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <random>
 #include <vector>
 
 namespace {
@@ -116,6 +117,45 @@ TEST_CASE("math chain_pair: the first orders against the chain rule written out"
   CHECK(d2[0] == doctest::Approx(5.0 * 0.25 + 2.0 * 7.0 * 0.5 * (-0.25) + (-11.0) * 0.0625));
   CHECK(d2[1] == doctest::Approx(5.0 * 0.5 * 1.5 + 7.0 * (0.5 * 2.0 + 1.5 * (-0.25)) + (-11.0) * (-0.25) * 2.0));
   CHECK(d2[2] == doctest::Approx(5.0 * 2.25 + 2.0 * 7.0 * 1.5 * 2.0 + (-11.0) * 4.0));
+}
+
+TEST_CASE("math chain_pair: the scalar composition against the general one") {
+  // chain_rule_pair_scalar_dk is chain_rule_pair_dk with an outer function that does not depend on
+  // its second argument, so the two must agree on every component of every order. Not to the last
+  // bit: the scalar recursion takes the two binomial coefficients out of its innermost loop, which
+  // sums the same terms in another order. Its state and its packing must be the ones its own
+  // helpers report.
+  CHECK(cp::scalar_state_size(1) == 2 + 2 * 1);
+  CHECK(cp::scalar_state_size(6) == 84);
+  CHECK(cp::scalar_state_index(6, 0, 0, 0) == 0);
+  std::mt19937_64 g(20261115);
+  std::uniform_real_distribution<double> u(-1.0, 1.0);
+  for (int trial = 0; trial < 20; ++trial) {
+    double f[7], map[tsize(6)] = {}, G[tsize(6)] = {};
+    for (int k = 0; k <= 6; ++k) f[k] = u(g);
+    for (int p = 0; p <= 6; ++p)
+      for (int q = 0; p + q <= 6; ++q)
+        if (p + q >= 1) map[cp::pair_index(p, q)] = u(g);
+    for (int k = 0; k <= 6; ++k) G[cp::pair_index(k, 0)] = f[k];
+    double a[7], b[7];
+    const auto same = [&](int K) {
+      double scale = 0.0;
+      for (int i = 0; i <= K; ++i) scale = std::fmax(scale, std::fabs(b[i]));
+      for (int i = 0; i <= K; ++i) {
+        INFO("order " << K << ", component " << i);
+        CHECK(std::fabs(a[i] - b[i]) <= 1e-14 * scale);
+      }
+    };
+    laplace::math::chain_rule_pair_scalar_dk<1>(f, map, a);
+    laplace::math::chain_rule_pair_dk<1>(G, map, map, b);
+    same(1);
+    laplace::math::chain_rule_pair_scalar_dk<3>(f, map, a);
+    laplace::math::chain_rule_pair_dk<3>(G, map, map, b);
+    same(3);
+    laplace::math::chain_rule_pair_scalar_dk<6>(f, map, a);
+    laplace::math::chain_rule_pair_dk<6>(G, map, map, b);
+    same(6);
+  }
 }
 
 TEST_CASE("math chain_pair: against the bivariate Taylor composition of mpmath") {

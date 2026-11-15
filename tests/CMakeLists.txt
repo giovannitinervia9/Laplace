@@ -53,6 +53,8 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_binomial.cpp
   distrib/test_geometric.cpp
   distrib/test_negbin.cpp
+  distrib/test_betabinom1.cpp
+  distrib/test_pig.cpp
   distrib/test_location_scale.cpp
   math/test_chain_pair.cpp
   pdmat/test_pilot.cpp

@@ -197,6 +197,10 @@ parent here, in tree order; the module pages define their groups without
 \ingroup distrib_discrete */
 /** \addtogroup distrib_negbin2
 \ingroup distrib_discrete */
+/** \addtogroup distrib_betabinom1
+\ingroup distrib_discrete */
+/** \addtogroup distrib_pig
+\ingroup distrib_discrete */
 
 /** \defgroup optimizers Optimizers
 \brief Objectives, stopping rules, line searches and the dense curvature solver for unconstrained minimization on the host. */
