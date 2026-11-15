@@ -39,6 +39,24 @@ struct Deriv {
   }
 };
 
+// psi^(n)(z) - psi^(n)(z + h), n = 0..5, from the batched route and from the
+// scalar one (which computes its asymptotic coefficients instead of reading the
+// table, so the two are independent at order 5)
+struct PsiDiffAll {
+  KOKKOS_INLINE_FUNCTION double operator()(double z, double h, double n) const {
+    double out[6], dD;
+    lm::own::detail_ibd::dpsi_all(z, h, 5, out, dD);
+    return out[static_cast<int>(n)];
+  }
+};
+
+struct PsiDiffOne {
+  KOKKOS_INLINE_FUNCTION double operator()(double z, double h, double n) const {
+    const int k = static_cast<int>(n);
+    return k == 0 ? lm::own::detail_ibd::dpsi0(z, h) : lm::own::detail_ibd::dpsi(k, z, h);
+  }
+};
+
 }  // namespace
 
 // The kernel below sits in a function with external linkage, outside the anonymous
@@ -90,6 +108,26 @@ void check_beta_shape_deriv(bool upper, double max_ulpN, double max_ulpL) {
   CHECK(eN <= max_ulpN);
   CHECK(eL <= max_ulpL);
 }
+
+// Kernels in a function with external linkage, as above.
+void check_psi_diff(double max_ulp_all, double max_ulp_one) {
+  const bench::Ref ref = bench::read_ref(refdir + "/psi_diff.csv");
+  const auto a = bench::accuracy(ref, bench::eval_kernel(ref.x, PsiDiffAll{}));
+  const auto b = bench::accuracy(ref, bench::eval_kernel(ref.x, PsiDiffOne{}));
+  std::printf("psi differences: dpsi_all max %.3g ulp at %s, dpsi max %.3g ulp at %s\n", a.max_ulp,
+              bench::show(a.worst, 3).c_str(), b.max_ulp, bench::show(b.worst, 3).c_str());
+  INFO("dpsi_all: max ", a.max_ulp, " ulp at ", bench::show(a.worst, 3), "; dpsi: max ", b.max_ulp, " ulp at ",
+       bench::show(b.worst, 3));
+  CHECK(a.n_bad == 0);
+  CHECK(b.n_bad == 0);
+  CHECK(a.max_ulp <= max_ulp_all);
+  CHECK(b.max_ulp <= max_ulp_one);
+}
+
+// measured on 2026-11-15: dpsi_all 7.69 ulp on gcc and 5.69 on CUDA, the scalar dpsi 6.69 and
+// 5.86, worst at order 5 where the difference cancels (z = 40, h = 4e-7; z = 1e5, h = 1e-7);
+// bound half again above the worse build
+TEST_CASE("polygamma differences at a shift, orders 0 to 5, against mpmath") { check_psi_diff(12.0, 12.0); }
 
 TEST_CASE("derivatives of log I_x(a, b) in the shapes against mpmath") {
   check_beta_shape_deriv<1>(false, 1600.0, 55.0);

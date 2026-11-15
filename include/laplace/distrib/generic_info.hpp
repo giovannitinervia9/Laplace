@@ -98,12 +98,13 @@ struct log_density_partials {
 
 LAPLACE_HD_FORCEINLINE int popcount4(int m) { return (m & 1) + ((m >> 1) & 1) + ((m >> 2) & 1) + ((m >> 3) & 1); }
 
-// l over the multiset {head...} + {c[i] : bit i of mask}
+// l over the multiset {head...} + {c[i] : bit i of mask}; the mask holds at most 6
+// bits (the information's own C has at most 4, the log cdf's at most 6)
 template <class L>
 LAPLACE_HD_FORCEINLINE double l_over(const L& L_, const int* head, int nh, const int* c, int mask) {
-  int idx[6], k = 0;
+  int idx[8], k = 0;
   for (int i = 0; i < nh; ++i) idx[k++] = head[i];
-  for (int i = 0; i < 4; ++i)
+  for (int i = 0; i < 6; ++i)
     if (mask >> i & 1) idx[k++] = c[i];
   return L_.at(idx, k);
 }

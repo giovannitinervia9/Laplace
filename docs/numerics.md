@@ -5438,6 +5438,152 @@ scratch if that memory matters.
 
 **Chosen.** As written.
 
+## Polygamma differences at a shift, to order 5
+
+**What.** `own::detail_ibd::dpsi_all(z, h, N, out, dDv)`
+(`include/laplace/math/incomplete_beta_deriv.hpp`) returns
+psi^(n)(z) - psi^(n)(z + h) for n = 0..N and D(z) - D(z + h) with
+D(w) = log w - psi(w), without forming the two terms, and now takes N = 5
+instead of N = 4. The sixth derivative of a log-gamma difference at an integer
+shift is psi^(5)(y + r) - psi^(5)(r), so the negative binomial and the
+beta-binomial masses need that order; the scalar `dpsi(n, z, h)` was already
+written for any n.
+
+**How.** The route is unchanged: the terms below z + M >= 15 are differenced
+one by one and at Z = z + M the asymptotic expansion is differenced term by
+term, each power Z^-p multiplied by E_p = 1 - (Z/(Z+h))^p, a sum of positive
+terms. The batched version reads its asymptotic coefficients from a table, one
+row per order n, whose entry k is B_2k (2k+1)(2k+2)...(2k+n-1) with B_2k the
+Bernoulli numbers; the row for n = 5, B_2k (2k+1)(2k+2)(2k+3)(2k+4), was
+computed with SymPy as exact rationals rounded once
+(`tools/reference/psi_diff.py` documents the grid; the coefficients are in the
+header). The four rows already in the file came out identical, which checks the
+derivation. `zE` is one element longer (p runs to 20 + N) and `fact`, `asym`
+and `rec` take the extra order.
+
+**Measured.** `tools/reference/psi_diff.py` writes
+`tests/data/reference/psi_diff.csv`, 900 rows at 200 bits from `mpmath.psi`
+(the definition, independent of the route): z from 1e-3 to 1e8, h/z from 1e-12,
+where the difference is about -h psi^(n+1)(z) and cancels against either term,
+to 1e12, where it is the first term alone, and h also 1, 2, 5, 40, 1000, the
+shift of a discrete mass. Worst error over every row and order, in ulps of the
+difference:
+
+| route | gcc | CUDA | worst argument |
+|---|---|---|---|
+| `dpsi_all` (batched) | 7.69 | 5.69 | z = 40, h = 4e-7, n = 5 |
+| `dpsi` (scalar) | 6.69 | 5.86 | z = 40, h = 4e-7 (gcc), z = 1e5, h = 1e-7 (CUDA) |
+
+**What this says.** The accuracy at order 5 is that of the orders already in
+use, and the worst points are the cancelling ones, as expected. Nothing in the
+existing callers changes: `incomplete_beta_deriv.hpp` and `student.hpp` still
+ask for N <= 4 and get the same numbers.
+
+**Chosen.** As above, bound 12 ulp in
+`tests/math/test_beta_deriv.cpp` ("polygamma differences at a shift"), both
+routes inside a kernel.
+
+**Open.** Order 6 is not written (no family needs psi^(6) differences). The
+functions live in a detail namespace of the incomplete beta, which three
+distributions will include for them alone; a header of their own is worth it
+only if that compile cost shows.
+
+## The derivatives of log F of a discrete distribution by summing the mass
+
+**What.** `log_cdf_dk_by_sum<K>(d, y)` and `log_ccdf_dk_by_sum<K>(d, y)`
+(`include/laplace/distrib/generic_cdf.hpp`), the derivatives of order K = 1..6
+in the parameters of log F(y) and log(1 - F(y)) for any discrete distribution,
+with the dispatchers `distrib_log_cdf_dk<K>` and `distrib_log_ccdf_dk<K>`,
+which take the distribution's own `log_cdf_dK` member when it has one. One
+route serves the five discrete families whose cdf has no closed derivative
+(binomial, negbin1, negbin2, betabinom1, pig), in place of the mixed (a, x)
+derivatives of the incomplete beta that two of them would need
+(decided with Giovanni on 2026-11-15, `note/piano_distrib_discrete.md`).
+
+**How.** With k = floor(y), S the tail summed, C a sorted multi-index of
+parameters, T a sub-multiset of C and B_T the complete Bell polynomial over T
+of the derivatives of a function (B_T = e^-g d_T e^g, B_empty = 1),
+
+    d_T S = sum_i p(i) B_T(l(i)),    l = log p,
+
+whose ratios to S are d_T S / S, from which the derivatives of log S follow by
+the same relation solved for them (`log_tail_dk_from_ratios`: the term that
+holds the lowest index of T leaves d_T log S alone). Summed that way the route
+is unusable at high order: the ratios are powers of the score, of size
+((y - mu)/mu)^K on the Poisson, while d_T log S is of the size of d_T l, so the
+step from one to the other cancels, up to 4e14 ulp at order 6. The sum is
+therefore centred on the first mass: with A = l(start) and m_i = l(i) - A,
+
+    S = e^A W,  W = sum_i e^(m_i),  d_T log S = d_T A + d_T log W,
+
+where d_T A is the mass's own derivative, exact and closed, and the
+derivatives of m_i, which vanish at the start, carry only the variation of l
+over the tail. The walk is that of `log_tail_by_sum` (the cheaper tail, each
+term relative to the first), with the stopping bound taken on the largest of
+the 2^K sums instead of the mass alone and asked for twice in a row. When the
+side asked for is the other one, O = 1 - S, its ratios follow from
+d_T O = -d_T S: d_T O / O = -(S/O) d_T S / S, with d_T S / S rebuilt from the
+derivatives of log S (`ratios_from_log_tail_dk`) and S / O <= 1, since the side
+summed is the one of smaller probability. The Bell machinery
+(`log_density_partials`, `l_over`) is the information's, extended from four to
+six positions in a mask.
+
+**Measured.** Against the Poisson rows of
+`tests/data/reference/distrib_log_cdf.csv` (mpmath, mu = 0.05 to 300, k from 0
+to 5 mu + 10, both sides, orders 1 to 6), worst error in ulps of the component,
+the same on gcc and on CUDA:
+
+| order | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| by sum, ratios of S (first version) | 481 | 7.5e4 | 2.1e7 | 7.4e9 | 1.2e12 | 4.5e14 |
+| by sum, centred | 476 | 502 | 856 | 7.58e3 | 2.41e5 | 5.34e5 |
+| the Poisson's own route | 479 | 509 | 537 | 562 | 867 | 3.84e3 |
+
+The worst points of orders 1 and 2 are at mu = 40, k = 210, where log F itself
+is -1e-79 and the Poisson's own route scores the same 479 ulp; the loss at
+orders 4 to 6 is at k near the median. Against the Poisson's own route at
+k = mu, relative difference at order 6: 1.6e-11 at mu = 40, 8.0e-11 at 300,
+9.9e-11 at 3e3, 1.1e-10 at 3e4, so the loss does not grow with the mean. Cost
+on one gcc thread at order 6, mu = 300, k = median: 103 us per call against
+3.9 us for the Poisson's closed route (one walk per component of the tensor,
+with l's derivatives to order 6 and a 3^K Bell recursion at each point).
+
+**What this says.** The route is exact to the last bits at orders 1 to 3 and
+loses about five digits at orders 5 and 6 near the median, which is the
+moment-to-cumulant cancellation of the centred variable and not something a
+better summation removes; a family that needs more has to carry its own closed
+route. Giovanni accepted it for the seven discrete families on 2026-11-15 and
+asked that one family also get its own closed route, to measure the difference
+in error and in time on the same references: the binomial, whose mean enters
+its cdf only through x = 1 - mu, so that the x-derivatives of log I_x(a, b) are
+elementary.
+
+**Chosen.** As above. Tested in `tests/distrib/test_generic.cpp` against the
+mpmath references with bounds half again above the measurement (715, 755,
+1.3e3, 1.14e4, 3.62e5, 8.0e5 ulp by order), plus the ends of the support, the
+dispatchers and both routes inside a kernel.
+
+**The complement side, measured again on a two-point support (2026-11-15).** The
+derivatives asked for on the side that is not summed are rebuilt from the other
+one, and that step loses digits when the two sides differ widely in how fast
+they move with the parameter. On the Poisson the loss is the 1e-10 of the table
+above; on the Bernoulli at mu = 0.99 (support {0, 1}, so one term a side), the
+generic route reproduces the closed derivatives of log F exactly, and those of
+log(1 - F) = log mu at y = 0 to 1.3e-16 at order 1, 9.2e-13 at order 3 and
+7.3e-7 at order 6. The quantity itself is the reason: with S = F = 1 - mu
+summed, the derivatives of log(1 - S) are of size (K-1)!/mu^K while those of
+S carry (K-1)!/(1 - mu)^K, larger by (mu/(1 - mu))^K, and in double precision
+the difference cannot be recovered. The five families that will use the route
+have many support points, where the two sides move alike and the loss is the
+Poisson's; a family whose support has two or three points should carry its own
+closed forms, as the Bernoulli does.
+
+**Open.** One walk per component: a two-parameter family at order 6 pays seven
+walks, which share the derivatives of l but not the Bell recursion, so fusing
+them saves about a factor of two and is left until a profile asks for it. The
+tail bound assumes a log-concave mass and |B_T| growing at most polynomially,
+true of the five families that will use it.
+
 ## Optimizer foundations: condition estimate and line searches
 
 **What.** Two pieces under the optimizers of phase 6. In `laplace::dense`,
@@ -5530,3 +5676,123 @@ below rounding.
 **Open.** The tolerances and constants (c1, c2, the shrink interval, the
 budgets of 60 and 30 evaluations) are the textbook values and wait for the
 methods of wave 1 to measure them.
+
+## The three closed discrete distributions: bernoulli, binomial, geometric
+
+**What.** `bernoulli_distrib` (mean mu in (0, 1), y in {0, 1}),
+`binomial_distrib` (mean proportion mu with a known size n, y in {0, ..., n})
+and `geometric_distrib` (mean mu > 0, y = 0, 1, ...), the first three of the
+seven discrete families of phase 4
+(`include/laplace/distrib/bernoulli.hpp`, `binomial.hpp`, `geometric.hpp`).
+Each writes the log-mass and its six derivative orders, the expected
+information and its four, the cdf family, and the quantile where it is closed;
+the size of the binomial is a trailing field of the struct, not a parameter,
+and `support_upper()` returns it. The derivatives of log F in the parameter are
+the families' own except for the binomial, which takes the generic route by
+summing the mass (the entry above).
+
+**How, bernoulli.** l = y log mu + (1 - y) log1p(-mu); only the term of the
+observed y is formed, so
+d^K l / dmu^K = y (-1)^(K-1) (K-1)! / mu^K at y = 1 and
+-(K-1)! / (1 - mu)^K at y = 0 (the second has no alternating sign: the first
+reading of this formula in the plan gave the two terms one, which is right at
+odd K only). I(mu) = 1/mu + 1/(1 - mu), its K-th derivative
+(-1)^K K! / mu^(K+1) + K! / (1 - mu)^(K+1), the two terms summed at the end, so
+the odd orders are exactly 0 at mu = 1/2. F is constant on each piece of the
+support, so the derivatives of log F are those of log1p(-mu) and those of
+log(1 - F) are those of log mu. The quantile is 0 at p <= 1 - mu and 1 above,
+also from log p and from log(1 - p).
+
+**How, binomial.** The log-mass in the saddle-point form (Loader 2000), as the
+Poisson's:
+l = (1/2) log(n / (2 pi y (n - y))) + delta(n) - delta(y) - delta(n - y)
+- n mu D(y / (n mu)) - n (1 - mu) D((n - y) / (n (1 - mu))), with delta
+Stirling's error (`math::stirling_error`) and D(1 + w) = (1 + w) log1p(w) - w
+by its series below |w| = 1/4; the ends y = 0 and y = n are n log(1 - mu) and
+n log mu. Both deviance arguments come from the one numerator y - n mu, formed
+by a fused multiply-add, since the rounded product n mu moves the mass by tens
+of ulp at n = 1e6 (measured: 41 ulp). The derivatives are
+d^K l = (K-1)! [(-1)^(K-1) y / mu^K - (n - y) / (1 - mu)^K], with order 1
+written (y - n mu) / (mu (1 - mu)) so that it stays accurate at the mode, and
+I = n / (mu (1 - mu)) with its derivatives closed. With k = floor(y) and
+0 <= k < n, F(k) = 1 - I_mu(k + 1, n - k) and 1 - F(k) = I_mu(k + 1, n - k):
+both sides are taken at mu itself from `own::ibeta`, `ibetac`, `log_ibeta` and
+`log_ibetac`, each side computed directly, and 1 - mu is never formed.
+
+**How, geometric.** l = -y t - log1p(mu) with t = log1p(1/mu), both terms
+negative. With S_K = sum_(j<K) C(K, j) mu^j and B_K = S_K / (mu (1 + mu))^K,
+d^K l = (-1)^(K-1) (K-1)! [y S_K - mu^K] / (mu (1 + mu))^K, I = B_1 and
+d^K I = (-1)^K K! B_(K+1): the identity (1 + mu)^K - mu^K = S_K removes the
+subtraction of two nearly equal terms, and what is left is the genuine zero of
+the derivative near y = mu / K. log(1 - F) = -n t with n = floor(y) + 1, whose
+derivatives are (-1)^(K-1) (K-1)! n B_K. log F takes two regimes, because the
+plain composition of g(u) = log(-expm1(u)) with u = -n t cancels by 1/mu^K at
+small mu (measured: 1e24 ulp at mu = 1e-6, y = 0, order 5):
+- F <= 1/2 (that is n t <= log 2): g^(k)(u) = -R_(k-1)(q) with q = 1/expm1(n t),
+  R_0 = q and R_(j+1) = (q + q^2) R_j'(q), whose coefficients k! S(j+1, k) are
+  all positive (S the Stirling numbers of the second kind), composed with the
+  chain rule;
+- F > 1/2: log F = log1p(-w) with w = r^n and r = mu / (1 + mu); the
+  derivatives of w from the chain rule of x^n at r, where
+  r^(m) = (-1)^(m-1) m! v^(m+1) with v = 1/(1 + mu), and those of log(1 - w)
+  are -(k-1)! / F^k.
+The quantile is closed: k + 1 >= target / t gives ceil - 1, corrected by at
+most eight one-step moves on its own predicate, so it is O(1) and not a search
+on the cdf.
+
+**Measured.** References from the definitions with mpmath (bernoulli at 300 and
+400 bits, kept when they agree to 2^-80 of the order's largest term, 360 rows;
+binomial from SymPy's own derivatives at 300 bits with the cdf summed with
+exact `math.comb` and cross-checked against mpmath's incomplete beta for
+n <= 100, 7622 rows; geometric from SymPy's derivatives at 400 bits, 2640
+rows), each script also checking every closed form against SymPy before writing
+anything. Worst error in ulps, gcc and CUDA (one figure when they agree):
+
+| quantity | bernoulli | binomial | geometric |
+|---|---|---|---|
+| log-mass | 0.5 | 7.7 / 6.7 | 1.3 |
+| its derivatives, orders 1 to 6 | 1.0 to 4.9 | 1.6 to 5.6 | 1.8 to 10.2 |
+| I and its derivatives to order 4 | 1.1 to 2.3 | 1.0 to 2.1 | 1.7 to 4.4 |
+| log F | 0.5 to 4.9 | 4.7 | 63.5 / 82.5 (value), 2.6 to 60.3 |
+| log(1 - F) | 0.5 to 2.6 | 4.3 | 1.1 to 7.1 |
+| F, 1 - F | exact | 79, 124 / 461 | — |
+
+The derivatives of the mass are scored in ulps of the larger of their two
+terms, since near the mode they are small against both (the binomial's order 3
+reaches 33 ulp of its own value there); the geometric's log F derivatives are
+scored against the largest value of the order at the same mu, since they have
+zeros in y. The binomial's F and 1 - F inherit the incomplete beta's error at
+large parameters, and where log F or log(1 - F) is within 1/e of zero its
+relative error reaches 9.0e4 and 2.5e4 ulp, which is |log w| ulp of a value
+formed as exp(log w) (the absolute error stays below 1e-90). The geometric's
+log F value is conditioned by n t, which reaches 100 on its grid.
+
+Checked here on top of the agents' own measurements: the bernoulli reference
+file regenerated byte for byte; the binomial's log-mass within 2 ulp and its
+first derivative within 0.43 ulp of the exact formula at 300 bits at
+(n = 1e6, mu = 0.3) near the mode, at (1e6, 1e-6) and at (1e4, 0.5); the
+geometric's log F derivatives at mu = 1e-6, y = 50, where log F is -5.1e-299,
+equal to a 2000-bit reference in every printed digit at orders 1, 5 and 6
+(-5.0997348070279152e-299, -2.8187129482141245e-268,
+-1.2966063657062807e-260); and the generic route against the bernoulli's closed
+derivatives, which is the measurement of the complement side recorded above.
+
+**What this says.** The three families that have closed forms everywhere are at
+the accuracy of the elementary functions they use, a few ulp, with the three
+expected soft spots documented: the odd derivatives of the bernoulli's
+information at mu = 1/2 and the derivatives of the mass near the mode are
+genuine zeros, scored on their terms; the binomial's cdf is as accurate as the
+incomplete beta; the geometric's log F needs its two regimes, and the first
+form, which looked natural, was unusable at small mu.
+
+**Chosen.** As above. Tests `tests/distrib/test_bernoulli.cpp`,
+`test_binomial.cpp` and `test_geometric.cpp`, bounds at 1.5 times the worse of
+the two builds, every reference row evaluated inside a Kokkos kernel; the whole
+suite is 351 cases and 227433 assertions on both builds.
+
+**Open.** The geometric's derivatives overflow once t^-7 passes the double
+range, that is above mu of about 1e44. The binomial's logarithms near zero
+could be made exact inside `log_ibeta` and `log_ibetac`, which would serve
+every family that takes a cdf from the incomplete beta. The manual pages of the
+three families are not written, and their `\ingroup` names do not exist in
+`groups.dox` yet.

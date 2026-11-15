@@ -183,7 +183,13 @@ parent here, in tree order; the module pages define their groups without
 /** \defgroup distrib_discrete Discrete
 \ingroup distrib
 \brief Distributions on the non-negative integers. */
+/** \addtogroup distrib_bernoulli
+\ingroup distrib_discrete */
+/** \addtogroup distrib_binomial
+\ingroup distrib_discrete */
 /** \addtogroup distrib_poisson
+\ingroup distrib_discrete */
+/** \addtogroup distrib_geometric
 \ingroup distrib_discrete */
 
 /** \defgroup optimizers Optimizers

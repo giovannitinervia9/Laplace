@@ -1,0 +1,194 @@
+/**
+\defgroup distrib_bernoulli Bernoulli distribution
+\brief Univariate Bernoulli distribution parametrized by its mean, with closed-form derivatives, Fisher information, cumulative functions, and quantiles.
+
+Defined in `<laplace/distrib/bernoulli.hpp>` as \ref laplace::distrib::bernoulli_distrib "bernoulli_distrib", this module evaluates the Bernoulli log-mass and its parameter derivatives to order \f$6\f$, expected Fisher information with derivatives to order \f$4\f$, cumulative and log-cumulative functions with derivatives to order \f$6\f$, and quantiles, all in closed form. Every method is marked `LAPLACE_HD` so evaluators run on host CPUs and inside Kokkos device kernels. See \ref distrib_core "distrib_core" for the shared interface and packed `sym_tensor` storage. Against 300-bit and 400-bit `mpmath` references, every implemented derivative stays within \f$4.87\f$ ulp.
+
+## Classic form and reparametrization
+
+The classic Bernoulli distribution (Johnson and others, 2005) models a binary trial on \f$y \in \{0, 1\}\f$ with success probability \f$p \in (0, 1)\f$ and mass \f$p(y; p) = p^y (1 - p)^{1 - y}\f$. Because \f$p\f$ is already the mean, Laplace calls it `mu` (\f$\mu = p \in (0, 1)\f$) and nothing else changes (variance \f$\mu(1 - \mu)\f$):
+\f[
+p(y; \mu) = \mu^y (1 - \mu)^{1 - y}, \qquad y \in \{0, 1\}.
+\f]
+
+## Parameters, domain, and regularity
+
+The struct sets `kind = distrib_kind::discrete` and `n_params = 1`; the descriptor of `mu` gives the open domain \f$(0, 1)\f$ and declares the log-mass and the cumulative functions infinitely smooth in it, with no kink and a support that does not move. The support runs from \f$0\f$ to \f$1\f$, `center()` returns \f$\mu\f$ and `scale()` returns \f$\sqrt{\mu(1 - \mu)}\f$.
+
+Off the support, `logpmf()` returns \f$-\infty\f$ and its derivatives quiet NaN. Below the support \f$F\f$ is \f$0\f$ and above it \f$1\f$, so the logarithm that vanishes there has derivatives \f$0\f$ and the one that is \f$-\infty\f$ has quiet NaN derivatives.
+
+## Formulas and cancellation-free evaluation
+
+The log-mass is \f$\ell(\mu; y) = y \log \mu + (1 - y) \log(1 - \mu)\f$. For \f$y = 1\f$, `logpmf()` evaluates \f$\log \mu\f$; for \f$y = 0\f$, it evaluates \f$\operatorname{log1p}(-\mu)\f$ so values near \f$\mu = 0\f$ keep full precision. For \f$K \in \{1, \dots, 6\}\f$,
+\f[
+\frac{\mathrm{d}^K \ell}{\mathrm{d}\mu^K} = y \frac{(-1)^{K - 1} (K - 1)!}{\mu^K} - (1 - y) \frac{(K - 1)!}{(1 - \mu)^K}.
+\f]
+To avoid forming an unused term, `logpmf_dk<K>(y)` computes only the term of the observed \f$y\f$. The expected Fisher information is \f$I(\mu) = \frac{1}{\mu} + \frac{1}{1 - \mu} = \frac{1}{\mu(1 - \mu)}\f$, stored in `sym_tensor<1, 2>`, with derivatives of order \f$K \in \{1, \dots, 4\}\f$:
+\f[
+\frac{\mathrm{d}^K I}{\mathrm{d}\mu^K} = \frac{(-1)^K K!}{\mu^{K + 1}} + \frac{K!}{(1 - \mu)^{K + 1}}.
+\f]
+The two terms are summed at the end so that at \f$\mu = 1/2\f$ the odd orders vanish identically.
+
+On \f$0 \le y < 1\f$, \f$F(y) = 1 - \mu\f$, \f$1 - F(y) = \mu\f$, `log_cdf(y)` evaluates \f$\operatorname{log1p}(-\mu)\f$, and `log_ccdf(y)` evaluates \f$\log \mu\f$. Because \f$F\f$ is constant on each piece, on \f$[0, 1)\f$ the derivatives of order \f$K \in \{1, \dots, 6\}\f$ are \f$\mathrm{d}^K \log F / \mathrm{d}\mu^K = -(K - 1)! / (1 - \mu)^K\f$ and \f$\mathrm{d}^K \log(1 - F) / \mathrm{d}\mu^K = (-1)^{K - 1} (K - 1)! / \mu^K\f$. The quantile `quantile(p)` returns \f$0\f$ for \f$p \le 1 - \mu\f$ and \f$1\f$ above. Likewise, `quantile_from_log(log_p)` compares against \f$\operatorname{log1p}(-\mu)\f$, and `quantile_from_log_upper(log_q)` returns \f$0\f$ for \f$\log q \ge \log \mu\f$ and \f$1\f$ below.
+
+## Accuracy
+
+Measured inside Kokkos kernels on `gcc` (Serial and OpenMP) and `CUDA` builds across \f$\mu \in [10^{-15}, 1 - 10^{-15}]\f$ against 300-bit and 400-bit `mpmath` references (360 rows; see \ref accuracy "How accuracy is measured" and `docs/numerics.md`), errors stay within the test bounds below. Because odd orders of \f$I\f$ vanish at \f$\mu = 1/2\f$, `expected_info_dk` is scored in ulps of the two-term magnitude sum \f$K!(\mu^{-(K + 1)} + (1 - \mu)^{-(K + 1)})\f$.
+
+| Quantity | Measured max (ulp) | Test bound (ulp) |
+| --- | --- | --- |
+| `logpmf_dk` orders 1 to 6 | \f$0.5\f$, \f$1\f$, \f$1.5\f$, \f$2.85\f$, \f$2.68\f$, \f$4.87\f$ | \f$0.75\f$, \f$1.5\f$, \f$2.25\f$, \f$4.3\f$, \f$4.0\f$, \f$7.3\f$ |
+| `expected_info_dk` orders 1 to 4 | \f$1.13\f$, \f$2.25\f$, \f$1.28\f$, \f$1.59\f$ | \f$1.7\f$, \f$3.4\f$, \f$1.9\f$, \f$2.4\f$ |
+| `log_cdf_dk` orders 1 to 6 | \f$0.496\f$, \f$0.993\f$, \f$1.49\f$, \f$2.85\f$, \f$2.68\f$, \f$4.87\f$ | \f$0.75\f$, \f$1.5\f$, \f$2.25\f$, \f$4.3\f$, \f$4.0\f$, \f$7.3\f$ |
+| `log_ccdf_dk` orders 1 to 6 | \f$0.5\f$, \f$1\f$, \f$1.5\f$, \f$1\f$, \f$1.25\f$, \f$2.63\f$ | \f$0.75\f$, \f$1.5\f$, \f$2.25\f$, \f$1.5\f$, \f$1.9\f$, \f$3.9\f$ |
+
+The value of `logpmf()` is checked separately against \f$\log \mu\f$ and \f$\operatorname{log1p}(-\mu)\f$ with a relative tolerance of \f$10^{-15}\f$, and at \f$\mu = 10^{-15}\f$ and \f$\mu = 1 - 10^{-15}\f$ with \f$10^{-14}\f$. The test also checks the variance of the score against `expected_info()` with a tolerance of \f$10^{-13}\f$, every derivative against 5-point finite differences with \f$10^{-8}\f$, and the generic summation routes of \ref distrib_generic "distrib_generic" against these closed forms with \f$10^{-10}\f$ for `log_cdf_dk` and \f$10^{-5}\f$ for `log_ccdf_dk`. The second tolerance is the looser one because a support of two points leaves the generic route little to sum: the step from one side to the other loses digits where the two sides move at different rates, and at \f$\mu = 0.99\f$ its sixth order differs from the closed form by \f$7.3 \times 10^{-7}\f$ relative.
+
+## Kokkos usage
+
+```cpp
+#include <laplace/distrib/bernoulli.hpp>
+#include <Kokkos_Core.hpp>
+
+void eval_bernoulli(Kokkos::View<const double*> y, Kokkos::View<double*> out, double mu) {
+  const laplace::distrib::bernoulli_distrib d{mu};
+  Kokkos::parallel_for("bernoulli_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpmf(y(i)) + d.logpmf_d1(y(i))[0];
+  });
+}
+```
+
+## Members
+
+Struct \ref laplace::distrib::bernoulli_distrib "bernoulli_distrib" implements \ref distrib_core "distrib_core" for `n_params = 1`: `mu`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `logpmf()`, `logpmf_d1()`..`logpmf_d6()`, `logpmf_dk()`, `expected_info()`, `expected_info_d1()`..`expected_info_d4()`, `expected_info_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `log_cdf_d1()`..`log_cdf_d6()`, `log_cdf_dk()`, `log_ccdf_d1()`..`log_ccdf_d6()`, `log_ccdf_dk()`, `quantile()`, `quantile_from_log()`, and `quantile_from_log_upper()`.
+
+## References
+
+- N. L. Johnson, A. W. Kemp and S. Kotz (2005), Univariate Discrete Distributions, Wiley Series in Probability and Statistics. https://doi.org/10.1002/0471715816
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/
+
+/**
+\defgroup distrib_binomial Binomial distribution
+\brief Univariate binomial distribution with known size and mean-proportion parameter, using a saddle-point log-mass and incomplete beta cumulative functions.
+
+Defined in `<laplace/distrib/binomial.hpp>` as \ref laplace::distrib::binomial_distrib "binomial_distrib", this module evaluates the binomial log-mass and its parameter derivatives to order \f$6\f$, expected Fisher information with derivatives to order \f$4\f$, and cumulative and log-cumulative functions. Every method is marked `LAPLACE_HD` for host CPUs and Kokkos device kernels; see \ref distrib_core "distrib_core" for the shared interface and `sym_tensor` storage. Parameter derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$ and quantiles are supplied by \ref distrib_generic "distrib_generic".
+
+## Classic form and reparametrization
+
+The classic binomial distribution (Johnson and others, 2005) counts successes \f$y \in \{0, 1, \dots, n\}\f$ in \f$n \ge 1\f$ independent trials of success probability \f$p \in (0, 1)\f$, with mass \f$p(y; n, p) = \binom{n}{y} p^y (1 - p)^{n - y}\f$. Laplace carries \f$p\f$ as the mean proportion `mu` (\f$\mu = p \in (0, 1)\f$) and stores the known size \f$n\f$ as a trailing field `size` rather than a parameter, so the distribution's single parameter stays the proportion while the variable has mean \f$n\mu\f$ and variance \f$n\mu(1 - \mu)\f$:
+\f[
+p(y; \mu) = \binom{n}{y} \mu^y (1 - \mu)^{n - y}, \qquad y \in \{0, 1, \dots, n\}.
+\f]
+
+## Parameters, domain, and regularity
+
+The struct sets `kind = distrib_kind::discrete` and `n_params = 1`; the descriptor of `mu` gives the open domain \f$(0, 1)\f$ and declares the log-mass and the cumulative functions infinitely smooth in it, with no kink and a support that does not move. The field `size` holds \f$n \ge 1\f$ as an integer in a `double` and is excluded from `n_params` and from the descriptors. The support runs from \f$0\f$ to `size`, `center()` returns \f$n\mu\f$ and `scale()` returns \f$\sqrt{n\mu(1 - \mu)}\f$.
+
+Outside \f$\{0, 1, \dots, n\}\f$, and at a \f$y\f$ that is not an integer, `logpmf()` returns \f$-\infty\f$. Below the support \f$F\f$ is \f$0\f$ and from \f$n\f$ on it is \f$1\f$, with the logarithms following.
+
+## Formulas and cancellation-free evaluation
+
+At the ends, `logpmf(0)` returns \f$n \operatorname{log1p}(-\mu)\f$ and `logpmf(n)` returns \f$n \log \mu\f$. For integers \f$1 \le y \le n - 1\f$, `logpmf(y)` uses the saddle-point deviance identity (Loader, 2002) with Stirling's error \f$\delta\f$ from \ref stirling "stirling" (DLMF §5.11):
+\f[
+\ell(\mu; y) = \frac{1}{2} \log\!\left(\frac{n}{2\pi y (n - y)}\right) + \delta(n) - \delta(y) - \delta(n - y) - n\mu\, D\!\left(\frac{y}{n\mu}\right) - n(1 - \mu)\, D\!\left(\frac{n - y}{n(1 - \mu)}\right),
+\f]
+where \f$D(z) = z \log z - z + 1\f$. Both deviance arguments, \f$w = (y - n\mu)/(n\mu)\f$ and \f$-(y - n\mu)/(n(1 - \mu))\f$, take the single numerator \f$y - n\mu\f$ formed by a fused multiply-add so that rounding \f$n\mu\f$ does not shift the log-mass at large \f$n\f$. For \f$|w| < 0.25\f$, \f$D(1 + w)\f$ is summed by \f$\sum_{m=2}^{\infty} (-1)^m w^m / (m(m - 1))\f$.
+
+Parameter derivatives of order \f$K \in \{1, \dots, 6\}\f$ are
+\f[
+\frac{\mathrm{d}^K \ell}{\mathrm{d}\mu^K} = (K - 1)! \left[ \frac{(-1)^{K - 1} y}{\mu^K} - \frac{n - y}{(1 - \mu)^K} \right],
+\f]
+with order \f$1\f$ written as \f$(y - n\mu) / (\mu(1 - \mu))\f$ via fused multiply-add to preserve accuracy near \f$y = n\mu\f$. Expected Fisher information is \f$I(\mu) = n / (\mu(1 - \mu))\f$, with \f$K\f$-th derivative (\f$K \in \{1, \dots, 4\}\f$)
+\f[
+\frac{\mathrm{d}^K I}{\mathrm{d}\mu^K} = n \, K! \left[ \frac{(-1)^K}{\mu^{K + 1}} + \frac{1}{(1 - \mu)^{K + 1}} \right].
+\f]
+
+For \f$0 \le k < n\f$ with \f$k = \lfloor y \rfloor\f$, cumulative functions evaluate the regularized incomplete beta function \f$I_\mu(k + 1, n - k)\f$ (DLMF §8.17) from \ref incomplete_beta "incomplete_beta". Specifically, \f$F(y) = 1 - I_\mu(k + 1, n - k)\f$ uses \ref laplace::math::ibetac "ibetac()" and \ref laplace::math::log_ibetac "log_ibetac()", and \f$1 - F(y) = I_\mu(k + 1, n - k)\f$ uses \ref laplace::math::ibeta "ibeta()" and \ref laplace::math::log_ibeta "log_ibeta()". Every call takes \f$\mu\f$ itself so \f$1 - \mu\f$ is never formed. The struct provides no `log_cdf_dk`, `log_ccdf_dk`, or `quantile` members. Instead, \ref laplace::distrib::distrib_log_cdf_dk "distrib_log_cdf_dk<K>()" and \ref laplace::distrib::distrib_log_ccdf_dk "distrib_log_ccdf_dk<K>()" in \ref distrib_generic "distrib_generic" supply the log-cumulative derivatives by summing the mass, and \ref laplace::distrib::distrib_quantile "distrib_quantile()" supplies the quantile.
+
+## Accuracy and limits
+
+Measured inside Kokkos kernels on `gcc` and `CUDA` builds over \f$n \in [1, 10^6]\f$ and \f$\mu \in [10^{-12}, 1 - 10^{-12}]\f$ against 300-bit references from SymPy (Meurer and others, 2017) and `mpmath` (7622 rows; see \ref accuracy "How accuracy is measured" and `docs/numerics.md`), errors stay within the test bounds below. Because the two terms of `logpmf_dk` cancel near the mode \f$y = n\mu\f$ where the derivative is genuinely small, `logpmf_dk` is scored in ulps of the larger of its two terms.
+
+| Quantity | Measured max (ulp) | Test bound (ulp) |
+| --- | --- | --- |
+| `logpmf` | \f$7.7\f$ (`gcc`), \f$6.7\f$ (`CUDA`) | \f$12\f$ |
+| `logpmf_dk` orders 1 to 6 | \f$1.63\f$, \f$2.0\f$, \f$2.4\f$, \f$3.4\f$, \f$3.8\f$, \f$5.6\f$ | \f$2.5\f$, \f$3\f$, \f$3.6\f$, \f$5.1\f$, \f$5.7\f$, \f$8.5\f$ |
+| `expected_info` and its derivatives, orders 1 to 4 | \f$0.96\f$, \f$2.1\f$, \f$1.4\f$, \f$2.1\f$, \f$2.0\f$ | \f$1.5\f$, \f$3.2\f$, \f$2.1\f$, \f$3.2\f$, \f$3.1\f$ |
+| `cdf`, `ccdf` | \f$79\f$, \f$124\f$ (`gcc`) / \f$461\f$ (`CUDA`) | \f$119\f$, \f$692\f$ |
+| `log_cdf`, `log_ccdf` | \f$4.7\f$, \f$4.3\f$ | \f$7.1\f$, \f$6.6\f$ |
+| `log_cdf`, `log_ccdf` within \f$1/e\f$ of \f$0\f$ | \f$9.0 \times 10^4\f$, \f$2.5 \times 10^4\f$ | \f$1.36 \times 10^5\f$, \f$3.7 \times 10^4\f$ |
+
+Where \f$\log F\f$ or \f$\log(1 - F)\f$ lies within \f$1/e\f$ of \f$0\f$, the relative error grows with the magnitude of the opposite tail's log-probability while the absolute error stays below \f$10^{-90}\f$. The test also checks the variance of the score against `expected_info()` with a tolerance of \f$10^{-11}\f$ and the derivatives of the log-mass and of the information against 5-point finite differences with \f$10^{-8}\f$. The generic `distrib_log_cdf_dk` and `distrib_log_ccdf_dk` of orders \f$1\f$ to \f$3\f$ differ from 5-point differences of `log_cdf` and `log_ccdf` by at most \f$4.0 \times 10^{-8}\f$ relative over sizes from \f$1\f$ to \f$1000\f$.
+
+## Members
+
+Struct \ref laplace::distrib::binomial_distrib "binomial_distrib" implements \ref distrib_core "distrib_core" for `n_params = 1`: `mu`, `size`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `logpmf()`, `logpmf_d1()`..`logpmf_d6()`, `logpmf_dk()`, `expected_info()`, `expected_info_d1()`..`expected_info_d4()`, `expected_info_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, and `log_ccdf()`.
+
+## References
+
+- N. L. Johnson, A. W. Kemp and S. Kotz (2005), Univariate Discrete Distributions, Wiley Series in Probability and Statistics. https://doi.org/10.1002/0471715816
+- C. Loader (2002), Fast and Accurate Computation of Binomial Probabilities, manuscript, Lucent Technologies, Murray Hill, NJ. https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §5.11 Asymptotic Expansions (Gamma Function), https://dlmf.nist.gov/5.11
+- NIST Digital Library of Mathematical Functions, §8.17 Incomplete Beta Functions, https://dlmf.nist.gov/8.17
+*/
+
+/**
+\defgroup distrib_geometric Geometric distribution
+\brief Univariate geometric distribution parametrized by its mean, with cancellation-free polynomial derivatives, two-regime log-CDF derivatives, and closed quantiles.
+
+Defined in `<laplace/distrib/geometric.hpp>` as \ref laplace::distrib::geometric_distrib "geometric_distrib", this module evaluates the geometric log-mass and its parameter derivatives to order \f$6\f$, expected Fisher information with derivatives to order \f$4\f$, cumulative and log-cumulative functions with derivatives to order \f$6\f$, and quantiles, all in closed form. Every method is marked `LAPLACE_HD` for host CPUs and Kokkos device kernels; see \ref distrib_core "distrib_core" for the shared interface and `sym_tensor` storage.
+
+## Classic form and reparametrization
+
+The classic geometric distribution (Johnson and others, 2005) counts the number of failures \f$y \in \{0, 1, 2, \dots\}\f$ before the first success in independent Bernoulli trials of success probability \f$p \in (0, 1)\f$, with mass \f$(1 - p)^y p\f$. Substituting \f$p = 1/(1 + \mu)\f$ parametrizes the distribution by its mean `mu` (\f$\mu \in (0, \infty)\f$), with variance \f$\mu(1 + \mu)\f$:
+\f[
+p(y; \mu) = \frac{1}{1 + \mu} \left(\frac{\mu}{1 + \mu}\right)^y, \qquad y \in \{0, 1, 2, \dots\}.
+\f]
+
+## Parameters, domain, and regularity
+
+The struct sets `kind = distrib_kind::discrete` and `n_params = 1`; the descriptor of `mu` gives the open domain \f$(0, \infty)\f$ and declares the log-mass and the cumulative functions infinitely smooth in it, with no kink and a support that does not move. The support runs from \f$0\f$ upwards without an end, `center()` returns \f$\mu\f$ and `scale()` returns \f$\sqrt{\mu(1 + \mu)}\f$.
+
+Below the support \f$F\f$ is \f$0\f$, so `log_cdf()` returns \f$-\infty\f$ with quiet NaN derivatives while `log_ccdf()` returns \f$0\f$ with vanishing ones. The quantile functions return \f$0\f$ at probability \f$0\f$, \f$+\infty\f$ at probability \f$1\f$, and quiet NaN outside \f$[0, 1]\f$ or at a positive log-probability.
+
+## Formulas and cancellation-free evaluation
+
+With \f$t = \operatorname{log1p}(1/\mu) > 0\f$, `logpmf(y)` evaluates \f$\ell(\mu; y) = -y t - \operatorname{log1p}(\mu)\f$, where both terms are negative. Using \f$(1 + \mu)^K - \mu^K = S_K(\mu) = \sum_{j < K} \binom{K}{j} \mu^j\f$ and \f$B_K(\mu) = \mu^{-K} - (1 + \mu)^{-K} = S_K(\mu) / (\mu(1 + \mu))^K\f$, the \f$K\f$-th derivative of \f$\ell\f$ (\f$K \in \{1, \dots, 6\}\f$) is written as a single fraction without subtraction of nearly equal powers:
+\f[
+\frac{\mathrm{d}^K \ell}{\mathrm{d}\mu^K} = (-1)^{K - 1} (K - 1)! \, \frac{y S_K(\mu) - \mu^K}{(\mu(1 + \mu))^K}.
+\f]
+Expected Fisher information is \f$I(\mu) = B_1(\mu) = 1/(\mu(1 + \mu))\f$, and its \f$K\f$-th derivative (\f$K \in \{1, \dots, 4\}\f$) is \f$(-1)^K K! \, B_{K + 1}(\mu)\f$.
+
+With \f$n = \lfloor y \rfloor + 1\f$ for \f$y \ge 0\f$ and \f$u = -n t\f$, \f$F(y) = -\operatorname{expm1}(u)\f$ and \f$1 - F(y) = e^u\f$. `log_cdf(y)` switches at \f$u = -\log 2\f$ between \f$\log(-\operatorname{expm1}(u))\f$ and \f$\operatorname{log1p}(-\exp(u))\f$, while `log_ccdf(y)` returns \f$-n t\f$ with derivatives \f$(-1)^{K - 1} (K - 1)! \, n B_K(\mu)\f$ (\f$K \in \{1, \dots, 6\}\f$). For `log_cdf_dk<K>(y)`, two regimes split at \f$F = 1/2\f$ (\f$n t = \log 2\f$):
+- When \f$n t \le \log 2\f$ (\f$F \le 1/2\f$), \f$\log F = g(u) = \log(-\operatorname{expm1}(u))\f$ has outer derivatives \f$g^{(k)}(u) = -R_{k - 1}(q)\f$ in \f$q = 1 / \operatorname{expm1}(n t)\f$, defined by \f$R_0(q) = q\f$ and \f$R_{j + 1}(q) = (q + q^2) R_j'(q)\f$. Every coefficient of \f$R_j\f$ is positive (derived with SymPy; Meurer and others, 2017). Composition with \f$u^{(m)}(\mu) = (-1)^{m - 1} (m - 1)! \, n B_m(\mu)\f$ uses \ref laplace::math::chain_rule_d1 "chain_rule_d1()" through `chain_rule_d6()` in \ref faa_di_bruno "faa_di_bruno" (Johnson, 2002).
+- When \f$n t > \log 2\f$ (\f$F > 1/2\f$), writing \f$\log F = \log(1 - w)\f$ with \f$w = r^n\f$ and \f$r = \mu / (1 + \mu)\f$ avoids \f$1/\mu^K\f$ cancellation at small \f$\mu\f$. Derivatives of \f$w\f$ chain \f$x^n\f$ at \f$r\f$ with \f$r^{(m)}(\mu) = (-1)^{m - 1} m! / (1 + \mu)^{m + 1}\f$, and then chain with \f$\mathrm{d}^k \log(1 - w) / \mathrm{d}w^k = -(k - 1)! / F^k\f$ via \ref faa_di_bruno "faa_di_bruno".
+
+The quantile functions start from \f$\lceil \mathrm{target}/(-t) \rceil - 1\f$ and apply at most \f$8\f$ single-integer corrections, each testing \f$\log F\f$ or \f$\log(1 - F)\f$ at that integer against the target. The work does not grow with the quantile, so no search over the cumulative function is needed.
+
+## Accuracy and limits
+
+Measured on `gcc` and `CUDA` builds over \f$\mu \in [10^{-6}, 10^6]\f$ against 400-bit references from SymPy (Meurer and others, 2017) and `mpmath` (2640 rows; see \ref accuracy "How accuracy is measured" and `docs/numerics.md`), errors stay within the test bounds below. Because `logpmf_dk` crosses zero near \f$y = \mu / K\f$, it is scored in ulps of the sum of the magnitudes of its two terms, \f$(K - 1)!\,(y/\mu^K + (y + 1)/(1 + \mu)^K)\f$. Because the derivatives of \f$\log F\f$ have zeros in \f$y\f$, each order is scored in ulps of its largest value at the same \f$\mu\f$. Each row gives the value first, then the orders; the two builds agree except where both figures are given.
+
+| Quantity | Measured max (ulp) | Test bound (ulp) |
+| --- | --- | --- |
+| `logpmf`, then orders 1 to 6 | \f$1.3\f$; \f$1.76\f$, \f$3.92\f$, \f$4.12\f$, \f$5.87\f$, \f$7.1\f$, \f$10.2\f$ | \f$2.0\f$; \f$2.7\f$, \f$5.9\f$, \f$6.2\f$, \f$8.8\f$, \f$10.7\f$, \f$15.3\f$ |
+| `expected_info`, then orders 1 to 4 | \f$1.69\f$; \f$3.24\f$, \f$3.95\f$, \f$3.89\f$, \f$4.4\f$ | \f$2.6\f$; \f$4.9\f$, \f$5.9\f$, \f$5.9\f$, \f$6.6\f$ |
+| `log_cdf`, then orders 1 to 6 | \f$63.5\f$ (`gcc`), \f$82.5\f$ (`CUDA`); \f$2.55\f$, \f$3.21\f$ and \f$2.8\f$, \f$8.32\f$, \f$14.6\f$, \f$43.3\f$ and \f$35.3\f$, \f$60.3\f$ and \f$53.7\f$ | \f$124.0\f$; \f$3.9\f$, \f$4.9\f$, \f$12.5\f$, \f$22.0\f$, \f$65.0\f$, \f$91.0\f$ |
+| `log_ccdf`, then orders 1 to 6 | \f$1.12\f$; \f$1.69\f$, \f$3.24\f$, \f$3.95\f$, \f$5.84\f$, \f$7.1\f$, \f$5.73\f$ | \f$1.7\f$; \f$2.6\f$, \f$4.9\f$, \f$5.9\f$, \f$8.8\f$, \f$10.7\f$, \f$8.6\f$ |
+
+The value of \f$\log F\f$ is conditioned by \f$n t\f$, which reaches \f$100\f$ on the test grid. The test also checks the variance of the score against `expected_info()` with a tolerance of \f$10^{-12}\f$, the derivatives against 5-point finite differences with \f$10^{-8}\f$ for the log-mass and the information and \f$10^{-7}\f$ for the cumulative functions, and the closed quantile against `quantile_by_search()`, which it equals on every point of the grid. The closed derivatives of \f$\log F\f$ differ from the generic summation of \ref distrib_generic "distrib_generic" by at most \f$5.2 \times 10^{-10}\f$ relative. Once \f$t^{-7}\f$ exceeds the `double` range, that is for \f$\mu\f$ above about \f$10^{44}\f$, the derivatives overflow.
+
+## Members
+
+Struct \ref laplace::distrib::geometric_distrib "geometric_distrib" implements \ref distrib_core "distrib_core" for `n_params = 1`: `mu`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `logpmf()`, `logpmf_d1()`..`logpmf_d6()`, `logpmf_dk()`, `expected_info()`, `expected_info_d1()`..`expected_info_d4()`, `expected_info_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `log_cdf_d1()`..`log_cdf_d6()`, `log_cdf_dk()`, `log_ccdf_d1()`..`log_ccdf_d6()`, `log_ccdf_dk()`, `quantile()`, `quantile_from_log()`, and `quantile_from_log_upper()`.
+
+## References
+
+- N. L. Johnson, A. W. Kemp and S. Kotz (2005), Univariate Discrete Distributions, Wiley Series in Probability and Statistics. https://doi.org/10.1002/0471715816
+- W. P. Johnson (2002), The Curious History of Faà di Bruno's Formula, The American Mathematical Monthly, 109(3), 217–234. https://doi.org/10.2307/2695352
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

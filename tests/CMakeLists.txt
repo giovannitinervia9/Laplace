@@ -49,6 +49,9 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_invgauss.cpp
   distrib/test_lognormal1.cpp
   distrib/test_lognormal2.cpp
+  distrib/test_bernoulli.cpp
+  distrib/test_binomial.cpp
+  distrib/test_geometric.cpp
   math/test_chain_pair.cpp
   pdmat/test_pilot.cpp
   pdmat/test_unstructured.cpp

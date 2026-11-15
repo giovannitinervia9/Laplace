@@ -160,7 +160,7 @@ LAPLACE_HD_FORCEINLINE double factorial(int n) {
 // E_p = 1 - rho^p, rho = w / (w + h): E_1 = h / (w + h) and
 // E_(p+1) = E_p + E_1 rho^p, a sum of positive terms.
 //
-// dpsi(n, z, h) = psi^(n)(z) - psi^(n)(z + h), n = 1..4: with
+// dpsi(n, z, h) = psi^(n)(z) - psi^(n)(z + h), n = 1..5: with
 // |psi^(n)(w)| = n! sum_k (w + k)^-(n+1), the terms below z + M >= 15 are
 // differenced one by one, and at Z = z + M the asymptotic expansion
 // (polygamma.hpp) term by term.
@@ -260,7 +260,9 @@ LAPLACE_HD_FORCEINLINE double dpsi_any(int n, double z, double w, double d) {
 // All the differences at once, for one evaluation per call (the separate
 // functions above repeat the shift and the asymptotic powers for each order;
 // measured 2026-11-09, the log-beta terms of order 5 cost 0.5-1 us that way):
-//   out[n] = psi^(n)(z) - psi^(n)(z + h), n = 0..N (N <= 4), and dDv = D(z) - D(z + h).
+//   out[n] = psi^(n)(z) - psi^(n)(z + h), n = 0..N (N <= 5), and dDv = D(z) - D(z + h).
+// Order 5 is what the sixth derivative of a log-gamma difference at an integer
+// shift needs (the negative binomial and the beta-binomial masses).
 LAPLACE_HD void dpsi_all(double z, double h, int N, double* out, double& dDv) {
   for (int n = 0; n <= N; ++n) out[n] = 0.0;
   dDv = 0.0;
@@ -271,7 +273,7 @@ LAPLACE_HD void dpsi_all(double z, double h, int N, double* out, double& dDv) {
   // zE[p] = Z^-p E_p, p = 1..20 + N, then the asymptotic sums with constant
   // coefficients: D: 1/2 at p = 1, B_2k / (2k) at p = 2k; psi^(n): (n-1)! at
   // p = n, n!/2 at p = n + 1, B_2k (2k+1)...(2k+n-1) at p = 2k + n
-  double zE[25];
+  double zE[26];
   double Ep = E1, rp = rho, zp = iZ;
   for (int p = 1; p <= 20 + N; ++p) {
     zE[p] = zp * Ep;
@@ -279,18 +281,19 @@ LAPLACE_HD void dpsi_all(double z, double h, int N, double* out, double& dDv) {
     rp *= rho;
     zp *= iZ;
   }
-  const double fact[5] = {1.0, 1.0, 2.0, 6.0, 24.0};
+  const double fact[6] = {1.0, 1.0, 2.0, 6.0, 24.0, 120.0};
   constexpr double cD[10] = {0.08333333333333333,  -0.008333333333333333, 0.003968253968253968, -0.004166666666666667,
                              0.007575757575757576, -0.021092796092796094, 0.08333333333333333,  -0.4432598039215686,
                              3.0539543302701198,   -26.456212121212122};
-  constexpr double cP[4][10] = {
+  constexpr double cP[5][10] = {
       {0.16666666666666666, -0.03333333333333333, 0.023809523809523808, -0.03333333333333333, 0.07575757575757576,
        -0.2531135531135531, 1.1666666666666667, -7.092156862745098, 54.971177944862156, -529.1242424242424},
       {0.5, -0.16666666666666666, 0.16666666666666666, -0.3, 0.8333333333333334, -3.2904761904761903, 17.5,
        -120.56666666666666, 1044.452380952381, -11111.60909090909},
       {2.0, -1.0, 1.3333333333333333, -3.0, 10.0, -46.06666666666667, 280.0, -2170.2, 20889.04761904762, -244455.4},
-      {10.0, -7.0, 12.0, -33.0, 130.0, -691.0, 4760.0, -41233.8, 438670.0, -5622474.2}};
-  double asym[5] = {0.0, 0.0, 0.0, 0.0, 0.0}, asymD = 0.0;
+      {10.0, -7.0, 12.0, -33.0, 130.0, -691.0, 4760.0, -41233.8, 438670.0, -5622474.2},
+      {60.0, -56.0, 120.0, -396.0, 1820.0, -11056.0, 85680.0, -824676.0, 9650740.0, -134939380.8}};
+  double asym[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, asymD = 0.0;
   for (int k = 10; k >= 1; --k) asymD += cD[k - 1] * zE[2 * k];
   asymD += 0.5 * zE[1];
   for (int n = 1; n <= N; ++n) {
@@ -298,7 +301,7 @@ LAPLACE_HD void dpsi_all(double z, double h, int N, double* out, double& dDv) {
     for (int k = 10; k >= 1; --k) t += cP[n - 1][k - 1] * zE[2 * k + n];
     asym[n] = fact[n - 1] * zE[n] + 0.5 * fact[n] * zE[n + 1] + t;
   }
-  double rec[5] = {0.0, 0.0, 0.0, 0.0, 0.0}, sumD = 0.0;
+  double rec[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, sumD = 0.0;
   for (int k = M - 1; k >= 0; --k) {
     // the same operations as dpsi and dD
     const double w = z + k, wh = w + h, iw = 1.0 / w;

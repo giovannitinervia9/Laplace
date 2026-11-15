@@ -212,6 +212,68 @@ TEST_CASE("distrib generic: Poisson cdf family by summing the mass") {
   }
 }
 
+template <int K>
+double sum_side(const ld::poisson_distrib& d, double k, bool upper) {
+  return upper ? ld::log_ccdf_dk_by_sum<K>(d, k)[0] : ld::log_cdf_dk_by_sum<K>(d, k)[0];
+}
+
+TEST_CASE("distrib generic: Poisson log F derivatives by summing the mass, against mpmath") {
+  // the references of tools/reference/distrib_log_cdf.py (the Poisson rows), each
+  // error in ulps of the component itself, as in test_pilot.cpp. The route loses
+  // about five digits at orders 5 and 6 near the median (the step from the sums
+  // d_T S / S to the derivatives of log S cancels there, about 1e-10 relative,
+  // without getting worse as the mean grows: docs/numerics.md).
+  std::FILE* f = std::fopen(LAPLACE_REFERENCE_DIR "/distrib_log_cdf.csv", "r");
+  REQUIRE(f != nullptr);
+  char line[512];
+  std::fgets(line, sizeof line, f);
+  // measured on 2026-11-15, worst ulp per order, the same on gcc and on CUDA: 476, 502, 856,
+  // 7.58e3, 2.41e5, 5.34e5; bounds half again
+  const double bound[7] = {0.0, 715.0, 755.0, 1.3e3, 1.14e4, 3.62e5, 8.0e5};
+  double worst[7] = {};
+  int rows = 0;
+  while (std::fgets(line, sizeof line, f)) {
+    int dist, upper, K, b;
+    char ys[64], his[64], los[64], mus[64], phis[64];
+    if (std::sscanf(line, "%d,%d,%63[^,],%d,%d,%63[^,],%63[^,],%63[^,],%63s", &dist, &upper, ys, &K, &b, his, los, mus,
+                    phis) != 9)
+      continue;
+    if (dist != 2) continue;
+    const double y = std::strtod(ys, nullptr), hi = std::strtod(his, nullptr), lo = std::strtod(los, nullptr),
+                 mu = std::strtod(mus, nullptr);
+    const ld::poisson_distrib d{mu};
+    double v = 0.0;
+    switch (K) {
+      case 1: v = sum_side<1>(d, y, upper); break;
+      case 2: v = sum_side<2>(d, y, upper); break;
+      case 3: v = sum_side<3>(d, y, upper); break;
+      case 4: v = sum_side<4>(d, y, upper); break;
+      case 5: v = sum_side<5>(d, y, upper); break;
+      case 6: v = sum_side<6>(d, y, upper); break;
+    }
+    const double u = std::fabs((v - hi) - lo) / std::ldexp(1.0, std::ilogb(hi) - 52);
+    INFO("mu = " << mu << ", k = " << y << ", K = " << K << ", upper = " << upper << ": " << u << " ulp");
+    CHECK(u <= bound[K]);
+    worst[K] = std::fmax(worst[K], u);
+    ++rows;
+  }
+  std::fclose(f);
+  CHECK(rows > 300);
+  for (int K = 1; K <= 6; ++K)
+    std::printf("[generic log F derivatives] Poisson, order %d: worst %.3g ulp of the component\n", K, worst[K]);
+}
+
+TEST_CASE("distrib generic: log F derivatives by sum, ends of the support and dispatcher") {
+  const ld::poisson_distrib d{3.5};
+  const auto h = hide(d);
+  CHECK(std::isnan(ld::log_cdf_dk_by_sum<2>(h, -1.0)[0]));
+  CHECK(ld::log_ccdf_dk_by_sum<2>(h, -1.0)[0] == 0.0);
+  CHECK(ld::log_cdf_dk_by_sum<3>(h, 2.5)[0] == ld::log_cdf_dk_by_sum<3>(h, 2.0)[0]);
+  CHECK(ld::distrib_log_cdf_dk<4>(d, 2.0)[0] == d.log_cdf_d4(2.0)[0]);
+  CHECK(ld::distrib_log_ccdf_dk<4>(d, 2.0)[0] == d.log_ccdf_d4(2.0)[0]);
+  CHECK(ld::distrib_log_cdf_dk<4>(h, 2.0)[0] == ld::log_cdf_dk_by_sum<4>(h, 2.0)[0]);
+}
+
 TEST_CASE("distrib generic: expected information and its derivatives, both forms") {
   // smooth distributions: both forms against the closed forms
   check_info(ld::gaussian1_distrib{0.4, 1.3}, "gaussian1(0.4, 1.3)", 16.0, 16.0);
@@ -356,6 +418,8 @@ void generic_routes_kernel_case() {
   run_kernel(out, "quantile_by_root laplace", KOKKOS_LAMBDA(int i) { return ld::quantile_by_root(hide(l), (i + 0.5) / n); });
   run_kernel(out, "quantile_by_search poisson", KOKKOS_LAMBDA(int i) { return ld::quantile_by_search(hide(p), (i + 0.5) / n); });
   run_kernel(out, "log_cdf_by_sum poisson", KOKKOS_LAMBDA(int i) { return ld::log_cdf_by_sum(hide(p), double(i)); });
+  run_kernel(out, "log_cdf_dk_by_sum poisson", KOKKOS_LAMBDA(int i) { return ld::log_cdf_dk_by_sum<6>(hide(p), double(i))[0]; });
+  run_kernel(out, "log_ccdf_dk_by_sum poisson", KOKKOS_LAMBDA(int i) { return ld::log_ccdf_dk_by_sum<3>(hide(p), double(i))[0]; });
   run_kernel(out, "moment gamma1", KOKKOS_LAMBDA(int) { return ld::moment_by_integral(hide(ga), 2, 2.0); });
   run_kernel(out, "info d0 laplace score", KOKKOS_LAMBDA(int) {
     return ld::expected_info_by_integral<0, ld::info_form::score>(hide(l))[0];
