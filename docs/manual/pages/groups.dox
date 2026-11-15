@@ -154,6 +154,23 @@ parent here, in tree order; the module pages define their groups without
 /** \addtogroup distrib_gumbel
 \ingroup distrib_real */
 
+/** \defgroup distrib_student_t Student t
+\ingroup distrib_real
+\brief The Student t distribution in two parametrizations. */
+/** \addtogroup distrib_student_t1
+\ingroup distrib_student_t */
+/** \addtogroup distrib_student_t2
+\ingroup distrib_student_t */
+
+/** \addtogroup distrib_enet
+\ingroup distrib_real */
+/** \addtogroup distrib_skewnormal
+\ingroup distrib_real */
+/** \addtogroup distrib_pseudohuber
+\ingroup distrib_real */
+/** \addtogroup distrib_skewt
+\ingroup distrib_real */
+
 /** \defgroup distrib_positive Continuous on the positive half-line
 \ingroup distrib
 \brief Continuous distributions with support on the positive half-line. */

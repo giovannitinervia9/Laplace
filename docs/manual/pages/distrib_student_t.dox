@@ -1,0 +1,184 @@
+/**
+ * \defgroup distrib_student_t1 Student t, scale parametrization
+ * \ingroup distrib
+ * \brief Univariate Student t distribution parametrized by location, scale, and degrees of freedom.
+ *
+ * Defined in `<laplace/distrib/student_t1.hpp>` as
+ * \ref laplace::distrib::student_t1_distrib "student_t1_distrib", this distribution implements
+ * log-density, cumulative, and complementary cumulative evaluators with mixed parameter and
+ * observation derivatives up to order \f$6\f$, expected Fisher information with derivatives up to
+ * order \f$4\f$, support queries, and robust sample starting values. Every evaluator is marked
+ * `LAPLACE_HD` so host and Kokkos device code run identically; see \ref distrib_core for common
+ * interface and tensor conventions, \ref distrib_generic for generic quantiles and random
+ * generation, and \ref distrib_start for sample initialization.
+ *
+ * ## Classic form and parametrization
+ *
+ * The classic standardized Student t density (Student, 1908) with \f$\nu > 0\f$ degrees of
+ * freedom is
+ * \f[
+ * t_\nu(z) = \frac{\Gamma((\nu + 1)/2)}{\sqrt{\nu\pi}\,\Gamma(\nu/2)}
+ * \left(1 + \frac{z^2}{\nu}\right)^{-(\nu + 1)/2}, \qquad z \in \mathbb{R},
+ * \f]
+ * where \f$\Gamma\f$ is the gamma function and \f$z\f$ is the standardized variate. Substituting
+ * \f$z = (y - \mu)/\sigma\f$ with location \f$\mu \in \mathbb{R}\f$ and scale \f$\sigma > 0\f$
+ * gives the density \f$f(y) = t_\nu(z)/\sigma\f$ and the log-density
+ * \f[
+ * \ell(\mu, \sigma, \nu; y) = c(\nu) - \log\sigma - \frac{\nu + 1}{2}\log\!\left(1 + \frac{z^2}{\nu}\right),
+ * \qquad c(\nu) = \log\frac{\Gamma((\nu + 1)/2)}{\Gamma(\nu/2)} - \frac{1}{2}\log(\nu\pi).
+ * \f]
+ * Here \f$\sigma\f$ is the scale rather than the standard deviation, which exists only for
+ * \f$\nu > 2\f$ and equals \f$\sigma\sqrt{\nu/(\nu - 2)}\f$. Setting \f$\nu = 1\f$ yields the
+ * Cauchy family (\ref distrib_cauchy "cauchy"), and \f$\nu \to \infty\f$ converges to the Gaussian
+ * family (\ref distrib_gaussian1 "gaussian1"). All regularity descriptors are `infinitely_smooth`,
+ * and `param_kinks()` and `y_kinks()` return no kinks.
+ *
+ * ## Log-density and Fisher information
+ *
+ * To avoid cancelling large gamma terms when \f$\nu \ge 8\f$, \f$c(\nu)\f$ calls the log-gamma
+ * ratio helper in \ref student, and its derivatives in \f$\nu\f$ come from the half-step
+ * polygamma difference helper in \ref gamma. With \f$r = z^2 / (\nu + z^2)\f$ and
+ * \f$q = 1 - r = \nu / (\nu + z^2)\f$, pure \f$\nu\f$-derivatives of the shape term
+ * \f$-\frac{\nu + 1}{2}\log(1 + z^2/\nu)\f$ follow the closed formula
+ * \f[
+ * D_{c, 0} = \frac{1}{2}(-1)^m \left[(m - 1)!\,\nu^{-m} B_m(r) + m!\,\nu^{-(m+1)} r \sum_{j=0}^{m} q^j\right],
+ * \qquad m = c - 1 \ge 1,
+ * \f]
+ * where \f$B_m(r) = (1 + m r)(1 - r)^m - 1\f$ avoids cancellation near \f$r = 0\f$ via
+ * \f$\operatorname{expm1}\f$. Mixed partials in \f$(\mu, \sigma, \nu)\f$ combine the
+ * shape derivatives in \f$(z, \nu)\f$ with the \f$c(\nu)\f$ terms through the shared
+ * location-scale derivative assembly, and `logpdf_dy_dk` uses \f$\partial/\partial y = -\partial/\partial\mu\f$.
+ *
+ * The expected Fisher information matrix in \f$(\mu, \sigma, \nu)\f$ is block-diagonal with
+ * entries \f$I_{\mu\mu} = (\nu + 1)/((\nu + 3)\sigma^2)\f$,
+ * \f$I_{\sigma\sigma} = 2\nu/((\nu + 3)\sigma^2)\f$,
+ * \f$I_{\sigma\nu} = -2/((\nu + 1)(\nu + 3)\sigma)\f$, and
+ * \f$I_{\nu\nu} = \frac{1}{4}[\psi'(\nu/2) - \psi'((\nu + 1)/2)] - (\nu + 5)/(2\nu(\nu + 1)(\nu + 3))\f$.
+ * Derivatives in \f$(\sigma, \nu)\f$ up to order \f$4\f$ combine inverse powers of \f$\sigma\f$,
+ * partial fractions in \f$\nu\f$, and the polygamma difference helper in \ref gamma, which keeps
+ * accuracy past the \f$\nu = 18\f$ series cutoff where \f$I_{\nu\nu} \sim 7/(2\nu^4)\f$.
+ *
+ * ## Cumulative functions and accuracy
+ *
+ * Cumulative probabilities delegate to `log_student_cdf` in \ref student, and their derivatives
+ * in \f$(z, \nu)\f$ up to order \f$6\f$ from \ref student (backed by \ref incomplete_beta) are
+ * pushed to \f$(\mu, \sigma, \nu)\f$. On the heavy side (\f$z \ge 0\f$ for `log_cdf`,
+ * \f$z \le 0\f$ for `log_ccdf`), a Bell polynomial recursion in the opposite log-tail \f$l\f$
+ * computes \f$\log(1 - e^l)\f$ and its derivatives without cancellation (see \ref chain_pair).
+ *
+ * Measured against SymPy (Meurer and others, 2017) at \f$400\f$ and \f$600\f$ bits for
+ * `logpdf_dk`, and against `mpmath` (The mpmath development team, 2023) at \f$400\f$/\f$600\f$ bits
+ * for `expected_info_dk` and \f$280\f$/\f$360\f$ bits for cumulative derivatives, worst-case
+ * errors across CPU `gcc` and CUDA builds (see \ref accuracy and `docs/numerics.md`) stay within:
+ *
+ * | Method | Worst scaled ulp (orders \f$1\f$..\f$6\f$ or \f$0\f$..\f$4\f$) | Test bound |
+ * | --- | --- | --- |
+ * | `logpdf_dk` | \f$13.5, 31.7, 100, 260, 940, 2400\f$ | \f$20, 48, 150, 390, 1410, 3600\f$ |
+ * | `log_cdf_dk` | \f$131, 243, 151, 336, 328, 6450\f$ | \f$197, 365, 227, 504, 492, 9700\f$ |
+ * | `log_ccdf_dk` | \f$131, 243, 151, 336, 328, 805\f$ | \f$197, 365, 227, 504, 492, 1210\f$ |
+ * | `expected_info_dk` | \f$161, 56, 51, 35, 17\f$ | \f$240, 85, 76, 53, 26\f$ |
+ *
+ * Here Fisher information errors are measured in ulp of each component, peaking at \f$I_{\nu\nu}\f$
+ * for \f$\nu = 17.9\f$; density errors peak at \f$z = 10^8\f$, and `log_cdf_dk` order \f$6\f$
+ * peaks at \f$z = 31.6\f$, \f$\nu = 3.5\f$. At \f$\nu = 1\f$ the family matches `cauchy_distrib`
+ * within \f$9 \times 10^{-14}\f$ on density and \f$3.2 \times 10^{-12}\f$ on `log_cdf` for
+ * \f$|z| < 20\f$, while at \f$\nu = 10^8\f$ and \f$10^{12}\f$ the differences from
+ * `gaussian1_distrib` are \f$0.5\f$, \f$0.25\f$ and \f$0.25\f$ of the \f$O(1/\nu)\f$ scale of the
+ * limit and are the same at both, so no digit is lost as \f$\nu\f$ grows.
+ * Quadrature, score-variance, and CUDA host/device checks agree
+ * within \f$1.1 \times 10^{-15}\f$, \f$7 \times 10^{-15}\f$, and \f$8.7 \times 10^{-15}\f$.
+ * At small integer \f$\nu \le 6\f$, the far-tail \f$(\mu, \sigma)\f$ block of `log_cdf_dk`
+ * loses digits on its own tiny entries while the full tensor remains bounded above.
+ *
+ * ## References
+ *
+ * - [1] Student (1908), The probable error of a mean, Biometrika, 6(1), 1-25. https://doi.org/10.2307/2331554
+ * - [2] A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+ * - [3] The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+ */
+
+/**
+ * \defgroup distrib_student_t2 Student t, standard deviation
+ * \ingroup distrib
+ * \brief Univariate Student t distribution parametrized by location, standard deviation, and degrees of freedom.
+ *
+ * Defined in `<laplace/distrib/student_t2.hpp>` as
+ * \ref laplace::distrib::student_t2_distrib "student_t2_distrib", this distribution reparametrizes
+ * \ref distrib_student_t1 "student_t1" by its standard deviation \f$\sigma > 0\f$ for \f$\nu > 2\f$.
+ * It provides the full `LAPLACE_HD` interface up to derivative order \f$6\f$ for log-density and
+ * cumulative tails and order \f$4\f$ for expected Fisher information, together with generic
+ * quantiles (\ref distrib_generic) and moment-based starting values (\ref distrib_start).
+ *
+ * ## Classic form and parametrization
+ *
+ * Starting from the standardized Student t density \f$t_\nu(z)\f$ (Student, 1908), finite
+ * variance requires \f$\nu > 2\f$, in which case the standard deviation \f$\sigma > 0\f$ is
+ * related to the scale \f$s\f$ of `student_t1_distrib` by \f$s = \sigma\sqrt{(\nu - 2)/\nu}\f$.
+ * Setting \f$z = (y - \mu)/s\f$ with location \f$\mu \in \mathbb{R}\f$ gives the log-density
+ * \f[
+ * \ell(\mu, \sigma, \nu; y) = c(\nu) - \log s - \frac{\nu + 1}{2}\log\!\left(1 + \frac{z^2}{\nu}\right),
+ * \qquad s = \sigma\sqrt{\frac{\nu - 2}{\nu}},
+ * \f]
+ * where \f$c(\nu)\f$ is the normalizing constant of `student_t1_distrib`. Unlike `student_t1`,
+ * \f$(\mu, \sigma)\f$ directly estimates the mean and standard deviation, and the Gaussian limit
+ * (\ref distrib_gaussian1 "gaussian1") matches both moments as \f$\nu \to \infty\f$. As
+ * \f$\nu \to 2^+\f$, \f$s\f$ shrinks to zero and the distribution concentrates around \f$\mu\f$. All
+ * regularity flags are `infinitely_smooth` and no kinks occur.
+ *
+ * ## Pushforward derivatives and Fisher information
+ *
+ * Value methods (`logpdf()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`) delegate to
+ * `as_t1()`, the equivalent `student_t1_distrib` at \f$(\mu, s, \nu)\f$. Derivative tensors up
+ * to order \f$6\f$ (`logpdf_dk()` and `log_cdf_tail_dk()`) share a pushforward from
+ * \f$(\mu, s, \nu)\f$ to \f$(\mu, \sigma, \nu)\f$. Writing \f$r(\nu) = \sqrt{1 - 2/\nu}\f$ so
+ * \f$s = \sigma r(\nu)\f$, linearity in \f$\sigma\f$ reduces the chain rule to one-dimensional
+ * derivatives \f$r^{(q)}\f$ computed recursively from \f$r^2 = 1 - 2/\nu\f$:
+ * \f[
+ * r^{(q)} = \frac{-2(-1)^q q!\,\nu^{-(q+1)} - \sum_{i=1}^{q-1} \binom{q}{i} r^{(i)} r^{(q-i)}}{2r}.
+ * \f]
+ * Mixed \f$y\f$-derivatives (`logpdf_dy_dk()`) use translation invariance
+ * \f$\partial/\partial y = -\partial/\partial\mu\f$.
+ *
+ * Under the standard-deviation parametrization, the expected Fisher information in
+ * \f$(\mu, \sigma, \nu)\f$ has entries
+ * \f[
+ * I_{\mu\mu} = \frac{1}{\sigma^2}\left(1 + \frac{6}{(\nu + 3)(\nu - 2)}\right),
+ * \quad I_{\sigma\sigma} = \frac{2\nu}{(\nu + 3)\sigma^2},
+ * \quad I_{\sigma\nu} = \frac{6}{(\nu + 3)(\nu - 2)(\nu + 1)\sigma},
+ * \f]
+ * together with
+ * \f[
+ * I_{\nu\nu} = I^{(1)}_{\nu\nu} + \frac{2}{(\nu + 3)\nu(\nu - 2)^2} - \frac{4}{\nu(\nu - 2)(\nu + 1)(\nu + 3)},
+ * \f]
+ * where \f$I^{(1)}_{\nu\nu}\f$ is the scale-parametrization component from \ref distrib_student_t1
+ * "student_t1". Derivatives up to order \f$4\f$ follow from partial fractions in \f$\nu\f$,
+ * \f$\nu - 2\f$, \f$\nu + 1\f$, and \f$\nu + 3\f$ combined with the derivatives of
+ * \f$I^{(1)}_{\nu\nu}\f$.
+ *
+ * ## Accuracy and near-boundary behavior
+ *
+ * Measured against SymPy (Meurer and others, 2017) and `mpmath` (The mpmath development team,
+ * 2023) references across CPU `gcc` and CUDA builds (see \ref accuracy and `docs/numerics.md`),
+ * worst scaled ulp errors stay within:
+ *
+ * | Method | Worst scaled ulp (orders \f$1\f$..\f$6\f$ or \f$0\f$..\f$4\f$) | Test bound |
+ * | --- | --- | --- |
+ * | `logpdf_dk` | \f$5.8, 9.3, 12.8, 55, 178, 632\f$ | \f$9, 14, 20, 83, 267, 950\f$ |
+ * | `log_cdf_dk` (\f$\nu \ge 2.001\f$) | \f$8.5, 9.2, 11.7, 18.4, 101, 262\f$ | \f$13, 14, 18, 28, 152, 393\f$ |
+ * | `log_ccdf_dk` (\f$\nu \ge 2.001\f$) | \f$8.5, 9.2, 38.8, 24.4, 101, 262\f$ | \f$13, 14, 59, 37, 152, 393\f$ |
+ * | `log_cdf_dk` (\f$\nu = 2 + 10^{-6}\f$) | \f$17.9, 1.5 \times 10^5, 5.9 \times 10^6, 1.6 \times 10^7, 4.6 \times 10^7, 1.3 \times 10^8\f$ | \f$27, 2.2 \times 10^5, 8.8 \times 10^6, 2.4 \times 10^7, 6.9 \times 10^7, 1.95 \times 10^8\f$ |
+ * | `expected_info_dk` | \f$321, 115, 100, 54, 35\f$ | \f$480, 173, 150, 82, 52\f$ |
+ *
+ * When \f$\nu \to 2^+\f$ (\f$\nu < 2.001\f$), the derivatives \f$r^{(q)}\f$ grow rapidly and
+ * \f$z = (y - \mu)/s\f$ becomes huge for \f$y \ne \mu\f$; at \f$\nu = 2 + 10^{-6}\f$, `logpdf_dk`
+ * stays within \f$39\f$ ulp while order-\f$6\f$ `log_cdf_dk` retains about \f$8\f$ decimal digits
+ * due to the intrinsic conditioning of the map \f$\nu \mapsto s\f$. Fisher information errors
+ * peak at \f$\nu = 17.9\f$, and quadrature, score-variance, and CUDA host/device checks agree
+ * within \f$1.1 \times 10^{-15}\f$, \f$7 \times 10^{-15}\f$, and \f$8.7 \times 10^{-15}\f$.
+ *
+ * ## References
+ *
+ * - [1] Student (1908), The probable error of a mean, Biometrika, 6(1), 1-25. https://doi.org/10.2307/2331554
+ * - [2] A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+ * - [3] The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+ */

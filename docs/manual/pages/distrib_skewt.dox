@@ -1,0 +1,100 @@
+/**
+\defgroup distrib_skewt Skew t
+\ingroup distrib
+\brief Continuous real-line distribution with location, scale, shape, and degrees of freedom, log-density derivatives to order 6, and an exact stochastic draw.
+
+Defined in `<laplace/distrib/skewt.hpp>` as \ref laplace::distrib::skewt_distrib "skewt_distrib", this module evaluates Azzalini's skew \f$t\f$ log-density in the direct parametrization, its parameter derivatives to order \f$6\f$, mixed observation-parameter derivatives, random draws from the exact stochastic representation, and host starting values. Every evaluator is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). This family writes no cumulative function, no expected Fisher information, and no quantile; all three come from \ref distrib_generic "the generic routes", where the cumulative function is the quadrature of the density. Against high-precision reference values on the `gcc` build, parameter derivatives of orders \f$1\f$ to \f$6\f$ stay within \f$1.3 \times 10^3\f$ ulp.
+
+## Classic form, parametrization, and limits
+
+Azzalini's skew \f$t\f$ distribution (Azzalini and Capitanio, 2003) is implemented directly in its textbook parametrization by location \f$\mu \in \mathbb{R}\f$, scale \f$\sigma > 0\f$, shape \f$\alpha \in \mathbb{R}\f$, and degrees of freedom \f$\nu > 0\f$ (some texts denote the location and scale by \f$(\xi, \omega)\f$). Here \f$\mu\f$ is the location parameter rather than the mean, and \f$\sigma\f$ is the scale parameter rather than the standard deviation. For an observation \f$y \in \mathbb{R}\f$, the density is twice the standard Student \f$t\f$ density \f$t_\nu\f$ of the standardized variable \f$z = (y - \mu)/\sigma\f$ times the standard Student \f$t\f$ distribution function \f$T_{\nu+1}\f$ at one more degree of freedom, evaluated at the shape times \f$z\f$ times the square root of \f$(\nu + 1)/(\nu + z^2)\f$:
+\f[
+f(y; \mu, \sigma, \alpha, \nu) = \frac{2}{\sigma}\, t_\nu(z)\, T_{\nu+1}(w), \qquad z = \frac{y - \mu}{\sigma}, \qquad w = \alpha z \sqrt{\frac{\nu + 1}{\nu + z^2}}.
+\f]
+On the logarithmic scale, the log-density separates into the Student log-density of \ref distrib_student_t1 "student_t1" plus one term:
+\f[
+\ell(\mu, \sigma, \alpha, \nu; y) = \log 2 + c(\nu) - \log\sigma + \Lambda(z, \nu) + \log T_{\nu+1}(w),
+\f]
+where \f$c(\nu) = \log\Gamma((\nu + 1)/2) - \log\Gamma(\nu/2) - \frac{1}{2}\log(\nu\pi)\f$ is the Student normalizing constant and \f$\Lambda(z, \nu) = -\frac{\nu + 1}{2}\log(1 + z^2/\nu)\f$. The two logarithms are taken separately: \f$\log T_{\nu+1}(w)\f$ is returned on the log scale by \ref laplace::math::own::log_student_cdf "log_student_cdf()" (\ref student "student"), so the light tail gives a large negative number and not \f$-\infty\f$. Writing \f$w = \alpha u(z, \nu)\f$ with \f$u(z, \nu) = z\sqrt{(\nu + 1)/(\nu + z^2)}\f$ in scaled form when \f$|z| > 1\f$ prevents \f$z^2\f$ from overflowing and keeps \f$u\f$ accurate as \f$u \to \operatorname{sgn}(z)\sqrt{\nu + 1}\f$.
+
+Three limiting families arise. At \f$\alpha = 0\f$, \f$T_{\nu+1}(0) = 1/2\f$ cancels the factor of \f$2\f$ and the family becomes the Student \f$t\f$ distribution (\ref distrib_student_t1 "student_t1"; Student, 1908). As \f$\nu \to \infty\f$, it converges to the skew normal distribution in its direct parametrization (\ref distrib_skewnormal "skewnormal"; Azzalini, 2005). As \f$|\alpha| \to \infty\f$, it becomes the half \f$t\f$ distribution (no separate module in Laplace). In `tests/distrib/test_skewt.cpp`, \f$\alpha = 0\f$ matches `student_t1_distrib` within \f$10^{-15}\f$ relative on `logpdf()` and to the last bit at every derivative order in \f$(\mu, \sigma, \nu)\f$, while at \f$\nu = 10^6\f$ and \f$\nu = 10^8\f$ `logpdf()` agrees with `skewnormal_distrib` (mapped from direct to centred parameters) to \f$7.7 \times 10^{-6}\f$ and \f$7.7 \times 10^{-8}\f$, tracking the \f$O(1/\nu)\f$ rate.
+
+## Parameters, domain, and regularity
+
+Struct `skewt_distrib` sets `kind = distrib_kind::continuous`, `n_params = 4`, and `y_regularity = infinitely_smooth`. In `params`, `mu` and `alpha` have open domain \f$(-\infty, \infty)\f$, and `sigma` and `nu` have open domain \f$(0, \infty)\f$. All four parameters report `circular = false`, `moves_support = false`, `regularity = infinitely_smooth`, and `cdf_regularity = infinitely_smooth`. The support is fixed at \f$(-\infty, \infty)\f$, and `param_kinks()` and `y_kinks()` return empty sets (`count = 0`). Member `center()` returns \f$\mu\f$ and `scale()` returns \f$\sigma\f$. Parameter derivatives of order \f$K\f$ pack into `sym_tensor<4, K>` in lexicographic order over \f$(\mu, \sigma, \alpha, \nu)\f$ (\ref distrib_core "distrib_core"). Member `start_value()` sets \f$\mu\f$ to the sample median, \f$\sigma\f$ to half the interquartile range (robust because moments need not exist), \f$\alpha\f$ to the sign of the sample skewness (\f$1\f$, \f$-1\f$, or \f$0\f$), and \f$\nu = 5\f$, moved inside the open domains by \ref laplace::distrib::start_inside "start_inside()" (\ref distrib_start "Starting values").
+
+## Assembly of derivatives
+
+Because \f$(\mu, \sigma)\f$ are a location and a scale and \f$(\alpha, \nu)\f$ are two smooth shape parameters, derivatives in \f$\mu\f$ and \f$\sigma\f$ reach \f$\Lambda(z, \nu) + \log T_{\nu+1}(w)\f$ only through \f$z\f$ and commute with derivatives in \f$(\alpha, \nu)\f$. Once the table
+\f[
+D_{c_1, c_2, j} = \frac{\partial^{c_1 + c_2 + j}}{\partial\alpha^{c_1}\,\partial\nu^{c_2}\,\partial z^j}\bigl[\Lambda(z, \nu) + \log T_{\nu+1}(w)\bigr], \qquad c_1 + c_2 + j \le K,
+\f]
+is built, the location-scale pushforward maps each \f$(c_1, c_2)\f$ slice in \f$z\f$ into `sym_tensor<4, K>`, and \f$c^{(K)}(\nu)\f$ and \f$(-1)^K (K - 1)!\,\sigma^{-K}\f$ are added to the all-\f$\nu\f$ and all-\f$\sigma\f$ entries. Mixed observation-parameter derivatives `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$) use \f$\partial / \partial y = -\partial / \partial \mu\f$.
+
+The first term \f$\Lambda(z, \nu)\f$ carries no \f$\alpha\f$ and adds the closed \f$(z, \nu)\f$ table of \ref distrib_student_t1 "student_t1". The second term \f$\log T_{\nu+1}(w)\f$ is a composition in three variables \f$(z, \alpha, \nu)\f$, which two facts reduce to compositions in the two variables \f$(z, \nu)\f$:
+
+- The shape \f$\alpha\f$ enters \f$w = \alpha u(z, \nu)\f$ linearly with \f$u\f$ independent of \f$\alpha\f$, so
+  \f[
+  \frac{\partial^{c_1}}{\partial\alpha^{c_1}} \log T_{\nu+1}(w) = u(z, \nu)^{c_1} \left(\frac{\partial^{c_1}}{\partial w^{c_1}}\log T\right)(w, \nu + 1)
+  \f]
+  holds identically, with no Bell sum in \f$\alpha\f$.
+- For each order \f$c_1\f$, what remains is the two-argument outer function \f$(\partial^{c_1}\log T / \partial w^{c_1})(w, m)\f$ (\ref student "student") composed with the two inner maps \f$w = \alpha u(z, \nu)\f$ and \f$m = \nu + 1\f$ in \f$(z, \nu)\f$, where \f$m\f$ is linear.
+
+Thus, for each \f$c_1\f$, \ref laplace::math::chain_rule_pair_scalar_dk "chain_rule_pair_scalar_dk()" (\ref chain_pair "chain_pair") forms the \f$(z, \nu)\f$ derivatives of \f$u^{c_1}\f$, \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()" forms those of \f$(\partial^{c_1}\log T / \partial w^{c_1})(\alpha u, \nu + 1)\f$ from the outer table of \f$\log T_m(w)\f$ shifted by \f$c_1\f$ in \f$w\f$, and Leibniz's rule multiplies the two tables.
+
+Only the mixed \f$(z, \nu)\f$ derivatives of \f$u(z, \nu) = z A^{1/2} B^{-1/2}\f$, with \f$A = \nu + 1\f$ and \f$B = \nu + z^2\f$, need new closed forms. Because \f$\partial B/\partial \nu = 1\f$, differentiating \f$B^{-1/2}\f$ \f$q\f$ times in \f$\nu\f$ gives \f$\phi_q B^{-s}\f$ with \f$s = 1/2 + q\f$ and \f$\phi_q = \prod_{i=0}^{q-1}(-1/2 - i)\f$. Starting from \f$z^0 B^{-s}\f$, each \f$z\f$-derivative applies the recurrence
+\f[
+\frac{\partial}{\partial z}\bigl[z^m B^{-(s+r)}\bigr] = m z^{m-1} B^{-(s+r)} - 2(s + r) z^{m+1} B^{-(s+r+1)},
+\f]
+carrying the coefficients of \f$z^m B^{-(s+r)}\f$ forward one derivative at a time. Every exponent \f$s + r\f$ stays a half-integer, so \f$B^{-(s+r)}\f$ is evaluated as \f$B^{-1/2}\f$ times an integer power of \f$1/B\f$. The \f$\nu\f$-derivatives \f$\mathrm{d}^i A^{1/2}/\mathrm{d}\nu^i = A^{1/2 - i}\prod_{k=0}^{i-1}(1/2 - k)\f$ and the leading factor \f$z\f$ then join \f$W = B^{-1/2}\f$ through \f$\partial^p(z W)/\partial z^p = z \partial^p W/\partial z^p + p\,\partial^{p-1} W/\partial z^{p-1}\f$ and Leibniz's rule in \f$\nu\f$.
+
+## Random draws and generic routes
+
+Both overloads of `rng()` draw from Azzalini and Capitanio's exact stochastic representation (Azzalini and Capitanio, 2003) rather than by inverting the cumulative function:
+\f[
+Y = \mu + \sigma\,\frac{\delta |N_1| + \sqrt{1 - \delta^2}\, N_2}{\sqrt{G / \nu}}, \qquad \delta = \frac{\alpha}{\sqrt{1 + \alpha^2}},
+\f]
+where \f$N_1\f$ and \f$N_2\f$ are independent standard normal variates and \f$G \sim \chi^2_\nu\f$ is independent of both, generated as \f$2 X\f$ with \f$X \sim \mathrm{Gamma}(\nu/2, 1)\f$. The two normal variates and the gamma variate are drawn by inverting their own distribution functions with \ref laplace::distrib::standard_normal_by_inversion "standard_normal_by_inversion()" and \ref laplace::distrib::standard_gamma_by_inversion "standard_gamma_by_inversion()" (\ref distrib_generic "distrib_generic") rather than by a rejection method, so one draw consumes one number of the stream, does not depend on the thread or backend, and takes no divergent branch in a kernel. On one `gcc` thread, `rng()` costs \f$529\f$ ns per call against \f$5.8\f$ ms by inversion of the generic cumulative function (where generic `log F` costs \f$442\f$ microseconds and generic quantile \f$8.3\f$ ms). The empirical distribution function of \f$2 \times 10^5\f$ draws agrees with the generic cumulative function within two standard errors at five points, and the sample mean and variance agree with the closed moments (`tests/distrib/test_skewt.cpp` checks \f$4 \times 10^4\f$ draws within \f$4\f$ standard errors plus \f$10^{-4}\f$).
+
+## Accuracy and checks
+
+Reference derivatives in `tests/data/reference/distrib_skewt_logpdf.csv` (\f$37620\f$ rows across \f$180\f$ points with \f$\nu \in [0.3, 10^6]\f$, \f$\alpha \in [-20, 50]\f$, \f$|z| \le 10^8\f$, and \f$\sigma \in [2^{-10}, 2^{10}]\f$) are built by `tools/reference/distrib_skewt_ref.py` using SymPy (Meurer and others, 2017) for the outer chain rule and mpmath (The mpmath development team, 2023) at \f$60\f$ and \f$90\f$ digits for the quadrature of \f$\log T_{\nu+1}\f$ derivatives, checked against mpmath's incomplete beta to \f$3.2 \times 10^{-55}\f$. Errors are measured in ulps of the largest component of the order at each point (see \ref accuracy "How accuracy is measured" and \ref distrib_core "distrib_core").
+
+| Order | Worst measured on `gcc` (ulp) | Test bound (ulp) |
+| --- | --- | --- |
+| \f$1\f$ (`logpdf_d1`) | \f$4\f$ | \f$6\f$ |
+| \f$2\f$ (`logpdf_d2`) | \f$9\f$ | \f$14\f$ |
+| \f$3\f$ (`logpdf_d3`) | \f$63\f$ | \f$95\f$ |
+| \f$4\f$ (`logpdf_d4`) | \f$99\f$ | \f$150\f$ |
+| \f$5\f$ (`logpdf_d5`) | \f$336\f$ | \f$505\f$ |
+| \f$6\f$ (`logpdf_d6`) | \f$1.3 \times 10^3\f$ | \f$1950\f$ |
+
+The worst arguments are the small shape \f$\nu = 0.3\f$ at order \f$6\f$, the far tail with large \f$|\alpha|\f$ at orders \f$4\f$ and \f$5\f$, and \f$\nu = 6\f$ with \f$|z|\f$ in the thousands at orders \f$2\f$ and \f$3\f$; the large-\f$\nu\f$ region stays healthy (\f$568\f$, \f$298\f$, and \f$387\f$ ulp at \f$\nu = 10^3, 10^4, 10^6\f$). In `tests/distrib/test_skewt.cpp`, `logpdf()` agrees with the definition to \f$3.8 \times 10^{-16}\f$ relative (bound \f$10^{-14}\f$), orders \f$1\f$ to \f$3\f$ match nested central differences to \f$2.0 \times 10^{-6}\f$, \f$1.1 \times 10^{-5}\f$, and \f$6.7 \times 10^{-5}\f$ (their own resolution; bounds \f$10^{-5}\f$, \f$6 \times 10^{-5}\f$, \f$4 \times 10^{-4}\f$), `logpdf_dy_dk()` matches central differences in \f$y\f$ to \f$1.1 \times 10^{-5}\f$ (bound \f$10^{-4}\f$), generic cumulative values match density values via central differences (\f$10^{-6}\f$) and invert cleanly through generic quantiles (\f$10^{-7}\f$), and the Hessian and score forms of generic expected information agree within \f$10^{-7}\f$ relative of each other and of `student_t1_distrib::expected_info()` at \f$\alpha = 0\f$. Inside Kokkos kernels, order-\f$6\f$ tensors agree between host and device within \f$10^{-12}\f$ (identical on `gcc`), and the generic cumulative route runs on CUDA with per-thread stack raised to \f$8192\f$ bytes (\f$588\f$ MB of \f$12282\f$ MB on RTX 4070 SUPER) within \f$10^{-9}\f$. See `docs/numerics.md` for full measurements.
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/skewt.hpp>
+
+void eval_skewt(Kokkos::View<const double*> y, Kokkos::View<double*> out,
+                double mu, double sigma, double alpha, double nu) {
+  const laplace::distrib::skewt_distrib d{mu, sigma, alpha, nu};
+  Kokkos::parallel_for("skewt_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0];
+  });
+}
+```
+
+## Members
+
+Struct \ref laplace::distrib::skewt_distrib "skewt_distrib" implements \ref distrib_core "distrib_core" for `n_params = 4`: `mu`, `sigma`, `alpha`, `nu`, `kind`, `n_params`, `y_regularity`, `params`, `logpdf()`, `logpdf_d1()`..`logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `rng(gen)`, `rng(seed, index)`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, and `start_value()`.
+
+## References
+
+- [1] A. Azzalini and A. Capitanio (2003), Distributions Generated by Perturbation of Symmetry with Emphasis on a Multivariate Skew t-Distribution, Journal of the Royal Statistical Society Series B: Statistical Methodology, 65(2), 367-389. https://doi.org/10.1111/1467-9868.00391
+- [2] ADELCHI AZZALINI (2005), The Skew-normal Distribution and Related Multivariate Families*, Scandinavian Journal of Statistics, 32(2), 159-188. https://doi.org/10.1111/j.1467-9469.2005.00426.x
+- [3] Student (1908), The probable error of a mean, Biometrika, 6(1), 1-25. https://doi.org/10.2307/2331554
+- [4] A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- [5] The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

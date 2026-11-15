@@ -61,6 +61,10 @@ The derivatives in \f$x\f$ use three regimes.
    \f]
    Evaluating this recurrence in double-double arithmetic (Dekker, 1971) avoids cancellation of roughly \f$\max(\nu, x)\f$ per derivative order. For \f$x \ge x_{\mathrm{cf}} = 1.0\f$, the starting ratio \f$K_{\mu+1}/K_\mu\f$ comes from Steed's continued fraction evaluated forwards by its convergents in double-double. For \f$x < 1.0\f$, it comes from Temme's series in double precision followed by forward recurrence in double-double, which damps error by about \f$\frac{x^2}{4(\mu+k)^2}\f$ per step.
 
+When several orders are needed at one point, \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" with template parameter \f$N \in \{1, \dots, 7\}\f$ writes \f$\log K_\nu(x)\f$ to `out[0]` and \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x)\f$ to `out[n]` for \f$n = 1, \dots, N\f$, where `out` holds at least \f$N + 1\f$ doubles. While `out[0]` is evaluated separately as in \ref laplace::math::own::log_bessel_k "log_bessel_k()", each derivative regime shares its work across orders \f$1\f$ to \f$N\f$. In the differentiated Debye expansion, the derivatives of \f$h\f$ and \f$q\f$ and the Taylor coefficients of \f$\log P\f$ and \f$t(z)\f$ are built once and composed per order. In the Hankel asymptotic expansion, the series \f$S(x)\f$ and its derivatives are summed once and read from one logarithmic-derivative recursion. In the Riccati identity in double-double arithmetic, the starting ratio is evaluated once and every order comes from one pass of the same recurrence.
+
+Over the arguments measured in `docs/numerics.md`, calling \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" is 2.9 to 5.7 times faster than eight separate calls, most at \f$x = \sqrt{2}\f$. Tested across the seven reference grids and the regime boundaries around \f$\nu = 20\f$, \f$x = 200\f$, and \f$x = 1\f$ (146,792 entries), it matches the single-order functions to tolerance \f$0\f$ on the CPU build (0 entries differ on gcc) and to relative tolerance \f$1.8 \times 10^{-15}\f$ on CUDA, where `nvcc` contracts and schedules the two differently (20,744 entries differ by at most \f$1.2 \times 10^{-15}\f$ relative).
+
 ## Measured accuracy
 
 See \ref accuracy "How accuracy is measured" for error metrics and test bounds. Because `mpmath`'s `besselk` fails near \f$\nu = 10^6\f$ (mpmath), reference values on 2,607 points (with \f$\nu \le 2^{40}\f$ and \f$x \in [2^{-30}, 2^{30}]\f$) are computed from the integral representation. With weight \f$w(\tau) = e^{-x \cosh \tau} \cosh(\nu \tau)\f$, the derivatives satisfy \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x) = (-1)^n \kappa_n\f$, where \f$\kappa_n\f$ is the \f$n\f$-th cumulant of \f$\cosh T\f$ under the density proportional to \f$w\f$.
@@ -133,6 +137,7 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::log_bessel_k_dx5 "log_bessel_k_dx5()" — \f$\frac{\mathrm{d}^5}{\mathrm{d}x^5}\log K_\nu(x)\f$
 - \ref laplace::math::own::log_bessel_k_dx6 "log_bessel_k_dx6()" — \f$\frac{\mathrm{d}^6}{\mathrm{d}x^6}\log K_\nu(x)\f$
 - \ref laplace::math::own::log_bessel_k_dx7 "log_bessel_k_dx7()" — \f$\frac{\mathrm{d}^7}{\mathrm{d}x^7}\log K_\nu(x)\f$
+- \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" — \f$\log K_\nu(x)\f$ and its derivatives of orders \f$1\f$ to \f$N\f$ in \f$x\f$ from one evaluation
 
 ## References
 

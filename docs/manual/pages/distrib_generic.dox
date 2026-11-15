@@ -2,19 +2,21 @@
 \defgroup distrib_generic Generic routes
 \brief Generic numerical routes and compile-time dispatchers for probability distributions.
 
-This module provides generic numerical routes and compile-time dispatchers for probability distributions (`distrib`s), covering cumulative distribution functions, quantiles, expectations, moments, expected Fisher information, and random variate generation. Its declarations live in `<laplace/distrib/generic_cdf.hpp>`, `<laplace/distrib/generic_quantile.hpp>`, `<laplace/distrib/generic_expectation.hpp>`, `<laplace/distrib/generic_info.hpp>`, and `<laplace/distrib/generic_rng.hpp>` inside namespace `laplace::distrib`, so users call them as `laplace::distrib::NAME`. All functions are marked `LAPLACE_HD` and execute on both host and device inside Kokkos kernels. On the tested pilot distributions, generic routes achieve 31.9 conditioning units on continuous quantiles, exact ranks on discrete search, 5.91 ulp of \f$\max(|\log|, 1)\f$ on discrete log-CDFs, 6.7 eps on moments, and 4.0 eps on smooth continuous expected information.
+This module provides generic numerical routes and compile-time dispatchers for probability distributions (`distrib`s), covering cumulative distribution functions, quantiles, expectations, moments, expected Fisher information, and random variate generation. Its declarations live in `<laplace/distrib/generic_cdf.hpp>`, `<laplace/distrib/generic_quantile.hpp>`, `<laplace/distrib/generic_expectation.hpp>`, `<laplace/distrib/generic_info.hpp>`, and `<laplace/distrib/generic_rng.hpp>` inside namespace `laplace::distrib`, so users call them as `laplace::distrib::NAME`. All functions are marked `LAPLACE_HD` and execute on both host and device inside Kokkos kernels. On the tested distributions, generic routes achieve 31.9 conditioning units on continuous quantiles, exact ranks on discrete search, 5.91 ulp of \f$\max(|\log|, 1)\f$ on discrete log-CDFs, \f$5.6 \times 10^{-16}\f$ relative to \f$\max(|\log|, 1)\f$ on continuous log-CDFs, 6.7 eps on moments, and 4.0 eps on smooth continuous expected information.
 
 ## Interface and dispatch
 
-Generic routes operate on any distribution type `D` satisfying the core interface documented in \ref distrib_core. Every `D` must provide `D::kind` (`continuous` or `discrete`), `D::n_params` and `D::params`, `logpdf(y)` or `logpmf(y)`, `support_lower()`, `support_upper()`, `center()`, and `scale()`. Continuous distributions with non-smooth points in the observation variable optionally provide `y_kinks()`. Computing expected Fisher information and its parameter derivatives of order \f$K \in \{0, \dots, 4\}\f$ also requires `logpdf_d1(y)` through `logpdf_dN(y)` (or `logpmf_d1(y)` through `logpmf_dN(y)`), with \f$N = K + 2\f$ in the Hessian form and \f$N = K + 1\f$ in the score form.
+Generic routes operate on any distribution type `D` satisfying the core interface documented in \ref distrib_core. Every `D` must provide `D::kind` (`continuous` or `discrete`), `D::n_params` and `D::params`, `logpdf(y)` or `logpmf(y)`, `support_lower()`, `support_upper()`, `center()`, and `scale()`. Continuous distributions with non-smooth points in the observation variable optionally provide `y_kinks()`. Computing generic parameter derivatives of \f$\log F(y)\f$ or \f$\log(1 - F(y))\f$ of order \f$K \in \{1, \dots, 6\}\f$ requires `logpdf_d1(y)` through `logpdf_dK(y)` (or `logpmf_d1(y)` through `logpmf_dK(y)`). Computing expected Fisher information and its parameter derivatives of order \f$K \in \{0, \dots, 4\}\f$ requires `logpdf_d1(y)` through `logpdf_dN(y)` (or `logpmf_d1(y)` through `logpmf_dN(y)`), with \f$N = K + 2\f$ in the Hessian form and \f$N = K + 1\f$ in the score form.
 
-Eight dispatchers use C++20 `requires` clauses to invoke `D`'s specialized member function when present and fall back to the generic route otherwise, with zero run-time overhead. These dispatchers are \ref laplace::distrib::distrib_cdf "distrib_cdf()", \ref laplace::distrib::distrib_ccdf "distrib_ccdf()", \ref laplace::distrib::distrib_log_cdf "distrib_log_cdf()", \ref laplace::distrib::distrib_log_ccdf "distrib_log_ccdf()", \ref laplace::distrib::distrib_quantile "distrib_quantile()", \ref laplace::distrib::distrib_quantile_from_log "distrib_quantile_from_log()", \ref laplace::distrib::distrib_quantile_from_log_upper "distrib_quantile_from_log_upper()", and \ref laplace::distrib::distrib_expected_info "distrib_expected_info()". Each generic route can also be invoked directly by name. For tensor packing, parameter descriptors, and specialized distribution implementations, see \ref distrib_core, \ref distrib_gaussian1, \ref distrib_laplace1, \ref distrib_poisson, and \ref distrib_gamma1.
+Ten dispatchers use C++20 `requires` clauses to invoke `D`'s specialized member function when present and fall back to the generic route otherwise, with zero run-time overhead. These dispatchers are \ref laplace::distrib::distrib_cdf "distrib_cdf()", \ref laplace::distrib::distrib_ccdf "distrib_ccdf()", \ref laplace::distrib::distrib_log_cdf "distrib_log_cdf()", \ref laplace::distrib::distrib_log_ccdf "distrib_log_ccdf()", \ref laplace::distrib::distrib_log_cdf_dk "distrib_log_cdf_dk()", \ref laplace::distrib::distrib_log_ccdf_dk "distrib_log_ccdf_dk()", \ref laplace::distrib::distrib_quantile "distrib_quantile()", \ref laplace::distrib::distrib_quantile_from_log "distrib_quantile_from_log()", \ref laplace::distrib::distrib_quantile_from_log_upper "distrib_quantile_from_log_upper()", and \ref laplace::distrib::distrib_expected_info "distrib_expected_info()". For the six cumulative dispatchers, when `D` has no specialized member, the generic route is chosen at compile time by `D::kind`: summation over the mass for discrete distributions and quadrature of the density for continuous distributions. Each generic route can also be invoked directly by name. For tensor packing, parameter descriptors, and specialized distribution implementations, see \ref distrib_core, \ref distrib_gaussian1, \ref distrib_laplace1, \ref distrib_poisson, and \ref distrib_gamma1.
 
 ## Definitions
 
 Let \f$F(y)\f$ denote the cumulative distribution function at observation \f$y\f$, \f$f(y)\f$ the continuous density, \f$p(i)\f$ the discrete probability mass at integer \f$i\f$, and \f$l(y; \theta) = \log f(y; \theta)\f$ (or \f$\log p(y; \theta)\f$) the log-density or log-mass with natural parameters \f$\theta = (\theta_0, \dots, \theta_{P-1})\f$.
 
 For discrete distributions with \f$k = \lfloor y \rfloor\f$, \ref laplace::distrib::log_cdf_by_sum "log_cdf_by_sum()" and \ref laplace::distrib::cdf_by_sum "cdf_by_sum()" compute \f$\log F(y) = \log \sum_{i \le k} p(i)\f$ and \f$F(y)\f$. Similarly, \ref laplace::distrib::log_ccdf_by_sum "log_ccdf_by_sum()" and \ref laplace::distrib::ccdf_by_sum "ccdf_by_sum()" compute \f$\log(1 - F(y)) = \log \sum_{i > k} p(i)\f$ and \f$1 - F(y)\f$.
+
+For continuous distributions with lower support bound \f$a\f$ given by `support_lower()`, \ref laplace::distrib::log_cdf_by_integral "log_cdf_by_integral()" and \ref laplace::distrib::cdf_by_integral "cdf_by_integral()" compute \f$\log F(y) = \log \int_a^y f(t)\,\mathrm{d}t\f$ and \f$F(y)\f$ by numerical quadrature, while \ref laplace::distrib::log_ccdf_by_integral "log_ccdf_by_integral()" and \ref laplace::distrib::ccdf_by_integral "ccdf_by_integral()" compute \f$\log(1 - F(y))\f$ and \f$1 - F(y)\f$. For derivative order \f$K \in \{1, \dots, 6\}\f$, \ref laplace::distrib::log_cdf_dk_by_sum "log_cdf_dk_by_sum()" and \ref laplace::distrib::log_ccdf_dk_by_sum "log_ccdf_dk_by_sum()" (discrete) and \ref laplace::distrib::log_cdf_dk_by_integral "log_cdf_dk_by_integral()" and \ref laplace::distrib::log_ccdf_dk_by_integral "log_ccdf_dk_by_integral()" (continuous) return the packed symmetric tensors \f$\partial^K \log F(y) / \partial\theta^K\f$ and \f$\partial^K \log(1 - F(y)) / \partial\theta^K\f$.
 
 For target probability \f$p \in (0, 1)\f$, continuous quantile routes (\ref laplace::distrib::quantile_by_root "quantile_by_root()", \ref laplace::distrib::quantile_by_root_from_log "quantile_by_root_from_log()", and \ref laplace::distrib::quantile_by_root_from_log_upper "quantile_by_root_from_log_upper()") solve \f$F(y) = p\f$ from \f$p\f$, \f$\log p\f$, or \f$\log q = \log(1 - p)\f$. Discrete quantile routes (\ref laplace::distrib::quantile_by_search "quantile_by_search()", \ref laplace::distrib::quantile_by_search_from_log "quantile_by_search_from_log()", and \ref laplace::distrib::quantile_by_search_from_log_upper "quantile_by_search_from_log_upper()") return the smallest integer \f$k\f$ in the support satisfying \f$F(k) \ge p\f$.
 
@@ -30,11 +32,13 @@ in the Hessian form (`info_form::hessian`), and
 \f]
 in the score form (`info_form::score`). Here \f$T\f$ ranges over sub-multisets of \f$C\f$, \f$l_U\f$ is the parameter derivative of \f$l\f$ over multiset \f$U\f$, \f$ab + U\f$ denotes \f$\{a, b\} \cup U\f$, and \f$B_T = e^{-l} \partial_T e^l\f$ (with \f$B_\emptyset = 1\f$) is the complete Bell polynomial (Bell, 1934) of the derivatives of \f$l\f$ over \f$T\f$.
 
-Random variates are drawn by \ref laplace::distrib::rng_by_inversion "rng_by_inversion()" via quantile inversion \f$Y = F^{-1}(u)\f$, where \f$u\f$ is generated by \ref laplace::distrib::open_unit_uniform "open_unit_uniform()" from the top 53 bits \f$n\f$ of a 64-bit unsigned integer `gen.urand64()` as \f$u = (n + 1/2) 2^{-53}\f$.
+Random variates are drawn by \ref laplace::distrib::rng_by_inversion "rng_by_inversion()" via quantile inversion \f$Y = F^{-1}(u)\f$, where \f$u\f$ is generated by \ref laplace::distrib::open_unit_uniform "open_unit_uniform()" from the top 53 bits \f$n\f$ of a 64-bit unsigned integer `gen.urand64()` as \f$u = (n + 1/2) 2^{-53}\f$. For standalone standard draws, \ref laplace::distrib::standard_normal_by_inversion "standard_normal_by_inversion()" returns \f$\Phi^{-1}(u)\f$ via \ref laplace::math::own::Phi_inv "Phi_inv()" in \ref normal "the normal module", where \f$\Phi\f$ is the standard normal cumulative distribution function. Given shape parameter \f$a > 0\f$, \ref laplace::distrib::standard_gamma_by_inversion "standard_gamma_by_inversion()" returns a unit-scale gamma draw \f$P^{-1}(a, u)\f$, the inverse of the regularized lower incomplete gamma function \f$P\f$ in its argument, via \ref laplace::math::own::gamma_p_inv "gamma_p_inv()" in \ref incomplete_gamma "the incomplete gamma module". Unlike a rejection method, inverting the distribution function consumes exactly one number of the stream per draw, so a kernel takes no divergent branch. Consequently, the draw of an observation is the same on every thread and every backend, which is the property the counter-based source exists for.
 
 ## Domain and special values
 
 For discrete cumulative functions, if \f$\lfloor y \rfloor\f$ is below `support_lower()`, then \f$F(y) = 0\f$, \f$\log F(y) = -\infty\f$, and \f$\log(1 - F(y)) = 0\f$. If \f$\lfloor y \rfloor\f$ is at least `support_upper()`, then \f$F(y) = 1\f$, \f$\log F(y) = 0\f$, and \f$\log(1 - F(y)) = -\infty\f$.
+
+For continuous cumulative functions, if \f$y\f$ is at most `support_lower()`, then \f$F(y) = 0\f$, \f$\log F(y) = -\infty\f$, \f$1 - F(y) = 1\f$, and \f$\log(1 - F(y)) = 0\f$; if \f$y\f$ is at least `support_upper()`, then \f$F(y) = 1\f$, \f$\log F(y) = 0\f$, \f$1 - F(y) = 0\f$, and \f$\log(1 - F(y)) = -\infty\f$. When quadrature fails to converge with a positive integral, \ref laplace::distrib::log_cdf_by_integral "log_cdf_by_integral()" and \ref laplace::distrib::log_ccdf_by_integral "log_ccdf_by_integral()" return quiet NaN. For parameter derivatives of order \f$K\f$, boundary points where the requested side has probability 0 return quiet NaN and boundary points where it has probability 1 return 0; for continuous distributions, any component whose multi-index contains a parameter with finite regularity (\ref laplace::distrib::distrib_param_info::regularity) returns quiet NaN.
 
 Quantile routes return `support_lower()` at \f$p = 0\f$, \f$\log p \le -\mathrm{distrib\_infinity}\f$, or \f$\log q = 0\f$, and return `support_upper()` at \f$p = 1\f$, \f$\log p = 0\f$, or \f$\log q \le -\mathrm{distrib\_infinity}\f$. Out-of-domain probabilities (\f$p < 0\f$, \f$p > 1\f$, \f$\log p > 0\f$, \f$\log q > 0\f$) and NaN inputs return quiet NaN.
 
@@ -58,6 +62,20 @@ For \f$k < \mathrm{center}()\f$, discrete cumulative routines sum \f$p(i)\f$ dow
 
 For continuous expectations, \ref laplace::distrib::expectation_by_integral "expectation_by_integral()" integrates \f$h(y) e^{\log f(y)}\f$ with \ref laplace::math::quad::panels_quad "panels_quad()" over the support, split at `center()` and `y_kinks()` with initial panel width `scale()`. For discrete expectations, it sweeps upwards and downwards from \f$\lfloor \mathrm{center}() \rfloor\f$, stopping each direction at the support boundary or by a two-term geometric tail bound once away from the centre with decreasing mass.
 
+### Continuous cumulative quadrature
+
+For a continuous distribution, the side of \f$y\f$ that does not hold `center()` is integrated with \ref laplace::math::quad::panels_quad "panels_quad()", split at `y_kinks()` when provided, in panels of width `scale()`. The other side is obtained from it by the complement on the log scale, \f$\log(1 - e^{\log S})\f$. Where \f$\ell(y) = \log f(y)\f$ is finite, the density at the integration end point is divided out of the integrand, giving
+\f[
+\log S = \ell(y) + \log W, \qquad W = \int \frac{f(t)}{f(y)}\,\mathrm{d}t,
+\f]
+so that the logarithm of a tail far below the smallest normal `double` is preserved without underflow.
+
+For the parameter derivatives of order \f$K \in \{1, \dots, 6\}\f$, differentiating under smooth parameters over a parameter multiset \f$T\f$ gives
+\f[
+\frac{\partial^{|T|} F}{\partial\theta_T} = \int f \, B_T(\ell),
+\f]
+where \f$B_T\f$ is the complete Bell polynomial (Bell, 1934) of the derivatives of \f$\ell = \log f\f$ over \f$T\f$. Building \f$B_T\f$ on the centred derivatives \f$\ell(t) - \ell(y)\f$ produces the ratios \f$\partial_T W / W\f$, from which \f$\partial_T \log S = \partial_T \ell(y) + \partial_T \log W\f$ is composed; when the requested side is the opposite tail \f$O = 1 - S\f$, its ratios follow from \f$\partial_T O / O = -(S / O)\,\partial_T S / S\f$ and invert to \f$\partial_T \log O\f$. One quadrature pass serves every component of every order up to \f$K\f$, because the integrands are the Bell polynomials of every multi-index of order at most \f$K\f$ evaluated from a single set of log-density derivative tensors at each node. A component whose parameter has finite regularity returns quiet NaN, because that parameter moves a non-smooth point of \f$\ell\f$ in \f$y\f$, and differentiating the integrand across it would leave a boundary term.
+
 ### Expected information and finite regularity
 
 The default format returned by \ref laplace::distrib::generic_info_form "generic_info_form()" is `info_form::score` for every distribution. It is the only form valid under finite parameter regularity, matches the Hessian form in accuracy on smooth test distributions, and avoids cancellation in \f$-\mathbb{E}[l_{aa}]\f$ that \f$\mathbb{E}[l_a^2]\f$ does not suffer. All components of \f$I\f$ and its derivatives are evaluated in a single pass on shared quadrature nodes or discrete summation terms, refining until every component converges.
@@ -77,17 +95,20 @@ See \ref accuracy "How accuracy is measured" for error metrics and \ref accuracy
 | Continuous quantile | `gaussian1`, `laplace`, `gamma1` (\f$p \in [10^{-300}, 1 - 10^{-15}]\f$) | 31.9 (`gamma1(2, 0.3)`, \f$p = 10^{-300}\f$) | 8.0 (`gaussian1`, `laplace`), 64.0 (`gamma1`) |
 | Discrete quantile | `poisson` (\f$\mu \in [0.05, 10^4]\f$) | Exact smallest integer \f$k\f$ | Exact match (ties within \f$10^{-13}\f$ skipped) |
 | Discrete log-CDF | `poisson` (\f$\mu \in [0.05, 1000]\f$) | 0.60–5.91 ulp of \f$\max(|\log|, 1)\f$ | 16.0 ulp |
+| Continuous log-CDF | `cauchy`, `logistic` (\f$\sigma \in \{0.25, 1, 7\}\f$, \f$y \in [-300, 300]\f$) | \f$5.6 \times 10^{-16}\f$ (`cauchy`), \f$4.4 \times 10^{-16}\f$ (`logistic`) of \f$\max(|\log|, 1)\f$ | 8.0 ulp of \f$\max(|\log|, 1)\f$ |
+| Continuous log-CDF derivatives | `cauchy` (\f$K = 1, \dots, 6\f$, \f$\sigma = 0.25\f$, \f$y \in [-40, 25]\f$) | \f$1.8 \times 10^{-15}\f$, \f$1.4 \times 10^{-14}\f$, \f$5.7 \times 10^{-14}\f$, \f$9.1 \times 10^{-13}\f$, \f$2.2 \times 10^{-11}\f$, \f$5.8 \times 10^{-10}\f$ of \f$\max(|f|, 1)\f$ | \f$6 \times 10^{-15}\f$, \f$5 \times 10^{-14}\f$, \f$2 \times 10^{-13}\f$, \f$3 \times 10^{-12}\f$, \f$7 \times 10^{-11}\f$, \f$2 \times 10^{-9}\f$ |
+| Continuous log-CDF derivatives | `logistic` (\f$K = 6\f$, \f$\sigma = 0.25\f$, \f$y \in [-40, 25]\f$) | \f$1.5 \times 10^{-9}\f$ of \f$\max(|f|, 1)\f$ | \f$5 \times 10^{-9}\f$ |
 | Moments | `gaussian1`, `laplace`, `gamma1`, `poisson` | 1.8 (`gaussian1`, `laplace`), 3.0 (`gamma1`), 0.6–6.7 (`poisson`) eps | 64.0 (`gaussian1`, `laplace`, `gamma1`), 16.0 (`poisson`) eps |
 | Expected information | `gaussian1`, `gamma1` (\f$K = 0, \dots, 4\f$) | 4.0 eps (Hessian), 3.2 eps (score) | 16.0 eps |
 | Expected information | `poisson` (\f$\mu \in \{0.05, 3.5\}\f$, \f$K = 0, \dots, 4\f$) | 4.7 eps (Hessian), 10.9 eps (score) | 16.0 eps (Hessian), 24.0 eps (score) |
 | Expected information | `poisson(40)` (\f$K = 0, \dots, 4\f$) | 247 eps (Hessian), 116 eps (score) | 400.0 eps (Hessian), 200.0 eps (score) |
 | Expected information | `laplace(0.4, 1.3)` (score, non-NaN) | Within test bounds | 64 eps (\f$K = 0, 1\f$), 256 eps (\f$K = 2\f$), 1024 eps (\f$K = 4\f$) |
 
-At \f$\log q \in \{-50, -300\}\f$, upper-tail quantiles are additionally checked by comparing \f$\log(1 - F)\f$ at the result against \f$\log q\f$ with relative tolerance \f$10^{-12}\f$. Full per-order accuracy tables are recorded in `docs/numerics.md`.
+At \f$\log q \in \{-50, -300\}\f$, upper-tail quantiles are additionally checked by comparing \f$\log(1 - F)\f$ at the result against \f$\log q\f$ with relative tolerance \f$10^{-12}\f$. For continuous log-CDF parameter derivatives, host measurements compare against closed forms relative to \f$\max(|f|, 1)\f$ because pure derivatives in the scale vanish at \f$y = \mu\f$, and kernel tests exercise the routes on both host and device. Full per-order accuracy tables are recorded in `docs/numerics.md`.
 
 ## Speed
 
-Generic quantiles, discrete cumulative functions, and random draws run in tens to thousands of nanoseconds per call, whereas one-pass generic expected information evaluates log-density derivatives at every quadrature node or summation term; full timings on CPU (one gcc thread and OpenMP) and CUDA (RTX 4070 SUPER) are recorded in `docs/numerics.md`.
+Generic quantiles, discrete cumulative functions, and random draws run in tens to thousands of nanoseconds per call, whereas one-pass generic expected information evaluates log-density derivatives at every quadrature node or summation term; full timings on CPU (one gcc thread and OpenMP) and CUDA (RTX 4070 SUPER) are recorded in `docs/numerics.md`. On one gcc thread, continuous log-CDF parameter derivatives cost 72 us at order 1, 424 us at order 2, 2.9 ms at order 4, and 34 ms at order 6.
 
 ## Example
 
@@ -134,15 +155,25 @@ Functions and types in this module are defined in `laplace::distrib` and called 
 - \ref laplace::distrib::generic_info_form "generic_info_form()" — default representation (`info_form::score`)
 - \ref laplace::distrib::distrib_expected_info "distrib_expected_info()" — expected information dispatching to member or generic route
 
-### Discrete cumulative distribution functions
-- \ref laplace::distrib::log_cdf_by_sum "log_cdf_by_sum()" — natural logarithm of cumulative distribution function by summation
-- \ref laplace::distrib::log_ccdf_by_sum "log_ccdf_by_sum()" — natural logarithm of complementary cumulative distribution function by summation
-- \ref laplace::distrib::cdf_by_sum "cdf_by_sum()" — cumulative distribution function by summation
-- \ref laplace::distrib::ccdf_by_sum "ccdf_by_sum()" — complementary cumulative distribution function by summation
-- \ref laplace::distrib::distrib_cdf "distrib_cdf()" — cumulative distribution function dispatching to member or generic summation
-- \ref laplace::distrib::distrib_ccdf "distrib_ccdf()" — complementary cumulative distribution function dispatching to member or generic summation
-- \ref laplace::distrib::distrib_log_cdf "distrib_log_cdf()" — natural logarithm of cumulative distribution function dispatching to member or generic summation
-- \ref laplace::distrib::distrib_log_ccdf "distrib_log_ccdf()" — natural logarithm of complementary cumulative distribution function dispatching to member or generic summation
+### Cumulative distribution functions
+- \ref laplace::distrib::log_cdf_by_sum "log_cdf_by_sum()" — natural logarithm of cumulative distribution function for a discrete distribution by summation
+- \ref laplace::distrib::log_ccdf_by_sum "log_ccdf_by_sum()" — natural logarithm of complementary cumulative distribution function for a discrete distribution by summation
+- \ref laplace::distrib::cdf_by_sum "cdf_by_sum()" — cumulative distribution function for a discrete distribution by summation
+- \ref laplace::distrib::ccdf_by_sum "ccdf_by_sum()" — complementary cumulative distribution function for a discrete distribution by summation
+- \ref laplace::distrib::log_cdf_dk_by_sum "log_cdf_dk_by_sum()" — parameter derivatives of order \f$K\f$ of \f$\log F(y)\f$ for a discrete distribution by summation
+- \ref laplace::distrib::log_ccdf_dk_by_sum "log_ccdf_dk_by_sum()" — parameter derivatives of order \f$K\f$ of \f$\log(1 - F(y))\f$ for a discrete distribution by summation
+- \ref laplace::distrib::log_cdf_by_integral "log_cdf_by_integral()" — natural logarithm of cumulative distribution function for a continuous distribution by quadrature
+- \ref laplace::distrib::log_ccdf_by_integral "log_ccdf_by_integral()" — natural logarithm of complementary cumulative distribution function for a continuous distribution by quadrature
+- \ref laplace::distrib::cdf_by_integral "cdf_by_integral()" — cumulative distribution function for a continuous distribution by quadrature
+- \ref laplace::distrib::ccdf_by_integral "ccdf_by_integral()" — complementary cumulative distribution function for a continuous distribution by quadrature
+- \ref laplace::distrib::log_cdf_dk_by_integral "log_cdf_dk_by_integral()" — parameter derivatives of order \f$K\f$ of \f$\log F(y)\f$ for a continuous distribution by quadrature
+- \ref laplace::distrib::log_ccdf_dk_by_integral "log_ccdf_dk_by_integral()" — parameter derivatives of order \f$K\f$ of \f$\log(1 - F(y))\f$ for a continuous distribution by quadrature
+- \ref laplace::distrib::distrib_cdf "distrib_cdf()" — cumulative distribution function dispatching to member or generic route by distribution kind
+- \ref laplace::distrib::distrib_ccdf "distrib_ccdf()" — complementary cumulative distribution function dispatching to member or generic route by distribution kind
+- \ref laplace::distrib::distrib_log_cdf "distrib_log_cdf()" — natural logarithm of cumulative distribution function dispatching to member or generic route by distribution kind
+- \ref laplace::distrib::distrib_log_ccdf "distrib_log_ccdf()" — natural logarithm of complementary cumulative distribution function dispatching to member or generic route by distribution kind
+- \ref laplace::distrib::distrib_log_cdf_dk "distrib_log_cdf_dk()" — parameter derivatives of order \f$K\f$ of \f$\log F(y)\f$ dispatching to member or generic route by distribution kind
+- \ref laplace::distrib::distrib_log_ccdf_dk "distrib_log_ccdf_dk()" — parameter derivatives of order \f$K\f$ of \f$\log(1 - F(y))\f$ dispatching to member or generic route by distribution kind
 
 ### Quantiles
 - \ref laplace::distrib::quantile_by_root "quantile_by_root()" — continuous quantile \f$F^{-1}(p)\f$ by root finding
@@ -160,6 +191,8 @@ Functions and types in this module are defined in `laplace::distrib` and called 
 - \ref laplace::distrib::open_unit_uniform "open_unit_uniform()" — open unit interval uniform draw in \f$[2^{-54}, 1 - 2^{-54}]\f$
 - \ref laplace::distrib::rng_by_inversion(const D&, Gen&) "rng_by_inversion(d, gen)" — random variate by quantile inversion using an explicit generator
 - \ref laplace::distrib::rng_by_inversion(const D&, std::uint64_t, std::uint64_t) "rng_by_inversion(d, seed, index)" — random variate by quantile inversion using the default counter source
+- \ref laplace::distrib::standard_normal_by_inversion "standard_normal_by_inversion()" — standard normal variate \f$\Phi^{-1}(u)\f$ by inversion of one uniform draw
+- \ref laplace::distrib::standard_gamma_by_inversion "standard_gamma_by_inversion()" — unit-scale gamma variate \f$P^{-1}(a, u)\f$ of shape \f$a > 0\f$ by inversion of one uniform draw
 
 ## References
 

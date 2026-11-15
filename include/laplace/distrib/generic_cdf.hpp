@@ -549,23 +549,187 @@ LAPLACE_HD double log_cdf_by_sum(const D& d, double y) { return detail_generic::
 template <class D>
 LAPLACE_HD double log_ccdf_by_sum(const D& d, double y) { return detail_generic::log_cdf_side_by_sum(d, y, true); }
 
+/**
+ * \ingroup distrib_generic
+ * \brief Natural logarithm of cumulative distribution function \f$\log F(y)\f$ for a continuous distribution by quadrature.
+ *
+ * Integrates the density over the side of \f$y\f$ that does not hold `d.center()`, using
+ * laplace::math::quad::panels_quad() split at `d.y_kinks()` when present with panel width `d.scale()`.
+ * When \f$y < \mathrm{center}()\f$, it integrates the lower tail directly; when \f$y \ge \mathrm{center}()\f$,
+ * it integrates the upper tail \f$S\f$ and returns the log-scale complement \f$\log(1 - e^{\log S})\f$.
+ * Where \f$\ell(y) = \log f(y)\f$ is finite, the density at the endpoint is divided out, giving
+ * \f$\log S = \ell(y) + \log W\f$ with \f$W = \int (f(t)/f(y))\,\mathrm{d}t\f$, so that tails far below
+ * the smallest normal `double` keep their logarithm accurately.
+ *
+ * \tparam D Continuous distribution type.
+ * \param d Distribution object.
+ * \param y Evaluation point.
+ * \return The value of \f$\log F(y)\f$.
+ *
+ * \par Domain and special values
+ * - If \f$y\f$ is at most `d.support_lower()`, returns \f$-\infty\f$.
+ * - If \f$y\f$ is at least `d.support_upper()`, returns \f$0.0\f$.
+ * - If quadrature fails to converge with a positive integral, returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * On Cauchy and logistic distributions (\f$\sigma \in \{0.25, 1, 7\}\f$, \f$y \in [-300, 300]\f$, gcc),
+ * worst error relative to \f$\max(|\log F|, 1)\f$ is \f$5.6 \times 10^{-16}\f$ on Cauchy and
+ * \f$4.4 \times 10^{-16}\f$ on logistic (test bound 8.0 ulp of \f$\max(|\log F|, 1)\f$).
+ *
+ * \see log_ccdf_by_integral(), cdf_by_integral(), distrib_log_cdf()
+ */
 // The same four quantities for a continuous distribution, by quadrature of its
 // density over the side of y that does not hold the centre (note/distrib.md
 // section 4). They are what a continuous family without a closed cdf inherits.
 template <class D>
 LAPLACE_HD double log_cdf_by_integral(const D& d, double y) { return detail_generic::log_cdf_side_by_integral(d, y, false); }
+
+/**
+ * \ingroup distrib_generic
+ * \brief Natural logarithm of complementary cumulative distribution function \f$\log(1 - F(y))\f$ for a continuous distribution by quadrature.
+ *
+ * Evaluates \f$\log(1 - F(y))\f$ by integrating the upper tail directly when \f$y \ge \mathrm{center}()\f$,
+ * or from the lower tail complement \f$\log(1 - e^{\log F(y)})\f$ when \f$y < \mathrm{center}()\f$,
+ * using the endpoint-scaled quadrature of log_cdf_by_integral().
+ *
+ * \tparam D Continuous distribution type.
+ * \param d Distribution object.
+ * \param y Evaluation point.
+ * \return The value of \f$\log(1 - F(y))\f$.
+ *
+ * \par Domain and special values
+ * - If \f$y\f$ is at most `d.support_lower()`, returns \f$0.0\f$.
+ * - If \f$y\f$ is at least `d.support_upper()`, returns \f$-\infty\f$.
+ * - If quadrature fails to converge with a positive integral, returns quiet NaN.
+ *
+ * \par Measured accuracy
+ * On Cauchy and logistic distributions (\f$\sigma \in \{0.25, 1, 7\}\f$, \f$y \in [-300, 300]\f$, gcc),
+ * worst error relative to \f$\max(|\log(1 - F)|, 1)\f$ is \f$5.6 \times 10^{-16}\f$ on Cauchy and
+ * \f$4.4 \times 10^{-16}\f$ on logistic (test bound 8.0 ulp of \f$\max(|\log(1 - F)|, 1)\f$).
+ *
+ * \see log_cdf_by_integral(), ccdf_by_integral(), distrib_log_ccdf()
+ */
 template <class D>
 LAPLACE_HD double log_ccdf_by_integral(const D& d, double y) { return detail_generic::log_cdf_side_by_integral(d, y, true); }
+
+/**
+ * \ingroup distrib_generic
+ * \brief Cumulative distribution function \f$F(y)\f$ for a continuous distribution by quadrature.
+ *
+ * Computes the exponential of log_cdf_by_integral().
+ *
+ * \tparam D Continuous distribution type.
+ * \param d Distribution object.
+ * \param y Evaluation point.
+ * \return The value of \f$F(y)\f$.
+ *
+ * \par Domain and special values
+ * - If \f$y\f$ is at most `d.support_lower()`, returns \f$0.0\f$.
+ * - If \f$y\f$ is at least `d.support_upper()`, returns \f$1.0\f$.
+ *
+ * \par Measured accuracy
+ * That of log_cdf_by_integral(), passed through the exponential.
+ *
+ * \see log_cdf_by_integral(), ccdf_by_integral(), distrib_cdf()
+ */
 template <class D>
 LAPLACE_HD double cdf_by_integral(const D& d, double y) { return math::exp(log_cdf_by_integral(d, y)); }
+
+/**
+ * \ingroup distrib_generic
+ * \brief Complementary cumulative distribution function \f$1 - F(y)\f$ for a continuous distribution by quadrature.
+ *
+ * Computes the exponential of log_ccdf_by_integral().
+ *
+ * \tparam D Continuous distribution type.
+ * \param d Distribution object.
+ * \param y Evaluation point.
+ * \return The value of \f$1 - F(y)\f$.
+ *
+ * \par Domain and special values
+ * - If \f$y\f$ is at most `d.support_lower()`, returns \f$1.0\f$.
+ * - If \f$y\f$ is at least `d.support_upper()`, returns \f$0.0\f$.
+ *
+ * \par Measured accuracy
+ * That of log_ccdf_by_integral(), passed through the exponential.
+ *
+ * \see log_ccdf_by_integral(), cdf_by_integral(), distrib_ccdf()
+ */
 template <class D>
 LAPLACE_HD double ccdf_by_integral(const D& d, double y) { return math::exp(log_ccdf_by_integral(d, y)); }
+
+/**
+ * \ingroup distrib_generic
+ * \brief Parameter derivatives of order \f$K\f$ of \f$\log F(y)\f$ for a continuous distribution by quadrature.
+ *
+ * Integrates the side of \f$y\f$ that does not hold `d.center()`, dividing out \f$f(y)\f$ when
+ * \f$\ell(y) = \log f(y)\f$ is finite so that \f$\log S = \ell(y) + \log W\f$ with \f$W = \int (f/f(y))\f$.
+ * Uses the identity
+ * \f[
+ * \frac{\partial^{|T|} F}{\partial\theta_T} = \int f \, B_T(\ell),
+ * \f]
+ * where \f$B_T\f$ is the complete Bell polynomial of the derivatives of \f$\ell\f$ over the parameter
+ * multiset \f$T\f$, built on the centred derivatives \f$\ell(t) - \ell(y)\f$ to obtain the ratios
+ * \f$\partial_T W / W\f$ and compose them to \f$\partial_T \log S = \partial_T \ell(y) + \partial_T \log W\f$.
+ * When \f$y \ge \mathrm{center}()\f$, the requested side \f$F = 1 - S\f$ is obtained from the upper
+ * tail \f$S\f$ via \f$\partial_T F / F = -(S/F)\,\partial_T S / S\f$. One quadrature pass serves every
+ * component, because the integrands are the Bell polynomials of every multi-index of order at most
+ * \f$K\f$ evaluated on shared quadrature nodes.
+ *
+ * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+ * \tparam D Continuous distribution type.
+ * \param d Distribution object.
+ * \param y Evaluation point.
+ * \return Packed symmetric tensor `sym_tensor<D::n_params, K>` of derivatives.
+ *
+ * \par Domain and special values
+ * - Quiet NaN in every component when \f$y\f$ is at most `d.support_lower()` (\f$\log F = -\infty\f$).
+ * - Zero in every component when \f$y\f$ is at least `d.support_upper()` (\f$F = 1\f$).
+ * - Quiet NaN in any component whose parameter has finite regularity: that parameter moves a
+ *   non-smooth point of \f$\ell\f$ in \f$y\f$, and differentiating the integrand across it would
+ *   leave a boundary term.
+ *
+ * \par Measured accuracy
+ * Against closed forms on Cauchy (orders 1 to 6, \f$\sigma = 0.25\f$, \f$y \in [-40, 25]\f$, gcc),
+ * worst error over \f$\max(|f|, 1)\f$ is \f$1.8 \times 10^{-15}\f$, \f$1.4 \times 10^{-14}\f$,
+ * \f$5.7 \times 10^{-14}\f$, \f$9.1 \times 10^{-13}\f$, \f$2.2 \times 10^{-11}\f$, and
+ * \f$5.8 \times 10^{-10}\f$ (test bounds \f$6 \times 10^{-15}\f$, \f$5 \times 10^{-14}\f$,
+ * \f$2 \times 10^{-13}\f$, \f$3 \times 10^{-12}\f$, \f$7 \times 10^{-11}\f$, and
+ * \f$2 \times 10^{-9}\f$); on logistic at order 6, \f$1.5 \times 10^{-9}\f$ (test bound \f$5 \times 10^{-9}\f$).
+ *
+ * \see log_ccdf_dk_by_integral(), log_cdf_by_integral(), distrib_log_cdf_dk()
+ */
 // the derivatives in the parameters of log F and log(1 - F), K = 1..6, by
 // quadrature of f B_T(l): one quadrature per component of the tensor
 template <int K, class D>
 LAPLACE_HD sym_tensor<D::n_params, K> log_cdf_dk_by_integral(const D& d, double y) {
   return detail_generic::log_cdf_side_dk_by_integral<K>(d, y, false);
 }
+
+/**
+ * \ingroup distrib_generic
+ * \brief Parameter derivatives of order \f$K\f$ of \f$\log(1 - F(y))\f$ for a continuous distribution by quadrature.
+ *
+ * Applies the one-pass Bell-polynomial quadrature of log_cdf_dk_by_integral() to \f$\log(1 - F(y))\f$,
+ * integrating the upper tail directly when \f$y \ge \mathrm{center}()\f$ and taking the complement of
+ * the lower tail when \f$y < \mathrm{center}()\f$.
+ *
+ * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+ * \tparam D Continuous distribution type.
+ * \param d Distribution object.
+ * \param y Evaluation point.
+ * \return Packed symmetric tensor `sym_tensor<D::n_params, K>` of derivatives.
+ *
+ * \par Domain and special values
+ * - Zero in every component when \f$y\f$ is at most `d.support_lower()` (\f$1 - F = 1\f$).
+ * - Quiet NaN in every component when \f$y\f$ is at least `d.support_upper()` (\f$\log(1 - F) = -\infty\f$).
+ * - Quiet NaN in any component whose parameter has finite regularity.
+ *
+ * \par Measured accuracy
+ * Same grid, worst errors, and test bounds as log_cdf_dk_by_integral().
+ *
+ * \see log_cdf_dk_by_integral(), log_ccdf_by_integral(), distrib_log_ccdf_dk()
+ */
 template <int K, class D>
 LAPLACE_HD sym_tensor<D::n_params, K> log_ccdf_dk_by_integral(const D& d, double y) {
   return detail_generic::log_cdf_side_dk_by_integral<K>(d, y, true);
@@ -619,9 +783,10 @@ LAPLACE_HD double ccdf_by_sum(const D& d, double y) { return math::exp(log_ccdf_
 
 /**
  * \ingroup distrib_generic
- * \brief Cumulative distribution function \f$F(y)\f$, dispatching to specialized member or generic summation.
+ * \brief Cumulative distribution function \f$F(y)\f$, dispatching to member or generic route by distribution kind.
  *
- * Calls `d.cdf(y)` if provided by distribution `d`; otherwise calls cdf_by_sum().
+ * Calls `d.cdf(y)` if provided by distribution `d`; otherwise calls cdf_by_sum() when `D::kind` is
+ * `distrib_kind::discrete` and cdf_by_integral() when it is `distrib_kind::continuous`.
  * The choice is made at compile time.
  *
  * \tparam D Distribution type.
@@ -629,7 +794,7 @@ LAPLACE_HD double ccdf_by_sum(const D& d, double y) { return math::exp(log_ccdf_
  * \param y Evaluation point.
  * \return The value of \f$F(y)\f$.
  *
- * \see cdf_by_sum(), distrib_ccdf(), distrib_log_cdf()
+ * \see cdf_by_sum(), cdf_by_integral(), distrib_ccdf(), distrib_log_cdf()
  */
 template <class D>
 LAPLACE_HD double distrib_cdf(const D& d, double y) {
@@ -640,9 +805,10 @@ LAPLACE_HD double distrib_cdf(const D& d, double y) {
 
 /**
  * \ingroup distrib_generic
- * \brief Complementary cumulative distribution function \f$1 - F(y)\f$, dispatching to specialized member or generic summation.
+ * \brief Complementary cumulative distribution function \f$1 - F(y)\f$, dispatching to member or generic route by distribution kind.
  *
- * Calls `d.ccdf(y)` if provided by distribution `d`; otherwise calls ccdf_by_sum().
+ * Calls `d.ccdf(y)` if provided by distribution `d`; otherwise calls ccdf_by_sum() when `D::kind` is
+ * `distrib_kind::discrete` and ccdf_by_integral() when it is `distrib_kind::continuous`.
  * The choice is made at compile time.
  *
  * \tparam D Distribution type.
@@ -650,7 +816,7 @@ LAPLACE_HD double distrib_cdf(const D& d, double y) {
  * \param y Evaluation point.
  * \return The value of \f$1 - F(y)\f$.
  *
- * \see ccdf_by_sum(), distrib_cdf(), distrib_log_ccdf()
+ * \see ccdf_by_sum(), ccdf_by_integral(), distrib_cdf(), distrib_log_ccdf()
  */
 template <class D>
 LAPLACE_HD double distrib_ccdf(const D& d, double y) {
@@ -661,9 +827,10 @@ LAPLACE_HD double distrib_ccdf(const D& d, double y) {
 
 /**
  * \ingroup distrib_generic
- * \brief Natural logarithm of cumulative distribution function \f$\log F(y)\f$, dispatching to specialized member or generic summation.
+ * \brief Natural logarithm of cumulative distribution function \f$\log F(y)\f$, dispatching to member or generic route by distribution kind.
  *
- * Calls `d.log_cdf(y)` if provided by distribution `d`; otherwise calls log_cdf_by_sum().
+ * Calls `d.log_cdf(y)` if provided by distribution `d`; otherwise calls log_cdf_by_sum() when `D::kind` is
+ * `distrib_kind::discrete` and log_cdf_by_integral() when it is `distrib_kind::continuous`.
  * The choice is made at compile time.
  *
  * \tparam D Distribution type.
@@ -671,7 +838,7 @@ LAPLACE_HD double distrib_ccdf(const D& d, double y) {
  * \param y Evaluation point.
  * \return The value of \f$\log F(y)\f$.
  *
- * \see log_cdf_by_sum(), distrib_cdf(), distrib_log_ccdf()
+ * \see log_cdf_by_sum(), log_cdf_by_integral(), distrib_cdf(), distrib_log_ccdf()
  */
 template <class D>
 LAPLACE_HD double distrib_log_cdf(const D& d, double y) {
@@ -682,9 +849,10 @@ LAPLACE_HD double distrib_log_cdf(const D& d, double y) {
 
 /**
  * \ingroup distrib_generic
- * \brief Natural logarithm of complementary cumulative distribution function \f$\log(1 - F(y))\f$, dispatching to specialized member or generic summation.
+ * \brief Natural logarithm of complementary cumulative distribution function \f$\log(1 - F(y))\f$, dispatching to member or generic route by distribution kind.
  *
- * Calls `d.log_ccdf(y)` if provided by distribution `d`; otherwise calls log_ccdf_by_sum().
+ * Calls `d.log_ccdf(y)` if provided by distribution `d`; otherwise calls log_ccdf_by_sum() when `D::kind` is
+ * `distrib_kind::discrete` and log_ccdf_by_integral() when it is `distrib_kind::continuous`.
  * The choice is made at compile time.
  *
  * \tparam D Distribution type.
@@ -692,7 +860,7 @@ LAPLACE_HD double distrib_log_cdf(const D& d, double y) {
  * \param y Evaluation point.
  * \return The value of \f$\log(1 - F(y))\f$.
  *
- * \see log_ccdf_by_sum(), distrib_ccdf(), distrib_log_cdf()
+ * \see log_ccdf_by_sum(), log_ccdf_by_integral(), distrib_ccdf(), distrib_log_cdf()
  */
 template <class D>
 LAPLACE_HD double distrib_log_ccdf(const D& d, double y) {
@@ -753,13 +921,14 @@ LAPLACE_HD sym_tensor<D::n_params, K> log_ccdf_dk_by_sum(const D& d, double y) {
 
 /**
  * \ingroup distrib_generic
- * \brief Parameter derivatives of order \f$K\f$ of \f$\log F(y)\f$, dispatching to the member or to the generic sum.
+ * \brief Parameter derivatives of order \f$K\f$ of \f$\log F(y)\f$, dispatching to member or generic route by distribution kind.
  *
- * Calls the distribution's own `log_cdf_dK(y)` when it has one; otherwise calls log_cdf_dk_by_sum().
+ * Calls the distribution's own `log_cdf_dK(y)` when it has one; otherwise calls log_cdf_dk_by_sum()
+ * when `D::kind` is `distrib_kind::discrete` and log_cdf_dk_by_integral() when it is `distrib_kind::continuous`.
  * The choice is made at compile time.
  *
  * \tparam K Derivative order (\f$1 \le K \le 6\f$).
- * \see log_cdf_dk_by_sum(), distrib_log_ccdf_dk()
+ * \see log_cdf_dk_by_sum(), log_cdf_dk_by_integral(), distrib_log_ccdf_dk()
  */
 template <int K, class D>
 LAPLACE_HD sym_tensor<D::n_params, K> distrib_log_cdf_dk(const D& d, double y) {
@@ -792,13 +961,14 @@ LAPLACE_HD sym_tensor<D::n_params, K> distrib_log_cdf_dk(const D& d, double y) {
 
 /**
  * \ingroup distrib_generic
- * \brief Parameter derivatives of order \f$K\f$ of \f$\log(1 - F(y))\f$, dispatching to the member or to the generic sum.
+ * \brief Parameter derivatives of order \f$K\f$ of \f$\log(1 - F(y))\f$, dispatching to member or generic route by distribution kind.
  *
- * Calls the distribution's own `log_ccdf_dK(y)` when it has one; otherwise calls log_ccdf_dk_by_sum().
+ * Calls the distribution's own `log_ccdf_dK(y)` when it has one; otherwise calls log_ccdf_dk_by_sum()
+ * when `D::kind` is `distrib_kind::discrete` and log_ccdf_dk_by_integral() when it is `distrib_kind::continuous`.
  * The choice is made at compile time.
  *
  * \tparam K Derivative order (\f$1 \le K \le 6\f$).
- * \see log_ccdf_dk_by_sum(), distrib_log_cdf_dk()
+ * \see log_ccdf_dk_by_sum(), log_ccdf_dk_by_integral(), distrib_log_cdf_dk()
  */
 template <int K, class D>
 LAPLACE_HD sym_tensor<D::n_params, K> distrib_log_ccdf_dk(const D& d, double y) {

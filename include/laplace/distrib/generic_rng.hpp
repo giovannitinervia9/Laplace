@@ -126,18 +126,20 @@ LAPLACE_HD double rng_by_inversion(const D& d, std::uint64_t seed, std::uint64_t
 
 /**
  * \ingroup distrib_generic
- * \brief Standard normal draw by inversion, \f$\Phi^{-1}(u)\f$ of one uniform.
+ * \brief Standard normal draw \f$\Phi^{-1}(u)\f$ by inversion of one uniform variate.
  *
- * Draws one uniform with open_unit_uniform() and returns math::Phi_inv() of it. There is no
- * rejection step, so one draw consumes exactly one number of the stream and the result is the same
- * on every thread and backend, which the polar and ratio-of-uniforms methods do not give.
+ * Draws one uniform variate \f$u \in [2^{-54}, 1 - 2^{-54}]\f$ with open_unit_uniform() and
+ * returns \ref laplace::math::own::Phi_inv "Phi_inv()" (\ref normal "normal module") at \f$u\f$,
+ * where \f$\Phi\f$ is the standard normal cumulative distribution function. There is no rejection
+ * step, so one draw consumes exactly one number of the stream, a kernel takes no divergent
+ * branch, and the draw of an observation is the same on every thread and backend.
  *
- * 	param Gen Generator type providing `std::uint64_t urand64()`.
+ * \tparam Gen Generator type providing `std::uint64_t urand64()`.
  * \param gen Generator instance.
- * 
-eturn A standard normal pseudorandom draw.
+ * \return A standard normal pseudorandom draw.
  *
- * \see open_unit_uniform(), standard_gamma_by_inversion()
+ * \see distrib_generic, open_unit_uniform(), rng_by_inversion(), standard_gamma_by_inversion(),
+ *      counter_uniform_source, normal
  */
 template <class Gen>
 LAPLACE_HD_FORCEINLINE double standard_normal_by_inversion(Gen& gen) {
@@ -146,20 +148,22 @@ LAPLACE_HD_FORCEINLINE double standard_normal_by_inversion(Gen& gen) {
 
 /**
  * \ingroup distrib_generic
- * \brief Standard gamma draw of shape \f$a\f$ and unit scale, by inversion of \f$P(a, x)\f$.
+ * \brief Standard gamma draw of shape \f$a > 0\f$ and unit scale, \f$P^{-1}(a, u)\f$, by inversion.
  *
- * Draws one uniform with open_unit_uniform() and returns math::gamma_p_inv() of it, the inverse of
- * the regularized lower incomplete gamma in its argument. As for the normal above there is no
- * rejection step: one draw is one number of the stream, on every thread and backend, and a kernel
- * takes no divergent branch.
+ * Draws one uniform variate \f$u \in [2^{-54}, 1 - 2^{-54}]\f$ with open_unit_uniform() and
+ * returns \ref laplace::math::own::gamma_p_inv "gamma_p_inv()" (\ref incomplete_gamma "incomplete gamma module")
+ * at \f$(a, u)\f$, the inverse of the regularized lower incomplete gamma function \f$P\f$ in its
+ * argument. Because there is no rejection step, one draw consumes exactly one number of the stream,
+ * a kernel takes no divergent branch, and the draw of an observation is the same on every thread
+ * and backend. Returns quiet NaN if \f$a \le 0\f$, \f$a = +\infty\f$, or \f$a\f$ is NaN.
  *
- * 	param Gen Generator type providing `std::uint64_t urand64()`.
- * \param a Shape parameter \f$a > 0\f$.
+ * \tparam Gen Generator type providing `std::uint64_t urand64()`.
+ * \param a Finite positive shape parameter \f$a \in (0, \infty)\f$.
  * \param gen Generator instance.
- * 
-eturn A gamma pseudorandom draw of shape \f$a\f$ and scale one.
+ * \return A gamma pseudorandom draw of shape \f$a\f$ and unit scale, or quiet NaN outside \f$a \in (0, \infty)\f$.
  *
- * \see open_unit_uniform(), standard_normal_by_inversion()
+ * \see distrib_generic, open_unit_uniform(), rng_by_inversion(), standard_normal_by_inversion(),
+ *      counter_uniform_source, incomplete_gamma
  */
 template <class Gen>
 LAPLACE_HD_FORCEINLINE double standard_gamma_by_inversion(double a, Gen& gen) {

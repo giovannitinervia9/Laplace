@@ -273,28 +273,78 @@ LAPLACE_HD void lambda_table(double z, double alpha, double nu, double* D) {
 
 }  // namespace detail_skewt
 
+/**
+ * \ingroup distrib_skewt
+ * \brief Azzalini's skew \f$t\f$ distribution on \f$\mathbb{R}\f$ in direct parametrization.
+ *
+ * Models a continuous outcome \f$y \in (-\infty, \infty)\f$ with location
+ * \f$\mu \in \mathbb{R}\f$, scale \f$\sigma > 0\f$, shape \f$\alpha \in \mathbb{R}\f$, and
+ * degrees of freedom \f$\nu > 0\f$ via the density
+ * \f[
+ *   f(y \mid \mu, \sigma, \alpha, \nu)
+ *     = \frac{2}{\sigma}\, t_\nu(z)\, T_{\nu+1}\!\left(\alpha\, z \sqrt{\frac{\nu + 1}{\nu + z^2}}\right),
+ *   \qquad z = \frac{y - \mu}{\sigma},
+ * \f]
+ * where \f$t_\nu\f$ is the standard Student \f$t\f$ density with \f$\nu\f$ degrees of freedom
+ * and \f$T_{\nu+1}\f$ is the standard Student \f$t\f$ cumulative distribution function with
+ * \f$\nu + 1\f$ degrees of freedom.
+ *
+ * The log-density is evaluated as
+ * \f[
+ *   \log f(y) = \log 2 + c(\nu) - \log \sigma - \frac{\nu + 1}{2}\log\!\left(1 + \frac{z^2}{\nu}\right)
+ *               + \log T_{\nu+1}(w),
+ * \f]
+ * with \f$c(\nu) = \log\Gamma((\nu + 1)/2) - \log\Gamma(\nu/2) - \frac{1}{2}\log(\nu\pi)\f$ and
+ * \f$w = \alpha\, z \sqrt{(\nu + 1)/(\nu + z^2)}\f$. Reducing \f$\alpha = 0\f$ recovers the
+ * Student \f$t\f$ distribution (\f$\nu\f$ degrees of freedom), and letting \f$\nu \to \infty\f$
+ * yields the skew normal distribution in direct parametrization. Cumulative probabilities,
+ * quantiles, and Fisher information are provided through \ref distrib_generic.
+ *
+ * \see distrib_skewt, logpdf(), logpdf_dk(), logpdf_dy_dk(), rng(), start_value()
+ */
 // Azzalini's skew t, with the location mu, the scale sigma, the shape alpha and the
 // degrees of freedom nu.
 struct skewt_distrib {
-  /// Location parameter mu.
+  /// \brief Location parameter \f$\mu \in (-\infty, \infty)\f$.
   double mu;
-  /// Scale parameter sigma > 0 (not the standard deviation).
+  /// \brief Scale parameter \f$\sigma > 0\f$ (not the standard deviation).
   double sigma;
-  /// Shape parameter alpha, zero giving the Student t.
+  /// \brief Shape parameter \f$\alpha \in (-\infty, \infty)\f$; \f$\alpha = 0\f$ gives the Student \f$t\f$.
   double alpha;
-  /// Degrees of freedom nu > 0.
+  /// \brief Degrees-of-freedom parameter \f$\nu > 0\f$.
   double nu;
 
+  /// \brief Distribution kind tag (continuous).
   static constexpr distrib_kind kind = distrib_kind::continuous;
+  /// \brief Number of scalar parameters in the parameter vector \f$(\mu, \sigma, \alpha, \nu)\f$.
   static constexpr int n_params = 4;
+  /// \brief Smoothness order of the log-density with respect to \f$y\f$.
   static constexpr int y_regularity = infinitely_smooth;
+  /// \brief Metadata table describing the parameters \f$\mu\f$, \f$\sigma\f$, \f$\alpha\f$, and \f$\nu\f$.
   static constexpr distrib_param_info params[4] = {
       {"mu", -distrib_infinity, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth},
       {"sigma", 0.0, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth},
       {"alpha", -distrib_infinity, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth},
       {"nu", 0.0, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth}};
 
-  /// log f(y) = log 2 + c(nu) - log sigma + Lambda(z, nu) + log T_(nu+1)(w).
+  /**
+   * \ingroup distrib_skewt
+   * \brief Evaluate the log-density \f$\log f(y \mid \mu, \sigma, \alpha, \nu)\f$.
+   *
+   * Computes
+   * \f[
+   *   \log f(y) = \log 2 + c(\nu) - \log \sigma
+   *               - \frac{\nu + 1}{2}\log\!\left(1 + \frac{z^2}{\nu}\right)
+   *               + \log T_{\nu+1}\!\left(\alpha\, u(z, \nu)\right),
+   * \f]
+   * where \f$z = (y - \mu)/\sigma\f$, \f$u(z, \nu) = z\sqrt{(\nu + 1)/(\nu + z^2)}\f$
+   * (evaluated in scaled form when \f$|z| > 1\f$ to avoid overflow), and
+   * \f$\log T_{\nu+1}\f$ is supplied by \c log_student_cdf().
+   *
+   * \param y Observed real value \f$y \in (-\infty, \infty)\f$.
+   * \return Log-density \f$\log f(y \mid \mu, \sigma, \alpha, \nu)\f$.
+   * \see logpdf_dk(), logpdf_dy_dk()
+   */
   LAPLACE_HD double logpdf(double y) const {
     const double z = (y - mu) / sigma;
     double cp[1];
@@ -304,7 +354,21 @@ struct skewt_distrib {
            math::own::log_student_cdf(w, nu + 1.0);
   }
 
-  /// The derivatives of order K of log f in (mu, sigma, alpha, nu).
+  /**
+   * \ingroup distrib_skewt
+   * \brief Partial derivatives of order \f$K\f$ of \f$\log f(y \mid \mu, \sigma, \alpha, \nu)\f$
+   *        with respect to \f$(\mu, \sigma, \alpha, \nu)\f$.
+   *
+   * Combines the Student log-CDF derivatives of \f$\log T_{\nu+1}(w)\f$ with the bivariate
+   * Faà di Bruno chain rule for \f$w = \alpha\, u(z, \nu)\f$ and the shared location-scale
+   * transformation in \f$(z, \sigma)\f$, then adds the \f$\nu\f$-only normalizing-constant
+   * derivatives and \f$\sigma\f$-only Jacobian term.
+   *
+   * \tparam K Derivative order, \f$1 \le K \le 6\f$.
+   * \param y Observed real value \f$y \in (-\infty, \infty)\f$.
+   * \return Symmetric tensor of order \f$K\f$ over \f$(\mu, \sigma, \alpha, \nu)\f$.
+   * \see logpdf(), logpdf_d1(), logpdf_dy_dk()
+   */
   template <int K>
   LAPLACE_HD sym_tensor<4, K> logpdf_dk(double y) const {
     const double z = (y - mu) / sigma;
@@ -320,21 +384,42 @@ struct skewt_distrib {
         detail_student_t1::sign_of_power(K) * detail_skewt::fact(K - 1) * isk;
     return t;
   }
-  /// First-order derivatives of log f.
-  LAPLACE_HD sym_tensor<4, 1> logpdf_d1(double y) const { return logpdf_dk<1>(y); }
-  /// Second-order derivatives of log f.
-  LAPLACE_HD sym_tensor<4, 2> logpdf_d2(double y) const { return logpdf_dk<2>(y); }
-  /// Third-order derivatives of log f.
-  LAPLACE_HD sym_tensor<4, 3> logpdf_d3(double y) const { return logpdf_dk<3>(y); }
-  /// Fourth-order derivatives of log f.
-  LAPLACE_HD sym_tensor<4, 4> logpdf_d4(double y) const { return logpdf_dk<4>(y); }
-  /// Fifth-order derivatives of log f.
-  LAPLACE_HD sym_tensor<4, 5> logpdf_d5(double y) const { return logpdf_dk<5>(y); }
-  /// Sixth-order derivatives of log f.
-  LAPLACE_HD sym_tensor<4, 6> logpdf_d6(double y) const { return logpdf_dk<6>(y); }
 
-  /// The mixed derivatives: J in y and K in the parameters. y and mu enter only through y - mu, so
-  /// d/dy = -d/dmu and the component is that of logpdf_dk<J + K> with J more indices in mu.
+  /**
+   * \name Fixed-order parameter derivatives
+   * \brief Convenience wrappers returning the order-\f$K\f$ derivative tensor of
+   *        \f$\log f(y \mid \mu, \sigma, \alpha, \nu)\f$ over \f$(\mu, \sigma, \alpha, \nu)\f$.
+   * @{
+   */
+  /// \brief First-order parameter derivatives of \f$\log f\f$; returns \c logpdf_dk<1>(y).
+  LAPLACE_HD sym_tensor<4, 1> logpdf_d1(double y) const { return logpdf_dk<1>(y); }
+  /// \brief Second-order parameter derivatives of \f$\log f\f$; returns \c logpdf_dk<2>(y).
+  LAPLACE_HD sym_tensor<4, 2> logpdf_d2(double y) const { return logpdf_dk<2>(y); }
+  /// \brief Third-order parameter derivatives of \f$\log f\f$; returns \c logpdf_dk<3>(y).
+  LAPLACE_HD sym_tensor<4, 3> logpdf_d3(double y) const { return logpdf_dk<3>(y); }
+  /// \brief Fourth-order parameter derivatives of \f$\log f\f$; returns \c logpdf_dk<4>(y).
+  LAPLACE_HD sym_tensor<4, 4> logpdf_d4(double y) const { return logpdf_dk<4>(y); }
+  /// \brief Fifth-order parameter derivatives of \f$\log f\f$; returns \c logpdf_dk<5>(y).
+  LAPLACE_HD sym_tensor<4, 5> logpdf_d5(double y) const { return logpdf_dk<5>(y); }
+  /// \brief Sixth-order parameter derivatives of \f$\log f\f$; returns \c logpdf_dk<6>(y).
+  LAPLACE_HD sym_tensor<4, 6> logpdf_d6(double y) const { return logpdf_dk<6>(y); }
+  /// @}
+
+  /**
+   * \ingroup distrib_skewt
+   * \brief Mixed derivatives of order \f$J\f$ in \f$y\f$ and order \f$K\f$ in \f$(\mu, \sigma, \alpha, \nu)\f$.
+   *
+   * Because \f$y\f$ and \f$\mu\f$ enter \f$\log f\f$ only through \f$y - \mu\f$,
+   * \f$\partial/\partial y = -\partial/\partial\mu\f$, so each mixed derivative equals
+   * \f$(-1)^J\f$ times the corresponding component of \c logpdf_dk<J + K>() with \f$J\f$
+   * additional differentiations in \f$\mu\f$.
+   *
+   * \tparam J Derivative order with respect to \f$y\f$ (\f$J \ge 0\f$, \f$J + K \le 6\f$).
+   * \tparam K Derivative order with respect to \f$(\mu, \sigma, \alpha, \nu)\f$ (\f$K \ge 0\f$).
+   * \param y Observed real value \f$y \in (-\infty, \infty)\f$.
+   * \return Symmetric tensor of order \f$K\f$ in \f$(\mu, \sigma, \alpha, \nu)\f$.
+   * \see logpdf(), logpdf_dk()
+   */
   template <int J, int K>
   LAPLACE_HD sym_tensor<4, K> logpdf_dy_dk(double y) const {
     if constexpr (J == 0) {
@@ -359,16 +444,28 @@ struct skewt_distrib {
     }
   }
 
-  /// A draw from the exact representation of the family, not by inverting the cdf.
-  ///
-  /// With delta = alpha / sqrt(1 + alpha^2), N_1 and N_2 independent standard normals and
-  /// G ~ chi^2_nu independent of both,
-  ///     Y = mu + sigma (delta |N_1| + sqrt(1 - delta^2) N_2) / sqrt(G / nu),
-  /// which is Azzalini and Capitanio's representation of the skew t: the numerator is a standard
-  /// skew normal of shape alpha and the denominator the Student's own scale mixture. The three
-  /// draws come from standard_normal_by_inversion() and standard_gamma_by_inversion(), each one
-  /// number of the stream, so the draw of an observation is the same on every thread and backend.
-  /// G/nu is 2/nu times a gamma draw of shape nu/2 and unit scale.
+  /**
+   * \ingroup distrib_skewt
+   * \brief Draw a variate from the exact skew \f$t\f$ representation using a uniform generator.
+   *
+   * With \f$\delta = \alpha / \sqrt{1 + \alpha^2}\f$, independent standard normal draws
+   * \f$N_1, N_2 \sim \mathcal{N}(0, 1)\f$, and \f$G \sim \chi^2_\nu\f$ independent of both,
+   * returns
+   * \f[
+   *   Y = \mu + \sigma\, \frac{\delta |N_1| + \sqrt{1 - \delta^2}\, N_2}{\sqrt{G / \nu}},
+   * \f]
+   * which is Azzalini and Capitanio's scale-mixture representation of the skew \f$t\f$:
+   * the numerator is a standard skew normal of shape \f$\alpha\f$ and the denominator is
+   * Student's own scale mixture. The three draws come from \c standard_normal_by_inversion()
+   * and \c standard_gamma_by_inversion(), each consuming one uniform variate from \p gen, so
+   * the draw is reproducible across threads and backends. \f$G / \nu\f$ is \f$2 / \nu\f$ times
+   * a unit-scale gamma draw of shape \f$\nu / 2\f$.
+   *
+   * \tparam Gen Uniform source type satisfying the counter-based generator interface.
+   * \param gen Uniform variate source.
+   * \return A single draw \f$Y \sim \text{ST}(\mu, \sigma^2, \alpha, \nu)\f$.
+   * \see distrib_skewt
+   */
   template <class Gen>
   LAPLACE_HD double rng(Gen& gen) const {
     const double delta = alpha / Kokkos::sqrt(1.0 + alpha * alpha);
@@ -378,24 +475,46 @@ struct skewt_distrib {
     return mu + sigma * (delta * Kokkos::fabs(n1) + Kokkos::sqrt(1.0 - delta * delta) * n2) /
                     Kokkos::sqrt(w);
   }
-  /// The same draw from the default source, the stream of observation `index` under `seed`.
+
+  /**
+   * \ingroup distrib_skewt
+   * \brief Draw a variate from the counter-based default stream for observation \p index under \p seed.
+   *
+   * \param seed 64-bit random seed.
+   * \param index Observation index defining the independent counter stream.
+   * \return A single draw \f$Y \sim \text{ST}(\mu, \sigma^2, \alpha, \nu)\f$.
+   * \see rng(Gen&) const
+   */
   LAPLACE_HD double rng(std::uint64_t seed, std::uint64_t index) const {
     counter_uniform_source src{seed, index};
     return rng(src);
   }
 
-  /// Lower bound of the support.
+  /// \brief Lower bound of the support, \f$-\infty\f$.
   LAPLACE_HD double support_lower() const { return -distrib_infinity; }
-  /// Upper bound of the support.
+  /// \brief Upper bound of the support, \f$+\infty\f$.
   LAPLACE_HD double support_upper() const { return distrib_infinity; }
-  /// Central location (mu).
+  /// \brief Central location \f$\mu\f$ used by generic quadrature and root-finding helpers.
   LAPLACE_HD double center() const { return mu; }
-  /// Typical spread (sigma).
+  /// \brief Typical spread \f$\sigma\f$ used by generic quadrature and root-finding helpers.
   LAPLACE_HD double scale() const { return sigma; }
-  /// No non-smooth points in any parameter.
+  /// \brief Return non-smooth points in parameter \p j (empty: smooth everywhere in \f$(\mu, \sigma, \alpha, \nu)\f$).
   LAPLACE_HD distrib_kinks param_kinks(int /*j*/, double /*y*/) const { return distrib_kinks{}; }
-  /// No non-smooth points in y.
+  /// \brief Return non-smooth points in \f$y\f$ (empty: infinitely smooth on \f$\mathbb{R}\f$).
   LAPLACE_HD distrib_kinks y_kinks() const { return distrib_kinks{}; }
+
+  /**
+   * \ingroup distrib_skewt
+   * \brief Construct robust starting values for \f$(\mu, \sigma, \alpha, \nu)\f$ from a sample summary.
+   *
+   * Uses the sample median for \f$\mu\f$, half the interquartile range for \f$\sigma\f$,
+   * the sign of sample skewness (\f$-1, 0, +1\f$) for \f$\alpha\f$, and \f$\nu = 5\f$,
+   * nudged strictly inside parameter bounds via \c start_inside().
+   *
+   * \param s Empirical sample summary computed from the data.
+   * \return Initial \c skewt_distrib parameter tuple inside the interior of the parameter space.
+   * \see distrib_start, start_inside()
+   */
   // Starting value from a sample (generic_start.hpp): the median, half the interquartile range
   // (robust, the law may have no moments), the sign of the sample skewness for alpha and nu = 5.
   skewt_distrib start_value(const distrib_sample_summary& s) const {

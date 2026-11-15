@@ -7607,8 +7607,8 @@ the hessian form against the score form 7.0e-13, the two entries that vanish by 
 differences 1.2e-11 to 1.0e-10. The generic cdf against differences of its own log F: 4.2e-12 at
 order one to 9.9e-11 at order six. The generic quantile needed no special treatment:
 cdf(quantile(p)) against p is 2.3e-15 relative and q(p) + q(1 - p) - 2 mu is 7e-16 at dyadic p.
-Device against host, orders one to six: 8.6e-16 at nu = 3.5, and 7.3e-16 to 1.4e-12 at
-nu = 0.05, where the cancellation of the small-nu corner reaches the device.
+Device against host, orders one to six: at most 1.3e-15 at nu = 3.5 and from 6.1e-16 to
+1.6e-14 at nu = 0.05.
 
 Cost on one gcc thread, the whole tensor a call:
 

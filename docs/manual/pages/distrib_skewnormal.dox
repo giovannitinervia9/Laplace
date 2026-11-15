@@ -1,0 +1,114 @@
+/**
+\defgroup distrib_skewnormal Skew normal
+\ingroup distrib
+\brief Continuous real-line distribution in the centred parametrization by mean, standard deviation, and skewness, with log-density and log-cumulative derivatives to order 6.
+
+Defined in `<laplace/distrib/skewnormal.hpp>` as \ref laplace::distrib::skewnormal_distrib "skewnormal_distrib", this module evaluates the skew normal log-density in its centred parametrization, its parameter derivatives to order \f$6\f$, mixed observation-parameter derivatives, cumulative and complementary cumulative distribution functions with derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$ to order \f$6\f$, regularity metadata, and sample starting values. Every evaluator is marked `LAPLACE_HD` and runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). Expected Fisher information and its parameter derivatives, quantiles, and random variate generation come from \ref distrib_generic "the generic routes". Against high-precision references for \f$|\gamma| \in [0.5, g - 10^{-10}]\f$, the log-density and its derivatives stay within \f$520\f$ ulp, while across all three functions (\f$\log f\f$, \f$\log F\f$, and \f$\log(1 - F)\f$) worst measured errors reach \f$5.6 \times 10^4\f$ ulp for \f$|\gamma| \ge 0.5\f$ and grow as \f$\gamma \to 0\f$, where derivatives of order two and above in \f$\gamma\f$ diverge.
+
+## Classic form and centred parametrization
+
+For an observation \f$y \in \mathbb{R}\f$, the classic skew normal distribution (Azzalini, 2005) has location \f$\xi \in \mathbb{R}\f$, scale \f$\omega > 0\f$, and shape \f$\alpha \in \mathbb{R}\f$, with density twice the standard normal density \f$\phi\f$ of the standardized variable \f$t = (y - \xi)/\omega\f$ times the standard normal cumulative distribution function \f$\Phi\f$ at \f$\alpha t\f$: \f$f_{\mathrm{classic}}(y; \xi, \omega, \alpha) = \frac{2}{\omega}\,\phi(t)\,\Phi(\alpha t)\f$.
+
+The centred parametrization implemented here replaces \f$(\xi, \omega, \alpha)\f$ with the three moments of the law (Azzalini, 2005): the mean \f$\mu \in \mathbb{R}\f$, the standard deviation \f$\sigma > 0\f$, and the skewness \f$\gamma \in (-g, g)\f$. Writing \f$z = (y - \mu)/\sigma\f$, \f$s = \sqrt{1 + c^2}\f$, \f$t = (z + c)/s\f$, and \f$u = \alpha t\f$ in terms of the implied auxiliary quantities \f$c\f$ and \f$\alpha\f$ defined in the next section, the implemented density is
+\f[
+f(y; \mu, \sigma, \gamma) = \frac{2}{\sigma\sqrt{1 + c^2}}\,\phi\!\left(\frac{z + c}{\sqrt{1 + c^2}}\right)\Phi\!\left(\alpha\,\frac{z + c}{\sqrt{1 + c^2}}\right), \qquad y \in \mathbb{R},
+\f]
+with log-density \f$\ell(\mu, \sigma, \gamma; y) = \log 2 - \log\sigma - \frac{1}{2}\log(2\pi) + W(z, c)\f$ and
+\f[
+W(z, c) = -\log s - \frac{t^2}{2} + \log\Phi(u).
+\f]
+Here \f$\log\Phi(u)\f$ is evaluated by \ref laplace::math::own::log_Phi "log_Phi()" (\ref normal "normal") rather than \f$\log(\Phi(u))\f$, because \f$\Phi\f$ underflows in the lower tail.
+
+## Map between parametrizations
+
+The cube root takes the skewness \f$\gamma\f$ to the auxiliary quantity \f$c\f$, which determines the classic location, scale, and shape:
+\f[
+c = \operatorname{sgn}(\gamma)\left(\frac{2|\gamma|}{4 - \pi}\right)^{1/3}, \qquad
+\xi = \mu - \sigma c, \qquad
+\omega = \sigma\sqrt{1 + c^2}, \qquad
+\alpha = \frac{c}{b\sqrt{1 - q}},
+\f]
+where \f$b = \sqrt{2/\pi}\f$, \f$\kappa = \pi/2 - 1 = (1 - b^2)/b^2\f$, and \f$q = \kappa c^2\f$. The skewness cannot leave the open interval \f$(-g, g)\f$ (Azzalini, 2005), whose bound is computed by the header's constant expression
+\f[
+g = \frac{4 - \pi}{2}\left(\frac{b}{\sqrt{1 - b^2}}\right)^3 = \frac{4 - \pi}{2}\,\kappa^{-3/2} \approx 0.9952717\dots,
+\f]
+the supremum of \f$|\gamma|\f$ over the family. As \f$|\gamma| \to g\f$, \f$q \to 1\f$ and \f$|\alpha| \to \infty\f$, giving the half-normal limit.
+
+Algebraically \f$1 - q = 1 - \kappa c^2 = (1 + c^2)(1 - \delta^2)\f$ with \f$\delta = \alpha / \sqrt{1 + \alpha^2}\f$, so as \f$|\gamma| \to g\f$ both \f$1\f$ and \f$\kappa c^2\f$ approach \f$1\f$ and their difference cancels. Writing
+\f[
+1 - q = -\operatorname{expm1}\!\left(\frac{2}{3}\log\frac{|\gamma|}{g}\right)
+\f]
+keeps \f$1 - q\f$ accurate near the boundary, with \f$\log(|\gamma|/g)\f$ evaluated via \f$\operatorname{log1p}((|\gamma| - g)/g)\f$ for \f$|\gamma| > g/2\f$. Because a 53-bit `double` rounding of \f$g\f$ alone differs from true \f$g\f$ by \f$2\f$ ulp and would cause \f$10^{-6}\f$ relative error in \f$1 - q\f$ at \f$|\gamma| = g - 10^{-10}\f$, the header represents \f$g\f$ as a double-double pair whose low part (\f$-1.9209167999475743 \times 10^{-16}\f$) was computed with mpmath at \f$300\f$ bits (The mpmath development team, 2023).
+
+## Parameters, domain, and regularity
+
+Struct `skewnormal_distrib` sets `kind = distrib_kind::continuous`, `n_params = 3`, and `y_regularity = infinitely_smooth`. In `params`, `mu` has open domain \f$(-\infty, \infty)\f$, `sigma` has \f$(0, \infty)\f$, and `gamma` has \f$(-g, g)\f$; all three set `circular = false`, `moves_support = false`, `regularity = infinitely_smooth`, and `cdf_regularity = infinitely_smooth`. The support is \f$(-\infty, \infty)\f$, `param_kinks()` and `y_kinks()` return empty sets (`count = 0`), `center()` returns \f$\mu\f$, and `scale()` returns \f$\sigma\f$. Parameter derivatives pack into `sym_tensor<3, K>` in lexicographic order (\ref distrib_core "distrib_core").
+
+The descriptors report infinite smoothness with no kink because no kink in \f$y\f$ moves with a parameter, yet the law itself is only continuously differentiable once in \f$\gamma\f$ at \f$\gamma = 0\f$: its derivatives in \f$\gamma\f$ of order two and above diverge like \f$\gamma^{-2/3}\f$, while the expected Fisher information remains finite there with skewness entry \f$I_{\gamma\gamma} = 1/6\f$. At \f$\gamma = 0\f$ exactly, the distribution reduces to the Gaussian \f$\mathcal{N}(\mu, \sigma^2)\f$ (\ref distrib_gaussian1 "gaussian1"): components with no \f$\gamma\f$-index equal those of the Gaussian, components with one \f$\gamma\f$-index take their exact limits from \f$\partial\ell/\partial\gamma = \operatorname{He}_3(z)/6 = (z^3 - 3z)/6\f$ and \f$\partial\log F/\partial\gamma = -(z^2 - 1)\phi(z)/(6\Phi(z))\f$, and components with two or more \f$\gamma\f$-indices return quiet NaN.
+
+## Formulas and evaluation
+
+Because \f$\ell\f$ depends on \f$(y, \mu)\f$ only through \f$z\f$ and on \f$\gamma\f$ only through \f$c\f$, its parameter derivatives to order \f$6\f$ are built in two steps. First, the mixed table \f$\partial^{j+k} W / \partial z^j \partial c^k\f$ (\f$j + k \le K\f$) is computed in \f$(z, c)\f$. Both \f$t = (z + c)A(c)\f$ and \f$u = \alpha(c)t\f$ are linear in \f$z\f$, where \f$A(c) = 1/s\f$, \f$E(c) = (1 - \kappa c^2)^{-1/2}\f$, and \f$\alpha(c) = c E(c)/b\f$. The \f$c\f$-derivatives of \f$A\f$ and \f$E\f$ come from the exact recurrences of
+\f[
+(1 + c^2)A'(c) = -c A(c), \qquad (1 - \kappa c^2)E'(c) = \kappa c E(c),
+\f]
+written in \f$1 - q = 1 - \kappa c^2\f$, and those of \f$t\f$, \f$\alpha\f$, \f$u\f$, and \f$\log s\f$ follow by Leibniz's rule. The term \f$-t^2/2\f$ contributes only for \f$j \in \{0, 1, 2\}\f$, while \f$\log\Phi(u)\f$ yields \f$(\log\Phi)^{(j)}(u)\,(\alpha(c) A(c))^j\f$, differentiated in \f$c\f$ by Leibniz's rule over Faà di Bruno's formula via \ref laplace::math::bell_partial "bell_partial()" (\ref faa_di_bruno "faa_di_bruno", whose partial Bell polynomials were written out with SymPy; Meurer and others, 2017).
+
+Second, the \f$c\f$-derivatives of the table are carried to \f$\gamma\f$ by univariate Faà di Bruno's formula,
+\f[
+\frac{\partial^m}{\partial\gamma^m} = \sum_{k=1}^m B_{m,k}\!\left(c', \dots, c^{(m - k + 1)}\right)\frac{\partial^k}{\partial c^k}, \qquad
+c^{(n)} = \frac{c}{\gamma^n}\prod_{r=0}^{n-1}\left(\frac{1}{3} - r\right),
+\f]
+so the \f$\gamma^{1/3 - n}\f$ growth enters once in the last step rather than inside every term of the inner composition. The resulting \f$(z, \gamma)\f$ table passes to the shared location-scale derivative assembly, with \f$(-1)^K (K - 1)!\,\sigma^{-K}\f$ added to the all-\f$\sigma\f$ component from \f$-\log\sigma\f$. Mixed derivatives `logpdf_dy_dk<J, K>()` (\f$J + K \le 6\f$) use \f$\partial/\partial y = -\partial/\partial\mu\f$.
+
+Cumulative probabilities are \f$F(y) = F_{\mathrm{SN}}(t; \alpha)\f$ and \f$1 - F(y) = F_{\mathrm{SN}}(-t; -\alpha)\f$ (Owen, 1956), evaluated via \ref laplace::math::own::log_sn_cdf "log_sn_cdf()" (\ref owen "owen"). Derivatives of \f$\log F\f$ to order \f$6\f$ read the \f$(t, \alpha)\f$ table from \ref laplace::math::own::log_sn_cdf_d1 "log_sn_cdf_d1()" through \ref laplace::math::own::log_sn_cdf_d6 "log_sn_cdf_d6()" (\ref owen "owen"), compose it with \f$t(z, c)\f$ and \f$\alpha(c)\f$ via bivariate Taylor series composition, carry \f$c\f$ to \f$\gamma\f$ as above, and pass the \f$(z, \gamma)\f$ table through the location-scale assembly; \f$\log(1 - F)\f$ runs the same code at \f$(-t, -\alpha)\f$.
+
+Expected Fisher information and its derivatives to order \f$4\f$, quantiles, and random variates come from \ref distrib_generic "the generic routes". Because the three parameters are the mean, standard deviation, and skewness, `start_value()` (\ref distrib_start "Starting values") uses those sample moments directly (falling back to \f$6(\text{mean} - \text{median})/\text{sd}\f$ when a summary lacks a skewness field), mapped strictly inside the open parameter domains by \ref laplace::distrib::start_inside "start_inside()".
+
+## Accuracy and loss of digits near zero skewness
+
+Reference values in `tests/data/reference/distrib_skewnormal.csv` (\f$54539\f$ rows from `tools/reference/distrib_skewnormal.py`) evaluate the definition in truncated three-variable Taylor arithmetic of degree \f$6\f$ at \f$300\f$ and \f$400\f$ bits using mpmath (The mpmath development team, 2023), keeping rows that agree to \f$2^{-80}\f$ across \f$\gamma = \pm 10^{-12}, \pm 10^{-8}, \pm 10^{-4}, \pm 10^{-2}, \pm 0.5, \pm 0.9, \pm(g - 10^{-6}), \pm(g - 10^{-10})\f$, \f$z \in [-12, 12]\f$ (so \f$u\f$ reaches \f$2 \times 10^6\f$), \f$(\mu, \sigma) \in \{(0.4, 1.3), (-2, 0.25)\}\f$, and subsets at \f$(10^5, 10^{-6})\f$ and \f$(3, 10^6)\f$. Errors are measured in ulp of the \f$(K, m)\f$ scale, the largest reference component of order \f$K\f$ with \f$m\f$ derivatives in \f$\gamma\f$ at that point (see \ref accuracy "How accuracy is measured"). The table lists the worst measured error across `logpdf_dk()`, `log_cdf_dk()`, and `log_ccdf_dk()` and across both `gcc` and `CUDA` builds (which agree within a factor of \f$3\f$ everywhere), with the test bounds of `tests/distrib/test_skewnormal.cpp` in parentheses.
+
+| \f$|\gamma|\f$ class | Order \f$1\f$ | Order \f$2\f$ | Order \f$3\f$ | Order \f$4\f$ | Order \f$5\f$ | Order \f$6\f$ |
+| --- | --- | --- | --- | --- | --- | --- |
+| \f$10^{-12}\f$ | \f$1.9\times 10^9\f$ (\f$2.9\times 10^9\f$) | \f$1.0\times 10^{14}\f$ (\f$1.6\times 10^{14}\f$) | \f$5.9\times 10^{17}\f$ (—) | \f$2.3\times 10^{18}\f$ (—) | \f$5.7\times 10^{18}\f$ (—) | \f$9.4\times 10^{18}\f$ (—) |
+| \f$10^{-8}\f$ | \f$1.4\times 10^6\f$ (\f$2.2\times 10^6\f$) | \f$6.8\times 10^9\f$ (\f$1.1\times 10^{10}\f$) | \f$1.7\times 10^{12}\f$ (\f$2.6\times 10^{12}\f$) | \f$8.4\times 10^{12}\f$ (\f$1.3\times 10^{13}\f$) | \f$1.7\times 10^{13}\f$ (\f$2.6\times 10^{13}\f$) | \f$2.3\times 10^{13}\f$ (\f$3.5\times 10^{13}\f$) |
+| \f$10^{-4}\f$ | \f$1.6\times 10^5\f$ (\f$2.5\times 10^5\f$) | \f$9.1\times 10^5\f$ (\f$1.4\times 10^6\f$) | \f$3.3\times 10^6\f$ (\f$4.9\times 10^6\f$) | \f$5.3\times 10^6\f$ (\f$8.0\times 10^6\f$) | \f$6.0\times 10^6\f$ (\f$9.0\times 10^6\f$) | \f$8.5\times 10^6\f$ (\f$1.3\times 10^7\f$) |
+| \f$10^{-2}\f$ | \f$130\f$ (\f$200\f$) | \f$8.3\times 10^3\f$ (\f$1.3\times 10^4\f$) | \f$2.3\times 10^4\f$ (\f$3.5\times 10^4\f$) | \f$4.9\times 10^4\f$ (\f$7.4\times 10^4\f$) | \f$5.5\times 10^4\f$ (\f$8.4\times 10^4\f$) | \f$1.4\times 10^5\f$ (\f$2.2\times 10^5\f$) |
+| \f$0.5\f$ | \f$272\f$ (\f$410\f$) | \f$678\f$ (\f$1.1\times 10^3\f$) | \f$513\f$ (\f$770\f$) | \f$475\f$ (\f$720\f$) | \f$2.8\times 10^3\f$ (\f$4.2\times 10^3\f$) | \f$1.7\times 10^4\f$ (\f$2.6\times 10^4\f$) |
+| \f$0.9\f$ | \f$1.2\times 10^3\f$ (\f$1.9\times 10^3\f$) | \f$1.6\times 10^3\f$ (\f$2.4\times 10^3\f$) | \f$1.4\times 10^3\f$ (\f$2.1\times 10^3\f$) | \f$1.7\times 10^3\f$ (\f$2.6\times 10^3\f$) | \f$1.8\times 10^3\f$ (\f$2.8\times 10^3\f$) | \f$6.4\times 10^3\f$ (\f$9.7\times 10^3\f$) |
+| \f$g - 10^{-6}\f$ | \f$54\f$ (\f$82\f$) | \f$331\f$ (\f$500\f$) | \f$330\f$ (\f$500\f$) | \f$5.6\times 10^4\f$ (\f$8.4\times 10^4\f$) | \f$873\f$ (\f$1.4\times 10^3\f$) | \f$1.4\times 10^3\f$ (\f$2.1\times 10^3\f$) |
+| \f$g - 10^{-10}\f$ | \f$100\f$ (\f$150\f$) | \f$68\f$ (\f$110\f$) | \f$86\f$ (\f$130\f$) | \f$1.7\times 10^4\f$ (\f$2.6\times 10^4\f$) | \f$683\f$ (\f$1.1\times 10^3\f$) | \f$208\f$ (\f$320\f$) |
+
+For `logpdf_dk()` alone, errors stay between \f$8\f$ and \f$520\f$ ulp across all orders from \f$|\gamma| = 0.5\f$ to \f$g - 10^{-10}\f$, even when \f$u\f$ reaches \f$2 \times 10^6\f$. At \f$|\gamma| = 10^{-12}\f$, orders \f$3\f$ to \f$6\f$ have no remaining digits and are omitted from the test comparison.
+
+Near \f$\gamma = 0\f$, entries of the \f$(z, c)\f$ table with at least one \f$c\f$-index are of size \f$O(c^2)\f$ formed from \f$O(1)\f$ terms, carrying about \f$10^{-16}\f$ absolute error before multiplication by \f$c^{(n)} \propto \gamma^{1/3 - n}\f$. Consequently, at \f$|\gamma| = 10^{-2}\f$ about five digits are lost at order \f$6\f$, at \f$|\gamma| = 10^{-4}\f$ about ten digits, and at \f$|\gamma| = 10^{-12}\f$ the first order retains seven digits, the second two, and higher orders none. The function values (`logpdf()`, `log_cdf()`, `log_ccdf()`) and all derivative orders involving only \f$(\mu, \sigma)\f$ are untouched.
+
+At \f$\gamma = 0\f$, `tests/distrib/test_skewnormal.cpp` verifies agreement against \ref distrib_gaussian1 "gaussian1_distrib" within \f$10^{-15}\f$ on `logpdf()`, \f$10^{-14}\f$ on `logpdf_d1()` in \f$(\mu, \sigma)\f$, \f$10^{-13}\f$ on `logpdf_d2()` in \f$(\mu, \sigma)\f$ and on \f$\partial\ell/\partial\gamma = (z^3 - 3z)/6\f$, \f$10^{-14}\f$ on `log_cdf()` and `log_ccdf()`, and \f$10^{-12}\f$ on `log_cdf_d3()` in \f$(\mu, \sigma)\f$. Through \ref distrib_generic "the generic routes", `expected_info()` agrees between its two forms and with the score variance to \f$10^{-9}\f$ relative, matches \f$\operatorname{diag}(1/\sigma^2, 2/\sigma^2, 1/6)\f$ at \f$\gamma = 0\f$ within \f$10^{-10}\f$, and agrees with finite differences to \f$10^{-7}\f$ (order \f$1\f$) and \f$10^{-6}\f$ (order \f$2\f$). On `logpdf_dk()`, 5-point finite differences measure \f$8.2 \times 10^{-10}\f$ at \f$\gamma \in \{0.3, -0.6\}\f$ (bound \f$1.5 \times 10^{-9}\f$), \f$4.1 \times 10^{-10}\f$ at \f$\gamma = 0.01\f$ (bound \f$10^{-9}\f$), and \f$1.3 \times 10^{-6}\f$ at \f$\gamma = 0.9\f$ (bound \f$2 \times 10^{-6}\f$); host and device sums inside a Kokkos kernel on CUDA (RTX 4070 SUPER) agree within \f$6.35 \times 10^{-13}\f$ (bound \f$10^{-12}\f$). See `docs/numerics.md` for full measurements.
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/skewnormal.hpp>
+
+void eval_skewnormal(Kokkos::View<const double*> y, Kokkos::View<double*> out,
+                     double mu, double sigma, double gamma) {
+  const laplace::distrib::skewnormal_distrib d{mu, sigma, gamma};
+  Kokkos::parallel_for("skewnormal_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0] + d.log_cdf(y(i));
+  });
+}
+```
+
+## Members
+
+Struct \ref laplace::distrib::skewnormal_distrib "skewnormal_distrib" implements \ref distrib_core "distrib_core" for `n_params = 3`: `mu`, `sigma`, `gamma`, `kind`, `n_params`, `y_regularity`, `params`, `logpdf()`, `logpdf_d1()`..`logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `log_cdf_d1()`..`log_cdf_d6()`, `log_cdf_dk()`, `log_ccdf_d1()`..`log_ccdf_d6()`, `log_ccdf_dk()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, and `start_value()`.
+
+## References
+
+- [1] ADELCHI AZZALINI (2005), The Skew-normal Distribution and Related Multivariate Families*, Scandinavian Journal of Statistics, 32(2), 159-188. https://doi.org/10.1111/j.1467-9469.2005.00426.x
+- [2] D. B. Owen (1956), Tables for Computing Bivariate Normal Probabilities, The Annals of Mathematical Statistics, 27(4), 1075–1090. https://doi.org/10.1214/aoms/1177728074
+- [3] A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- [4] The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

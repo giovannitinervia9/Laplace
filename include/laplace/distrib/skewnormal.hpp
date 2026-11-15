@@ -372,17 +372,40 @@ LAPLACE_HD void cdf_table(double z, double g, double sgn, double* D) {
 
 }  // namespace detail_skewnormal
 
+/**
+ * \ingroup distrib_skewnormal
+ * \brief Skew normal distribution in the centred parametrization by mean, standard deviation, and skewness.
+ *
+ * Density \f$f(y; \mu, \sigma, \gamma) = \frac{2}{\omega}\phi(t)\Phi(\alpha t)\f$ on
+ * \f$y \in \mathbb{R}\f$, where \f$t = (y - \xi)/\omega\f$ and \f$(\xi, \omega, \alpha)\f$ are
+ * the classic parameters implied by the mean \f$\mu \in \mathbb{R}\f$, standard deviation
+ * \f$\sigma > 0\f$, and skewness \f$\gamma \in (-g, g)\f$:
+ * \f$c = \operatorname{sgn}(\gamma)(2|\gamma|/(4 - \pi))^{1/3}\f$,
+ * \f$\xi = \mu - \sigma c\f$, \f$\omega = \sigma\sqrt{1 + c^2}\f$,
+ * \f$\alpha = c / (b\sqrt{1 - q})\f$ with \f$b = \sqrt{2/\pi}\f$,
+ * \f$1 - q = -\operatorname{expm1}(\frac{2}{3}\log(|\gamma|/g)) = 1 - (\pi/2 - 1)c^2\f$, and
+ * \f$g = \frac{4 - \pi}{2}(\pi/2 - 1)^{-3/2} \approx 0.99527\f$.
+ * Evaluates \f$\log f\f$, \f$\log F\f$, \f$\log(1 - F)\f$, and their parameter and mixed
+ * derivatives up to order \f$6\f$; expected information, quantiles, and draws use the generic
+ * routes in \ref distrib_generic. At \f$\gamma = 0\f$, the distribution reduces to the Gaussian
+ * \f$\mathcal{N}(\mu, \sigma^2)\f$ and is only \f$C^1\f$ in \f$\gamma\f$ there.
+ * \see distrib_skewnormal, distrib_core
+ */
 struct skewnormal_distrib {
-  /// Mean.
+  /// Mean parameter \f$\mu \in (-\infty, \infty)\f$.
   double mu;
-  /// Standard deviation.
+  /// Standard deviation parameter \f$\sigma \in (0, \infty)\f$.
   double sigma;
-  /// Skewness, in (-g, g) with g = 0.99527...
+  /// Skewness parameter \f$\gamma \in (-g, g)\f$, where \f$g = \frac{4 - \pi}{2}(\pi/2 - 1)^{-3/2} \approx 0.99527\f$.
   double gamma;
 
+  /// Distribution kind (\c distrib_kind::continuous).
   static constexpr distrib_kind kind = distrib_kind::continuous;
+  /// Number of natural parameters (3).
   static constexpr int n_params = 3;
+  /// Differentiability order of \f$\log f\f$ in \f$y\f$ (\c infinitely_smooth).
   static constexpr int y_regularity = infinitely_smooth;
+  /// Descriptors of \c mu, \c sigma, and \c gamma.
   static constexpr distrib_param_info params[3] = {
       {"mu", -distrib_infinity, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth},
       {"sigma", 0.0, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth},
@@ -408,7 +431,19 @@ struct skewnormal_distrib {
       {"gamma", -detail_skewnormal::g_max, detail_skewnormal::g_max, false, infinitely_smooth, false,
        infinitely_smooth}};
 
-  /// The log density log f(y; mu, sigma, gamma).
+  /**
+   * \ingroup distrib_skewnormal
+   * \brief Evaluates the log-density \f$\log f(y; \mu, \sigma, \gamma)\f$.
+   *
+   * Computes \f$\log 2 - \log\sigma - \frac{1}{2}\log(1 + c^2) - \frac{1}{2}\log(2\pi) - \frac{t^2}{2} + \log\Phi(\alpha t)\f$
+   * using log_Phi() (\ref normal) so the lower tail does not underflow. Reduces to
+   * \f$\mathcal{N}(\mu, \sigma^2)\f$ at \f$\gamma = 0\f$; returns quiet NaN on NaN input or
+   * outside \f$\sigma > 0\f$, \f$\gamma \in (-g, g)\f$. Stays within \f$520\f$ ulp away from
+   * \f$\gamma = 0\f$.
+   * \param y Observation point \f$y \in \mathbb{R}\f$.
+   * \return Log-density value.
+   * \see distrib_skewnormal, logpdf_dk(), logpdf_dy_dk()
+   */
   LAPLACE_HD double logpdf(double y) const {
     const auto m = detail_skewnormal::imply(gamma);
     const double z = (y - mu) / sigma, s = Kokkos::sqrt(m.s2), t = (z + m.cc) / s;
@@ -416,7 +451,22 @@ struct skewnormal_distrib {
            0.91893853320467274178 - 0.5 * t * t + math::log_Phi(m.alpha * t);
   }
 
-  /// The derivatives of order K of the log density in (mu, sigma, gamma), a sym_tensor<3, K>.
+  /**
+   * \ingroup distrib_skewnormal
+   * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log f(y; \mu, \sigma, \gamma)\f$ in \f$(\mu, \sigma, \gamma)\f$.
+   *
+   * Forms the mixed table in \f$(z, c)\f$ using bell_partial(), maps \f$c\f$ to \f$\gamma\f$
+   * once by Faà di Bruno's formula, pushes \f$(z, \gamma)\f$ to \f$(\mu, \sigma, \gamma)\f$,
+   * and adds \f$(-1)^K(K - 1)!\,\sigma^{-K}\f$ to the pure \f$\sigma\f$-component. At
+   * \f$\gamma = 0\f$, components with zero \f$\gamma\f$-indices match \f$\mathcal{N}(\mu, \sigma^2)\f$,
+   * those with one \f$\gamma\f$-index take the limit from \f$\partial\ell/\partial\gamma = (z^3 - 3z)/6\f$,
+   * and those with two or more \f$\gamma\f$-indices return quiet NaN. Stays within \f$520\f$ ulp for
+   * \f$|\gamma| \ge 0.5\f$; loses digits in \f$\gamma\f$-components as \f$\gamma \to 0\f$.
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param y Observation point \f$y \in \mathbb{R}\f$.
+   * \return Packed symmetric tensor \c sym_tensor<3, K> of parameter derivatives.
+   * \see distrib_skewnormal, logpdf(), logpdf_dy_dk()
+   */
   template <int K>
   LAPLACE_HD sym_tensor<3, K> logpdf_dk(double y) const {
     const double z = (y - mu) / sigma;
@@ -430,17 +480,42 @@ struct skewnormal_distrib {
     t[sym_tensor_position<3, K>(idx)] += detail_skewnormal::sign_of_power(K) * detail_skewnormal::fact(K - 1) * isk;
     return t;
   }
+  /**
+   * \name Derivatives of the log-density
+   * Parameter derivatives of \f$\log f(y; \mu, \sigma, \gamma)\f$ in \f$(\mu, \sigma, \gamma)\f$ for orders \f$K = 1 \dots 6\f$.
+   * @{
+   */
+  /// First-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \gamma)\f$.
   LAPLACE_HD sym_tensor<3, 1> logpdf_d1(double y) const { return logpdf_dk<1>(y); }
+  /// Second-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \gamma)\f$.
   LAPLACE_HD sym_tensor<3, 2> logpdf_d2(double y) const { return logpdf_dk<2>(y); }
+  /// Third-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \gamma)\f$.
   LAPLACE_HD sym_tensor<3, 3> logpdf_d3(double y) const { return logpdf_dk<3>(y); }
+  /// Fourth-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \gamma)\f$.
   LAPLACE_HD sym_tensor<3, 4> logpdf_d4(double y) const { return logpdf_dk<4>(y); }
+  /// Fifth-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \gamma)\f$.
   LAPLACE_HD sym_tensor<3, 5> logpdf_d5(double y) const { return logpdf_dk<5>(y); }
+  /// Sixth-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \gamma)\f$.
   LAPLACE_HD sym_tensor<3, 6> logpdf_d6(double y) const { return logpdf_dk<6>(y); }
+  /** @} */
 
+  /**
+   * \ingroup distrib_skewnormal
+   * \brief Evaluates mixed partial derivatives \f$\partial^{J+K}\log f / \partial y^J \partial\theta^K\f$.
+   *
+   * Uses \f$\partial/\partial y = -\partial/\partial\mu\f$ so each component \f$(i, j, k)\f$ of
+   * order \f$K\f$ equals \f$(-1)^J\f$ times component \f$(i + J, j, k)\f$ of `logpdf_dk<J + K>(y)`;
+   * returns `logpdf(y)` for \f$J = K = 0\f$ and `logpdf_dk<K>(y)` for \f$J = 0, K \ge 1\f$.
+   * Verified against 5-point finite differences within \f$10^{-8}\f$ relative tolerance.
+   * \tparam J Derivative order in \f$y\f$ (\f$J \ge 0\f$).
+   * \tparam K Derivative order in \f$\theta = (\mu, \sigma, \gamma)\f$ (\f$J + K \le 6\f$).
+   * \param y Observation point \f$y \in \mathbb{R}\f$.
+   * \return Packed symmetric tensor \c sym_tensor<3, K> of parameter derivatives.
+   * \see distrib_skewnormal, logpdf(), logpdf_dk()
+   */
   // l depends on y and mu only through y - mu, so d/dy = -d/dmu and the component with a derivatives in
   // mu, b in sigma and c in gamma of d^J/dy^J (order K) is (-1)^J times the component (a + J, b, c) of
   // order J + K.
-  /// J derivatives in y and the tensor of order K in (mu, sigma, gamma), J + K <= 6.
   template <int J, int K>
   LAPLACE_HD sym_tensor<3, K> logpdf_dy_dk(double y) const {
     if constexpr (J == 0) {
@@ -474,22 +549,69 @@ struct skewnormal_distrib {
     }
   }
 
-  /// log F(y) = log_sn_cdf(t, alpha).
+  /**
+   * \ingroup distrib_skewnormal
+   * \brief Evaluates \f$\log F(y) = \log F_{\mathrm{SN}}(t; \alpha)\f$ via log_sn_cdf() (\ref owen).
+   *
+   * Reduces to \f$\log\Phi(z)\f$ at \f$\gamma = 0\f$, returns \f$-\infty\f$ at \f$y = -\infty\f$,
+   * \f$0\f$ at \f$y = +\infty\f$, and quiet NaN on NaN input or outside the parameter domain.
+   * \param y Observation point \f$y \in \mathbb{R}\f$.
+   * \return Log-probability \f$\log F(y) \le 0\f$.
+   * \see distrib_skewnormal, cdf(), log_ccdf(), log_cdf_dk()
+   */
   LAPLACE_HD double log_cdf(double y) const {
     const auto m = detail_skewnormal::imply(gamma);
     const double z = (y - mu) / sigma, t = (z + m.cc) / Kokkos::sqrt(m.s2);
     return math::log_sn_cdf(t, m.alpha);
   }
-  /// log(1 - F(y)) = log F_SN(-t; -alpha).
+  /**
+   * \ingroup distrib_skewnormal
+   * \brief Evaluates \f$\log(1 - F(y)) = \log F_{\mathrm{SN}}(-t; -\alpha)\f$ via log_sn_cdf() (\ref owen).
+   *
+   * Reduces to \f$\log\Phi(-z)\f$ at \f$\gamma = 0\f$, returns \f$0\f$ at \f$y = -\infty\f$,
+   * \f$-\infty\f$ at \f$y = +\infty\f$, and quiet NaN on NaN input or outside the parameter domain.
+   * \param y Observation point \f$y \in \mathbb{R}\f$.
+   * \return Complementary log-probability \f$\log(1 - F(y)) \le 0\f$.
+   * \see distrib_skewnormal, ccdf(), log_cdf(), log_ccdf_dk()
+   */
   LAPLACE_HD double log_ccdf(double y) const {
     const auto m = detail_skewnormal::imply(gamma);
     const double z = (y - mu) / sigma, t = (z + m.cc) / Kokkos::sqrt(m.s2);
     return math::log_sn_cdf(-t, -m.alpha);
   }
+  /**
+   * \ingroup distrib_skewnormal
+   * \brief Evaluates the cumulative distribution function \f$F(y) = \exp(\log F(y))\f$.
+   * \param y Observation point \f$y \in \mathbb{R}\f$.
+   * \return Probability \f$F(y) \in [0, 1]\f$.
+   * \see distrib_skewnormal, log_cdf(), ccdf()
+   */
   LAPLACE_HD double cdf(double y) const { return math::exp(log_cdf(y)); }
+  /**
+   * \ingroup distrib_skewnormal
+   * \brief Evaluates the complementary cumulative distribution function \f$1 - F(y) = \exp(\log(1 - F(y)))\f$.
+   * \param y Observation point \f$y \in \mathbb{R}\f$.
+   * \return Complementary probability \f$1 - F(y) \in [0, 1]\f$.
+   * \see distrib_skewnormal, log_ccdf(), cdf()
+   */
   LAPLACE_HD double ccdf(double y) const { return math::exp(log_ccdf(y)); }
 
-  /// The derivatives of order K of log F(y) in (mu, sigma, gamma).
+  /**
+   * \ingroup distrib_skewnormal
+   * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log F(y; \mu, \sigma, \gamma)\f$ in \f$(\mu, \sigma, \gamma)\f$.
+   *
+   * Composes the \f$(t, \alpha)\f$ table from log_sn_cdf_d1()..log_sn_cdf_d6() (\ref owen)
+   * with \f$t(z, c)\f$ and \f$\alpha(c)\f$, carries \f$c\f$ to \f$\gamma\f$, and pushes
+   * \f$(z, \gamma)\f$ to \f$(\mu, \sigma, \gamma)\f$. At \f$\gamma = 0\f$, components with zero
+   * \f$\gamma\f$-indices match \f$\mathcal{N}(\mu, \sigma^2)\f$, those with one \f$\gamma\f$-index
+   * take the limit from \f$\partial\log F/\partial\gamma = -(z^2 - 1)\phi(z)/(6\Phi(z))\f$, and
+   * those with two or more \f$\gamma\f$-indices return quiet NaN. See \ref distrib_skewnormal for
+   * measured errors per \f$|\gamma|\f$ class and order.
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param y Observation point \f$y \in \mathbb{R}\f$.
+   * \return Packed symmetric tensor \c sym_tensor<3, K> of parameter derivatives.
+   * \see distrib_skewnormal, log_cdf(), log_ccdf_dk()
+   */
   template <int K>
   LAPLACE_HD sym_tensor<3, K> log_cdf_dk(double y) const {
     const double z = (y - mu) / sigma;
@@ -497,7 +619,18 @@ struct skewnormal_distrib {
     detail_skewnormal::cdf_table<K>(z, gamma, 1.0, D);
     return detail_location_scale::mixed_shape_dk<K>(D, z, sigma);
   }
-  /// The derivatives of order K of log(1 - F(y)) in (mu, sigma, gamma).
+  /**
+   * \ingroup distrib_skewnormal
+   * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log(1 - F(y; \mu, \sigma, \gamma))\f$ in \f$(\mu, \sigma, \gamma)\f$.
+   *
+   * Mirrors log_cdf_dk() at \f$(-t, -\alpha)\f$; at \f$\gamma = 0\f$, components with one
+   * \f$\gamma\f$-index take the limit from \f$\partial\log(1 - F)/\partial\gamma = (z^2 - 1)\phi(-z)/(6\Phi(-z))\f$,
+   * and higher \f$\gamma\f$-orders return quiet NaN. See \ref distrib_skewnormal for measured errors.
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param y Observation point \f$y \in \mathbb{R}\f$.
+   * \return Packed symmetric tensor \c sym_tensor<3, K> of parameter derivatives.
+   * \see distrib_skewnormal, log_ccdf(), log_cdf_dk()
+   */
   template <int K>
   LAPLACE_HD sym_tensor<3, K> log_ccdf_dk(double y) const {
     const double z = (y - mu) / sigma;
@@ -505,28 +638,74 @@ struct skewnormal_distrib {
     detail_skewnormal::cdf_table<K>(z, gamma, -1.0, D);
     return detail_location_scale::mixed_shape_dk<K>(D, z, sigma);
   }
+  /**
+   * \name Derivatives of the log cumulative distribution function
+   * Parameter derivatives of \f$\log F(y; \mu, \sigma, \gamma)\f$ for orders \f$K = 1 \dots 6\f$.
+   * @{
+   */
+  /// First-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 1> log_cdf_d1(double y) const { return log_cdf_dk<1>(y); }
+  /// Second-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 2> log_cdf_d2(double y) const { return log_cdf_dk<2>(y); }
+  /// Third-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 3> log_cdf_d3(double y) const { return log_cdf_dk<3>(y); }
+  /// Fourth-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 4> log_cdf_d4(double y) const { return log_cdf_dk<4>(y); }
+  /// Fifth-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 5> log_cdf_d5(double y) const { return log_cdf_dk<5>(y); }
+  /// Sixth-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 6> log_cdf_d6(double y) const { return log_cdf_dk<6>(y); }
+  /** @} */
+  /**
+   * \name Derivatives of the complementary log cumulative distribution function
+   * Parameter derivatives of \f$\log(1 - F(y; \mu, \sigma, \gamma))\f$ for orders \f$K = 1 \dots 6\f$.
+   * @{
+   */
+  /// First-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 1> log_ccdf_d1(double y) const { return log_ccdf_dk<1>(y); }
+  /// Second-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 2> log_ccdf_d2(double y) const { return log_ccdf_dk<2>(y); }
+  /// Third-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 3> log_ccdf_d3(double y) const { return log_ccdf_dk<3>(y); }
+  /// Fourth-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 4> log_ccdf_d4(double y) const { return log_ccdf_dk<4>(y); }
+  /// Fifth-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 5> log_ccdf_d5(double y) const { return log_ccdf_dk<5>(y); }
+  /// Sixth-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 6> log_ccdf_d6(double y) const { return log_ccdf_dk<6>(y); }
+  /** @} */
 
+  /// \ingroup distrib_skewnormal
+  /// \brief Lower bound of the continuous support (\f$-\infty\f$).
   LAPLACE_HD double support_lower() const { return -distrib_infinity; }
+  /// \ingroup distrib_skewnormal
+  /// \brief Upper bound of the continuous support (\f$+\infty\f$).
   LAPLACE_HD double support_upper() const { return distrib_infinity; }
+  /// \ingroup distrib_skewnormal
+  /// \brief Central location (the mean \f$\mu\f$).
   LAPLACE_HD double center() const { return mu; }
+  /// \ingroup distrib_skewnormal
+  /// \brief Typical spread (the standard deviation \f$\sigma\f$).
   LAPLACE_HD double scale() const { return sigma; }
+  /// \ingroup distrib_skewnormal
+  /// \brief Non-smooth points in the parameters with respect to \f$y\f$ (none).
   // no kink in y for any parameter; the non-smooth point of gamma at zero is
   // on its own axis, which this member does not describe (see params above)
   LAPLACE_HD distrib_kinks param_kinks(int /*j*/, double /*y*/) const { return distrib_kinks{}; }
+  /// \ingroup distrib_skewnormal
+  /// \brief Non-smooth points of \f$\log f\f$ in \f$y\f$ (none).
   LAPLACE_HD distrib_kinks y_kinks() const { return distrib_kinks{}; }
 
+  /**
+   * \ingroup distrib_skewnormal
+   * \brief Starting value from a sample summary: sets \f$(\mu, \sigma, \gamma)\f$ from the sample
+   * mean, standard deviation, and skewness (or \f$6(\text{mean} - \text{median})/\text{sd}\f$ when
+   * \p s has no \c skewness member), moved strictly inside the open parameter domains by start_inside().
+   * \tparam Summary Sample summary type providing \c mean, \c variance, and \c median (and optionally \c skewness).
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c skewnormal_distrib with all three parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
   // Starting value (generic_start.hpp): by construction the parameters are the mean, the standard deviation
   // and the skewness, so the sample's own are the exact moment estimates. The summary carries no skewness
   // field (distrib_sample_summary of core.hpp): when it gets one, named skewness, it is used; until then

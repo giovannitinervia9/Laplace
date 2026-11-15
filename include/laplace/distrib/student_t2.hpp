@@ -154,50 +154,112 @@ LAPLACE_HD void info_derivs(double nu, double* a2, double* b, double* e2, double
 
 }  // namespace detail_student_t2
 
+/**
+ * \ingroup distrib_student_t2
+ * \brief Student t distribution parametrized by location, standard deviation, and degrees of freedom.
+ *
+ * Models a real observation \f$y \in \mathbb{R}\f$ with location (mean) \f$\mu \in \mathbb{R}\f$,
+ * standard deviation \f$\sigma > 0\f$, and degrees of freedom \f$\nu > 2\f$. It reparametrizes
+ * `student_t1_distrib` with scale \f$s = \sigma\sqrt{(\nu - 2)/\nu}\f$, so the log-density is
+ * \f[
+ * \ell(\mu, \sigma, \nu; y) = c(\nu) - \log s - \frac{\nu + 1}{2}\log\!\left(1 + \frac{z^2}{\nu}\right),
+ * \qquad z = \frac{y - \mu}{s}.
+ * \f]
+ * Near \f$\nu = 2^+\f$, derivatives of `log_cdf` and `log_ccdf` amplify because
+ * \f$\sqrt{(\nu - 2)/\nu}\f$ becomes steep.
+ *
+ * \see distrib_student_t2, student_t1_distrib, gaussian1_distrib
+ */
 struct student_t2_distrib {
-  /// Location parameter mu.
+  /// Location parameter (mean) \f$\mu \in \mathbb{R}\f$.
   double mu;
-  /// Standard deviation sigma > 0.
+  /// Standard deviation \f$\sigma > 0\f$.
   double sigma;
-  /// Degrees of freedom nu > 2.
+  /// Degrees of freedom \f$\nu > 2\f$.
   double nu;
 
+  /// Distribution kind (continuous).
   static constexpr distrib_kind kind = distrib_kind::continuous;
+  /// Number of distribution parameters (\f$3\f$).
   static constexpr int n_params = 3;
+  /// Regularity of the log-density with respect to \f$y\f$ (infinitely smooth).
   static constexpr int y_regularity = infinitely_smooth;
+  /// Parameter metadata descriptors for `mu`, `sigma`, and `nu`.
   static constexpr distrib_param_info params[3] = {
       {"mu", -distrib_infinity, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth},
       {"sigma", 0.0, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth},
       {"nu", 2.0, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth}};
 
-  /// The scale s = sigma sqrt((nu - 2)/nu) of the equivalent student_t1.
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Compute the scale \f$s = \sigma\sqrt{(\nu - 2)/\nu}\f$ of the equivalent `student_t1_distrib`.
+   * \return Scale parameter \f$s > 0\f$ for \f$\nu > 2\f$.
+   * \see as_t1
+   */
   LAPLACE_HD double t1_scale() const { return sigma * Kokkos::sqrt((nu - 2.0) / nu); }
-  /// The equivalent student_t1_distrib at (mu, s, nu).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Construct the equivalent `student_t1_distrib` at \f$(\mu, s, \nu)\f$.
+   * \return Scale-parametrized `student_t1_distrib{mu, t1_scale(), nu}`.
+   * \see t1_scale, student_t1_distrib
+   */
   LAPLACE_HD student_t1_distrib as_t1() const { return student_t1_distrib{mu, t1_scale(), nu}; }
 
-  /// log f(y) = l1(mu, s, nu; y).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate the log-density \f$\ell(\mu, \sigma, \nu; y)\f$.
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Log-density value at `y` (\f$-\infty\f$ when `y` is \f$\pm\infty\f$).
+   * \see logpdf_dk, log_cdf, expected_info
+   */
   LAPLACE_HD double logpdf(double y) const { return as_t1().logpdf(y); }
 
-  /// The derivatives of order K of log f in (mu, sigma, nu).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate order-\f$K\f$ parameter derivatives of \f$\log f(y)\f$ in \f$(\mu, \sigma, \nu)\f$.
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Symmetric tensor of partial derivatives of order \f$K\f$.
+   * \see logpdf, logpdf_d1, logpdf_dy_dk
+   */
   template <int K>
   LAPLACE_HD sym_tensor<3, K> logpdf_dk(double y) const {
     return detail_student_t2::compose<K>(detail_student_t2::logpdf_source{as_t1(), y}, sigma, nu);
   }
-  /// First-order derivatives of log f.
+  /**
+   * \name Log-density parameter derivatives by order
+   * \ingroup distrib_student_t2
+   * \brief Shorthand accessors calling `logpdf_dk<K>(y)` for \f$K = 1, \dots, 6\f$.
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Symmetric tensor of partial derivatives of the corresponding order.
+   * \see logpdf_dk
+   * @{
+   */
+  /// First-order derivatives of \f$\log f\f$.
   LAPLACE_HD sym_tensor<3, 1> logpdf_d1(double y) const { return logpdf_dk<1>(y); }
-  /// Second-order derivatives of log f.
+  /// Second-order derivatives of \f$\log f\f$.
   LAPLACE_HD sym_tensor<3, 2> logpdf_d2(double y) const { return logpdf_dk<2>(y); }
-  /// Third-order derivatives of log f.
+  /// Third-order derivatives of \f$\log f\f$.
   LAPLACE_HD sym_tensor<3, 3> logpdf_d3(double y) const { return logpdf_dk<3>(y); }
-  /// Fourth-order derivatives of log f.
+  /// Fourth-order derivatives of \f$\log f\f$.
   LAPLACE_HD sym_tensor<3, 4> logpdf_d4(double y) const { return logpdf_dk<4>(y); }
-  /// Fifth-order derivatives of log f.
+  /// Fifth-order derivatives of \f$\log f\f$.
   LAPLACE_HD sym_tensor<3, 5> logpdf_d5(double y) const { return logpdf_dk<5>(y); }
-  /// Sixth-order derivatives of log f.
+  /// Sixth-order derivatives of \f$\log f\f$.
   LAPLACE_HD sym_tensor<3, 6> logpdf_d6(double y) const { return logpdf_dk<6>(y); }
+  /** @} */
 
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate \f$\partial^J / \partial y^J\f$ composed with order-\f$K\f$ parameter
+   *        derivatives of \f$\log f(y)\f$ in \f$(\mu, \sigma, \nu)\f$.
+   * \tparam J Observation derivative order (\f$J \ge 0\f$).
+   * \tparam K Parameter derivative order (\f$K \ge 0\f$, with \f$J + K \le 6\f$).
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Symmetric tensor of order \f$K\f$ in \f$(\mu, \sigma, \nu)\f$.
+   * \see logpdf_dk
+   */
   // l depends on y and mu only through y - mu, so d/dy = -d/dmu (as in student_t1).
-  /// J derivatives in y and the tensor of order K in (mu, sigma, nu).
   template <int J, int K>
   LAPLACE_HD sym_tensor<3, K> logpdf_dy_dk(double y) const {
     if constexpr (J == 0) {
@@ -219,7 +281,12 @@ struct student_t2_distrib {
     }
   }
 
-  /// The expected information matrix (mu, sigma, nu).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate the expected Fisher information matrix in \f$(\mu, \sigma, \nu)\f$.
+   * \return Symmetric \f$3 \times 3\f$ Fisher information matrix stored in `sym_tensor<3, 2>`.
+   * \see expected_info_dk, logpdf_dk
+   */
   LAPLACE_HD sym_tensor<3, 2> expected_info() const {
     double a[1], b[1], e[1], f[1];
     detail_student_t2::info_derivs<0>(nu, a, b, e, f);
@@ -231,7 +298,14 @@ struct student_t2_distrib {
     t[5] = f[0];
     return t;
   }
-  /// The derivatives of order K of the expected information in (mu, sigma, nu).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate order-\f$K\f$ parameter derivatives of the expected Fisher information in
+   *        \f$(\mu, \sigma, \nu)\f$.
+   * \tparam K Derivative order (\f$1 \le K \le 4\f$).
+   * \return Expected-information tensor of order \f$K\f$.
+   * \see expected_info, expected_info_d1
+   */
   template <int K>
   LAPLACE_HD expected_info_tensor<3, K> expected_info_dk() const {
     double a[K + 1], b[K + 1], e[K + 1], f[K + 1];
@@ -240,6 +314,14 @@ struct student_t2_distrib {
     detail_student_t1::fill_info<K>(a, b, e, f, sigma, t);
     return t;
   }
+  /**
+   * \name Expected-information parameter derivatives by order
+   * \ingroup distrib_student_t2
+   * \brief Shorthand accessors calling `expected_info_dk<K>()` for \f$K = 1, \dots, 4\f$.
+   * \return Expected-information tensor of the corresponding order.
+   * \see expected_info_dk
+   * @{
+   */
   /// First-order derivatives of the expected information.
   LAPLACE_HD expected_info_tensor<3, 1> expected_info_d1() const { return expected_info_dk<1>(); }
   /// Second-order derivatives of the expected information.
@@ -248,64 +330,145 @@ struct student_t2_distrib {
   LAPLACE_HD expected_info_tensor<3, 3> expected_info_d3() const { return expected_info_dk<3>(); }
   /// Fourth-order derivatives of the expected information.
   LAPLACE_HD expected_info_tensor<3, 4> expected_info_d4() const { return expected_info_dk<4>(); }
+  /** @} */
 
-  /// F(y) = T_nu((y - mu)/s).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate the cumulative distribution function \f$F(y) = T_\nu((y - \mu)/s)\f$.
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Lower-tail probability in \f$[0, 1]\f$ (\f$0\f$ at \f$-\infty\f$, \f$1\f$ at \f$+\infty\f$).
+   * \see ccdf, log_cdf
+   */
   LAPLACE_HD double cdf(double y) const { return as_t1().cdf(y); }
-  /// 1 - F(y).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate the complementary cumulative distribution function \f$1 - F(y) = T_\nu(-(y - \mu)/s)\f$.
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Upper-tail probability in \f$[0, 1]\f$ (\f$1\f$ at \f$-\infty\f$, \f$0\f$ at \f$+\infty\f$).
+   * \see cdf, log_ccdf
+   */
   LAPLACE_HD double ccdf(double y) const { return as_t1().ccdf(y); }
-  /// log F(y).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate the log cumulative distribution function \f$\log F(y)\f$.
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Log lower-tail probability in \f$[-\infty, 0]\f$ (\f$-\infty\f$ at \f$-\infty\f$, \f$0\f$ at \f$+\infty\f$).
+   * \see log_ccdf, log_cdf_dk, cdf
+   */
   LAPLACE_HD double log_cdf(double y) const { return as_t1().log_cdf(y); }
-  /// log(1 - F(y)).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate the log complementary cumulative distribution function \f$\log(1 - F(y))\f$.
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Log upper-tail probability in \f$[-\infty, 0]\f$ (\f$0\f$ at \f$-\infty\f$, \f$-\infty\f$ at \f$+\infty\f$).
+   * \see log_cdf, log_ccdf_dk, ccdf
+   */
   LAPLACE_HD double log_ccdf(double y) const { return as_t1().log_ccdf(y); }
 
-  /// The derivatives of order K of log F (upper = false) or log(1 - F) (upper = true) in (mu, sigma, nu).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate order-\f$K\f$ parameter derivatives of \f$\log F(y)\f$ or \f$\log(1 - F(y))\f$
+   *        in \f$(\mu, \sigma, \nu)\f$.
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \param upper If `false`, differentiate \f$\log F(y)\f$; if `true`, differentiate \f$\log(1 - F(y))\f$.
+   * \return Symmetric tensor of partial derivatives of order \f$K\f$.
+   * \see log_cdf_dk, log_ccdf_dk
+   */
   template <int K>
   LAPLACE_HD sym_tensor<3, K> log_cdf_tail_dk(double y, bool upper) const {
     return detail_student_t2::compose<K>(detail_student_t2::log_cdf_source{as_t1(), y, upper}, sigma, nu);
   }
-  /// The derivatives of order K of log F.
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate order-\f$K\f$ parameter derivatives of \f$\log F(y)\f$ in \f$(\mu, \sigma, \nu)\f$.
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Symmetric tensor of partial derivatives of order \f$K\f$.
+   * \see log_cdf_tail_dk, log_cdf, log_cdf_d1
+   */
   template <int K>
   LAPLACE_HD sym_tensor<3, K> log_cdf_dk(double y) const { return log_cdf_tail_dk<K>(y, false); }
-  /// The derivatives of order K of log(1 - F).
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Evaluate order-\f$K\f$ parameter derivatives of \f$\log(1 - F(y))\f$ in
+   *        \f$(\mu, \sigma, \nu)\f$.
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Symmetric tensor of partial derivatives of order \f$K\f$.
+   * \see log_cdf_tail_dk, log_ccdf, log_ccdf_d1
+   */
   template <int K>
   LAPLACE_HD sym_tensor<3, K> log_ccdf_dk(double y) const { return log_cdf_tail_dk<K>(y, true); }
-  /// First-order derivatives of log F.
+  /**
+   * \name Log-CDF parameter derivatives by order
+   * \ingroup distrib_student_t2
+   * \brief Shorthand accessors calling `log_cdf_dk<K>(y)` for \f$K = 1, \dots, 6\f$.
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Symmetric tensor of partial derivatives of the corresponding order.
+   * \see log_cdf_dk
+   * @{
+   */
+  /// First-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 1> log_cdf_d1(double y) const { return log_cdf_dk<1>(y); }
-  /// Second-order derivatives of log F.
+  /// Second-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 2> log_cdf_d2(double y) const { return log_cdf_dk<2>(y); }
-  /// Third-order derivatives of log F.
+  /// Third-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 3> log_cdf_d3(double y) const { return log_cdf_dk<3>(y); }
-  /// Fourth-order derivatives of log F.
+  /// Fourth-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 4> log_cdf_d4(double y) const { return log_cdf_dk<4>(y); }
-  /// Fifth-order derivatives of log F.
+  /// Fifth-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 5> log_cdf_d5(double y) const { return log_cdf_dk<5>(y); }
-  /// Sixth-order derivatives of log F.
+  /// Sixth-order derivatives of \f$\log F\f$.
   LAPLACE_HD sym_tensor<3, 6> log_cdf_d6(double y) const { return log_cdf_dk<6>(y); }
-  /// First-order derivatives of log(1 - F).
+  /** @} */
+  /**
+   * \name Log-CCDF parameter derivatives by order
+   * \ingroup distrib_student_t2
+   * \brief Shorthand accessors calling `log_ccdf_dk<K>(y)` for \f$K = 1, \dots, 6\f$.
+   * \param y Observation value \f$y \in \mathbb{R}\f$.
+   * \return Symmetric tensor of partial derivatives of the corresponding order.
+   * \see log_ccdf_dk
+   * @{
+   */
+  /// First-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 1> log_ccdf_d1(double y) const { return log_ccdf_dk<1>(y); }
-  /// Second-order derivatives of log(1 - F).
+  /// Second-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 2> log_ccdf_d2(double y) const { return log_ccdf_dk<2>(y); }
-  /// Third-order derivatives of log(1 - F).
+  /// Third-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 3> log_ccdf_d3(double y) const { return log_ccdf_dk<3>(y); }
-  /// Fourth-order derivatives of log(1 - F).
+  /// Fourth-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 4> log_ccdf_d4(double y) const { return log_ccdf_dk<4>(y); }
-  /// Fifth-order derivatives of log(1 - F).
+  /// Fifth-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 5> log_ccdf_d5(double y) const { return log_ccdf_dk<5>(y); }
-  /// Sixth-order derivatives of log(1 - F).
+  /// Sixth-order derivatives of \f$\log(1 - F)\f$.
   LAPLACE_HD sym_tensor<3, 6> log_ccdf_d6(double y) const { return log_ccdf_dk<6>(y); }
+  /** @} */
 
-  /// Lower bound of the support.
+  /// Lower bound of the support (\f$-\infty\f$).
   LAPLACE_HD double support_lower() const { return -distrib_infinity; }
-  /// Upper bound of the support.
+  /// Upper bound of the support (\f$+\infty\f$).
   LAPLACE_HD double support_upper() const { return distrib_infinity; }
-  /// Central location (mu).
+  /// Central location (\f$\mu\f$).
   LAPLACE_HD double center() const { return mu; }
-  /// Typical spread (sigma, the standard deviation).
+  /// Typical spread (standard deviation \f$\sigma\f$).
   LAPLACE_HD double scale() const { return sigma; }
-  /// No non-smooth points in any parameter.
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Return parameter-domain non-smooth points (none for Student t).
+   * \return Empty kink list.
+   * \see y_kinks
+   */
   LAPLACE_HD distrib_kinks param_kinks(int /*j*/, double /*y*/) const { return distrib_kinks{}; }
-  /// No non-smooth points in y.
+  /// Return observation-domain non-smooth points (none for Student t).
   LAPLACE_HD distrib_kinks y_kinks() const { return distrib_kinks{}; }
+  /**
+   * \ingroup distrib_student_t2
+   * \brief Construct a starting parameter vector inside the domain from sample summaries.
+   * \param s Sample summary statistics (`mean`, `variance`).
+   * \return Valid starting `student_t2_distrib` with sample mean, standard deviation, and \f$\nu = 5\f$.
+   * \see distrib_start
+   */
   // Starting value from a sample (generic_start.hpp): the sample mean and standard deviation (the
   // parameters are the mean and the standard deviation themselves) and nu = 5; strictly inside the domain.
   student_t2_distrib start_value(const distrib_sample_summary& s) const {

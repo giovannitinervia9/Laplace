@@ -328,25 +328,51 @@ LAPLACE_HD void lambda_table(double z, double nu, const double* Rn, double* D) {
 }  // namespace detail_pseudohuber
 
 /**
- * \brief The pseudo-Huber distribution in its location \f$\mu\f$, standard deviation \f$\sigma\f$ and shape \f$\nu\f$.
+ * \ingroup distrib_pseudohuber
+ * \brief The pseudo-Huber distribution in its location \f$\mu\f$, standard deviation \f$\sigma > 0\f$,
+ * and shape \f$\nu > 0\f$.
+ *
+ * Density
+ * \f$f(y) = \frac{\sqrt{R(\nu)}}{2\sigma x K_1(x)} \exp\!\left(-\sqrt{\nu + R(\nu) z^2}\right)\f$
+ * on \f$y \in (-\infty, \infty)\f$, where \f$z = (y - \mu)/\sigma\f$, \f$x = \sqrt{\nu}\f$, and
+ * \f$R(\nu) = x K_2(x)/K_1(x)\f$, with variance \f$\sigma^2\f$ for every \f$\nu > 0\f$, the Laplace
+ * distribution as \f$\nu \to 0\f$, and the Gaussian distribution as \f$\nu \to \infty\f$.
+ * Evaluates the log-density, parameter derivatives to order 6, mixed observation-parameter
+ * derivatives, and the Bessel ratio; cumulative functions, expected Fisher information, quantiles,
+ * and random draws come from \ref distrib_generic.
+ * \see distrib_pseudohuber, distrib_core
  */
 struct pseudohuber_distrib {
-  /// Location parameter mu (the mean).
+  /// Location parameter \f$\mu \in (-\infty, \infty)\f$ (the mean and median).
   double mu;
-  /// Standard deviation sigma > 0.
+  /// Standard deviation \f$\sigma \in (0, \infty)\f$.
   double sigma;
-  /// Shape parameter nu > 0 (the Laplace law as nu tends to 0, the Gaussian as it tends to infinity).
+  /// Shape parameter \f$\nu \in (0, \infty)\f$ (Laplace limit as \f$\nu \to 0\f$, Gaussian limit as \f$\nu \to \infty\f$).
   double nu;
 
+  /// Distribution kind (\c distrib_kind::continuous).
   static constexpr distrib_kind kind = distrib_kind::continuous;
+  /// Number of natural parameters (3).
   static constexpr int n_params = 3;
+  /// Differentiability order of \f$\log f\f$ in \f$y\f$ (\c infinitely_smooth).
   static constexpr int y_regularity = infinitely_smooth;
+  /// Descriptors of \c mu, \c sigma, and \c nu.
   static constexpr distrib_param_info params[3] = {
       {"mu", -distrib_infinity, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth},
       {"sigma", 0.0, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth},
       {"nu", 0.0, distrib_infinity, false, infinitely_smooth, false, infinitely_smooth}};
 
-  /// The Bessel ratio R(nu) = sqrt(nu) K_2(sqrt nu)/K_1(sqrt nu) = 1 - x (log K_1)'(x), x = sqrt(nu); the series in nu for small nu.
+  /**
+   * \ingroup distrib_pseudohuber
+   * \brief Evaluates the Bessel ratio \f$R(\nu) = \sqrt{\nu}\, K_2(\sqrt{\nu}) / K_1(\sqrt{\nu})\f$.
+   *
+   * Uses a 14-term small-argument series of \f$K_0\f$ and \f$K_1\f$ for \f$\nu < 1\f$, and the
+   * cancellation-free identity \f$R(\nu) = 1 - x (\log K_1)'(x)\f$ with \f$x = \sqrt{\nu}\f$ via
+   * log_bessel_k_dx1() for \f$\nu \ge 1\f$.
+   * \return Value of \f$R(\nu)\f$ for \f$\nu > 0\f$ (approaching 2 as \f$\nu \to 0\f$ and
+   * \f$\sqrt{\nu} + 3/2\f$ as \f$\nu \to \infty\f$; quiet NaN for \f$\nu \le 0\f$ or NaN).
+   * \see distrib_pseudohuber, logpdf()
+   */
   LAPLACE_HD double bessel_ratio() const {
     if (nu < detail_pseudohuber::small_nu_split) {
       double Rn[1], hd[1];
@@ -357,7 +383,18 @@ struct pseudohuber_distrib {
     return 1.0 - x * math::log_bessel_k_dx1(1.0, x);
   }
 
-  /// log f(y) = -sqrt(nu + R z^2) + (1/2) log R - (1/2) log nu - log K_1(sqrt nu) - log 2 - log sigma.
+  /**
+   * \ingroup distrib_pseudohuber
+   * \brief Evaluates the log-density \f$\log f(y; \mu, \sigma, \nu)\f$.
+   *
+   * Computes \f$\ell = -\sqrt{\nu + R(\nu) z^2} + h(\nu) - \log 2 - \log\sigma\f$ with
+   * \f$z = (y - \mu)/\sigma\f$ and \f$h(\nu) = \frac{1}{2}\log R(\nu) - \frac{1}{2}\log\nu - \log K_1(\sqrt{\nu})\f$,
+   * using the small-argument series for \f$\nu < 1\f$ and bessel_ratio() with
+   * log_bessel_k() for \f$\nu \ge 1\f$.
+   * \param y Observation point \f$y \in (-\infty, \infty)\f$.
+   * \return Log-density value (\f$-\infty\f$ as \f$|y| \to \infty\f$, quiet NaN on NaN input).
+   * \see distrib_pseudohuber, logpdf_dk(), bessel_ratio()
+   */
   LAPLACE_HD double logpdf(double y) const {
     const double z = (y - mu) / sigma;
     double R, h;
@@ -373,7 +410,21 @@ struct pseudohuber_distrib {
     return -Kokkos::sqrt(nu + R * z * z) + h - math::log(2.0 * sigma);
   }
 
-  /// The derivatives of order K of log f in (mu, sigma, nu).
+  /**
+   * \ingroup distrib_pseudohuber
+   * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log f(y; \mu, \sigma, \nu)\f$
+   * in \f$(\mu, \sigma, \nu)\f$.
+   *
+   * Evaluates \f$R(\nu)\f$ and \f$h(\nu)\f$ and their \f$\nu\f$-derivatives from the small-argument
+   * series for \f$\nu < 1\f$ or from one call to log_bessel_k_dx_upto() for \f$\nu \ge 1\f$,
+   * assembles the mixed \f$(z, \nu)\f$ derivative table of \f$\Lambda(z, \nu) = -\sqrt{\nu + R(\nu) z^2}\f$,
+   * maps it to \f$(\mu, \sigma, \nu)\f$, and adds \f$h^{(K)}(\nu)\f$ and
+   * \f$(-1)^K (K - 1)! \sigma^{-K}\f$ to the pure \f$\nu\f$ and \f$\sigma\f$ components.
+   * \tparam K Derivative order (\f$1 \le K \le 6\f$).
+   * \param y Observation point \f$y \in (-\infty, \infty)\f$.
+   * \return Packed symmetric tensor `sym_tensor<3, K>` of derivatives.
+   * \see distrib_pseudohuber, logpdf(), logpdf_dy_dk()
+   */
   template <int K>
   LAPLACE_HD sym_tensor<3, K> logpdf_dk(double y) const {
     const double z = (y - mu) / sigma;
@@ -394,22 +445,42 @@ struct pseudohuber_distrib {
     t[detail_pseudohuber::pos3(0, K, 0)] += detail_pseudohuber::sign_of_power(K) * detail_pseudohuber::fact(K - 1) * isk;
     return t;
   }
-  /// First-order derivatives of log f.
+  /**
+   * \name Derivatives of the log-density
+   * Parameter derivatives of \f$\log f(y; \mu, \sigma, \nu)\f$ for orders \f$K = 1 \dots 6\f$.
+   * @{
+   */
+  /// First-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \nu)\f$.
   LAPLACE_HD sym_tensor<3, 1> logpdf_d1(double y) const { return logpdf_dk<1>(y); }
-  /// Second-order derivatives of log f.
+  /// Second-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \nu)\f$.
   LAPLACE_HD sym_tensor<3, 2> logpdf_d2(double y) const { return logpdf_dk<2>(y); }
-  /// Third-order derivatives of log f.
+  /// Third-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \nu)\f$.
   LAPLACE_HD sym_tensor<3, 3> logpdf_d3(double y) const { return logpdf_dk<3>(y); }
-  /// Fourth-order derivatives of log f.
+  /// Fourth-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \nu)\f$.
   LAPLACE_HD sym_tensor<3, 4> logpdf_d4(double y) const { return logpdf_dk<4>(y); }
-  /// Fifth-order derivatives of log f.
+  /// Fifth-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \nu)\f$.
   LAPLACE_HD sym_tensor<3, 5> logpdf_d5(double y) const { return logpdf_dk<5>(y); }
-  /// Sixth-order derivatives of log f.
+  /// Sixth-order derivatives of \f$\log f\f$ in \f$(\mu, \sigma, \nu)\f$.
   LAPLACE_HD sym_tensor<3, 6> logpdf_d6(double y) const { return logpdf_dk<6>(y); }
+  /** @} */
 
+  /**
+   * \ingroup distrib_pseudohuber
+   * \brief Evaluates \f$J\f$ observation derivatives and the order-\f$K\f$ parameter tensor of
+   * \f$\log f(y; \mu, \sigma, \nu)\f$.
+   *
+   * Uses \f$\partial/\partial y = -\partial/\partial\mu\f$ so that for \f$J \ge 1\f$ each
+   * component is \f$(-1)^J\f$ times the corresponding component of logpdf_dk() of order \f$J + K\f$
+   * with \f$J\f$ additional indices in \f$\mu\f$; for \f$J = 0\f$ and \f$K = 0\f$, stores logpdf()
+   * in element 0.
+   * \tparam J Derivative order in \f$y\f$ (\f$J \ge 0\f$).
+   * \tparam K Derivative order in \f$(\mu, \sigma, \nu)\f$ (\f$J + K \le 6\f$).
+   * \param y Observation point \f$y \in (-\infty, \infty)\f$.
+   * \return Packed symmetric tensor `sym_tensor<3, K>` of mixed derivatives.
+   * \see distrib_pseudohuber, logpdf_dk(), logpdf()
+   */
   // l depends on y and mu only through y - mu, so d/dy = -d/dmu: the component of logpdf_dk<J + K>
   // with J more indices in mu, times (-1)^J.
-  /// J derivatives in y and the tensor of order K in (mu, sigma, nu).
   template <int J, int K>
   LAPLACE_HD sym_tensor<3, K> logpdf_dy_dk(double y) const {
     if constexpr (J == 0) {
@@ -431,18 +502,42 @@ struct pseudohuber_distrib {
     }
   }
 
-  /// Lower bound of the support.
+  /// \ingroup distrib_pseudohuber
+  /// \brief Lower bound of the continuous support (\f$-\infty\f$).
+  /// \return -\c distrib_infinity.
   LAPLACE_HD double support_lower() const { return -distrib_infinity; }
-  /// Upper bound of the support.
+  /// \ingroup distrib_pseudohuber
+  /// \brief Upper bound of the continuous support (\f$+\infty\f$).
+  /// \return \c distrib_infinity.
   LAPLACE_HD double support_upper() const { return distrib_infinity; }
-  /// Central location (mu).
+  /// \ingroup distrib_pseudohuber
+  /// \brief Central location (the mean \f$\mu\f$).
+  /// \return \c mu.
   LAPLACE_HD double center() const { return mu; }
-  /// Typical spread (sigma, the standard deviation).
+  /// \ingroup distrib_pseudohuber
+  /// \brief Typical spread (the standard deviation \f$\sigma\f$).
+  /// \return \c sigma.
   LAPLACE_HD double scale() const { return sigma; }
-  /// No non-smooth points in any parameter.
+  /// \ingroup distrib_pseudohuber
+  /// \brief Non-smooth points in any parameter (none).
+  /// \return Empty \c distrib_kinks.
   LAPLACE_HD distrib_kinks param_kinks(int /*j*/, double /*y*/) const { return distrib_kinks{}; }
-  /// No non-smooth points in y.
+  /// \ingroup distrib_pseudohuber
+  /// \brief Non-smooth points in \f$y\f$ (none).
+  /// \return Empty \c distrib_kinks.
   LAPLACE_HD distrib_kinks y_kinks() const { return distrib_kinks{}; }
+  /**
+   * \ingroup distrib_pseudohuber
+   * \brief Starting value from a sample summary: sample mean \f$\mu = \bar{y}\f$, sample
+   * standard deviation \f$\sigma = \sqrt{s^2}\f$, and shape \f$\nu = 1\f$.
+   *
+   * Sets \f$\nu = 1\f$ between the Laplace and Gaussian limits and moves every parameter strictly
+   * inside its open domain with start_inside(), so a zero-variance sample still starts with
+   * \f$\sigma > 0\f$.
+   * \param s Sample summary computed on the host by summarize_sample().
+   * \return A `pseudohuber_distrib` with all parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
   // Starting value from a sample (generic_start.hpp): the sample mean and standard deviation, and nu = 1
   // (between the two limits); strictly inside the domain.
   pseudohuber_distrib start_value(const distrib_sample_summary& s) const {

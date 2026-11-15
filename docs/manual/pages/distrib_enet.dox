@@ -1,0 +1,117 @@
+/**
+\defgroup distrib_enet Elastic net
+\ingroup distrib
+\brief Continuous real-line distribution with log-density proportional to minus the elastic-net penalty, closed expected information, and Mills-ratio cumulative functions.
+
+Defined in `<laplace/distrib/enet.hpp>` as \ref laplace::distrib::enet_distrib "enet_distrib", this module evaluates the elastic-net log-density, its parameter derivatives to order \f$6\f$, mixed observation-parameter derivatives, the closed expected Fisher information with parameter derivatives to order \f$4\f$, cumulative and complementary cumulative functions with derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$ to order \f$6\f$, quantiles, and starting values. Every evaluator is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). Only random variate generation is inherited from \ref distrib_generic "the generic routes" via \ref laplace::distrib::rng_by_inversion "rng_by_inversion()". Against high-precision reference values, the log-density and its derivatives stay within \f$2030\f$ ulp, quantiles within \f$4.86\f$ ulp, cumulative derivatives up to \f$16500\f$ ulp, and the order-\f$4\f$ expected information derivative reaches \f$7.8 \times 10^5\f$ ulp at a large-scale corner.
+
+## Classic form and parametrization
+
+The elastic-net penalty (Zou and Hastie, 2005) combines an absolute-value penalty and a quadratic penalty. Up to an additive constant, the log-density of this distribution is minus the elastic-net penalty evaluated at the centred variable \f$z = y - \mu\f$, formed by multiplying and normalizing a Laplace density and a Gaussian density with the same location \f$\mu \in \mathbb{R}\f$. With penalty weight \f$\lambda > 0\f$ (a rate) and mixing weight \f$\alpha \in (0, 1)\f$, the two component rates are the Laplace rate \f$a = \lambda \alpha\f$ and the Gaussian precision \f$c = \lambda (1 - \alpha)\f$, giving the probability density
+\f[
+f(y; \mu, \lambda, \alpha) = \frac{1}{Z} \exp\!\left(-a |y - \mu| - \frac{c}{2}(y - \mu)^2\right), \qquad y \in \mathbb{R},
+\f]
+with normalizing constant
+\f[
+Z = \frac{2\,M(x)}{\sqrt{c}}, \qquad x = \frac{a}{\sqrt{c}}, \qquad M(x) = \frac{\Phi(-x)}{\phi(x)},
+\f]
+where \f$M(x)\f$ is the Mills ratio and \f$\phi\f$ and \f$\Phi\f$ are the standard normal density and cumulative distribution function. On the log scale, \f$A = \log Z = \log 2 + \log M(x) - \frac{1}{2}\log c\f$ is evaluated through \ref laplace::math::own::log_mills "log_mills()" (\ref normal "normal"). Expressing \f$Z\f$ and tail probabilities through \f$\log M\f$ avoids forming ratios of two normal cumulative functions such as \f$\Phi(-(s D + x)) / (2\Phi(-x))\f$ (whose logarithm \f$\log\Phi(-(s D + x)) - \log\Phi(-x) - \log 2\f$ subtracts two terms of size \f$x^2 / 2\f$): as \f$\alpha \to 1\f$, \f$x \to \infty\f$ and that difference loses every significant digit.
+
+The distribution is symmetric about \f$\mu\f$, so its mean and median equal \f$\mu\f$, and its variance is \f$-2\,\partial A / \partial c\f$. At the two ends of the mixing, letting \f$\alpha \to 1\f$ (\f$c \to 0\f$, \f$x \to \infty\f$) yields the Laplace distribution with location \f$\mu\f$ and rate \f$\lambda\f$ (\ref distrib_laplace2 "laplace2", \ref distrib_laplace "Laplace"), while letting \f$\alpha \to 0\f$ (\f$a \to 0\f$, \f$x \to 0\f$) yields the Gaussian distribution with mean \f$\mu\f$ and precision \f$\lambda\f$ (\ref distrib_gaussian3 "gaussian3", \ref distrib_gaussian1 "gaussian1", \ref distrib_gaussian "Gaussian").
+
+## Parameters, domain, and regularity
+
+Struct `enet_distrib` sets `kind = distrib_kind::continuous`, `n_params = 3`, and `y_regularity = 0`. In `params`, `mu` has open domain \f$(-\infty, \infty)\f$ with `regularity = 0` and `cdf_regularity = 1`, `lambda` has \f$(0, \infty)\f$, and `alpha` has \f$(0, 1)\f$, both `lambda` and `alpha` with `regularity = infinitely_smooth` and `cdf_regularity = infinitely_smooth`. All three set `circular = false` and `moves_support = false`, with fixed support \f$(-\infty, \infty)\f$. Member `center()` returns \f$\mu\f$ and `scale()` returns the standard deviation \f$\sqrt{-2\,\partial A / \partial c}\f$.
+
+Both `y_kinks()` (at \f$y = \mu\f$) and `param_kinks(0, y)` (at \f$\mu = y\f$) declare one non-smooth point with `continuous_order = 0`, which \ref distrib_generic "the generic routes" read; `lambda` and `alpha` have no kinks. The log-density \f$\ell = \log f\f$ is \f$C^0\f$ in \f$\mu\f$ and in \f$y\f$ at \f$z = y - \mu = 0\f$: its derivative \f$\partial \ell / \partial y = -a \operatorname{sgn}(z) - c z\f$ drops by \f$2a\f$ across \f$z = 0\f$ (so \f$\partial \ell / \partial \mu\f$ jumps by \f$+2a\f$), and the library sets \f$\operatorname{sgn}(0) = 0\f$ at \f$z = 0\f$. Both \f$\log F\f$ and \f$\log(1 - F)\f$ are \f$C^1\f$ there, with continuous first derivative \f$-2 f(\mu)\f$ in \f$\mu\f$ for \f$\log F\f$; the quantity that jumps across \f$z = 0\f$ is the second derivative in \f$\mu\f$, by \f$-4 a f(\mu)\f$ for \f$\log F\f$ and \f$+4 a f(\mu)\f$ for \f$\log(1 - F)\f$ (which becomes \f$2 a^2\f$ at the Laplace limit \f$f(\mu) = a / 2\f$). In \f$\lambda\f$ and \f$\alpha\f$, \f$\ell\f$, \f$\log F\f$, and \f$\log(1 - F)\f$ are \f$C^\infty\f$. Parameter derivatives pack into `sym_tensor<3, K>`, placing the component with \f$i\f$ derivatives in \f$\mu\f$, \f$j = K - i - k\f$ in \f$\lambda\f$, and \f$k\f$ in \f$\alpha\f$ at index \f$(K - i)(K - i + 1)/2 + k\f$ (\ref distrib_core "distrib_core").
+
+## Formulas and cancellation-free evaluation
+
+All parameter derivatives of the normalizing constant \f$A(a, c) = \log Z\f$ to order \f$6\f$ are carried from \f$(a, c)\f$ to \f$(\lambda, \alpha)\f$ by \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()" (\ref chain_pair "chain_pair") through the bilinear map \f$a = \lambda \alpha\f$, \f$c = \lambda (1 - \alpha)\f$. To prevent cancellation, \f$A(a, c)\f$ and its \f$(a, c)\f$-derivatives switch representations at \f$x = a / \sqrt{c} = 1.5\f$, where the first form loses accuracy above \f$x = 2\f$, the second below \f$x = 1\f$, and \f$1.5\f$ minimizes the worst error at orders \f$5\f$ and \f$6\f$:
+
+- For \f$x < 1.5\f$, \f$A = \log 2 + \log M(x) - \frac{1}{2}\log c\f$, using \ref laplace::math::own::log_mills_d1 "log_mills_d1()" through \ref laplace::math::own::log_mills_d6 "log_mills_d6()" (\ref normal "normal") composed with \f$x(a, c) = a c^{-1/2}\f$.
+- For \f$x \ge 1.5\f$, \f$A = \log 2 - \log a + F(t)\f$ with \f$t = c / a^2 = 1/x^2\f$ and \f$F(t) = \log(x M(x))\f$, which is smooth in \f$t\f$ up to the Laplace limit \f$t \to 0\f$. Its \f$m\f$-th derivative \f$F^{(m)}(t)\f$ is the \f$m\f$-th cumulant of \f$-U^2 / 2\f$ under the density proportional to \f$\exp(-u - t u^2 / 2)\f$ on \f$u > 0\f$, computed from the downward moment-ratio recursion \f$\rho_j = j / (1 + t \rho_{j+1})\f$ in the scaled form of \ref normal "normal".
+
+Because \f$\ell(\mu, \lambda, \alpha; y) = -a|z| - \frac{1}{2} c z^2 - A\f$ is bilinear in \f$(a, c)\f$, its order-\f$K\f$ parameter derivative is
+\f[
+\frac{\partial^K \ell}{\partial\mu^i \partial\lambda^j \partial\alpha^k} = a_{jk} u_i + c_{jk} v_i - [i = 0]\,\frac{\partial^K A}{\partial\lambda^j \partial\alpha^k},
+\f]
+where \f$u_0 = -|z|\f$, \f$u_1 = \operatorname{sgn}(z)\f$, \f$v_0 = -z^2/2\f$, \f$v_1 = z\f$, \f$v_2 = -1\f$ (all higher \f$u_i, v_i\f$ vanish), and \f$a_{jk}, c_{jk}\f$ are the partials of \f$a\f$ and \f$c\f$. Mixed derivatives `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$) use \f$\partial/\partial y = -\partial/\partial\mu\f$ and return \f$(-1)^J\f$ times the \f$(i + J, j, k)\f$ component.
+
+Because \f$-\mathbb{E}[\ell_{\mu\mu}] = c\f$ misses the point mass \f$2 a f(\mu)\f$ at the kink, the closed expected Fisher information uses the score variance identity \f$I_{\mu\mu} = \mathbb{E}[s_\mu^2]\f$:
+\f[
+I_{\mu\mu} = c + 2 a e^{-A}, \qquad I_{\mu\lambda} = I_{\mu\alpha} = 0, \qquad I_{\lambda\lambda} = A_{\lambda\lambda}, \qquad I_{\lambda\alpha} = A_{\lambda\alpha} - \frac{A_\alpha}{\lambda}, \qquad I_{\alpha\alpha} = A_{\alpha\alpha}.
+\f]
+The \f$-A_\alpha/\lambda\f$ term comes from \f$\partial^2 a / \partial\lambda\partial\alpha = 1 = -\partial^2 c / \partial\lambda\partial\alpha\f$. By symmetry and location invariance, \f$I_{\mu\lambda}\f$, \f$I_{\mu\alpha}\f$, and every derivative of \f$I\f$ with a \f$\mu\f$-index vanish; orders \f$1\f$ to \f$4\f$ of the \f$(\lambda, \alpha)\f$ block read off orders \f$3\f$ to \f$6\f$ of \f$A\f$. Differentiating \f$I_{\mu\mu}\f$ through \f$e^{-A}\f$ cancels pure powers of \f$\alpha\f$ identically (losing \f$4 \times 10^9\f$ ulp at \f$(\lambda, \alpha) = (10^6, 0.5)\f$), so `expected_info_dk()` writes \f$I_{\mu\mu} = c(1 + x e^{-\log M(x)})\f$ for \f$x < 1.5\f$ and \f$a^2(t + e^{-F(t)})\f$ for \f$x \ge 1.5\f$, chaining the inner scalar function of \f$x\f$ or \f$t\f$ and applying Leibniz's rule with the rate prefactor.
+
+With \f$D = |z|\f$ and \f$s = \sqrt{c}\f$, the tail probability beyond \f$D\f$ is \f$P(|Y - \mu| > D) = e^T\f$, where
+\f[
+T = -a D - \frac{c D^2}{2} - \log 2 + \log M(x + s D) - \log M(x) = -a D - \frac{c D^2}{2} - \log 2 + A(a + c D, c) - A(a, c).
+\f]
+Since \f$T \le -\log 2\f$ everywhere, \f$\log F(y)\f$ is \f$T\f$ for \f$z < 0\f$ and \f$\operatorname{log1p}(-e^T)\f$ for \f$z \ge 0\f$, with \f$\log(1 - F(y))\f$ mirrored. Derivatives of \f$T\f$ in \f$(\mu, \lambda, \alpha)\f$ to order \f$6\f$ combine the \f$A\f$ tables at \f$(a, c)\f$ and \f$(a + c D, c)\f$ with \f$\partial D/\partial\mu = -\operatorname{sgn}(z)\f$, and on the near side are carried through three-variable multi-index recursions for \f$e^T\f$ and \f$\log(1 - e^T)\f$. Member `quantile(p)` solves \f$a D + \frac{1}{2} c D^2 - (\log M(x + s D) - \log M(x)) = -\log(2 p_{\mathrm{tail}})\f$ with \f$p_{\mathrm{tail}} = \min(p, 1 - p)\f$ by monotone Newton iteration from the quadratic root, avoiding the cancellation of \ref laplace::math::own::Phi_inv_logp "Phi_inv_logp()" near \f$\alpha = 1\f$. Member `start_value()` sets \f$\mu\f$ to the sample median, \f$\alpha = 1/2\f$, and \f$\lambda\f$ by bisection in \f$\log \lambda\f$ to match the sample variance (\ref distrib_start "Starting values").
+
+## Accuracy and limits
+
+Against \f$35595\f$ reference rows computed by `tools/reference/distrib_enet.py` (`tests/data/reference/distrib_enet.csv`) using mpmath (The mpmath development team, 2023) at \f$500\f$ and \f$600\f$ bits after checking closed forms with SymPy (Meurer and others, 2017) and `mpmath.quad`, the `gcc` and `CUDA` builds agree to the digits kept. Errors are measured in ulps of the largest component of each order at that point (and of \f$\max(|q|, |\mu|)\f$ for quantiles; see \ref accuracy "How accuracy is measured" and \ref distrib_core "distrib_core").
+
+| Quantity | Order | Worst measured (ulp) | Test bound (ulp) |
+| --- | --- | --- | --- |
+| `logpdf` | \f$0\f$ | \f$157\f$ | \f$240\f$ |
+| `logpdf_d1` | \f$1\f$ | \f$2.9\f$ | \f$5\f$ |
+| `logpdf_d2` | \f$2\f$ | \f$5.5\f$ | \f$9\f$ |
+| `logpdf_d3` | \f$3\f$ | \f$24\f$ | \f$40\f$ |
+| `logpdf_d4` | \f$4\f$ | \f$116\f$ | \f$175\f$ |
+| `logpdf_d5` | \f$5\f$ | \f$1650\f$ | \f$2500\f$ |
+| `logpdf_d6` | \f$6\f$ | \f$2030\f$ | \f$3100\f$ |
+| `log_cdf` | \f$0\f$ | \f$478\f$ | \f$720\f$ |
+| `log_cdf_d1` | \f$1\f$ | \f$493\f$ | \f$740\f$ |
+| `log_cdf_d2` | \f$2\f$ | \f$1800\f$ | \f$2700\f$ |
+| `log_cdf_d3` | \f$3\f$ | \f$4940\f$ | \f$7400\f$ |
+| `log_cdf_d4` | \f$4\f$ | \f$2790\f$ | \f$4200\f$ |
+| `log_cdf_d5` | \f$5\f$ | \f$9570\f$ | \f$14400\f$ |
+| `log_cdf_d6` | \f$6\f$ | \f$16500\f$ | \f$24800\f$ |
+| `log_ccdf` | \f$0\f$ | \f$628\f$ | \f$950\f$ |
+| `log_ccdf_d1` | \f$1\f$ | \f$965\f$ | \f$1450\f$ |
+| `log_ccdf_d2` | \f$2\f$ | \f$1800\f$ | \f$2700\f$ |
+| `log_ccdf_d3` | \f$3\f$ | \f$4940\f$ | \f$7400\f$ |
+| `log_ccdf_d4` | \f$4\f$ | \f$2790\f$ | \f$4200\f$ |
+| `log_ccdf_d5` | \f$5\f$ | \f$9570\f$ | \f$14400\f$ |
+| `log_ccdf_d6` | \f$6\f$ | \f$16500\f$ | \f$24800\f$ |
+| `expected_info` | \f$0\f$ | \f$19.5\f$ | \f$30\f$ |
+| `expected_info_d1` | \f$1\f$ | \f$31.7\f$ | \f$48\f$ |
+| `expected_info_d2` | \f$2\f$ | \f$116\f$ | \f$175\f$ |
+| `expected_info_d3` | \f$3\f$ | \f$412\f$ | \f$620\f$ |
+| `expected_info_d4` | \f$4\f$ | \f$7.8 \times 10^5\f$ | \f$1.18 \times 10^6\f$ |
+| `quantile` | \f$0\f$ | \f$4.86\f$ | \f$7.3\f$ |
+
+The worst points occur at specific regimes. For `logpdf_d5()` and `logpdf_d6()`, the peaks sit at \f$(\lambda, \alpha) = (1.7, 0.4)\f$ in pure \f$\alpha\f$-derivatives, reflecting the \f$96\f$ and \f$536\f$ ulp errors of `log_mills_d5()` and `log_mills_d6()` amplified by cancellation between the \f$a\f$ and \f$c\f$ derivatives. For `log_cdf` and `log_ccdf`, orders \f$0\f$ and \f$1\f$ peak in the far tail at \f$|T| = 170\f$, while orders \f$3\f$ to \f$6\f$ peak within about \f$0.01\f$ scale units of \f$\mu\f$ for \f$x \in [0.7, 2]\f$, where subtracting two \f$A\f$ tables carries about \f$10^{-12}\f$ absolute error. For `expected_info_d4()`, the peak is the order-\f$4\f$ derivative of \f$I_{\mu\mu}\f$ in \f$\alpha\f$ at \f$(\lambda, \alpha) = (10^6, 0.5)\f$, where the component is \f$1.2 \times 10^4\f$ against \f$I_{\mu\mu} = 10^{12}\f$ (\f$6 \times 10^{-11}\f$ of the component and \f$10^{-14}\f$ of \f$I_{\mu\mu}\f$).
+
+At the two ends of \f$\alpha\f$, `tests/distrib/test_enet.cpp` verifies both family limits. At \f$\alpha = 1 - 10^{-10}\f$, the \f$(\mu, \lambda)\f$ block of every order of `logpdf()`, `log_cdf()`, and `log_ccdf()` agrees with \ref distrib_laplace2 "laplace2_distrib" within \f$10^{-8}\f$ of the order's scale (floor \f$10^{-9}\f$), and `expected_info()` and `quantile()` agree within \f$10^{-8}\f$. At \f$\alpha = 10^{-10}\f$, `logpdf()` (orders \f$0\f$ to \f$6\f$) and `expected_info()` agree with \ref distrib_gaussian3 "gaussian3_distrib" and \ref distrib_gaussian1 "gaussian1_distrib" within \f$10^{-8}\f$ (floor \f$10^{-9}\f$ on tensors), while cumulative derivatives agree within \f$10^{-6}\f$. The test also checks agreement between the \f$x\f$ and \f$t\f$ tables of \f$A(a, c)\f$ (worst \f$6.0 \times 10^{-12}\f$ at \f$x = 4\f$, bound \f$9 \times 10^{-12}\f$), unit normalization by quadrature (\f$10^{-11}\f$), `expected_info()` against quadrature score variance (\f$10^{-9}\f$) and against `expected_info_by_integral<K, info_form::score>()` for \f$K = 0, 1, 2\f$ (\f$10^{-9}\f$, \f$10^{-8}\f$, \f$10^{-7}\f$), 5-point finite differences (\f$10^{-7}\f$ for log-density and information, \f$10^{-6}\f$ for cumulative derivatives), and host-device execution (\f$1.88 \times 10^{-12}\f$ on CUDA, \f$0\f$ on gcc, bound \f$2.9 \times 10^{-12}\f$).
+
+Three open corners remain. First, orders \f$4\f$ to \f$6\f$ of \f$\log F\f$ and \f$\log(1 - F)\f$ within about \f$0.01\f$ scale units of \f$\mu\f$ still subtract two \f$A\f$ tables instead of using a Taylor or integral expansion in \f$D\f$ for components without a \f$\mu\f$-derivative. Second, the order-\f$4\f$ derivative of \f$I_{\mu\mu}\f$ in \f$\alpha\f$ at \f$\lambda \ge 10^5\f$ lacks a series for \f$\exp(-F(t)) - 1 - t\f$. Third, \f$I_{\lambda\alpha}\f$ near \f$\alpha = 1\f$ (\f$3.7 \times 10^{-13}\f$ with absolute error \f$7 \times 10^{-17}\f$ at \f$\alpha = 1 - 10^{-12}\f$) is accurate absolutely rather than relatively. See `docs/numerics.md` for full measurements.
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/enet.hpp>
+
+void eval_enet(Kokkos::View<const double*> y, Kokkos::View<double*> out,
+               double mu, double lambda, double alpha) {
+  const laplace::distrib::enet_distrib d{mu, lambda, alpha};
+  Kokkos::parallel_for("enet_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0] + d.expected_info()[0];
+  });
+}
+```
+
+## Members
+
+Struct \ref laplace::distrib::enet_distrib "enet_distrib" implements \ref distrib_core "distrib_core" for `n_params = 3`: `mu`, `lambda`, `alpha`, `kind`, `n_params`, `y_regularity`, `params`, `logpdf()`, `logpdf_d1()`..`logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `expected_info()`, `expected_info_d1()`..`expected_info_d4()`, `expected_info_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `quantile()`, `log_cdf_d1()`..`log_cdf_d6()`, `log_cdf_dk()`, `log_ccdf_d1()`..`log_ccdf_d6()`, `log_ccdf_dk()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, and `start_value()`.
+
+## References
+
+- H. Zou and T. Hastie (2005), Regularization and Variable Selection Via the Elastic Net, Journal of the Royal Statistical Society Series B: Statistical Methodology, 67(2), 301-320. https://doi.org/10.1111/j.1467-9868.2005.00503.x
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

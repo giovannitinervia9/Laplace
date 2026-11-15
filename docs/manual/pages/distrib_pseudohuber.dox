@@ -1,0 +1,104 @@
+/**
+\defgroup distrib_pseudohuber Pseudo-Huber
+\ingroup distrib
+\brief Continuous real-line distribution with location \f$\mu\f$, standard deviation \f$\sigma > 0\f$, and shape \f$\nu > 0\f$, interpolating between the Laplace and Gaussian laws.
+
+Defined in `<laplace/distrib/pseudohuber.hpp>` as \ref laplace::distrib::pseudohuber_distrib "pseudohuber_distrib", this module evaluates the pseudo-Huber log-density, its parameter derivatives to order \f$6\f$, mixed observation-parameter derivatives, the Bessel ratio `bessel_ratio()`, and host starting values. Every evaluator is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). Cumulative functions, parameter derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$, expected Fisher information and its derivatives, quantiles, and random variates come from \ref distrib_generic "the generic routes". Against high-precision reference values, the log-density and its derivatives stay within \f$29.2\f$ ulp for \f$\nu < 1\f$, \f$1.5 \times 10^3\f$ ulp for \f$1 \le \nu < 10^4\f$, and \f$1.6 \times 10^4\f$ ulp for \f$\nu \ge 10^4\f$.
+
+## Two origins and implemented form
+
+Up to an additive constant, minus the logarithm of this density is the smooth pseudo-Huber loss \f$\sqrt{1 + t^2} - 1\f$ (Charbonnier and others, 1997), quadratic near \f$t = 0\f$ and linear in the tails, which smooths the Huber loss (Huber, 1964) that replaces the square by an absolute value beyond a threshold. As a probability law on \f$\mathbb{R}\f$, the same density is the symmetric hyperbolic distribution (Barndorff-Nielsen, 1977), whose log-density is minus the square root of a quadratic: in tail rate \f$\alpha > 0\f$, scale \f$\delta > 0\f$, and location \f$\mu \in \mathbb{R}\f$, it reads \f$f_{\mathrm{hyp}}(y) = \bigl(2\delta K_1(\alpha\delta)\bigr)^{-1}\exp\bigl(-\alpha\sqrt{\delta^2 + (y - \mu)^2}\bigr)\f$, where \f$K_1\f$ and \f$K_2\f$ are modified Bessel functions of the second kind. These two readings describe the same law, and Laplace carries it parametrized by its standard deviation \f$\sigma > 0\f$ and shape \f$\nu > 0\f$ via \f$\alpha = \sqrt{R(\nu)} / \sigma\f$ and \f$\delta = \sigma\sqrt{\nu / R(\nu)}\f$, where \f$\alpha\delta = \sqrt{\nu}\f$:
+\f[
+f(y; \mu, \sigma, \nu) = \frac{\sqrt{R(\nu)}}{2 \sigma x K_1(x)} \exp\!\left(-\sqrt{\nu + R(\nu) z^2}\right), \qquad y \in \mathbb{R},
+\f]
+with standardized observation \f$z = (y - \mu)/\sigma\f$, \f$x = \sqrt{\nu}\f$, and Bessel ratio \f$R(\nu) = x K_2(x) / K_1(x)\f$. Here \f$\mu \in \mathbb{R}\f$ is the location (mean and median), \f$\sigma > 0\f$ is the standard deviation, and \f$\nu > 0\f$ is the shape. Because \f$\operatorname{Var}(Y) = \sigma^2\f$ for every \f$\nu > 0\f$, the scale \f$\sigma\f$ carries the entire variance and \f$\nu\f$ governs only the tails. As \f$\nu \to 0\f$, \f$R(\nu) \to 2\f$ and the law approaches the Laplace distribution with mean \f$\mu\f$ and scale \f$\sigma / \sqrt{2}\f$ (\ref distrib_laplace "Laplace", \ref distrib_laplace1 "laplace1_distrib"). As \f$\nu \to \infty\f$, \f$R(\nu) \sim \sqrt{\nu} + 3/2\f$ and the law approaches the Gaussian distribution with mean \f$\mu\f$ and standard deviation \f$\sigma\f$ (\ref distrib_gaussian "Gaussian", \ref distrib_gaussian1 "gaussian1_distrib").
+
+## Parameters, domain, and regularity
+
+Struct `pseudohuber_distrib` sets `kind = distrib_kind::continuous`, `n_params = 3`, and `y_regularity = infinitely_smooth`. In `params`, `mu` has open domain \f$(-\infty, \infty)\f$, `sigma` has \f$(0, \infty)\f$, and `nu` has \f$(0, \infty)\f$. All three set `circular = false`, `moves_support = false`, `regularity = infinitely_smooth`, and `cdf_regularity = infinitely_smooth`. The support is the whole real line \f$(-\infty, \infty)\f$, and neither `param_kinks()` nor `y_kinks()` reports any non-smooth point. Member `center()` returns \f$\mu\f$ and `scale()` returns \f$\sigma\f$. Parameter derivatives pack into `sym_tensor<3, K>` in lexicographic multi-index order (\ref distrib_core "distrib_core").
+
+## Formulas and cancellation-free evaluation
+
+On the log scale, the log-density splits into an observation-dependent exponent and a shape normalizer:
+\f[
+\ell(\mu, \sigma, \nu; y) = \Lambda(z, \nu) + h(\nu) - \log 2 - \log \sigma, \qquad
+\Lambda(z, \nu) = -\sqrt{\nu + R(\nu) z^2}, \qquad
+h(\nu) = \frac{1}{2}\log R(\nu) - \frac{1}{2}\log \nu - \log K_1(x).
+\f]
+For \f$\nu \ge 1\f$, using \f$K_1'(x) = -K_2(x) + K_1(x)/x\f$ rewrites the Bessel ratio as
+\f[
+R(\nu) = 1 - x g'(x), \qquad \frac{\mathrm{d}^k R}{\mathrm{d}x^k} = -\bigl(x g^{(k+1)}(x) + k g^{(k)}(x)\bigr) \quad (k \ge 1),
+\f]
+where \f$g(x) = \log K_1(x)\f$ and its argument derivatives come from one call to \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" (\ref bessel_k "bessel_k") up to order \f$K + 1\f$. Because \f$g'(x) \approx -1 - 1/(2x)\f$, the summed terms share the same sign and no quotient of functions of size \f$e^{-x}\f$ is formed. One Faà di Bruno composition per order through \f$x = \sqrt{\nu}\f$ (\ref faa_di_bruno "faa_di_bruno") gives the \f$\nu\f$-derivatives of \f$R\f$. The normalizer \f$h(\nu)\f$ takes its derivatives from the same single Bessel evaluation, since \f$\log R - \log x = \log(K_2/K_1)\f$ avoids ever computing \f$\log K_2\f$.
+
+Below \f$\nu = 1\f$, the Bessel derivative formula cancels terms of size \f$x^{-k}\f$ down to \f$x^{2-k}\f$ and loses about \f$\varepsilon/\nu\f$. For \f$\nu < 1\f$, \f$R\f$ and \f$h\f$ instead use the 14-term small-argument series of \f$K_0\f$ and \f$K_1\f$ (DLMF §10.31.1) in \f$\nu\f$ and \f$L = \log(x/2)\f$ with no Bessel call: setting \f$A = K_0\f$ and \f$B = x K_1\f$ gives
+\f[
+R(\nu) = 2 + \nu \frac{A}{B}, \qquad h(\nu) = \frac{1}{2}\log R(\nu) - \log B,
+\f]
+cancelling the pole of \f$\log K_1\f$ and the \f$\frac{1}{2}\log\nu\f$ term identically; derivatives follow by Leibniz's rule and \ref faa_di_bruno "faa_di_bruno".
+
+To differentiate \f$\Lambda\f$ in \f$(z, \nu)\f$, write \f$\rho(\nu) = \sqrt{R(\nu)}\f$ and \f$q(\nu) = \nu / R(\nu)\f$, so \f$\Lambda(z, \nu) = -\rho(\nu)\,G(q(\nu), z)\f$ with \f$G(q, z) = \sqrt{q + z^2}\f$. With \f$H_p(z) = (q + z^2)^p\f$, the \f$q\f$-derivatives are \f$\partial^i G/\partial q^i = (1/2)_i H_{1/2 - i}\f$ and the \f$z\f$-derivatives satisfy \f$(q + z^2) H_p^{(m+1)} = 2(p - m) z H_p^{(m)} + m(2p - m + 1) H_p^{(m-1)}\f$. Because that recurrence cancels at large \f$|z|\f$ when \f$p = 1/2\f$, pure \f$z\f$-derivatives of \f$G\f$ of order \f$m \ge 2\f$ use the exact identity \f$H_{1/2}^{(m)} = q\, H_{-3/2}^{(m-2)}\f$ instead. Composition through \f$q(\nu)\f$ via \ref laplace::math::bell_partial "bell_partial()" (\ref faa_di_bruno "faa_di_bruno") and Leibniz's rule against \f$\rho(\nu)\f$ yield the mixed \f$(z, \nu)\f$ table, which is mapped to `sym_tensor<3, K>` in \f$(\mu, \sigma, \nu)\f$ before adding \f$h^{(K)}(\nu)\f$ and \f$(-1)^K (K - 1)! \sigma^{-K}\f$ to the pure \f$\nu\f$ and \f$\sigma\f$ entries. Mixed observation-parameter derivatives `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$) return \f$(-1)^J\f$ times the component of `logpdf_dk<J + K>(y)` with \f$J\f$ more \f$\mu\f$-indices.
+
+The cumulative functions, expected Fisher information, quantiles, and random draws are supplied by \ref distrib_generic "the generic routes". Member `start_value()` sets \f$\mu\f$ to the sample mean, \f$\sigma\f$ to the sample standard deviation, and \f$\nu = 1\f$, moved strictly inside the domain (\ref distrib_start "Starting values").
+
+## Accuracy and limits
+
+Against \f$209\f$ parameter-observation points (\f$\nu \in [10^{-6}, 10^8]\f$, \f$|z| \le 10^8\f$, \f$\sigma \in [2^{-20}, 2^{20}]\f$) written by `tools/reference/distrib_pseudohuber.py` with mpmath (The mpmath development team, 2023) at \f$400\f$ and \f$600\f$ bits, the log-density and its derivatives meet the region bounds below on both `gcc` and `CUDA` builds, measured in ulp of the value for order \f$0\f$ and in ulp of the largest component of the order at each point for orders \f$1\f$ to \f$6\f$ (see \ref accuracy "How accuracy is measured").
+
+| Order | \f$\nu < 1\f$: worst (bound) | \f$1 \le \nu < 10^4\f$: worst (bound) | \f$\nu \ge 10^4\f$: worst (bound) |
+| --- | --- | --- | --- |
+| \f$0\f$ (`logpdf`) | \f$1.61\f$ (\f$2.5\f$) | \f$41.5\f$ (\f$63\f$) | \f$1.6 \times 10^4\f$ (\f$2.5 \times 10^4\f$) |
+| \f$1\f$ (`logpdf_d1`) | \f$29.2\f$ (\f$45\f$) | \f$1.5 \times 10^3\f$ (\f$2.3 \times 10^3\f$) | \f$1.2 \times 10^4\f$ (\f$1.9 \times 10^4\f$) |
+| \f$2\f$ (`logpdf_d2`) | \f$4.67\f$ (\f$7.5\f$) | \f$747\f$ (\f$1.2 \times 10^3\f$) | \f$1.0 \times 10^4\f$ (\f$1.6 \times 10^4\f$) |
+| \f$3\f$ (`logpdf_d3`) | \f$5.49\f$ (\f$8.5\f$) | \f$1.0 \times 10^3\f$ (\f$1.6 \times 10^3\f$) | \f$5.3 \times 10^3\f$ (\f$8.0 \times 10^3\f$) |
+| \f$4\f$ (`logpdf_d4`) | \f$8.19\f$ (\f$13\f$) | \f$339\f$ (\f$510\f$) | \f$5.4 \times 10^3\f$ (\f$8.1 \times 10^3\f$) |
+| \f$5\f$ (`logpdf_d5`) | \f$13.5\f$ (\f$21\f$) | \f$869\f$ (\f$1.3 \times 10^3\f$) | \f$8.6 \times 10^3\f$ (\f$1.3 \times 10^4\f$) |
+| \f$6\f$ (`logpdf_d6`) | \f$9.08\f$ (\f$14\f$) | \f$1.4 \times 10^3\f$ (\f$2.2 \times 10^3\f$) | \f$9.1 \times 10^3\f$ (\f$1.4 \times 10^4\f$) |
+
+Both limiting distributions hold in `tests/distrib/test_pseudohuber.cpp`. For \f$|z| \ge 1.5\f$, every order \f$1\f$ to \f$6\f$ of the \f$(\mu, \sigma)\f$ block agrees with \ref distrib_laplace1 "laplace1_distrib" (scale \f$\sigma / \sqrt{2}\f$) to \f$3.3 \times 10^{-8}\f$ relative at \f$\nu = 10^{-8}\f$ (bound \f$5 \times 10^{-8}\f$) and \f$2.5 \times 10^{-6}\f$ at \f$\nu = 10^{-6}\f$ (bound \f$3.7 \times 10^{-6}\f$). At \f$\nu = 10^8\f$ and \f$10^{10}\f$, differences against \ref distrib_gaussian1 "gaussian1_distrib" measured in units of the asymptotic scales \f$K!\,(1 + z^2)^{(4+K)/2} / (\sigma^K \sqrt{\nu})\f$ for \f$(\mu, \sigma)\f$ components and \f$K!\,(1 + z^2)^{(4+K)/2} / (\sigma^{K-c} \nu^{c+1/2})\f$ for \f$\nu\f$-components (\f$c \ge 1\f$) reach at most \f$0.75\f$ (bound \f$1.1\f$), \f$0.19\f$ (bound \f$0.28\f$), and \f$0.375\f$ for the value (bound \f$0.56\f$). By numerical quadrature across \f$\nu \in [10^{-4}, 5 \times 10^5]\f$, the density integrates to \f$1\f$ and has variance \f$\sigma^2\f$ within \f$4.5 \times 10^{-14}\f$ relative (bound \f$7 \times 10^{-14}\f$). Inside Kokkos kernels (RTX 4070 SUPER), host and device agree to at most \f$1.3 \times 10^{-15}\f$ at \f$\nu = 3.5\f$ and from \f$6.1 \times 10^{-16}\f$ to \f$1.6 \times 10^{-14}\f$ at \f$\nu = 0.05\f$.
+
+## Generic routes
+
+On the generic quadrature expected information, the score form agrees with the variance of the score to \f$3.5 \times 10^{-16}\f$ relative (bound \f$5.3 \times 10^{-16}\f$), the Hessian form agrees with the score form to \f$7.0 \times 10^{-13}\f$ relative (bound \f$1.1 \times 10^{-12}\f$), and the symmetry zeros \f$I_{\mu\sigma}\f$ and \f$I_{\mu\nu}\f$ stay within \f$6.9 \times 10^{-16}\f$ of the largest entry (bound \f$10^{-15}\f$). Against the Laplace and Gaussian limits, the information agrees to \f$1.57 \times 10^{-4}\f$ at \f$\nu = 10^{-8}\f$ (bound \f$2.4 \times 10^{-4}\f$) and \f$1.5 \times 10^{-4}\f$ at \f$\nu = 10^8\f$ (bound \f$2.3 \times 10^{-4}\f$). Orders \f$1\f$ to \f$4\f$ in both forms match 5-point finite differences within \f$1.2 \times 10^{-11}\f$ to \f$1.0 \times 10^{-10}\f$ relative (bounds \f$1.8 \times 10^{-11}\f$ to \f$1.5 \times 10^{-10}\f$).
+
+For the generic cumulative functions, orders \f$1\f$ to \f$6\f$ of \f$\log F\f$ and \f$\log(1 - F)\f$ match 5-point finite differences within \f$4.2 \times 10^{-12}\f$ at order \f$1\f$ up to \f$9.9 \times 10^{-11}\f$ at order \f$6\f$ (bounds \f$6.4 \times 10^{-12}\f$ to \f$1.5 \times 10^{-10}\f$). Generic quantiles satisfy \f$F(F^{-1}(p)) = p\f$ within \f$2.3 \times 10^{-15}\f$ relative (bound \f$3.5 \times 10^{-15}\f$) and \f$F^{-1}(p) + F^{-1}(1 - p) = 2\mu\f$ within \f$7 \times 10^{-16}\f$ at dyadic \f$p\f$ (bound \f$1.1 \times 10^{-15}\f$). See `docs/numerics.md` for full measurements.
+
+## Cost and open corners
+
+On one `gcc` thread, evaluating the full order-\f$6\f$ tensor `logpdf_d6()` takes \f$5.7\f$ microseconds at \f$\nu = 10^{-4}\f$ (where `logpdf()` takes \f$79\f$ nanoseconds) and the timings below across shapes; the cost is dominated by assembling \f$\Lambda\f$ and packing the symmetric tensor rather than evaluating the Bessel functions. The generic expected information takes \f$3\f$ ms (\f$\nu = 0.05\f$) to \f$16\f$ ms (\f$\nu = 2.5\f$) at order \f$0\f$ and \f$60\f$ to \f$160\f$ ms at order \f$4\f$, with the score form \f$1.5\f$ to \f$2\f$ times faster than the Hessian form.
+
+| Shape | Order-6 tensor (microseconds) |
+| --- | --- |
+| \f$\nu = 0.1\f$ | \f$5.6\f$ |
+| \f$\nu = 2\f$ | \f$7.2\f$ |
+| \f$\nu = 100\f$ | \f$6.3\f$ |
+| \f$\nu = 10^4\f$ | \f$6.3\f$ |
+
+Two corners remain open. First, for \f$\nu \ge 10^4\f$, the value (\f$1.6 \times 10^4\f$ ulp) and first order (\f$1.2 \times 10^4\f$ ulp) reflect that \f$\log f\f$ is a difference of numbers of size \f$\sqrt{\nu}\f$ (about \f$10^{-12}\f$ absolute error at \f$\nu = 10^8\f$). Second, at \f$\nu = 1\f$, order \f$6\f$ reaches \f$1.4 \times 10^3\f$ ulp from the assembly of \f$\Lambda\f$.
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/pseudohuber.hpp>
+
+void eval_pseudohuber(Kokkos::View<const double*> y, Kokkos::View<double*> out,
+                      double mu, double sigma, double nu) {
+  const laplace::distrib::pseudohuber_distrib d{mu, sigma, nu};
+  Kokkos::parallel_for("pseudohuber_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0];
+  });
+}
+```
+
+## Members
+
+Struct \ref laplace::distrib::pseudohuber_distrib "pseudohuber_distrib" implements \ref distrib_core "distrib_core" for `n_params = 3`: `mu`, `sigma`, `nu`, `kind`, `n_params`, `y_regularity`, `params`, `bessel_ratio()`, `logpdf()`, `logpdf_d1()`..`logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, and `start_value()`.
+
+## References
+
+- O. Barndorff-Nielsen (1977), Exponentially decreasing distributions for the logarithm of particle size, Proceedings of the Royal Society of London. A. Mathematical and Physical Sciences, 353(1674), 401-419. https://doi.org/10.1098/rspa.1977.0041
+- Peter J. Huber (1964), Robust Estimation of a Location Parameter, The Annals of Mathematical Statistics, 35(1), 73-101. https://doi.org/10.1214/aoms/1177703732
+- P. Charbonnier, L. Blanc-Feraud, G. Aubert and M. Barlaud (1997), Deterministic edge-preserving regularization in computed imaging, IEEE Transactions on Image Processing, 6(2), 298-311. https://doi.org/10.1109/83.551699
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/
