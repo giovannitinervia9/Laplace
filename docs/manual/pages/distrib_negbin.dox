@@ -1,0 +1,265 @@
+/**
+\defgroup distrib_negbin2 Negative binomial, quadratic variance
+\ingroup distrib
+\brief Discrete count distribution with mean \f$\mu > 0\f$ and variance \f$\mu + \mu^2/\theta\f$, with the log-mass in Loader's saddle-point form and its parameter derivatives to order six.
+
+`laplace::distrib::negbin2_distrib` models an overdispersed count \f$y \in \{0, 1, 2, \dots\}\f$ by its
+mean \f$\mu > 0\f$ and a dispersion \f$\theta > 0\f$, with variance \f$\mu + \mu^2/\theta\f$, quadratic
+in the mean. As \f$\theta \to \infty\f$ at fixed \f$\mu\f$ it becomes the Poisson distribution of
+the same mean (\ref distrib_poisson "distrib_poisson"), and at \f$\theta = 1\f$ the geometric
+distribution of the same mean (\ref distrib_geometric "distrib_geometric").
+The log-mass and its derivatives to order six are its own; the
+derivatives of the cumulative functions, the expected information, the quantile and the random
+numbers come from \ref distrib_generic "the generic routes".
+
+## Classic form and reparametrization
+
+Classically the negative binomial counts the failures \f$y\f$ before the \f$r\f$-th success in
+independent trials of success probability \f$p\f$,
+\f$\binom{y + r - 1}{y} p^r (1 - p)^y\f$, with mean \f$r(1-p)/p\f$ and variance \f$r(1-p)/p^2\f$; the
+shape \f$r > 0\f$ need not be an integer. Taking \f$r = \theta\f$ and
+\f$p = \theta/(\theta + \mu)\f$ gives the mean \f$\mu\f$ and the variance above, and the log-mass
+
+\f[
+\ell(\mu, \theta; y) = \log\Gamma(y + \theta) - \log\Gamma(\theta) - \log\Gamma(y + 1)
+  + \theta \log\frac{\theta}{\theta + \mu} + y \log\frac{\mu}{\theta + \mu}.
+\f]
+
+Evaluated in that form it loses about \f$\log_{10} y\f$ digits: the three log-gamma terms are of the
+size of \f$y \log y\f$ while the log-mass is of the size of \f$\log y\f$.
+
+## Parameters, domain, and regularity
+
+The struct sets `kind = distrib_kind::discrete` and `n_params = 2`; the descriptors of `mu` and
+`theta` give the open domain \f$(0, \infty)\f$ and declare the log-mass and the cumulative functions
+infinitely smooth in both, with no kink and a support that does not move. The support runs from
+\f$0\f$ to \f$+\infty\f$, `center()` returns \f$\mu\f$ and `scale()` returns
+\f$\sqrt{\mu + \mu^2/\theta}\f$. Derivatives are packed as `sym_tensor<2, K>`, whose component
+\f$b\f$ holds \f$\partial^K \ell / \partial\mu^{K-b} \partial\theta^{b}\f$
+(\ref distrib_core "distrib_core").
+
+## Formulas and cancellation-free evaluation
+
+Both negative binomial parametrizations share one form, Loader's saddle point, the one
+the Poisson and the binomial distributions also use (Loader, 2002;
+\ref distrib_poisson "distrib_poisson", \ref distrib_binomial "distrib_binomial").
+With \f$\delta\f$ Stirling's error (\ref stirling "stirling"),
+\f$\operatorname{bd}_0(a, b) = a \log(a/b) - a + b\f$ the unit deviance, and, for \f$y \ge 1\f$,
+\f$b_1 = \mu (y + \theta)/(\theta + \mu)\f$, \f$b_2 = \theta (y + \theta)/(\theta + \mu)\f$ and
+\f$\Delta = \theta (y - \mu)/(\theta + \mu)\f$, so that \f$b_1 + b_2 = y + \theta\f$,
+\f$b_1 - y = -\Delta\f$ and \f$b_2 - \theta = \Delta\f$:
+
+\f[
+\ell(\mu, \theta; y) = \frac{1}{2}\log\frac{\theta}{2\pi y (y + \theta)}
+  + \delta(y + \theta) - \delta(y) - \delta(\theta)
+  - \operatorname{bd}_0(y, b_1) - \operatorname{bd}_0(\theta, b_2).
+\f]
+
+Every term is then of the size of the result at any count. At \f$y = 0\f$ the form carries
+\f$\log y\f$ and the mass is \f$-\theta \operatorname{log1p}(\mu/\theta)\f$ instead.
+
+A deviance is differentiated through \f$\psi_1(z) = z - \operatorname{log1p}(z)\f$, since
+\f$\operatorname{bd}_0(a, b) = a\, \psi_1\!\big((b - a)/a\big)\f$. At the shape, where
+\f$b_2 - \theta = \Delta\f$ always, this is a product of \f$\theta\f$ and one composition with
+\f$z_2 = \Delta/\theta = (y - \mu)/(\theta + \mu)\f$, and \f$b_2\f$ is never formed. At the count,
+\f$z = (b_1 - y)/y = -\Delta/y\f$ and the same composition serves for \f$|z| < 1/2\f$, where the
+deviance is of the size of \f$z^2\f$; above \f$1/2\f$ the two closed tensors of
+\f$\partial^\alpha b_1 - y\, \partial^\alpha \log b_1\f$ are used instead, because the composition's
+alternating sum has terms far larger than the result once the count is far from the mean. The
+rational functions of the parameters are built from closed formulas rather than from products:
+\f$\theta/(\theta+\mu)\f$ and \f$\mu/(\theta+\mu)\f$ have
+\f$\partial^{p+q} = (-1)^{p+q} (p+q-1)!\,(p\theta - q\mu)/(\theta+\mu)^{p+q+1}\f$ up to sign, one
+exact numerator, so their derivatives in either parameter alone are single terms.
+
+The cumulative function is the classical incomplete beta identity
+\f$F(k) = I_p(\theta, k + 1)\f$ with \f$k = \lfloor y \rfloor\f$ and \f$p = \theta/(\theta + \mu)\f$,
+taken from `laplace::math::ibeta`, `ibetac`, `log_ibeta` and `log_ibetac`
+(\ref incomplete_beta "incomplete_beta"), each side computed directly so that the small one is
+never a difference. Of the expected information, \f$I_{\mu\mu} = (\mu + \mu^2/\theta)^{-1}\f$ and
+\f$I_{\mu\theta} = 0\f$ are known in closed form, and the test checks the generic sum against them;
+\f$I_{\theta\theta}\f$ has no closed form here and comes from that sum.
+
+## Accuracy and limits
+
+Against the references of `tools/reference/distrib_negbin.py` (5397 rows: the log-mass from
+symbolic derivatives of the definition evaluated at 400 and 500 bits, the cumulative functions
+from `mpmath`'s own incomplete beta at 200 and 260 bits, each kept where the two precisions agree
+to \f$2^{-80}\f$), in ulps of the largest component of the same order at the same point
+(\ref accuracy_conditioned "the conditioning model"), with the test's bounds for orders 0 to 6:
+
+| quantity | worst measured | test bound |
+| --- | --- | --- |
+| `logpmf` | 18.8 | 28 |
+| `logpmf_dk`, orders 1 to 6 | 5.2 to \f$1.6 \times 10^3\f$ | 90, 2340, 23, 9.1, 7.8, 13.5 |
+| `log_cdf` and its generic derivatives | 17.5 to \f$8.1 \times 10^3\f$ | 450, 26, 5640, 800, 1460, 8700, \f$1.2 \times 10^4\f$ |
+| `log_ccdf` and its generic derivatives | 45.7 to 519 | 310, 69, 108, 254, 342, 780, 548 |
+
+The peak of \f$1.6 \times 10^3\f$ ulp at order two sits at \f$(\mu, \theta, y) = (10^3, 10^6, 1)\f$,
+where \f$\theta = \mu^2/y\f$ makes the exact
+\f$\partial^2 \ell / \partial\mu^2 = -y/\mu^2 + (y+\theta)/(\theta+\mu)^2\f$ a zero to three digits:
+a zero of the quantity asked for, not of the route. The derivatives of \f$\log F\f$ are at the level
+of the summation route that produces them. The cumulative functions inherit the conditioning of
+\f$I_p(\theta, k+1)\f$ in \f$p\f$, which costs \f$\theta\f$ ulp per ulp of \f$p\f$.
+
+## Kokkos usage
+
+Every member is marked `LAPLACE_HD`, so the same code runs on the host and inside a device kernel.
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/negbin2.hpp>
+
+void eval_negbin2(Kokkos::View<const double*> y, Kokkos::View<double*> out, double mu,
+                  double theta) {
+  const laplace::distrib::negbin2_distrib d{mu, theta};
+  Kokkos::parallel_for("negbin2_d2", y.extent(0), KOKKOS_LAMBDA(int i) {
+    out(i) = d.logpmf_d2(y(i))[0];  // d^2 log p / dmu^2
+  });
+}
+```
+
+## Members
+
+- `mu`, `theta`: the mean and the dispersion.
+- `logpmf()`, `logpmf_dk<K>()` and `logpmf_d1()` to `logpmf_d6()`: the log-mass and its parameter
+  derivatives to order six.
+- `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`: the cumulative functions through the regularized
+  incomplete beta; `success_prob()` returns \f$\theta/(\theta + \mu)\f$.
+- `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`: the support, the
+  location and spread used by the generic routes, and the empty set of non-smooth points.
+
+## References
+
+- N. L. Johnson, A. W. Kemp and S. Kotz (2005), Univariate Discrete Distributions, Wiley Series in Probability and Statistics. https://doi.org/10.1002/0471715816
+- C. Loader (2002), Fast and Accurate Computation of Binomial Probabilities, manuscript, Lucent Technologies, Murray Hill, NJ. https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §5.11 Asymptotic Expansions (Gamma Function), https://dlmf.nist.gov/5.11
+- NIST Digital Library of Mathematical Functions, §8.17 Incomplete Beta Functions, https://dlmf.nist.gov/8.17
+*/
+
+/**
+\defgroup distrib_negbin1 Negative binomial, linear variance
+\ingroup distrib
+\brief Discrete count distribution with mean \f$\mu > 0\f$ and variance \f$\mu(1 + \theta)\f$, the same mass as the quadratic parametrization taken in variables that stay regular at its Poisson limit.
+
+`laplace::distrib::negbin1_distrib` is the same distribution as
+\ref distrib_negbin2 "the quadratic parametrization", written with a dispersion \f$\theta > 0\f$ for
+which the variance \f$\mu(1 + \theta)\f$ is proportional to the mean. Its Poisson limit is
+\f$\theta \to 0\f$. Nothing in its expected information is orthogonal: \f$I_{\mu\theta} \neq 0\f$, so
+all three blocks come from the generic sum over the support.
+
+## Classic form and reparametrization
+
+From the classic shape \f$r\f$ and success probability \f$p\f$ of
+\ref distrib_negbin2 "the quadratic parametrization", this one takes \f$r = \mu/\theta\f$ and
+\f$p = 1/(1 + \theta)\f$, which gives the mean \f$\mu\f$, the variance \f$\mu(1 + \theta)\f$ and the
+log-mass
+
+\f[
+\ell(\mu, \theta; y) = \log\Gamma\!\left(y + \frac{\mu}{\theta}\right)
+  - \log\Gamma\!\left(\frac{\mu}{\theta}\right) - \log\Gamma(y + 1)
+  - \frac{\mu}{\theta}\operatorname{log1p}(\theta) + y \log\frac{\theta}{1 + \theta}.
+\f]
+
+## Parameters, domain, and regularity
+
+As in \ref distrib_negbin2 "the quadratic parametrization": both parameters are open on
+\f$(0, \infty)\f$, the log-mass and the cumulative functions are infinitely smooth in them, the
+support does not move and runs from \f$0\f$ to \f$+\infty\f$, `center()` returns \f$\mu\f$ and
+`scale()` returns \f$\sqrt{\mu(1 + \theta)}\f$.
+
+## Formulas and cancellation-free evaluation
+
+The log-mass is the saddle-point form of \ref distrib_negbin2 "the quadratic parametrization" at
+the shape \f$r = \mu/\theta\f$, and what this parametrization adds is which variables the
+derivatives may be taken in. The shape itself is not one of them: differentiating
+\f$r = \mu/\theta\f$ \f$K\f$ times in \f$\theta\f$ puts terms of the size of \f$\theta^{1-K}\f$ into
+the chain rule while \f$\partial^K \ell / \partial\theta^K\f$ is of the size of one, so the
+composition loses a relative \f$\theta^{K-1}\f$. Every quantity is therefore written as a rational
+function of \f$(\mu, \theta)\f$ that is regular at \f$\theta = 0\f$:
+
+\f[
+u = \frac{y\theta}{\mu}, \qquad b_1 = \frac{y\theta + \mu}{1 + \theta} = y - \frac{y - \mu}{1 + \theta},
+\qquad w_1 = \frac{y - \mu}{y\theta + \mu},
+\f]
+
+so that \f$(y + r)/r = 1 + u\f$ and the prefactor \f$\tfrac{1}{2}\log(r/(y+r))\f$ is
+\f$-\tfrac{1}{2}\operatorname{log1p}(u)\f$, while \f$b_1\f$ has closed partials of one term each.
+Because \f$b_2 = b_1/\theta\f$ and \f$w_2 = -\theta w_1\f$ exactly, the deviance at the shape is
+
+\f[
+\operatorname{bd}_0(r, b_2) = -b_1 w_1\, \psi(-\theta w_1), \qquad
+\psi(v) = \frac{D(1 + v)}{v}, \qquad D(1 + v) = (1 + v)\operatorname{log1p}(v) - v,
+\f]
+
+a product with no \f$1/\theta\f$ left in it. The deviance at the count is the one of
+\ref distrib_negbin2 "the quadratic parametrization" with these maps. At \f$y = 0\f$ the log-mass is
+\f$-\mu\,(1 + \kappa(\theta))\f$ with \f$\kappa(\theta) = \operatorname{log1p}(\theta)/\theta - 1\f$,
+which is of the size of \f$\theta\f$ as \f$\theta \to 0\f$ and loses nothing there. The difference of
+Stirling's errors \f$\delta(y + r) - \delta(r)\f$ is taken as a function of \f$s = \theta/\mu\f$
+above \f$r = 10\f$, where both arguments are in the range of the asymptotic series of
+\ref stirling "stirling" and the difference is an explicit function of \f$s\f$; below \f$r = 10\f$
+the shape is a regular variable and the composition is taken in it.
+
+The cumulative function is \f$F(k) = I_p(r, k + 1)\f$ with \f$p = 1/(1 + \theta)\f$ formed directly
+(\ref incomplete_beta "incomplete_beta"), and the derivatives of \f$\log F\f$ and
+\f$\log(1 - F)\f$, the expected information and its derivatives, the quantile and the random numbers
+come from \ref distrib_generic "the generic routes".
+
+## Accuracy and limits
+
+On the same references as \ref distrib_negbin2 "the quadratic parametrization", in ulps of the
+largest component of the same order at the same point, with the test's bounds for orders 0 to 6:
+
+| quantity | worst measured | test bound |
+| --- | --- | --- |
+| `logpmf` | 41.2 | 62 |
+| `logpmf_dk`, orders 1 to 6 | 24.6 to \f$3.1 \times 10^3\f$ | 430, 37, 60, 4600, 660, 2000 |
+| `log_cdf` and its generic derivatives | 39.3 to \f$9.0 \times 10^8\f$ | \f$8.1 \times 10^5\f$, 62, 59, \f$2.5 \times 10^4\f$, \f$4.0 \times 10^5\f$, \f$1.8 \times 10^7\f$, \f$1.4 \times 10^9\f$ |
+| `log_ccdf` and its generic derivatives | 25 to 272 | 410, 43, 43, 38, 38, 82, 164 |
+
+Three corners carry those worst figures. At \f$(\mu, \theta, y) = (10^5, 10^{-3}, 100158)\f$ the
+four pieces of the assembled log-mass are 140 to 700 times the fourth derivative, which is where
+the \f$3.1 \times 10^3\f$ ulp comes from. At \f$(10^3, 10^{-6})\f$ the success probability is
+\f$1 - 10^{-6}\f$ and \f$\log I_p\f$ is within \f$10^{-6}\f$ of zero, where its relative error is
+that of a logarithm near zero: \f$5.4 \times 10^5\f$ ulp on the value of \f$\log F\f$. At
+\f$\theta = 1000\f$, a shape of \f$0.04\f$ whose tail decays by \f$0.999\f$ a step, the summation
+route reaches \f$9.0 \times 10^8\f$ ulp at order six. On the two builds the measured figures agree
+everywhere but two cells, where they differ by one ulp.
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/negbin1.hpp>
+
+void eval_negbin1(Kokkos::View<const double*> y, Kokkos::View<double*> out, double mu,
+                  double theta) {
+  const laplace::distrib::negbin1_distrib d{mu, theta};
+  Kokkos::parallel_for("negbin1_logpmf", y.extent(0), KOKKOS_LAMBDA(int i) {
+    out(i) = d.logpmf(y(i));
+  });
+}
+```
+
+## Members
+
+- `mu`, `theta`: the mean and the dispersion.
+- `logpmf()`, `logpmf_dk<K>()` and `logpmf_d1()` to `logpmf_d6()`: the log-mass and its parameter
+  derivatives to order six.
+- `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`: the cumulative functions through the regularized
+  incomplete beta; `shape()` returns \f$\mu/\theta\f$ and `success_prob()` returns
+  \f$1/(1 + \theta)\f$.
+- `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`: the support, the
+  location and spread used by the generic routes, and the empty set of non-smooth points.
+
+## References
+
+- N. L. Johnson, A. W. Kemp and S. Kotz (2005), Univariate Discrete Distributions, Wiley Series in Probability and Statistics. https://doi.org/10.1002/0471715816
+- C. Loader (2002), Fast and Accurate Computation of Binomial Probabilities, manuscript, Lucent Technologies, Murray Hill, NJ. https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §5.11 Asymptotic Expansions (Gamma Function), https://dlmf.nist.gov/5.11
+- NIST Digital Library of Mathematical Functions, §8.17 Incomplete Beta Functions, https://dlmf.nist.gov/8.17
+*/

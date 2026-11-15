@@ -6306,3 +6306,174 @@ earlier where the curvature is small. (2) Poisson, chisq and the gamma
 parametrizations evaluate lgamma or the Stirling error at every pass although
 the terms that depend only on y could be summed once; that is an engine
 optimization (sufficient statistics), not done here.
+
+## The two negative binomial families: negbin1 and negbin2
+
+**What.** `negbin2_distrib` (mean mu > 0, dispersion theta > 0, variance
+mu + mu^2/theta) and `negbin1_distrib` (the same two parameters, variance
+mu (1 + theta)), the fourth and fifth of the seven discrete families of phase 4
+(`include/laplace/distrib/negbin2.hpp`, `negbin1.hpp` and the shared
+`negbin_core.hpp`). Each writes the log-mass with its six derivative orders and
+the cumulative functions, which are closed through the regularized incomplete
+beta, F(k) = I_p(r, k + 1) with r the shape and p the success probability; the
+derivatives of log F and log(1 - F), the expected information with its
+derivatives, the quantile and the random numbers come from the generic routes
+(`generic_cdf.hpp`, `generic_info.hpp`, `generic_quantile.hpp`,
+`generic_rng.hpp`). Of the information, negbin2's I_mu_mu = 1/(mu + mu^2/theta)
+and I_mu_theta = 0 are known in closed form and the test checks the generic sum
+against them; negbin1 has no orthogonal block.
+
+**How, the form.** Both families are the same mass in a shape r and a mean m,
+with (r, m) = (theta, mu) for negbin2 and (mu/theta, mu) for negbin1:
+
+    p(y) = Gamma(y + r) / (Gamma(r) y!) (r/(r+m))^r (m/(r+m))^y.
+
+Every grouping of that expression keeps terms of the size of y log y while the
+log-mass is of the size of log y, so at large counts it loses about log10(y)
+digits. The form used is Loader's saddle point, as in `poisson.hpp` and
+`binomial.hpp`, with delta Stirling's error (`math::stirling_error`, equal to
+Loader's stirlerr) and bd0(a, b) = a log(a/b) - a + b: for y >= 1,
+
+    l = (1/2) log( r / (2 pi y (y + r)) ) + delta(y+r) - delta(y) - delta(r)
+        - bd0(y, b1) - bd0(r, b2),
+    b1 = m (y+r)/(r+m),  b2 = r (y+r)/(r+m),  b1 + b2 = y + r,
+
+and both deviances are taken at the one numerator Delta = r (y - m)/(r + m),
+since b1 - y = -Delta and b2 - r = Delta exactly. At y = 0 the form has log y in
+it and the mass is written directly as r log(r/(r+m)) = -r log1p(m/r).
+
+**How, the derivatives.** Each family composes that form with its own rational
+functions of (mu, theta), never with the shape: with r = mu/theta the chain
+rule's terms are of the size of theta^(1-K) while d^K l / dtheta^K is of the
+size of one, a relative loss of theta^(K-1). negbin1 therefore reads
+(y + r)/r = 1 + u with u = y theta / mu, b1 = (y theta + mu)/(1 + theta) and
+w1 = (y - mu)/(y theta + mu), all regular at theta = 0. A deviance is
+differentiated through psi1(z) = z - log1p(z), since bd0(a, b) = a psi1((b-a)/a):
+
+- at the shape, where b - a = Delta always, this is a product of a and one
+  composition (negbin2: theta psi1((y - mu)/(theta + mu)), with b2 never
+  formed; negbin1: -b1 w1 psi(-theta w1) with psi(v) = D(1+v)/v, since
+  b2 = b1/theta and w2 = -theta w1 exactly, so the 1/theta cancels);
+- at the count, the composition y psi1(z), z = (b1 - y)/y, below |z| = 1/2 and
+  the two closed tensors d^a b1 - y d^a log b1 above it.
+
+The small algebra that assembles them (packed pairs of derivatives of total
+order at most 6, in the layout of `math/chain_pair.hpp`) is in
+`negbin_core.hpp`: constants, affine forms, their reciprocals and logarithms,
+products by Leibniz's rule and the composition of a function of one variable,
+which calls `chain_rule_pair_dk` once per order. Every rational is built from a
+closed formula with one numerator rather than from a product of tensors:
+theta/(theta+mu) and mu/(theta+mu) have
+d^(p+q) = (-1)^(p+q) (p+q-1)! (p theta - q mu) / (theta+mu)^(p+q+1) up to sign,
+whose pure derivatives in either parameter are single terms. negbin1's
+difference of Stirling's errors delta(y+r) - delta(r) is taken as a function of
+s = theta/mu above r = 10, where both arguments are in the range of the
+asymptotic series of `stirling.hpp`, so that delta(r) = sum_j sigma_j s^(2j-1)
+and delta(y+r) the same series at t = s/(1 + y s); below r = 10 the shape is a
+regular variable and the composition is taken in it.
+
+**What was tried and rejected.** Four routes were written and measured before
+this one; each is recorded because each looked right:
+
+1. the log-gamma difference at the integer shift y in Stirling form, with
+   lgamma(y+1) left as a term: 1.4e5 ulp on the mass at y = 1e5 (both
+   families), the loss of log10(y) digits described above;
+2. negbin1 by composing the core's derivatives in r with r = mu/theta: 6e23 ulp
+   at order 6 and theta = 1e-6, the loss of theta^(K-1);
+3. a deviance as the product b D(1 + w) differentiated by Leibniz's rule:
+   3.8e6 ulp on the second derivative in mu at y = 1, mu = 1e3, theta = 1e6,
+   where the intermediate terms are 1.2e-2 and the result 1e-6; and the
+   composition of f(b) = bd0(a, b) with b: 4.9e11 ulp at order 6 for a count
+   far from the mean, where the Bell sum alternates with terms 1e7 times the
+   result;
+4. negbin1's bd0(r, b2) written out as
+   mu (1 + kappa(theta)) - y (1 + kappa(u)) + (y - mu)/(1 + theta): terms of the
+   size of mu against a result of the size of (y - mu)^2 theta / mu, so 1.3e4
+   ulp on the value at (1e5, 1e-3) near the mode.
+
+The rationals built as products of tensors cost a further mu/theta in the mu
+direction (1.9e5 ulp at order 1 at (1e5, 1e-3)), and -(V(theta, 0, mu) + mu)
+for the mass at y = 0 subtracts mu from a quantity of its own size (239 ulp at
+mu = 40, theta = 0.01) where one log1p cancels nothing.
+
+**Measured.** References from `tools/reference/distrib_negbin.py`, which first
+checks every closed form against SymPy (Loader's identity, both
+parametrizations' rationals, negbin1's deviance at the shape as a product,
+kappa and psi with their series and their recursions, t(s), and V with its
+series) and then writes 5397 rows: the mass from lambdified symbolic
+derivatives of the definition at 400 and 500 bits, log F and log(1 - F) from
+mpmath's own incomplete beta by `mpmath.diff` at 200 and 260 bits, each kept
+where the two precisions agree to 2^-80. The mass rows need the high precision:
+the symbolic sixth derivative in theta carries terms of the size of theta^-6
+against a result of the size of mu, so at theta = 1e-6 about 31 digits are lost
+and 200 bits leave too few. Worst error in ulps of the largest component of the
+same order at the same point, gcc (Serial + OpenMP) and CUDA:
+
+| quantity | negbin2 | negbin1 |
+|---|---|---|
+| log-mass | 18.8 | 41.2 |
+| its derivatives, orders 1 to 6 | 5.2 to 1.6e3 | 24.6 to 3.1e3 |
+| log F, orders 0 to 6 | 17.5 to 8.1e3 | 39.3 to 9.0e8 |
+| log(1 - F), orders 0 to 6 | 45.7 to 519 | 25 to 272 |
+
+The two builds agree on every cell: the only differences over the 5397 rows are
+one ulp on negbin1's log(1 - F) at orders 0 and 6 (272 against 271 and 109
+against 110), so one figure is given for both.
+
+The outliers of each row are named points, not a general level: negbin2's
+second derivative reaches 1.6e3 ulp at (mu = 1e3, theta = 1e6, y = 1), where
+theta = mu^2/y makes the exact d^2 l / dmu^2 = -y/mu^2 + (y+theta)/(theta+mu)^2
+a zero to three digits, and negbin1's fourth reaches 3.1e3 ulp at
+(1e5, 1e-3, y = 100158), where the four pieces of the assembled mass are 140 to
+700 times the result. The derivatives of log F by the generic summation route
+are at the level of that route, tens to thousands of ulp, with two corners:
+negbin1 at theta = 1000 (a shape of 0.04, so a tail that decays by 0.999 a
+step) reaches 9.0e8 ulp at order 6, and the value log F itself reaches 5.4e5 ulp
+at (1e3, 1e-6), where p = 1 - 1e-6 and log I_p is within 1e-6 of zero -- the
+limit `log_ibeta` already records for the binomial.
+
+Speed, ns per call as Serial (one host thread) / CUDA,
+`benchmarks/distrib_negbin.cpp`:
+
+| quantity | negbin2(3.5, 2) | negbin1(3.5, 2) | negbin1(2242, 0.028) |
+|---|---|---|---|
+| log p | 255 / 170 | 272 / 191 | 144 / 428 |
+| log p, order 1 | 732 / 159 | 949 / 677 | 461 / 886 |
+| log p, order 6 | 13100 / 3920 | 26900 / 7310 | 34000 / 46300 |
+| log F (incomplete beta) | 281 / 129 | 332 / 166 | 511 / 2100 |
+| log F, order 2 (generic sum) | 2.5e5 / 1.2e5 | 4.2e5 / 1.7e5 | 1.5e6 / 1.9e6 |
+| I (generic sum) | 1.0e5 / 1.3e4 | 1.5e5 / 2.9e4 | 3.9e5 / 4.2e5 |
+| I, order 2 (generic sum) | 9.3e5 / 1.0e5 | 8.9e5 / 1.6e5 | 3.9e6 / 4.6e6 |
+
+The last column is launched on 64 arguments against 1024 for the first two, so
+its CUDA figures are the launch, not the kernel; the generic sums walk a tail
+whose length depends on the parameters, which is why they cost ten to a hundred
+times the mass. OpenMP with 4 threads is 2 to 4 times Serial on the mass and
+its derivatives.
+
+**What this says.** The mass and its derivatives are at the accuracy of the
+functions they are built from, tens of ulp, once three things hold together:
+Loader's form for the value, inner maps that are regular where the family's
+Poisson limit is, and a deviance differentiated as a product or a composition
+of quantities of the result's own size rather than by Leibniz's rule on a
+product of a large factor and a small one. The three rewrites above were each
+worth about four digits, and the one that mattered most was the last: an
+alternating Bell sum is unusable at order 6 when its terms are far from the
+result. What remains is either a genuine zero of the quantity asked for or the
+accuracy of a route these families only call.
+
+**Chosen.** As above. Test `tests/distrib/test_negbin.cpp`, bounds at 1.5 times
+the worse of the two builds, every reference row evaluated inside a Kokkos
+kernel; the two families also check against each other (negbin2(mu, theta) is
+negbin1(mu, mu/theta)) and against the geometric at theta = 1.
+
+**Open.** The order-6 tensor costs 13 to 34 microseconds because every order
+reassembles the whole tensor through `chain_rule_pair_dk`; orders 1 and 2, which
+is what a fit reads, are under a microsecond, so this is left until a profile
+asks for it. The derivatives of log F have no closed route here: writing one
+through the mixed derivatives of the incomplete beta in its shape and its
+argument is the same open point the binomial records. The cumulative functions
+inherit the conditioning of I_p(r, k + 1) in p, which costs theta ulp per ulp of
+p: the two parametrizations agree on the mass to 1e-12 and on the cumulative
+function only to 1e-15 theta. Neither family implements `start_value`, the
+member the fitting interface is adding.

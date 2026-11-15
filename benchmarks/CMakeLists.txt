@@ -1,6 +1,6 @@
 # Measurement tools (accuracy and speed); not part of the test suite.
 
-laplace_kokkos_sources(math_elementary.cpp math_special.cpp math_incomplete.cpp math_ibeta.cpp math_inverse.cpp math_normal.cpp math_gamma_deriv.cpp math_gamma_mixed.cpp math_gamma_ratio.cpp math_beta_deriv.cpp math_student.cpp math_owen.cpp math_bessel.cpp math_bessel_k.cpp math_faa.cpp math_quad.cpp math_dd.cpp math_rel.cpp math_stirling.cpp bijector_scalar.cpp distrib_generic.cpp pdmat_pilot.cpp bijector_coupled.cpp pdmat_unstructured.cpp pdmat_toeplitz.cpp pdmat_factor_analytic.cpp pdmat_reduced_rank.cpp basis_bspline.cpp basis_cyclic_bspline.cpp basis_tensor.cpp)
+laplace_kokkos_sources(math_elementary.cpp math_special.cpp math_incomplete.cpp math_ibeta.cpp math_inverse.cpp math_normal.cpp math_gamma_deriv.cpp math_gamma_mixed.cpp math_gamma_ratio.cpp math_beta_deriv.cpp math_student.cpp math_owen.cpp math_bessel.cpp math_bessel_k.cpp math_faa.cpp math_quad.cpp math_dd.cpp math_rel.cpp math_stirling.cpp bijector_scalar.cpp distrib_generic.cpp pdmat_pilot.cpp bijector_coupled.cpp pdmat_unstructured.cpp pdmat_toeplitz.cpp pdmat_factor_analytic.cpp pdmat_reduced_rank.cpp basis_bspline.cpp basis_cyclic_bspline.cpp basis_tensor.cpp distrib_negbin.cpp)
 
 add_executable(math_elementary math_elementary.cpp)
 target_link_libraries(math_elementary PRIVATE Laplace::laplace)
@@ -63,6 +63,9 @@ target_link_libraries(math_stirling PRIVATE Laplace::laplace)
 
 add_executable(distrib_generic distrib_generic.cpp)
 target_link_libraries(distrib_generic PRIVATE Laplace::laplace)
+
+add_executable(distrib_negbin distrib_negbin.cpp)
+target_link_libraries(distrib_negbin PRIVATE Laplace::laplace)
 
 add_executable(pdmat_pilot pdmat_pilot.cpp)
 target_link_libraries(pdmat_pilot PRIVATE Laplace::laplace)
