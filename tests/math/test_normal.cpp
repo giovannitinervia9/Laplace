@@ -47,6 +47,22 @@ struct LogPhiD {
     }
   }
 };
+struct LogMills {
+  KOKKOS_INLINE_FUNCTION double operator()(double x) const { return laplace::math::log_mills(x); }
+};
+struct LogMillsD {
+  int k;
+  KOKKOS_INLINE_FUNCTION double operator()(double x) const {
+    switch (k) {
+      case 1: return laplace::math::log_mills_d1(x);
+      case 2: return laplace::math::log_mills_d2(x);
+      case 3: return laplace::math::log_mills_d3(x);
+      case 4: return laplace::math::log_mills_d4(x);
+      case 5: return laplace::math::log_mills_d5(x);
+      default: return laplace::math::log_mills_d6(x);
+    }
+  }
+};
 struct PhiInv {
   KOKKOS_INLINE_FUNCTION double operator()(double p) const { return laplace::math::Phi_inv(p); }
 };
@@ -178,6 +194,27 @@ TEST_CASE("derivatives of log Phi against mpmath") {
   check_deriv(6, 1150.0, 1.0, 2.6, 4.1);
 }
 
+// The derivatives of log M have no zero on the real line (the cumulants of the
+// density proportional to exp(-x s - s^2/2) on s > 0 are positive and fall to
+// zero only as x -> -inf), so the plain relative error in ulps is their
+// measure. The value does cross zero, at x = 0.30246, where M(x) = 1, and no
+// route that starts from M is relatively accurate there; log M enters a
+// log-density additively, so what counts is its absolute error, which is the
+// ulp1 column (ulps of max(|log M|, 1)). Its relative error is left unbounded
+// and the measurement is in the numerics note.
+// Bounds: the errors measured on 2026-11-15 on the gcc/OpenMP and CUDA builds
+// with a margin of about half again. From order three on the error is that of
+// log_Phi_dk in its branch below t = -1, which these call at t = -x.
+TEST_CASE("the Mills ratio on the log scale against mpmath") {
+  check("log_mills", LogMills{}, 1e300, 3.0);
+  check("log_mills_d1", LogMillsD{1}, 3.5, 2.0);
+  check("log_mills_d2", LogMillsD{2}, 8.0, 2.0);
+  check("log_mills_d3", LogMillsD{3}, 21.0, 2.0);
+  check("log_mills_d4", LogMillsD{4}, 40.0, 2.0);
+  check("log_mills_d5", LogMillsD{5}, 145.0, 4.5);
+  check("log_mills_d6", LogMillsD{6}, 805.0, 6.3);
+}
+
 TEST_CASE("normal quantile from p and from log p against mpmath") {
   check_quantile("qnorm", PhiInv{}, false, 3.5);
   check_quantile("Phi_inv_logp", PhiInvLogp{}, true, 4.5);
@@ -207,4 +244,16 @@ TEST_CASE("normal block at the ends of the range") {
   CHECK(lm::Phi_inv_logp(0.0) == inf);
   CHECK(std::isnan(lm::erfc(std::nan(""))));
   CHECK(std::isnan(lm::log_Phi(std::nan(""))));
+  // log M(x) = log Phi(-x) + x^2/2 + log(2 pi)/2 grows as x^2/2 to the left and
+  // falls as -log x to the right; its first derivative is -1/x there
+  CHECK(lm::log_mills(inf) == -inf);
+  CHECK(lm::log_mills(-inf) == inf);
+  CHECK(std::isfinite(lm::log_mills(-1.896e154)));
+  for (double x : {-1.8962e154, -1e200, -inf}) CHECK(lm::log_mills(x) == inf);
+  CHECK(lm::log_mills_d1(inf) == 0.0);
+  CHECK(lm::log_mills_d1(-1e200) == -1e200);
+  CHECK(lm::log_mills_d2(-1e200) == 1.0);
+  CHECK(lm::log_mills_d6(-1e200) == 0.0);
+  for (int k = 1; k <= 6; ++k) CHECK(std::isnan(LogMillsD{k}(std::nan(""))));
+  CHECK(std::isnan(lm::log_mills(std::nan(""))));
 }

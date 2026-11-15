@@ -10,6 +10,9 @@
 // whose derivatives in z are those of the standardized distribution.
 // mixed_power_dk does the same when the second parameter carries the scale as a
 // power, sigma = w^k (the variance, the precision, the rate).
+// mixed_shape_dk does it when the function of z also depends on a third,
+// smooth parameter (a shape): the Student's degrees of freedom, the
+// pseudo-Huber's nu.
 #pragma once
 
 #include <laplace/core/config.hpp>
@@ -126,6 +129,51 @@ LAPLACE_HD sym_tensor<2, K> mixed_power_dk(const double* L, double z, double sig
     for (int i = 0; i < b; ++i) f /= w;
     t[b] = s * f;
   }
+  return t;
+}
+
+// A location, a scale and one smooth shape parameter s: the parameters are
+// (mu, sigma, s) in that order and the log-density is Lambda(z, s) plus terms
+// in sigma and s alone, which the caller adds to the components they belong to
+// (-log sigma adds its own derivatives to the component with every index in
+// sigma, as the two-parameter families do).
+//
+// Derivatives in mu and sigma reach Lambda only through z and so commute with
+// those in s: the component with a derivatives in mu, b in sigma and c in s is
+// entry b of mixed_dk<a + b> applied to the z-derivatives of d^c Lambda / ds^c,
+// and the component with a = b = 0 is d^K Lambda / ds^K itself. So nothing is
+// computed here beyond mixed_dk; what this does is read the table of mixed
+// (z, s) derivatives in the right order and write the components where the
+// packing of sym_tensor<3, K> wants them.
+//
+//   D[c * (K + 1) + j] = d^c/ds^c d^j/dz^j Lambda(z, s),   c + j <= K,
+//
+// with j = 0 read only at c = K (the entries with c + j > K are never read).
+template <int K, int C>
+LAPLACE_HD void shape_block(const double* D, double z, double sigma, sym_tensor<3, K>& t) {
+  constexpr int n = K - C;  // derivatives in (mu, sigma)
+  const double* L = D + C * (K + 1);
+  int idx[K];
+  if constexpr (n == 0) {
+    for (int i = 0; i < K; ++i) idx[i] = 2;
+    t[sym_tensor_position<3, K>(idx)] = L[0];
+  } else {
+    const sym_tensor<2, n> s = mixed_dk<n>(L, z, sigma);
+    for (int b = 0; b <= n; ++b) {
+      int p = 0;
+      for (int i = 0; i < n - b; ++i) idx[p++] = 0;
+      for (int i = 0; i < b; ++i) idx[p++] = 1;
+      for (int i = 0; i < C; ++i) idx[p++] = 2;
+      t[sym_tensor_position<3, K>(idx)] = s[b];
+    }
+  }
+  if constexpr (C < K) shape_block<K, C + 1>(D, z, sigma, t);
+}
+
+template <int K>
+LAPLACE_HD sym_tensor<3, K> mixed_shape_dk(const double* D, double z, double sigma) {
+  sym_tensor<3, K> t;
+  shape_block<K, 0>(D, z, sigma, t);
   return t;
 }
 

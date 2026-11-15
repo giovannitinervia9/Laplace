@@ -6483,3 +6483,125 @@ since negbin1's Poisson limit is the lower end of theta (where `start_inside`
 already puts it) while negbin2's is the upper one, so its denominator is floored
 at mu/100, which starts it at theta = 100 mu, a variance of 1.01 times the mean.
 The floor is a convention, not a measurement.
+
+## The Mills ratio on the log scale, with its derivatives to order 6
+
+**What.** `own::log_mills(x)` and `own::log_mills_d1 .. _d6(x)`
+(`include/laplace/math/normal.hpp`, with the wrapper in `laplace::math`):
+log M(x) and its derivatives in x to order six, where
+M(x) = Phi(-x) / phi(x) = sqrt(pi/2) erfcx(x / sqrt 2) is the Mills ratio.
+`inv_mills(t)` = phi(t)/Phi(t), which is 1/M(-t), was already there. The
+normalizing constant of the elastic-net density is 2 M(x) / sqrt(c) with
+x = a / sqrt(c), a = lambda alpha and c = lambda (1 - alpha), so its logarithm
+and the derivatives of that log-density in (lambda, alpha) read exactly these
+seven functions.
+
+**How.** The value: for x >= 0 from `erfcx_pos`, which neither cancels nor
+underflows (erfcx(x / sqrt 2) falls like sqrt(2/pi) / x, so log M falls like
+-log x); for x < 0, where erfcx overflows below x = -37.6, from
+log M = log Phi(-x) + x^2/2 + log(2 pi)/2 with x^2/2 carried as the exact pair
+h + l, as log Phi does. Below -sqrt(2 DBL_MAX) = -1.8961e154 the quadratic
+passes DBL_MAX and the value saturates to +inf.
+
+The derivatives rest on one identity. With t = -x,
+log M(x) = log Phi(t) + x^2/2 + log(2 pi)/2, so
+
+    d^k log M / dx^k = (-1)^k [d^k log Phi / dt^k](-x) + x [k = 1] + [k = 2],
+
+which from order three on is the derivative of log Phi alone: orders 3 to 6 are
+`log_Phi_d3 .. _d6` at -x with the sign (-1)^k, and nothing is added or
+subtracted. At orders one and two the two terms cancel for large x, each being
+of size x and of size one while the results are -1/x and 1/x^2. There the
+cumulant form is used instead: d^k log M / dx^k = (-1)^k kappa_k, with kappa_k
+the cumulants of the density proportional to exp(-x s - s^2/2) on s > 0, which
+`log_Phi_dk` already computed inside its own branch below t = -1 and which is
+now a function of its own, `detail_normal::mills_cumulant(k, x, c2, m0)` (the
+downward ratio recursion with K = k + m0 + ceil(c2 / x^2) steps, then the
+moment-to-cumulant recursion). `log_Phi_dk` calls it in place of its own copy,
+operation for operation, so its measured numbers are untouched. The split is at
+x = 1, which is where `log_Phi_dk` changes route as well.
+
+So the only new arithmetic is the value for x >= 0 and the two cumulant calls;
+the rest is the normal block's own measured code, read through the identity.
+`detail_owen::log_g0_series` carries the same recursion in an all-orders form
+(one downward pass fills every order's Taylor coefficient) and keeps it: it
+sits in the skew normal's cdf, where one pass for five orders is the point.
+
+**Measured.** `tools/reference/mills.py` writes `log_mills.csv` (2412 rows) and
+`log_mills_d1 .. _d6.csv` (2011 rows each) at 220 bits, every row checked
+against a computation at 290 bits. The route is independent of the C++ one: the
+raw moments m_k = int_0^inf s^k exp(-x s - s^2/2) ds of the same density are
+integrated with mpmath (positive integrands, so no quadrature cancels; the
+substitution s = u/x above x = 1 keeps the mass at u of order one for every x
+up to 1e9), then log M = log m_0 and the cumulants follow from the moments. The
+grid runs over x from 1e-6 to 1e9, a fifth of the rows in [0.4, 2.5] around the
+split, a fifth in [-5, 1], a fifth in [25, 45] where Phi(-x) underflows on the
+natural scale, and, for the value alone, down to x = -1e8. Below x = -5 the
+cumulants of order three and above fall like exp(-x^2/2) while the raw moments
+grow like |x|^k, so no working precision recovers them by this route; the C++
+route there is `log_Phi_dk` at a positive argument, which has its own
+references.
+
+Worst error over every row, relative, in ulps of the result:
+
+| quantity | gcc | CUDA | worst x (gcc, CUDA) | the plain form, gcc |
+|---|---|---|---|---|
+| log M | 858 | 858 | 0.3021, 0.3021 | 6.6e16 |
+| order 1 | 2.25 | 1.84 | 0.843, 36.1 | 8.7e15 |
+| order 2 | 5.12 | 4.44 | 90.7, 0.991 | 8.7e15 |
+| order 3 | 13.9 | 11.0 | 1.010, 1.026 | the same route |
+| order 4 | 26.0 | 18.6 | 1.515, 1.423 | the same route |
+| order 5 | 96.2 | 44.4 | 1.011, 1.066 | the same route |
+| order 6 | 536 | 485 | 1.108, 1.084 | the same route |
+
+The last column is the plain form, which takes every order from log Phi at -x
+and adds the quadratic's terms at orders one and two, and the value from
+log Phi(-x) + x^2/2 at every x. The two differ only where the split exists, and
+there the plain form keeps no digit at all beyond x of a few thousand (its
+worst points are x = 2.1e9 for the value, 1.4e8 and 1.9e8 for the two orders).
+From order three on the two are the same code, which is why those rows agree.
+
+The 858 ulp of the value are the conditioning of its zero: log M crosses zero
+at x = 0.30246, where M(x) = 1, and no route that computes M first is
+relatively accurate there. The quantity enters a log-density additively, so
+what matters is its absolute error: 2.03 ulp of max(|log M|, 1) on gcc and 1.79
+on CUDA over the whole grid. The same measure for the six orders is at most
+3.01 (gcc, order 5) and 4.19 (gcc, order 6), 3.79 on CUDA.
+
+Speed, one thread (Serial) and the device, over 2^20 points of x log-uniform in
+[1e-3, 1e6]:
+
+| quantity | Serial ns (gcc) | OpenMP ns | Serial ns (MSVC) | CUDA ns |
+|---|---|---|---|---|
+| log M | 15.6 | 1.89 | 16.6 | 0.79 |
+| order 1 | 75.0 | 7.20 | 82.0 | 8.73 |
+| order 2 | 81.3 | 7.83 | 90.4 | 7.97 |
+| order 3 | 90.5 | 8.40 | 99.9 | 8.29 |
+| order 4 | 107 | 10.1 | 129 | 8.62 |
+| order 5 | 123 | 11.7 | 140 | 8.55 |
+| order 6 | 130 | 11.5 | 146 | 7.97 |
+
+**What this says.** The identity makes four of the six orders free: they are
+`log_Phi_dk` with a sign, and their errors are that function's own in its
+branch below t = -1 (767 ulp on gcc measured there at order 6, against the 536
+seen over this grid). The two orders that do cancel are repaired by the
+recursion the module already had, and the plain form shows what the repair is
+worth: 8.7e15 ulp against 5 ulp. The cost is log Phi's derivatives': each order
+runs its own downward recursion, so asking for all six costs about 600 ns on
+one thread near the split, where the recursion takes 20 + ceil(300 / x^2)
+steps.
+
+**Chosen.** As above, bounds in `tests/math/test_normal.cpp` ("the Mills ratio
+on the log scale against mpmath"): for the value 3.0 ulp of max(|log M|, 1)
+with its relative error unbounded, and 3.5, 8.0, 21, 40, 145 and 805 ulp for
+the six orders, each about one and a half times the larger of the two builds'
+maxima. The ends of the range are checked in the same file's "normal block at
+the ends of the range": the value saturates to +inf below -1.8961e154 and the
+derivatives are those of the quadratic alone there (x, 1 and zero).
+
+**Open.** All six orders in one pass would run one recursion instead of six, as
+`detail_owen::log_g0_series` does for the Taylor coefficients: worth measuring
+if the elastic net's profile shows these calls. The relative accuracy at the
+zero of the value would need an expansion of sqrt(pi/2) erfcx(x / sqrt 2) - 1
+around x = 0.30246, and nothing asks for it, since the quantity is used
+additively.

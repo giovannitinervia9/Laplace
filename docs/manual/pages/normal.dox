@@ -1,8 +1,8 @@
 /**
 \defgroup normal Normal distribution function
-\brief Standard normal distribution function, complementary error functions, log distribution function with derivatives to order 6, and quantile functions from probability and log-probability.
+\brief Standard normal distribution function, complementary error functions, log distribution function and log Mills ratio with derivatives to order 6, and quantile functions from probability and log-probability.
 
-The header `<laplace/math/normal.hpp>` provides the standard normal distribution function \f$\Phi\f$, its logarithm \f$\log \Phi\f$ and derivatives to order 6, the complementary error functions \f$\operatorname{erfc}\f$ and \f$\operatorname{erfcx}\f$, and the quantile functions from probability and log-probability. Every public function is called in `laplace::math`, is marked `LAPLACE_HD` for host and Kokkos device execution, and stays within 4.08 ulp for scalar values, 2.76 ulpC for quantiles, 2.85 ulp relative for derivatives on \f$[-1, 4)\f$, and 767 ulp (478 ulp on CUDA) for derivatives below \f$-1\f$.
+The header `<laplace/math/normal.hpp>` provides the standard normal distribution function \f$\Phi\f$, its logarithm \f$\log \Phi\f$ and derivatives to order 6, the log Mills ratio \f$\log M\f$ and its derivatives to order 6, the complementary error functions \f$\operatorname{erfc}\f$ and \f$\operatorname{erfcx}\f$, and the quantile functions from probability and log-probability. Every public function is called in `laplace::math` and is marked `LAPLACE_HD` for host and Kokkos device execution. Measured errors stay within 4.08 ulp for scalar values, 2.03 ulp1 (1.79 on CUDA) for \f$\log M\f$, 2.76 ulpC for quantiles, 2.85 ulp relative for \f$\log \Phi\f$ derivatives on \f$[-1, 4)\f$, 767 ulp (478 on CUDA) for \f$\log \Phi\f$ derivatives below \f$-1\f$, and 536 ulp (485 on CUDA) for \f$\log M\f$ derivatives.
 
 ## Definitions
 
@@ -59,6 +59,20 @@ For \f$\Phi^{-1}(p)\f$ with \f$p \le 0.5\f$, Boost.Math's \f$-\sqrt{2}\operatorn
 
 For \f$\Phi^{-1}(e^l)\f$, arguments \f$l \ge -\log 2\f$ evaluate \f$-\Phi^{-1}(-\operatorname{expm1}(l))\f$. For \f$-700.0 < l < -\log 2\f$, iteration starts from \f$-\sqrt{2}\operatorname{erfc}^{-1}(2e^l)\f$, and for \f$l \le -700.0\f$ from \f$x_0 = -\sqrt{-2l - \log(-4\pi l)}\f$, taking up to 8 Newton steps \f$x \mapsto x - (\log \Phi(x) - l)/R(x)\f$ until \f$|\Delta x| \le 4\varepsilon |x|\f$, where \f$\varepsilon = 2^{-52}\f$.
 
+### Log Mills ratio and its derivatives
+
+The Mills ratio (Mills, 1926) is
+\f[
+M(x) = \frac{\Phi(-x)}{\phi(x)} = \sqrt{\frac{\pi}{2}} \operatorname{erfcx}\left(\frac{x}{\sqrt{2}}\right),
+\f]
+where \f$x \in \mathbb{R}\f$. Its logarithm \f$\log M(x)\f$ falls like \f$-\log x\f$ as \f$x \to +\infty\f$ and grows like \f$x^2 / 2\f$ as \f$x \to -\infty\f$. For \f$x \ge 0\f$, \f$\log M(x)\f$ is evaluated from \f$\operatorname{erfcx}(x / \sqrt{2})\f$, avoiding cancellation and underflow. For \f$x < 0\f$, it evaluates \f$\log \Phi(-x) + x^2/2 + \frac{1}{2}\log(2\pi)\f$ with \f$x^2/2\f$ carried as an exact pair of doubles, saturating to \f$+\infty\f$ below \f$x = -1.8961 \times 10^{154}\f$ where \f$x^2/2\f$ passes the largest double; at \f$+\infty\f$ it returns \f$-\infty\f$.
+
+With \f$t = -x\f$, the identity \f$\log M(x) = \log \Phi(t) + x^2/2 + \frac{1}{2}\log(2\pi)\f$ gives the derivatives of order \f$k \in \{1, \dots, 6\}\f$,
+\f[
+\frac{\mathrm{d}^k \log M}{\mathrm{d}x^k} = (-1)^k \left[\frac{\mathrm{d}^k \log \Phi}{\mathrm{d}t^k}\right](-x) + x\,[k = 1] + [k = 2].
+\f]
+From order three on, the quadratic terms vanish and the function returns \f$(-1)^k g_k(-x)\f$ directly. At orders one and two, the two terms of the identity cancel for large \f$x\f$ (each of size \f$x\f$ and of size one, while the results are \f$-1/x\f$ and \f$1/x^2\f$). Therefore, orders one and two evaluate the identity directly for \f$x < 1\f$ and switch at \f$x = 1\f$ to \f$(-1)^k \kappa_k\f$, where \f$\kappa_k\f$ are the cumulants of the density proportional to \f$\exp(-x s - s^2/2)\f$ on \f$s > 0\f$, those of the section above at \f$y = x\f$, from the same downward moment-ratio recursion. Below \f$x = -1.8961 \times 10^{154}\f$, the derivatives reduce to those of the quadratic alone: \f$x\f$, \f$1\f$, and zero. At \f$+\infty\f$, the first derivative returns \f$0\f$. Every function returns quiet NaN on NaN input.
+
 ## Accuracy
 
 See \ref accuracy "How accuracy is measured" for error definitions and reference generation. Quantiles use \ref accuracy_inverse "ulpC" with the input \f$p\f$ or \f$l\f$ as scale.
@@ -85,6 +99,18 @@ On \f$[-1, 4)\f$, derivative errors are given in ulps of the order's band scale 
 | \ref laplace::math::own::log_Phi_d4 "log_Phi_d4()" | 1.49 | 1.44 | 2.2 | 2.30 | 2.46 | 3.7 | 25.3 | 27.3 | 50.0 | 0.19 | 2.0 |
 | \ref laplace::math::own::log_Phi_d5 "log_Phi_d5()" | 0.84 | 0.84 | 1.4 | 2.85 | 2.85 | 4.3 | 81.3 | 59.1 | 120.0 | 0.21 | 3.0 |
 | \ref laplace::math::own::log_Phi_d6 "log_Phi_d6()" | 1.34 | 1.41 | 2.6 | 2.70 | 2.45 | 4.1 | 767 | 478 | 1150.0 | 0.34 | 1.0 |
+
+For the log Mills ratio and its derivatives, `log_mills()` crosses zero at \f$x = 0.30246\f$ where \f$M(x) = 1\f$. Its relative error there (858 \ref accuracy_ulp "ulp" on gcc and CUDA) is the conditioning of that zero and is left unbounded by the test, which bounds its absolute error in \ref accuracy_ulp1 "ulp1". The derivatives have no zeros on \f$\mathbb{R}\f$ and are measured in relative \ref accuracy_ulp "ulp".
+
+| Function | Measure | Measured max gcc | Measured max CUDA | Test bound |
+|---|---|---|---|---|
+| \ref laplace::math::own::log_mills "log_mills()" | \ref accuracy_ulp1 "ulp1" | 2.03 | 1.79 | 3.0 ulp1 |
+| \ref laplace::math::own::log_mills_d1 "log_mills_d1()" | \ref accuracy_ulp "ulp" | 2.25 | 1.84 | 3.5 ulp |
+| \ref laplace::math::own::log_mills_d2 "log_mills_d2()" | ulp | 5.12 | 4.44 | 8.0 ulp |
+| \ref laplace::math::own::log_mills_d3 "log_mills_d3()" | ulp | 13.9 | 11.0 | 21.0 ulp |
+| \ref laplace::math::own::log_mills_d4 "log_mills_d4()" | ulp | 26.0 | 18.6 | 40.0 ulp |
+| \ref laplace::math::own::log_mills_d5 "log_mills_d5()" | ulp | 96.2 | 44.4 | 145.0 ulp |
+| \ref laplace::math::own::log_mills_d6 "log_mills_d6()" | ulp | 536 | 485 | 805.0 ulp |
 
 See `docs/numerics.md` for reference details, per-subinterval breakdowns, and platform and Boost comparisons.
 
@@ -140,6 +166,13 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::log_Phi_d4 "log_Phi_d4()" — Fourth derivative of \f$\log \Phi\f$
 - \ref laplace::math::own::log_Phi_d5 "log_Phi_d5()" — Fifth derivative of \f$\log \Phi\f$
 - \ref laplace::math::own::log_Phi_d6 "log_Phi_d6()" — Sixth derivative of \f$\log \Phi\f$
+- \ref laplace::math::own::log_mills "log_mills()" — Logarithm of the Mills ratio
+- \ref laplace::math::own::log_mills_d1 "log_mills_d1()" — First derivative of \f$\log M\f$
+- \ref laplace::math::own::log_mills_d2 "log_mills_d2()" — Second derivative of \f$\log M\f$
+- \ref laplace::math::own::log_mills_d3 "log_mills_d3()" — Third derivative of \f$\log M\f$
+- \ref laplace::math::own::log_mills_d4 "log_mills_d4()" — Fourth derivative of \f$\log M\f$
+- \ref laplace::math::own::log_mills_d5 "log_mills_d5()" — Fifth derivative of \f$\log M\f$
+- \ref laplace::math::own::log_mills_d6 "log_mills_d6()" — Sixth derivative of \f$\log M\f$
 - \ref laplace::math::own::Phi_inv "Phi_inv()" — Quantile from probability
 - \ref laplace::math::own::Phi_inv_logp "Phi_inv_logp()" — Quantile from log-probability
 

@@ -1,5 +1,6 @@
 // Accuracy and speed of the functions of the normal block (include/laplace/math/normal.hpp):
-// erfcx, Phi, log Phi, the derivatives of log Phi to order five, and the
+// erfcx, Phi, log Phi, the derivatives of log Phi to order five, the Mills
+// ratio on the log scale with its derivatives to order six, and the
 // quantile from p and from log p. Candidates: Laplace's own, Boost.Math, the
 // platform (and on CUDA its erfcx, normcdf, normcdfinv), the naive formulas,
 // and a port of statmodels7's derivatives of log Phi (pt_logphi.h).
@@ -112,6 +113,48 @@ struct LogPhiDCheb {
       case 3: return laplace::math::log_Phi_d3(t);
       case 4: return laplace::math::log_Phi_d4(t);
       default: return laplace::math::log_Phi_d5(t);
+    }
+  }
+};
+
+// ---------------------------------------------------------------- Mills ratio
+// log M(x), M(x) = Phi(-x)/phi(x): the public function (erfcx for x >= 0, the
+// log Phi form below), and the naive form everywhere, which adds x^2/2 to a
+// log-probability of the same size and the opposite sign.
+struct LogMillsOwn {
+  KOKKOS_INLINE_FUNCTION double operator()(double x) const { return laplace::math::log_mills(x); }
+};
+struct LogMillsNaive {
+  KOKKOS_INLINE_FUNCTION double operator()(double x) const {
+    return own::log_Phi(-x) + 0.5 * x * x + 0.91893853320467274178;
+  }
+};
+// The derivatives: the public functions (the cumulants above x = 1 at orders
+// one and two), and the direct form at every x, which cancels there.
+struct LogMillsDOwn {
+  int k;
+  KOKKOS_INLINE_FUNCTION double operator()(double x) const {
+    switch (k) {
+      case 1: return laplace::math::log_mills_d1(x);
+      case 2: return laplace::math::log_mills_d2(x);
+      case 3: return laplace::math::log_mills_d3(x);
+      case 4: return laplace::math::log_mills_d4(x);
+      case 5: return laplace::math::log_mills_d5(x);
+      default: return laplace::math::log_mills_d6(x);
+    }
+  }
+};
+struct LogMillsDDirect {
+  int k;
+  KOKKOS_INLINE_FUNCTION double operator()(double x) const {
+    const double s = (k % 2 == 0) ? 1.0 : -1.0;
+    switch (k) {
+      case 1: return x - own::log_Phi_d1(-x);
+      case 2: return own::log_Phi_d2(-x) + 1.0;
+      case 3: return s * own::log_Phi_d3(-x);
+      case 4: return s * own::log_Phi_d4(-x);
+      case 5: return s * own::log_Phi_d5(-x);
+      default: return s * own::log_Phi_d6(-x);
     }
   }
 };
@@ -242,6 +285,18 @@ int main(int argc, char* argv[]) {
   run("log_Phi", "cuda", LogPhiCuda{}, t_phi);
   run("qnorm", "cuda", PhiInvCuda{}, t_p);
 #endif
+
+  // the Mills ratio on the log scale: the enet's normalizing constant reads it
+  // at x = alpha sqrt(lambda / (1 - alpha)), from near 0 to beyond 1e8
+  const auto t_mills = bench::make_time_args(n, [&] { return expo(-10, 20); });
+  run("log_mills", "own", LogMillsOwn{}, t_mills);
+  run("log_mills", "naive", LogMillsNaive{}, t_mills);
+  static const char* mname[] = {"",           "log_mills_d1", "log_mills_d2", "log_mills_d3",
+                                "log_mills_d4", "log_mills_d5", "log_mills_d6"};
+  for (int k = 1; k <= 6; ++k) {
+    run(mname[k], "own", LogMillsDOwn{k}, t_mills);
+    run(mname[k], "direct", LogMillsDDirect{k}, t_mills);
+  }
 
   // derivatives: the recursion everywhere, statmodels7's port, and the own
   // version over a grid of switch points and lengths of the downward recursion

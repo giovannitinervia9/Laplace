@@ -1,6 +1,7 @@
 // The functions of the standard normal distribution as numerical functions:
-// erfc, erfcx, Phi, log Phi, the derivatives of log Phi to order five, and the
-// quantile Phi^-1 from p and from log p.
+// erfc, erfcx, Phi, log Phi, the derivatives of log Phi to order six, the Mills
+// ratio on the log scale with its derivatives to order six, and the quantile
+// Phi^-1 from p and from log p.
 //
 // Notation: phi is the standard normal density, Phi its distribution function,
 // erfcx(x) = exp(x^2) erfc(x) the scaled complementary error function,
@@ -39,6 +40,9 @@ constexpr double inv_sqrt_pi = 0.56418958354775628695;     // 1/sqrt(pi)
 constexpr double sqrt_2_over_pi = 0.79788456080286535588;  // sqrt(2/pi)
 constexpr double inv_sqrt_2pi = 0.39894228040143267794;    // 1/sqrt(2 pi)
 constexpr double log_half = -0.69314718055994530942;
+constexpr double half_log_2pi = 0.91893853320467274178;      // log(2 pi) / 2
+constexpr double half_log_half_pi = 0.22579135264472743236;  // log(pi / 2) / 2
+constexpr double square_limit = 1.8961e154;                  // sqrt(2 DBL_MAX): x^2/2 overflows past it
 constexpr double eps = 2.220446049250313e-16;
 
 // p + e = u v exactly (the FMA on the device; Dekker's product on the host,
@@ -826,6 +830,33 @@ LAPLACE_HD_FORCEINLINE double g_from_kappa(int k, double x, double kappa) {
   return kappa;
 }
 
+// kappa_k, k = 1..6, of the density proportional to exp(-x s - s^2/2) on s > 0,
+// for x > 0: the scaled raw moments mu_j = x^j m_j from the downward ratio
+// recursion above (K = k + m0 + ceil(c2 / x^2) steps), then the
+// moment-to-cumulant recursion. Two functions read it: d^k log Phi / dt^k at
+// t = -x is g_from_kappa of kappa_k, and d^k log M / dx^k = (-1)^k kappa_k for
+// the Mills ratio M(x) = Phi(-x) / phi(x). detail_owen::log_g0_series carries
+// the same recursion in its all-orders form, which fills the Taylor
+// coefficients of every order in one pass; this one answers for a single order,
+// as its two callers ask.
+LAPLACE_HD double mills_cumulant(int k, double x, double c2, int m0) {
+  double mu[7] = {1.0, 0, 0, 0, 0, 0, 0};
+  const double ix = 1.0 / x, w = ix * ix;
+  const double kk = c2 * w;
+  const int K = k + m0 + (kk < 20000.0 ? static_cast<int>(Kokkos::ceil(kk)) : 20000);
+  const double K1 = K + 1.0;
+  double rho = 2.0 * K1 / (1.0 + Kokkos::sqrt(1.0 + 4.0 * K1 * w));
+  double r[7] = {0, 0, 0, 0, 0, 0, 0};
+  for (int j = K; j >= 1; --j) {
+    rho = j / (1.0 + w * rho);
+    if (j <= k) r[j] = rho;
+  }
+  for (int j = 1; j <= k; ++j) mu[j] = mu[j - 1] * r[j];
+  double scale = ix;
+  for (int j = 1; j < k; ++j) scale *= ix;
+  return cumulant(k, mu) * scale;
+}
+
 LAPLACE_HD double log_Phi_dk(int k, double t, double t_switch, double c2, int m0) {
   if (t != t) return t;
   if (t >= t_switch) {
@@ -842,22 +873,7 @@ LAPLACE_HD double log_Phi_dk(int k, double t, double t_switch, double c2, int m0
     return -g5 * (t + 2.0 * R) - 4.0 * g4 * (1.0 + 2.0 * g2) - 6.0 * g3 * g3;
   }
   const double x = -t;
-  double mu[7] = {1.0, 0, 0, 0, 0, 0, 0};
-  const double ix = 1.0 / x, w = ix * ix;
-  const double kk = c2 * w;
-  const int K = k + m0 + (kk < 20000.0 ? static_cast<int>(Kokkos::ceil(kk)) : 20000);
-  const double K1 = K + 1.0;
-  double rho = 2.0 * K1 / (1.0 + Kokkos::sqrt(1.0 + 4.0 * K1 * w));
-  double r[7] = {0, 0, 0, 0, 0, 0, 0};
-  for (int j = K; j >= 1; --j) {
-    rho = j / (1.0 + w * rho);
-    if (j <= k) r[j] = rho;
-  }
-  // scaled raw moments mu_j = x^j m_j give the scaled cumulants x^j kappa_j
-  for (int j = 1; j <= k; ++j) mu[j] = mu[j - 1] * r[j];
-  double scale = ix;
-  for (int j = 1; j < k; ++j) scale *= ix;
-  return g_from_kappa(k, x, cumulant(k, mu) * scale);
+  return g_from_kappa(k, x, mills_cumulant(k, x, c2, m0));
 }
 
 // Phi^-1(p) for 0 < p <= 1/2: Boost's erfc^-1, then in the tail (p < 0.1) one
@@ -1073,6 +1089,237 @@ LAPLACE_HD double log_Phi_d6(double t) {
   return detail_normal::log_Phi_dk_outside(6, t);
 }
 
+// log M(x) and its derivatives to order six, M(x) = Phi(-x) / phi(x) =
+// sqrt(pi/2) erfcx(x / sqrt 2) the Mills ratio. The normalizing constant of the
+// elastic-net density is 2 M(x) / sqrt(c), so its logarithm and its derivatives
+// in the parameters read these.
+//
+// The value: for x >= 0 from erfcx, which neither cancels nor underflows
+// (erfcx(x / sqrt 2) falls like sqrt(2/pi) / x); for x < 0, where erfcx
+// overflows below x = -37.6, from log M = log Phi(-x) + x^2/2 + log(2 pi)/2
+// with x^2/2 carried as the exact pair h + l.
+//
+// The derivatives. With t = -x, log M(x) = log Phi(t) + x^2/2 + log(2 pi)/2, so
+//   d^k log M / dx^k = (-1)^k [d^k log Phi / dt^k](-x) + x [k = 1] + [k = 2],
+// which from order three on is the derivative of log Phi alone and loses
+// nothing. At orders one and two the two terms cancel for large x (each is of
+// size x and of size one, while the results are -1/x and 1/x^2), and there the
+// cumulant form is taken instead: d^k log M / dx^k = (-1)^k kappa_k, with
+// kappa_k the cumulants of the density proportional to exp(-x s - s^2/2) on
+// s > 0, which detail_normal::mills_cumulant computes without forming either
+// term. The split is at x = 1, below which the direct form keeps all but half
+// a digit and above which the ratio recursion converges in m0 steps; it is the
+// same threshold at which log_Phi_dk changes route.
+// Below -square_limit the exact pair h + l of x^2/2 passes DBL_MAX, as it does
+// in log Phi, and the derivatives of log Phi at -x are zero to the last bit
+// well before it (R(38.5) is already below the double range), so there
+// log M = x^2/2 saturates to +inf and its derivatives are those of the
+// quadratic alone: x, 1 and zero.
+/**
+ * \ingroup normal
+ * \brief Natural logarithm of the Mills ratio, \f$\log M(x)\f$.
+ *
+ * \f[
+ * \log M(x) = \log \frac{\Phi(-x)}{\phi(x)} = \log\left(\sqrt{\frac{\pi}{2}} \operatorname{erfcx}\left(\frac{x}{\sqrt{2}}\right)\right)
+ * \f]
+ * For \f$x \ge 0\f$, evaluates from `erfcx()`. For \f$x < 0\f$, evaluates
+ * \f$\log \Phi(-x) + x^2/2 + \frac{1}{2}\log(2\pi)\f$ with \f$x^2/2\f$ carried as an exact pair
+ * of doubles. See \ref normal for evaluation regimes.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\log M(x)\f$.
+ *
+ * \par Limits
+ * Falls like \f$-\log x\f$ as \f$x \to +\infty\f$ and grows like \f$x^2/2\f$ as \f$x \to -\infty\f$.
+ * Saturates to \f$+\infty\f$ for \f$x < -1.8961 \times 10^{154}\f$ (where \f$x^2/2\f$ passes the
+ * largest double) and at \f$-\infty\f$; returns \f$-\infty\f$ at \f$+\infty\f$, and quiet NaN on NaN.
+ *
+ * \par Accuracy
+ * Measured maximum absolute error 2.03 \ref accuracy_ulp1 "ulp1" on gcc and 1.79 ulp1 on CUDA
+ * (test bound 3.0 ulp1). Crosses zero at \f$x = 0.30246\f$, where \f$M(x) = 1\f$, so its
+ * relative error there (858 \ref accuracy_ulp "ulp") is the conditioning of that zero and is
+ * not bounded by the test.
+ *
+ * \see normal, log_Phi(), erfcx(), log_mills_d1()
+ */
+LAPLACE_HD double log_mills(double x) {
+  using namespace detail_normal;
+  if (x != x) return x;
+  if (x >= 0.0) return half_log_half_pi + math::log(erfcx_pos(x * sqrt_half));
+  if (x < -square_limit) return detail::pos_inf();
+  double h, l;
+  half_square(x, h, l);
+  return h + (l + (log_Phi(-x) + half_log_2pi));
+}
+
+/**
+ * \ingroup normal
+ * \brief First derivative of the log Mills ratio, \f$\frac{\mathrm{d}}{\mathrm{d}x} \log M(x)\f$.
+ *
+ * \f[
+ * \frac{\mathrm{d}}{\mathrm{d}x} \log M(x) = x - R(-x) = -\kappa_1(x)
+ * \f]
+ * where \f$R\f$ is `log_Phi_d1()`. For \f$x < 1\f$, evaluates \f$x - R(-x)\f$ from the identity
+ * \f$\log M(x) = \log \Phi(-x) + x^2/2 + \frac{1}{2}\log(2\pi)\f$. For \f$x \ge 1\f$, where
+ * \f$x\f$ and \f$R(-x)\f$ cancel to \f$-1/x\f$, evaluates \f$-\kappa_1(x)\f$, the first cumulant
+ * of the density proportional to \f$\exp(-x s - s^2/2)\f$ on \f$s > 0\f$. See \ref normal for details.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}}{\mathrm{d}x} \log M(x)\f$.
+ *
+ * \par Limits
+ * Returns \f$x\f$ for \f$x < -1.8961 \times 10^{154}\f$, \f$0.0\f$ at \f$+\infty\f$, and quiet NaN on NaN.
+ *
+ * \par Accuracy
+ * Measured maximum relative error 2.25 \ref accuracy_ulp "ulp" on gcc and 1.84 ulp on CUDA
+ * (test bound 3.5 ulp).
+ *
+ * \see normal, log_mills(), log_mills_d2(), log_Phi_d1()
+ */
+LAPLACE_HD double log_mills_d1(double x) {
+  if (x != x) return x;
+  if (x >= 1.0) return -detail_normal::mills_cumulant(1, x, 300.0, 20);
+  if (x < -detail_normal::square_limit) return x;
+  return x - log_Phi_d1(-x);
+}
+/**
+ * \ingroup normal
+ * \brief Second derivative of the log Mills ratio, \f$\frac{\mathrm{d}^2}{\mathrm{d}x^2} \log M(x)\f$.
+ *
+ * \f[
+ * \frac{\mathrm{d}^2}{\mathrm{d}x^2} \log M(x) = g_2(-x) + 1 = \kappa_2(x)
+ * \f]
+ * where \f$g_2\f$ is `log_Phi_d2()`. For \f$x < 1\f$, evaluates \f$g_2(-x) + 1\f$. For \f$x \ge 1\f$,
+ * where \f$g_2(-x)\f$ and \f$1\f$ cancel to \f$1/x^2\f$, evaluates \f$\kappa_2(x)\f$, the second
+ * cumulant of the density proportional to \f$\exp(-x s - s^2/2)\f$ on \f$s > 0\f$. See \ref normal
+ * for details.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}^2}{\mathrm{d}x^2} \log M(x)\f$.
+ *
+ * \par Limits
+ * Returns \f$1.0\f$ for \f$x < -1.8961 \times 10^{154}\f$, approaches \f$0.0\f$ as
+ * \f$x \to +\infty\f$, and returns quiet NaN on NaN.
+ *
+ * \par Accuracy
+ * Measured maximum relative error 5.12 \ref accuracy_ulp "ulp" on gcc and 4.44 ulp on CUDA
+ * (test bound 8.0 ulp).
+ *
+ * \see normal, log_mills(), log_mills_d1(), log_mills_d3(), log_Phi_d2()
+ */
+LAPLACE_HD double log_mills_d2(double x) {
+  if (x != x) return x;
+  if (x >= 1.0) return detail_normal::mills_cumulant(2, x, 300.0, 20);
+  if (x < -detail_normal::square_limit) return 1.0;
+  return log_Phi_d2(-x) + 1.0;
+}
+/**
+ * \ingroup normal
+ * \brief Third derivative of the log Mills ratio, \f$\frac{\mathrm{d}^3}{\mathrm{d}x^3} \log M(x)\f$.
+ *
+ * \f[
+ * \frac{\mathrm{d}^3}{\mathrm{d}x^3} \log M(x) = -g_3(-x)
+ * \f]
+ * where \f$g_3\f$ is `log_Phi_d3()`, because the quadratic term in
+ * \f$\log M(x) = \log \Phi(-x) + x^2/2 + \frac{1}{2}\log(2\pi)\f$ vanishes from order three on.
+ * See \ref normal for details.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}^3}{\mathrm{d}x^3} \log M(x)\f$.
+ *
+ * \par Limits
+ * Returns \f$0.0\f$ for \f$x < -1.8961 \times 10^{154}\f$, approaches \f$0.0\f$ as
+ * \f$x \to \pm\infty\f$, and returns quiet NaN on NaN.
+ *
+ * \par Accuracy
+ * Measured maximum relative error 13.9 \ref accuracy_ulp "ulp" on gcc and 11.0 ulp on CUDA
+ * (test bound 21.0 ulp).
+ *
+ * \see normal, log_mills(), log_mills_d2(), log_mills_d4(), log_Phi_d3()
+ */
+LAPLACE_HD double log_mills_d3(double x) {
+  if (x < -detail_normal::square_limit) return 0.0;  // NaN falls through to log_Phi_dk, which returns it
+  return -log_Phi_d3(-x);
+}
+/**
+ * \ingroup normal
+ * \brief Fourth derivative of the log Mills ratio, \f$\frac{\mathrm{d}^4}{\mathrm{d}x^4} \log M(x)\f$.
+ *
+ * \f[
+ * \frac{\mathrm{d}^4}{\mathrm{d}x^4} \log M(x) = g_4(-x)
+ * \f]
+ * where \f$g_4\f$ is `log_Phi_d4()`. See \ref normal for details.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}^4}{\mathrm{d}x^4} \log M(x)\f$.
+ *
+ * \par Limits
+ * Returns \f$0.0\f$ for \f$x < -1.8961 \times 10^{154}\f$, approaches \f$0.0\f$ as
+ * \f$x \to \pm\infty\f$, and returns quiet NaN on NaN.
+ *
+ * \par Accuracy
+ * Measured maximum relative error 26.0 \ref accuracy_ulp "ulp" on gcc and 18.6 ulp on CUDA
+ * (test bound 40.0 ulp).
+ *
+ * \see normal, log_mills(), log_mills_d3(), log_mills_d5(), log_Phi_d4()
+ */
+LAPLACE_HD double log_mills_d4(double x) {
+  if (x < -detail_normal::square_limit) return 0.0;  // NaN falls through to log_Phi_dk, which returns it
+  return log_Phi_d4(-x);
+}
+/**
+ * \ingroup normal
+ * \brief Fifth derivative of the log Mills ratio, \f$\frac{\mathrm{d}^5}{\mathrm{d}x^5} \log M(x)\f$.
+ *
+ * \f[
+ * \frac{\mathrm{d}^5}{\mathrm{d}x^5} \log M(x) = -g_5(-x)
+ * \f]
+ * where \f$g_5\f$ is `log_Phi_d5()`. See \ref normal for details.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}^5}{\mathrm{d}x^5} \log M(x)\f$.
+ *
+ * \par Limits
+ * Returns \f$0.0\f$ for \f$x < -1.8961 \times 10^{154}\f$, approaches \f$0.0\f$ as
+ * \f$x \to \pm\infty\f$, and returns quiet NaN on NaN.
+ *
+ * \par Accuracy
+ * Measured maximum relative error 96.2 \ref accuracy_ulp "ulp" on gcc and 44.4 ulp on CUDA
+ * (test bound 145.0 ulp).
+ *
+ * \see normal, log_mills(), log_mills_d4(), log_mills_d6(), log_Phi_d5()
+ */
+LAPLACE_HD double log_mills_d5(double x) {
+  if (x < -detail_normal::square_limit) return 0.0;  // NaN falls through to log_Phi_dk, which returns it
+  return -log_Phi_d5(-x);
+}
+/**
+ * \ingroup normal
+ * \brief Sixth derivative of the log Mills ratio, \f$\frac{\mathrm{d}^6}{\mathrm{d}x^6} \log M(x)\f$.
+ *
+ * \f[
+ * \frac{\mathrm{d}^6}{\mathrm{d}x^6} \log M(x) = g_6(-x)
+ * \f]
+ * where \f$g_6\f$ is `log_Phi_d6()`. See \ref normal for details.
+ *
+ * \param x Real argument \f$x \in \mathbb{R}\f$.
+ * \return The value of \f$\frac{\mathrm{d}^6}{\mathrm{d}x^6} \log M(x)\f$.
+ *
+ * \par Limits
+ * Returns \f$0.0\f$ for \f$x < -1.8961 \times 10^{154}\f$, approaches \f$0.0\f$ as
+ * \f$x \to \pm\infty\f$, and returns quiet NaN on NaN.
+ *
+ * \par Accuracy
+ * Measured maximum relative error 536 \ref accuracy_ulp "ulp" on gcc and 485 ulp on CUDA
+ * (test bound 805.0 ulp).
+ *
+ * \see normal, log_mills(), log_mills_d5(), log_Phi_d6()
+ */
+LAPLACE_HD double log_mills_d6(double x) {
+  if (x < -detail_normal::square_limit) return 0.0;  // NaN falls through to log_Phi_dk, which returns it
+  return log_Phi_d6(-x);
+}
+
 // Phi^-1(p)
 /**
  * \ingroup normal
@@ -1171,6 +1418,14 @@ LAPLACE_HD_FORCEINLINE double log_Phi_d3(double t) { return own::log_Phi_d3(t); 
 LAPLACE_HD_FORCEINLINE double log_Phi_d4(double t) { return own::log_Phi_d4(t); }
 LAPLACE_HD_FORCEINLINE double log_Phi_d5(double t) { return own::log_Phi_d5(t); }
 LAPLACE_HD_FORCEINLINE double log_Phi_d6(double t) { return own::log_Phi_d6(t); }
+// log M and its derivatives, M(x) = Phi(-x)/phi(x) the Mills ratio
+LAPLACE_HD_FORCEINLINE double log_mills(double x) { return own::log_mills(x); }
+LAPLACE_HD_FORCEINLINE double log_mills_d1(double x) { return own::log_mills_d1(x); }
+LAPLACE_HD_FORCEINLINE double log_mills_d2(double x) { return own::log_mills_d2(x); }
+LAPLACE_HD_FORCEINLINE double log_mills_d3(double x) { return own::log_mills_d3(x); }
+LAPLACE_HD_FORCEINLINE double log_mills_d4(double x) { return own::log_mills_d4(x); }
+LAPLACE_HD_FORCEINLINE double log_mills_d5(double x) { return own::log_mills_d5(x); }
+LAPLACE_HD_FORCEINLINE double log_mills_d6(double x) { return own::log_mills_d6(x); }
 LAPLACE_HD_FORCEINLINE double Phi_inv(double p) { return own::Phi_inv(p); }
 LAPLACE_HD_FORCEINLINE double Phi_inv_logp(double l) { return own::Phi_inv_logp(l); }
 
