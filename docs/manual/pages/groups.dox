@@ -194,3 +194,9 @@ parent here, in tree order; the module pages define their groups without
 
 /** \defgroup optimizers Optimizers
 \brief Objectives, stopping rules, line searches and the dense curvature solver for unconstrained minimization on the host. */
+/** \defgroup optimizers_quasi_newton Quasi-Newton methods and multistart
+\ingroup optimizers
+\brief BFGS and L-BFGS for objectives with a gradient, and a multistart wrapper over any optimizer. */
+/** \defgroup optimizers_second_order Newton and trust region
+\ingroup optimizers
+\brief Newton's method with an eigenvalue modification and a line search, and a trust-region method with the exact dense subproblem. */

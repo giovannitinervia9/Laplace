@@ -69,6 +69,9 @@ set(LAPLACE_TEST_SOURCES
   basis/test_tensor.cpp
   dense/test_dense.cpp
   optimizers/test_optimizers.cpp
+  optimizers/test_quasi_newton.cpp
+  optimizers/test_multistart.cpp
+  optimizers/test_second_order.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

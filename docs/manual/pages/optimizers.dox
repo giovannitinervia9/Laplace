@@ -1,7 +1,7 @@
 /**
 \addtogroup optimizers
 
-The `laplace::optimizers` module provides the pieces of unconstrained minimization on the host: the objective concepts (`<laplace/optimizers/objective.hpp>`), the report of a run (`report.hpp`), the stopping rules (`stop_rules.hpp`), two line searches (`line_search.hpp`), the dense curvature solver (`dense_curvature_solver.hpp`) and `minimize()` (`minimize.hpp`), all in the same directory. They are header-only templates that run on the host; none is marked `LAPLACE_HD`. A program that uses `dense_curvature_solver` links `Laplace::dense`. On the standard test problems the line searches accept a step within 13 evaluations along \f$-g\f$ and within one along a Newton direction.
+The `laplace::optimizers` module provides the pieces of unconstrained minimization on the host: the objective concepts (`<laplace/optimizers/objective.hpp>`), the report of a run (`report.hpp`), the stopping rules (`stop_rules.hpp`), two line searches (`line_search.hpp`), the dense curvature solver (`dense_curvature_solver.hpp`) and `minimize()` (`minimize.hpp`), all in the same directory. They are header-only templates that run on the host; none is marked `LAPLACE_HD`. A program that uses `dense_curvature_solver` links `Laplace::dense`. On the standard test problems the line searches accept a step within 13 evaluations along \f$-g\f$ and within one along a Newton direction. Newton's method and the trust region are on the page \ref optimizers_second_order "Newton and trust region"; the quasi-Newton methods BFGS and L-BFGS and the multistart wrapper are on the page \ref optimizers_quasi_newton "Quasi-Newton methods and multistart".
 
 ## Objectives
 

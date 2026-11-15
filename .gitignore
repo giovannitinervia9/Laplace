@@ -15,5 +15,6 @@ install*/
 *.out
 # reference values produced by mpmath (tools/reference) are versioned
 !tests/data/reference/*.csv
+!tests/data/reference/**/*.csv
 __pycache__/
 

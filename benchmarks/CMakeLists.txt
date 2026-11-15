@@ -106,3 +106,11 @@ target_link_libraries(pdmat_ws_state PRIVATE Laplace::laplace Laplace::dense)
 laplace_kokkos_sources(optimizers_foundations.cpp)
 add_executable(optimizers_foundations optimizers_foundations.cpp)
 target_link_libraries(optimizers_foundations PRIVATE Laplace::dense)
+
+laplace_kokkos_sources(optimizers_quasi_newton.cpp)
+add_executable(optimizers_quasi_newton optimizers_quasi_newton.cpp)
+target_link_libraries(optimizers_quasi_newton PRIVATE Laplace::laplace)
+
+laplace_kokkos_sources(optimizers_second_order.cpp)
+add_executable(optimizers_second_order optimizers_second_order.cpp)
+target_link_libraries(optimizers_second_order PRIVATE Laplace::dense)

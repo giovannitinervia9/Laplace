@@ -5796,3 +5796,367 @@ could be made exact inside `log_ibeta` and `log_ibetac`, which would serve
 every family that takes a cdf from the incomplete beta. The manual pages of the
 three families are not written, and their `\ingroup` names do not exist in
 `groups.dox` yet.
+
+## Frozen R references for the optimizers
+
+**What.** Three sets of files produced in R once, so that the optimizers of
+phase 6 and the fit_distrib bench can be compared with statmodels7 and optimizers7 without R at test
+time (note/optimizers.md, decisions 8 and 10). Versions: R 4.6.0,
+statmodels7 0.244.0, distributions7 0.94.2, optimizers7 0.22.0 (installed
+from its source tree for these files; 0.21.0 gave the same counts and
+estimates bit for bit, since 0.22 only compiles the stopping rules). Every script is run from the
+repository root with `Rscript --vanilla`.
+
+**The battery in R.** `tools/reference/optimizers_problems.R` writes the
+problems of `tests/optimizers/test_problems.hpp` in R: extended Rosenbrock at
+n = 2, 10, 100, Powell singular, Beale, Brown badly scaled, helical valley,
+Wood, the quadratics at n = 10 and kappa = 1e2, 1e6, 1e12, the saddle and the
+exploded cosh at n = 3, each with the added constants 0, 1, 1e3 and 1e6, and
+the noisy objective at n = 2 (53 problems). The quadratics need the 64-bit
+LCG of `test_uniform`; it is computed in 16-bit limbs held in doubles, and
+its first values equal the C++ ones bit for bit (checked with `%a` against a
+compiled copy). The script checks its gradients and Hessians against central
+differences (relative error below 1e-4; Brown badly scaled reaches 1.3e-5
+because f is near 1e12 at the check point, the others stay below 1e-9).
+
+**optimizers7 counts.** `tools/reference/optimizers_optimizers7.R` runs
+optimizers7's `newton()`, `bfgs()` and `lbfgs()` with their defaults on the
+53 problems (159 runs, 2.3 s) and writes
+`tests/data/reference/optimizers/optimizers7_counts.csv`: iterations, f, g, H
+counts, final point and value at full precision, f - f*, max |g|,
+max |x - x*|, the converged flag and the rule that fired. optimizers7
+reports only the label of its composite rule (gradient max-norm < 1e-6, or
+|df| < 1e-10, or |dx| < 1e-8); the script repeats each run with
+maxit = iterations - 1 to get the previous iterate and evaluates the three
+rules with `crit_met()`. The gradient check at the start is switched off
+(`optimizers7.check_gradient = FALSE`) so that the counts are the method's.
+
+Converged flags: newton 48 of 53, bfgs 44, lbfgs 47. Of the 139 runs
+flagged converged, 42 were declared on a change rule alone, with the
+gradient rule not met (newton 4, bfgs 12, lbfgs 26). Among them:
+
+| problem | method | rule | f - f* | max \|g\| | max \|x - x*\| |
+|---|---|---|---|---|---|
+| quadratic kappa 1e12 (every constant) | lbfgs | \|dx\| < 1e-8 | 9374 | 2371 | 5.07 |
+| quadratic kappa 1e6 | lbfgs | \|df\| < 1e-10 | 6.3e-10 | 2.1e-3 | 5.0e-6 |
+| Brown badly scaled | bfgs, lbfgs | \|df\| < 1e-10 | 0 | 5.0e-4, 2.1e-3 | 3.5e-10, 1.6e-9 |
+| Powell singular | bfgs, lbfgs | \|df\| < 1e-10 | 4.3e-11, 5.1e-11 | 1.7e-5, 7.8e-5 | 1.3e-3, 1.2e-3 |
+
+The first row is a false success 5 units from the minimizer; the others
+stop near it without meeting stationarity. All three methods also stop at
+the saddle from (1, 0), where the gradient is zero at (0, 0) (f - f* = 0.25):
+a stationary point, not a false success. The exploded cosh exhausts the
+iteration budget (200 for newton, 500 for the quasi-Newton methods), and the
+noisy objective ends not converged after one iteration with 31 or 32
+evaluations of f. The added constant changes the counts in five runs only,
+all on |df| < 1e-10 (an absolute change rule, met later or never when |f|
+is larger): Powell bfgs and lbfgs 38 to 39 iterations at 1e6, Wood lbfgs
+89 to 86, the kappa 1e2 quadratic lbfgs 38 to 39, and the kappa 1e6
+quadratic lbfgs from converged to "stopped without converging" at 1e6.
+
+**fit_distrib data and estimates.** `tools/reference/optimizers_fit_distrib.R`
+simulates the 16 parametrizations of `include/laplace/distrib` (cauchy,
+chisq, exponential, gamma1, gamma2, gaussian1-3, gumbel, invgauss, laplace1,
+laplace2, logistic, lognormal1, lognormal2, poisson) at n = 1e3 and 1e5 with
+seed 20261115 + 100 k + j (k the distrib's position in the script, j = 1, 2
+the size; Mersenne-Twister, Inversion), fits each with statmodels7's
+`fit_distrib()` at its defaults (Fisher scoring, n_start = 5, `set.seed(1)`
+before the fit) and writes the files in
+`tests/data/reference/optimizers/fit_distrib/` (13 MB in all; a README there
+repeats the layout):
+
+- `<distrib>_n1000.csv`: a header `y`, then 1000 values as C99 hexadecimal
+  doubles (`%a`), exact in both directions;
+- `<distrib>_n100000.f64`: 100000 values as raw IEEE 754 binary64,
+  little-endian, 8 bytes each, no header and no count (800000 bytes), in
+  the order of the draws;
+- `fit_distrib.csv`: per (distrib, n, parameter) the true value, the
+  estimate, standard error, log-likelihood, iterations, f/g/H counts, the
+  converged flag and fit_distrib's score (max-norm of the score per
+  observation on the link scale); and the
+  closed-form MLE with its log-likelihood where one exists.
+
+Each Laplace distrib was matched to the distributions7 constructor with the
+same parameters (`invgauss` to `invgauss1`, `laplace1` to `laplace`, the
+others by name), and the script first checks that the log-densities, written
+in R from the Laplace headers, agree with distributions7's: at most 4.4e-16
+at three points each. No parametrization differs. distributions7 calls the
+logistic's mu a mean and the gumbel's mu a location; they are the same
+parameters as Laplace's (the gumbel's mean is mu + gamma sigma in both).
+Inverse Gaussian data are drawn by the method of Michael, Schucany and Haas
+(1976); gumbel and Laplace data by transforming exponentials.
+
+The closed forms: the gaussian mean and mean squared deviation (as sigma,
+sigma^2 or its inverse), the exponential and Poisson mean, the lognormal from
+the moments of log y (lognormal2 through the invariance m = exp(mu + s/2),
+v = (e^s - 1) e^(2 mu + s), with mu and s the mean and variance of log y),
+the inverse Gaussian mean and mean of 1/y - 1/ybar, the Laplace median and
+mean absolute deviation from it (at even n the median is the midpoint of the
+two middle values; the likelihood is flat between them and the scale is the
+same anywhere there). Against them statmodels7 is within 8.3e-7 relative at
+n = 1e3 and 7.9e-11 at n = 1e5, and its log-likelihood is lower by at most
+1.3e-10. The difference comes from fit_distrib's stopping rule on the score
+per observation (< 1e-6): on the gaussians it stops after one Fisher step
+from a start with the n - 1 variance, with a relative error near
+(1/(2n))^2 = 2.5e-7 in sigma. Every fit converged, in 1 to 3 iterations,
+because fit_distrib starts from data-based values.
+
+**What this says.** optimizers7's counts are a reference for the number of
+evaluations and for the ways a run can end, not targets: about a third of
+its successes rest on a change rule, one of them 5 units from the
+minimizer, which is the class of false success that decision 5 removes.
+The fit_distrib estimates are a reference to about 1e-6 relative at
+n = 1e3 and 1e-10 at n = 1e5; where a closed form exists it is the sharper
+oracle.
+
+**Chosen.** Data at full precision as CSV for n = 1e3 and as binary for
+n = 1e5, no n = 1e6 (decided with Giovanni); optimizers7 0.22.0.
+
+**Open.** Laplace's side of the times and counts is measured by the
+optimizer benches and by the fit_distrib bench against these files. The
+bernoulli, binomial and geometric distribs, written at the same time, have
+no fit_distrib reference yet.
+
+## BFGS, L-BFGS and multistart: the stationarity of a quasi-Newton method
+
+**What.** `bfgs_optimizer` (dense inverse-Hessian approximation B, O(n^2) per
+iteration), `lbfgs_optimizer` (the last `memory` = 10 pairs, two-loop
+recursion, O(memory n)) and `multistart_optimizer` (any optimizer from many
+starts) in `include/laplace/optimizers/{bfgs,lbfgs,multistart}.hpp`.
+
+**How.** Direction d = -B g, strong Wolfe line search by default (c1 1e-4,
+c2 0.9), first trial step 1. Before any curvature pair, and after a reset,
+B = min(1, 1 / |g|_inf) I. A pair s = x_new - x, y = g_new - g is used when
+s'y > 1e-10 |s| |y|, otherwise skipped; BFGS resets B after 5 consecutive
+skips, L-BFGS keeps its pairs. The first pair scales the identity by
+s'y / y'y (Shanno and Phua 1978); L-BFGS starts its two-loop recursion from
+gamma I with gamma = s'y / y'y of the latest pair. A direction that is not a
+finite descent direction resets B.
+
+Stationarity: the decrement
+(1/2) max(g' B g, gamma_max g' g), with g' B g = |g' d| for the next
+direction d and gamma_max the largest s'y / y'y of the accepted pairs (0
+before any pair), and a convergence verdict of the stopping rule confirmed
+on the next iteration (if the confirming line search cannot move the point,
+the verdict stands).
+
+Why both. (1/2) g' B g alone, with the default tolerance 1e-6, declared BFGS
+converged far from x* on the quadratics of the battery (n = 10, x0 = 0,
+x* = (1, ..., 10)):
+
+| kappa | iterations | f - f* | decrement | (f - f*) / decrement |
+|---|---|---|---|---|
+| 1e2 | 38 | 4.1e-8 | 3.8e-8 | 1.07 |
+| 1e4 | 60 | 3.6e-3 | 5.5e-7 | 6.6e3 |
+| 1e6 | 84 | 7.4e-3 | 3.6e-7 | 2.1e4 |
+| 1e8 | 107 | 9.8e-3 | 2.8e-8 | 3.6e5 |
+| 1e10 | 103 | 1.4e2 | 2.0e-7 | 6.9e8 |
+
+Without a stopping rule the same runs reach x* exactly (f - f* = 0) at
+iterations 47, 79, 108 and 136 for kappa 1e2 to 1e8: the stop, not the
+method, was wrong. The trace shows a plateau: B has learned the stiff
+directions and still carries about 1 / lambda_max along a weak direction
+that no step has sampled, where the remaining error lies; the realized
+decrease of each step agrees with the predicted one (ratio 1.0 to 1.2), so
+no consistency test sees it, and a stricter Wolfe curvature (c2 = 0.1) does
+not help (ratio 9.1e3 at kappa 1e4). The same measure declared both methods
+converged on abs_sum with n = 10 (f about 1e-6, a smooth method on a
+non-smooth function) and BFGS on Wood with f - f* = 1.0e-3.
+
+The floor gamma_max g' g gives every direction at least the largest inverse
+curvature seen. With it alone one case remained: f = x - log x from
+x0 = 0.01, where one step reaches 1.01 and the only pair, taken across
+curvatures from 1e4 to 1, gives s'y / y'y = 0.0101 against 1 at the point:
+converged with f - f* = 5e-5. The confirmation takes one more step, which
+corrects B. Requiring two consecutive passes without the floor removed only
+the kappa 1e4 case.
+
+**Measured** (`benchmarks/optimizers_quasi_newton.cpp`, gcc, one thread,
+decrement tolerance 1e-6). MGH problems from their standard starts; the
+same iterations with f* = 0, 1, 1e3 and 1e6 up to a few runs at 1e6 (in
+brackets):
+
+| problem | BFGS it / f, g | L-BFGS it / f, g | BFGS us | L-BFGS us |
+|---|---|---|---|---|
+| Rosenbrock n = 2 | 35 / 41 | 36 / 43 (35 / 59) | 22 | 31 |
+| Rosenbrock n = 100 | 36 / 42 | 36 / 43 | 356 | 94 |
+| Powell singular | 31 / 32 | 31 / 33 | 22 | 36 |
+| Beale | 14 / 15 | 14 / 15 | 13 | 14 |
+| Brown badly scaled | 12 / 24 (11 / 38) | 13 / 25 | 11 | 12 |
+| helical valley | 29 / 31 | 26 / 29 | 21 | 23 |
+| Wood | 35 / 43 | 19 / 22, saddle | 27 | 17 |
+
+All end converged with f - f* <= 6.3e-8 and max |x - x*| <= 6.1e-3 (Powell,
+whose Hessian is singular at x*; 9.9e-5 or less elsewhere), except L-BFGS on
+Wood, which stops near the saddle at f = 7.877 (x about
+(-0.967, 0.945, -0.971, 0.953), one negative pivot of the Hessian,
+max |g| = 0.011): a positive definite B cannot see negative curvature.
+
+Quadratics, n = 10 (iterations, f - f* at the end):
+
+| kappa | BFGS | L-BFGS m = 5 | m = 10 | m = 20 |
+|---|---|---|---|---|
+| 1e2 | 39, 3.2e-10 | 40, 6.1e-7 | 30, 6.8e-8 | 26, 4.5e-12 |
+| 1e4 | 73, 1.1e-10 | 199, 3.1e-6 | 100, 1.5e-8 | 56, 7.1e-9 |
+| 1e6 | 102, 1.2e-10 | budget | 249, 2.3e-7 | 90, 1.2e-8 |
+| 1e8 | 130, 4.7e-9 | budget | 305, 9.8e-3 false | 119, 9.9e-3 false |
+| 1e10 | 130, stalled, 1.1e-2 | budget | 457, 1.1e-2 false | 145, 1.1e-2 false |
+| 1e12 | 91, stalled, 9.4e3 | budget | 106, line search failed | 62, stalled |
+
+BFGS with Armijo instead of Wolfe converges at kappa 1e10 (158 iterations,
+f - f* = 1.4e-15). n = 100, kappa 1e6: BFGS 868 iterations, f - f* 4.0e-7,
+12 ms; L-BFGS reaches the 1000-iteration budget with every memory. The
+false successes of L-BFGS at kappa 1e8 and 1e10 remain: its error lies along
+directions that no pair has sampled, which neither B nor gamma_max can show.
+
+Negative cases, none converged: the noisy objective (line search failed at
+iteration 0), sum cosh from 700 with 100 iterations (iteration budget; with
+1000 both converge at 860 iterations), abs_sum with n = 2, 4, 10 under Wolfe
+and Armijo (stalled, line search failed or budget). abs_sum with n = 1
+converges exactly: one step lands on 0, where the subgradient is 0.
+
+Multistart over BFGS on Styblinski-Tang, f = (1/2) sum (x^4 - 16 x^2 + 5 x),
+from x0 = (2.5, ..., 2.5) in the basin of the worst minimum, Latin hypercube
+on x0 +- 3 max(1, |x0|):
+
+| n | starts | converged | distinct optima | global found | f, g evaluations | ms |
+|---|---|---|---|---|---|---|
+| 2 | 1 | 1 | 1 | no | 6 | 0.010 |
+| 2 | 10 | 10 | 3 | yes | 130 | 0.086 |
+| 2 | 40 | 40 | 3 | yes | 533 | 0.33 |
+| 4 | 10 | 10 | 3 | no | 193 | 0.12 |
+| 4 | 40 | 40 | 5 | yes | 805 | 0.49 |
+
+Distinct optima are counted on the converged values sorted, a new one after
+each gap larger than distinct_tolerance = 1e-5. Under the measure without
+floor and confirmation the converged values at one minimum spread by 2.4e-6
+and were counted as two optima at 1e-6.
+
+**Chosen.** The floored decrement with confirmation, for both methods;
+L-BFGS memory 10; constants as above (curvature tolerance 1e-10, 5 skips,
+1000 iterations, 1e5 evaluations); multistart with 10 starts, spread 1, seed
+1, distinct tolerance 1e-5, the kept run the best (a converged run before a
+non-converged one, then the lower value, a later run only when lower by more
+than the tolerance).
+
+**Open.** L-BFGS's false successes on quadratics with kappa >= 1e8 and its
+stop at Wood's saddle are limits of the method (tested as such, not hidden).
+BFGS with Wolfe stalls at kappa 1e10 (130 iterations, f - f* = 1.1e-2) where
+Armijo converges (158 iterations, f - f* = 1.4e-15): not studied.
+Multistart runs its starts in sequence; threads or processes are for later.
+
+## Newton and the trust region: the eigenvalue route, the exact subproblem
+
+**What.** `newton_optimizer` (`include/laplace/optimizers/newton.hpp`) and
+`trust_region_optimizer` (`include/laplace/optimizers/trust_region.hpp`), the
+second-order methods of phase 6, both for a `curvature_objective` with a dense
+H. Both declare success only through the stop rule, by default
+`decrement_stop_rule` (decrement (1/2) g' H^-1 g <= 1e-6); the decrement is NaN
+wherever H has no Cholesky factor, so no point with an indefinite or singular H
+converges on it.
+
+**How.** Newton: when the Cholesky factor of H exists, d = -H^-1 g. Otherwise
+H = V diag(w) V' (w increasing) and d = -sum_i (v_i' g) / max(|w_i|, floor) v_i
+with floor = 1e-8 max|w_i| (an eigenvalue modification, Nocedal and Wright
+2006, section 3.4), plus a unit step along v_1 with g' v_1 <= 0 when
+w_1 < -floor (a direction of negative curvature, More and Sorensen 1979); that
+direction is scaled down to a largest component of `max_modified_step` = 1,
+because its length is set by the floor and not by the curvature. Where
+g' d = 0 (g = 0 at a saddle) the step is accepted on the second-order decrease
+f(x + s d) - f(x) <= c1 s^2 d' H d / 2, halving s. Every direction is then
+scaled down to a largest component of `max_step` (Dennis and Schnabel's
+maxstep in the max norm; default unbounded), and Armijo searches from s = 1.
+
+Trust region: the step minimizes g' p + p' H p / 2 over |p|_2 <= radius (More
+and Sorensen 1983). The Newton step is taken when H is positive definite and
+the step fits. Otherwise, with H = V diag(w) V' and gamma = V' g,
+|p(lambda)|^2 = sum gamma_i^2 / (w_i + lambda)^2 and lambda solves
+1/|p(lambda)| = 1/radius by Newton's method, safeguarded by bisection on
+[max(0, -w_1), max(0, -w_1) + |g| / radius], in the eigenbasis: one
+eigendecomposition per accepted point, O(n) per secular iteration, gamma
+scaled by its largest entry so that the squares cannot overflow. Eigenvalue
+sums w_i + lambda below delta = 8 n eps max|w| are treated as zero. When
+|p(max(0, -w_1) + delta)| <= radius the step is the one at lambda = max(0, -w_1)
+without the unresolved components, plus tau v_1 to the boundary when
+w_1 < -delta (the hard case). Radius: |p| / 4 when rho < 1/4 or the trial value
+is not finite, doubled when rho > 3/4 and p is on the boundary, the step
+accepted when rho > 1e-4 (Nocedal and Wright 2006, Algorithm 4.1); initial
+radius 1, no maximum.
+
+**Measured** (`benchmarks/optimizers_second_order.cpp`, gcc, one thread):
+iterations, evaluations of f, g (= H), f - f*, us per run. Every run below
+ends converged; with f* shifted by 1e6 the counts are the same.
+
+| problem | Newton | | | | trust region | | | |
+|---|---|---|---|---|---|---|---|---|
+| | iter | f, g | f - f* | us | iter | f, g | f - f* | us |
+| Rosenbrock, n = 2 | 23 | 55, 24 | 3.3e-10 | 17.2 | 24 | 46, 22 | 7.6e-9 | 19.6 |
+| extended Rosenbrock, n = 100 | 23 | 55, 24 | 1.7e-8 | 1529 | 23 | 45, 22 | 4.7e-10 | 1966 |
+| Powell singular | 12 | 25, 13 | 5.7e-7 | 13.8 | 12 | 25, 13 | 6.0e-7 | 16.4 |
+| Beale | 6 | 15, 7 | 3.3e-8 | 9.1 | 6 | 12, 6 | 7.8e-7 | 9.9 |
+| Brown badly scaled | 184 | 375, 185 | 2.1e-15 | 155 | 31 | 63, 32 | 1.4e-19 | 34.1 |
+| helical valley | 14 | 31, 15 | 2.2e-8 | 17.1 | 8 | 16, 8 | 1.6e-9 | 12.7 |
+| Wood | 41 | 102, 42 | 6.8e-8 | 61.0 | 44 | 83, 39 | 2.0e-10 | 59.1 |
+| quadratic n = 10, kappa 1e2 | 1 | 3, 2 | 3.2e-28 | 6.3 | 5 | 11, 6 | 1.2e-28 | 31.1 |
+| quadratic, kappa 1e6 | 1 | 3, 2 | 4.7e-20 | 6.2 | 5 | 11, 6 | 5.1e-21 | 27.0 |
+| quadratic, kappa 1e12 | 1 | 3, 2 | 4.5e-10 | 6.3 | 5 | 11, 6 | 9.5e-10 | 27.6 |
+| saddle from (1, 0) | 1 | 3, 2 | 0 | 5.1 | 5 | 11, 6 | 6.9e-10 | 9.0 |
+| Rosenbrock from (0, 1) | 2 | 5, 3 | 0 | 5.8 | 4 | 9, 5 | 4.6e-11 | 9.2 |
+
+The trust region's iterations count every trial step; its accepted steps are
+the g evaluations less one.
+
+Newton's `max_step`: 5, and 1e3 max(1, max|x0_i|) (Dennis and Schnabel's
+default in the max norm), end Brown badly scaled on the budget of 200
+iterations (x* = (1e6, 2e-6)); 5 also costs Wood 58 iterations against 41;
+elsewhere the counts are unchanged. Unbounded by default.
+
+Newton's `max_modified_step` (iterations, f evaluations):
+
+| problem | 1 | 10 | 1e3 | inf |
+|---|---|---|---|---|
+| Beale | 6, 15 | 14, 39 | 14, 39 | 14, 39 |
+| Brown badly scaled | 184, 375 | 25, 55 | 5, 11 | 5, 11 |
+| helical valley | 14, 31 | 21, 56 | 21, 56 | 21, 56 |
+| Wood | 41, 102 | 57, 152 | 57, 152 | 57, 152 |
+| Rosenbrock from (0, 1) | 2, 5 | 22, 65 | 22, 65 | 22, 65 |
+
+Rosenbrock n = 2 and 100, Powell and the saddle do not depend on it. On Brown,
+the first step lands where H is indefinite and the capped direction moves
+x_2 by 0.0025 per iteration.
+
+Initial radius 10 instead of 1: quadratics 2 iterations instead of 5, Brown
+26 instead of 31, Rosenbrock from (0, 1) 12 instead of 4, helical valley 11
+instead of 8.
+
+**Tests** (`tests/optimizers/test_second_order.cpp`, 6 cases, 720 assertions,
+gcc and CUDA). The MGH problems with f* = 0, 1, 1e3 and 1e6 and the quadratics
+with kappa 1e2 to 1e12 must end converged with f - f* <= 2 tol plus 8 eps |f*|
+(the decrement is f - f* on a quadratic, 2/3 of it on Powell's quartic) and a
+positive definite final factorization; on the quadratics also
+|x_i - x*_i| <= sqrt(4 tol) + 1e-9 kappa, and Newton in at most 2 iterations.
+Both methods leave the saddle started from (1, 0) and from the saddle itself,
+reaching (0, +-1). A trial point with a non-finite value is refused
+(x - log x from 10, where the Newton step goes to -80) and a non-finite start
+is reported as not admissible. Must not converge: the noisy objective, the
+exploded start (iteration budget at 100), sum |x_i| (decrement NaN
+throughout), and a change rule (stopped on change).
+
+**Repaired while testing.** The resolution shift of the subproblem was
+1e-10 (max|w| + |g| / radius): on Brown badly scaled (eigenvalues 2 and 2.7e11)
+it exceeded the small eigenvalue and the step dropped that component, and
+the run stalled at f = 4e11; now 8 n eps max|w|. gamma^2 overflowed at the
+exploded start (gamma about 5e303); now scaled. At an exact stationary point
+(g = 0) the decrement was NaN because the Newton slope was tested as < 0; now
+<= 0.
+
+**Chosen** (Giovanni, 2026-11-15): the defaults above (max_step unbounded,
+max_modified_step 1, floor 1e-8, the negative-curvature step, decrement NaN
+without a Cholesky factor, subproblem in the eigenbasis, initial radius 1,
+max_iterations 200 for Newton and 1000 trial steps for the trust region,
+1e5 value evaluations).
+
+**Open.** The cap of 1 on the modified direction is in the units of x and
+costs Brown badly scaled 37 times its iterations. The trust region takes an
+eigendecomposition at every accepted point where the Newton step does not
+fit; at n = 100 it is 1.3 times slower than Newton for the same iterations.

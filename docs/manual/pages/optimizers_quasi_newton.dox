@@ -1,0 +1,121 @@
+/**
+\addtogroup optimizers_quasi_newton
+
+This page documents two quasi-Newton methods, BFGS and L-BFGS, and a multistart wrapper over any optimizer, in namespace `laplace::optimizers` (headers `<laplace/optimizers/bfgs.hpp>`, `lbfgs.hpp` and `multistart.hpp`). They are header-only templates that run on the host; nothing is marked `LAPLACE_HD` and no library is linked. A run is `minimize(bfgs_optimizer<>{}, f, x0)`, with the objectives, stopping rules, line searches and report of \ref optimizers "the optimizers page". On the standard test problems both methods converge with \f$f - f^* \le 6.3 \times 10^{-8}\f$, except L-BFGS on Wood's function, where it stops near a saddle point.
+
+## Quasi-Newton methods
+
+Both methods minimize an objective modeling \ref laplace::optimizers::gradient_objective "gradient_objective" with a symmetric positive definite approximation \f$B\f$ of the inverse Hessian, built from the accepted steps and the changes of the gradient.
+
+The class template \ref laplace::optimizers::bfgs_optimizer "bfgs_optimizer" (`bfgs_optimizer<Rule, LineSearch>`) keeps a dense \f$n \times n\f$ inverse-Hessian approximation \f$B\f$, requiring \f$O(n^2)\f$ memory and work per iteration, where \f$n\f$ is the parameter dimension. After accepting a step \f$s = x_{+} - x\f$ from the current point \f$x\f$ to \f$x_{+}\f$ with gradient change \f$y = g_{+} - g\f$ from \f$g = \nabla f(x)\f$ to \f$g_{+} = \nabla f(x_{+})\f$, it updates \f$B\f$ by the BFGS formula (Nocedal and Wright, 2006, Algorithm 6.1):
+\f[ B_{+} = (I - \rho s y^\top) B (I - \rho y s^\top) + \rho s s^\top, \qquad \rho = 1 / (s^\top y), \f]
+with \f$I\f$ the identity.
+
+The class template \ref laplace::optimizers::lbfgs_optimizer "lbfgs_optimizer" (`lbfgs_optimizer<Rule, LineSearch>`) never forms \f$B\f$. It retains the last `memory` curvature pairs \f$(s, y)\f$, with default \f$m = 10\f$, taking \f$O(m n)\f$ memory and work per iteration. It computes \f$B g\f$ by the two-loop recursion started from \f$\gamma I\f$, where \f$\gamma = (s^\top y) / (y^\top y)\f$ uses the most recent accepted pair (Nocedal and Wright, 2006, Algorithms 7.4 and 7.5). The first pass runs over the stored pairs from newest to oldest and removes from a copy of \f$g\f$ its components along the \f$y\f$; after the scaling by \f$\gamma\f$, the second pass runs from oldest to newest and adds back components along the \f$s\f$.
+
+Both optimizers take a stopping rule `Rule` and a line search `LineSearch` as template parameters, defaulting to \ref laplace::optimizers::decrement_stop_rule "decrement_stop_rule" and \ref laplace::optimizers::wolfe_line_search "wolfe_line_search" (Nocedal and Wright, 2006, Algorithms 3.5 and 3.6). At compile time, \ref laplace::optimizers::stop_rule_for "stop_rule_for" checks `Rule` against \ref laplace::optimizers::quasi_newton_provides "quasi_newton_provides", which combines `stop_needs_gradient | stop_needs_decrement | stop_needs_previous`. Any stopping rule requiring at most the gradient, the decrement, and the previous point and value is accepted. The \ref laplace::optimizers::armijo_line_search "armijo_line_search" (Dennis and Schnabel, 1996) is also accepted; because Armijo evaluates only objective values during backtracking, the optimizer evaluates the gradient once more at the accepted point.
+
+Each iteration takes the direction \f$d = -B g\f$, runs the line search along it from step \f$1\f$ and updates the model with the pair \f$(s, y)\f$ of the accepted step. Before any pair has been accepted, at the first iteration and after a reset, \f$B = \min(1, 1 / \lVert g \rVert_\infty) I\f$, so the first trial displacement is of order \f$1\f$ in the parameters and never longer than \f$-g\f$. When the first pair is accepted, the identity is scaled by \f$(s^\top y) / (y^\top y)\f$ before the first update (Shanno and Phua, 1978). A pair is used only when \f$s^\top y\f$ is finite and \f$s^\top y > \tau \lVert s \rVert \lVert y \rVert\f$, where \f$\tau\f$ is `curvature_tolerance` (default \f$10^{-10}\f$) and \f$\lVert \cdot \rVert\f$ is the Euclidean norm; otherwise the update is skipped because a small \f$s^\top y\f$ makes \f$\rho\f$ explode. BFGS resets \f$B\f$ after `max_skipped_updates` consecutive skips (default \f$5\f$). L-BFGS has no reset after skips: a skipped pair leaves the stored pairs as they are, and when the buffer is full the oldest pair leaves when a new pair enters. A direction with \f$g^\top d\f$ not finite or \f$g^\top d \ge 0\f$ resets the model, and \f$d\f$ is recomputed before the line search.
+
+## Stationarity and confirmation
+
+The quasi-Newton methods report the stationarity decrement defined in the "Report and status" section of \ref optimizers "the optimizers page", extended with a curvature floor and a one-step confirmation. Before asking the stopping rule at every iteration, including iteration \f$0\f$ at the start, the optimizer computes the next direction \f$d\f$ and sets `decrement` to
+\f[ \frac{1}{2} \max\bigl(g^\top B g,\ \gamma_{\max}\, g^\top g\bigr), \f]
+where \f$g^\top B g = |g^\top d|\f$ for the next direction \f$d\f$, and \f$\gamma_{\max}\f$ is the largest \f$(s^\top y) / (y^\top y)\f$ over the accepted pairs (\f$0\f$ before any pair). Because \f$B\f$ is accurate only along the directions its pairs have sampled and keeps the scale of the stiff directions elsewhere, \f$\frac{1}{2} g^\top B g\f$ alone can lie many orders of magnitude below \f$f - f^*\f$ on an ill-conditioned problem, where \f$f^*\f$ is the minimum value. The floor \f$\gamma_{\max} g^\top g\f$ gives every direction at least the largest inverse curvature seen.
+
+A convergence verdict of the stopping rule (`converged` or `converged_at_resolution`) is confirmed on the next iteration: the rule must hold twice in a row. If the confirming line search cannot move the point because its outcome is `step_below_rounding`, `below_resolution`, or `not_descent_direction`, the pending verdict stands. Confirmation costs one extra iteration per converged run. A `stopped_on_change` verdict is not confirmed and terminates immediately. Starting at an exact stationary point with \f$g = 0\f$ ends with status `converged` after \f$0\f$ iterations.
+
+## Settings and status
+
+Both classes keep their settings as public members: `stop_rule` and `line_search`, `max_iterations` (default 1000), `max_evaluations` (default \f$10^5\f$ value evaluations), `curvature_tolerance` (\f$\tau\f$ above), `trace` (an optional \ref laplace::optimizers::optimizer_trace "optimizer_trace"), and `memory` for L-BFGS or `max_skipped_updates` for BFGS.
+
+The budget `max_evaluations` is checked before each line search, so a run can exceed it by one search. A start with a non-finite value or gradient ends with status `start_not_admissible`. Outside a confirmation, a line search that fails with `step_below_rounding` or `below_resolution` ends the run as `stalled`, any other failure as `line_search_failed`. The report's `curvature_evaluations` is always \f$0\f$.
+
+## Accuracy and cost
+
+The figures below were measured with gcc on one thread, with the default Wolfe line search and decrement tolerance \f$10^{-6}\f$. The standard test problems were run from their usual starts, also with constants \f$1\f$, \f$10^3\f$ and \f$10^6\f$ added to \f$f\f$. Every run converges with \f$f - f^* \le 6.3 \times 10^{-8}\f$, except L-BFGS on Wood's function. The distance \f$\max_i |x_i - x^*_i|\f$ to the minimizer \f$x^*\f$ is at most \f$6.1 \times 10^{-3}\f$ on Powell singular, whose Hessian is singular at \f$x^*\f$, and at most \f$9.9 \times 10^{-5}\f$ elsewhere. Each Wolfe trial evaluates the value and the gradient.
+
+| Problem | BFGS iterations | BFGS value evaluations | L-BFGS iterations | L-BFGS value evaluations |
+|---|---|---|---|---|
+| Rosenbrock (\f$n = 2\f$) | 35 | 41 | 36 | 43 |
+| Rosenbrock (\f$n = 100\f$) | 36 | 42 | 36 | 43 |
+| Powell singular | 31 | 32 | 31 | 33 |
+| Beale | 14 | 15 | 14 | 15 |
+| Brown badly scaled | 12 | 24 | 13 | 25 |
+| Helical valley | 29 | 31 | 26 | 29 |
+| Wood | 35 | 43 | 19 | 22 (saddle) |
+
+A run takes 11 to 36 microseconds, except Rosenbrock with \f$n = 100\f$: 356 microseconds for BFGS and 94 for L-BFGS.
+
+On quadratics of dimension \f$n = 10\f$ with condition number \f$\kappa\f$, BFGS converges up to \f$\kappa = 10^8\f$, in 39 iterations at \f$\kappa = 10^2\f$ and 130 at \f$10^8\f$, with \f$f - f^* \le 4.7 \times 10^{-9}\f$; at \f$10^{10}\f$ and \f$10^{12}\f$ it ends `stalled`. L-BFGS with memory 10 converges up to \f$\kappa = 10^6\f$, in 30 to 249 iterations with \f$f - f^* \le 2.3 \times 10^{-7}\f$.
+
+At \f$\kappa = 10^8\f$ and \f$\kappa = 10^{10}\f$, L-BFGS with memory \f$10\f$ is declared converged about \f$10^{-2}\f$ above \f$f^*\f$ because the remaining error lies along directions that no stored or past pair has sampled, so neither \f$B\f$ nor \f$\gamma_{\max}\f$ detects it. On Wood's function, L-BFGS stops near the saddle point at \f$f = 7.877\f$, where a positive definite \f$B\f$ cannot see the negative curvature. BFGS reaches the minimum in both cases.
+
+Neither method converges on the negative test cases: a noisy objective, \f$\sum_i \cosh x_i\f$ started from \f$700\f$ with a budget of \f$100\f$ iterations, and \f$\sum_i |x_i|\f$ with \f$n = 2, 4, 10\f$ under both line searches. The tests check that a converged run has \f$f - f^* \le 10^{-5}\f$, `decrement` \f$\le 10^{-6}\f$, `curvature_evaluations` \f$= 0\f$, and \f$\max_i |x_i - x^*_i|\f$ within \f$2 \times 10^{-3}\f$ (\f$5 \times 10^{-2}\f$ on Powell singular and \f$5 \times 10^{-3}\f$ on the quadratics). The details of the measurements are in `docs/numerics.md`.
+
+## Multistart
+
+The class template \ref laplace::optimizers::multistart_optimizer "multistart_optimizer" (`multistart_optimizer<Inner>`) runs any optimizer `Inner` (stored in member `optimizer`) from several starting points in sequence and keeps one run. It satisfies \ref laplace::optimizers::optimizer_for "optimizer_for" for every objective that `Inner` accepts, so \ref laplace::optimizers::minimize "minimize()" accepts it.
+
+When `starts` (a `std::vector<std::vector<double>>`) is not empty, its points are used as given and `x0` is ignored. Otherwise `generated_starts(x0)` returns `x0` followed by `start_count - 1` points of a Latin hypercube around it (McKay, Beckman, and Conover, 1979). On coordinate \f$j\f$, the interval \f$x_{0,j} \pm 3\,\sigma \max(1, |x_{0,j}|)\f$, with \f$\sigma\f$ equal to `spread`, is cut into `start_count - 1` equal-width strata, each used once in an order and at a position within the stratum drawn from a 64-bit linear congruential generator seeded with `seed`, giving the same starts on every platform and compiler. The defaults are `start_count` \f$= 10\f$, `spread` \f$= 1\f$, `seed` \f$= 1\f$, and `distinct_tolerance` \f$= 10^{-5}\f$.
+
+Runs are compared in the order run: a run with a non-finite value is never kept when a finite one exists; a converged run (`optimizer_succeeded()` is `true`) beats a non-converged one; and between runs of the same kind a later run replaces the kept one only when its value is lower by more than `distinct_tolerance`. The kept run is the best under this rule, never merely the last.
+
+Calling `run(objective, x0)` returns the kept run's \ref laplace::optimizers::optimizer_report "optimizer_report" with `iterations`, the three evaluation counts, and `elapsed_seconds` summed over all starts. Calling `run_multistart(objective, x0)` returns a \ref laplace::optimizers::multistart_report "multistart_report" with that report, every start's own report, and the counts of starts, of converged starts, of distinct optima and of converged starts that found the kept value. Distinct optima are counted on the sorted converged values, a new one after each gap larger than `distinct_tolerance`.
+
+Measured with BFGS on the Styblinski-Tang function
+\f[ f(x) = \frac{1}{2} \sum_{i=1}^n \left(x_i^4 - 16 x_i^2 + 5 x_i\right) \f]
+from \f$x_0 = (2.5, \dots, 2.5)\f$, which lies in the basin of the worst of its \f$2^n\f$ minima (taking \f$n + 1\f$ distinct values), one start ends at the worst minimum; \f$10\f$ starts find the global minimum for \f$n = 2\f$ in \f$0.086\f$ ms with \f$3\f$ distinct optima counted, and \f$40\f$ starts find it for \f$n = 4\f$ in \f$0.49\f$ ms with \f$5\f$ distinct optima counted. The tests check the selection rule on scripted runs, the strata of the generated starts, and the global minimum for \f$n = 2, 4\f$ with 40 starts, within \f$10^{-5}\f$ in value.
+
+## Example
+
+The example minimizes the Rosenbrock function \f$f(x) = 100 (x_2 - x_1^2)^2 + (1 - x_1)^2\f$ from \f$x_0 = (-1.2, 1)\f$ with L-BFGS, after `Kokkos::initialize`.
+
+```cpp
+#include <laplace/optimizers/lbfgs.hpp>
+#include <laplace/optimizers/minimize.hpp>
+
+struct rosenbrock_objective {
+  double value(const laplace::optimizers::optimizer_point& x) const {
+    const double t1 = x(1) - x(0) * x(0);
+    const double t2 = 1.0 - x(0);
+    return 100.0 * t1 * t1 + t2 * t2;
+  }
+  double value_gradient(const laplace::optimizers::optimizer_point& x,
+                        const laplace::optimizers::optimizer_vector& g) const {
+    const double t1 = x(1) - x(0) * x(0);
+    const double t2 = 1.0 - x(0);
+    g(0) = -400.0 * x(0) * t1 - 2.0 * t2;
+    g(1) = 200.0 * t1;
+    return 100.0 * t1 * t1 + t2 * t2;
+  }
+};
+
+bool rosenbrock_example() {
+  laplace::optimizers::optimizer_vector x0("x0", 2);
+  x0(0) = -1.2;
+  x0(1) = 1.0;
+  rosenbrock_objective f;
+  laplace::optimizers::lbfgs_optimizer<> opt;
+  const laplace::optimizers::optimizer_report report = laplace::optimizers::minimize(opt, f, x0);
+  return laplace::optimizers::optimizer_succeeded(report.status);
+}
+```
+
+## Module types and functions
+
+In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::quasi_newton_provides "quasi_newton_provides"
+- \ref laplace::optimizers::bfgs_optimizer "bfgs_optimizer"
+- \ref laplace::optimizers::lbfgs_optimizer "lbfgs_optimizer"
+- \ref laplace::optimizers::multistart_report "multistart_report"
+- \ref laplace::optimizers::multistart_optimizer "multistart_optimizer"
+
+## References
+
+- J. E. Dennis and R. B. Schnabel (1996), Numerical Methods for Unconstrained Optimization and Nonlinear Equations, Society for Industrial and Applied Mathematics. https://doi.org/10.1137/1.9781611971200
+- M. D. McKay, R. J. Beckman and W. J. Conover (1979), Comparison of three methods for selecting values of input variables in the analysis of output from a computer code, Technometrics, 21(2), 239–245. https://doi.org/10.1080/00401706.1979.10489755
+- J. Nocedal and S. J. Wright (2006), Numerical Optimization, 2nd edition, Springer. https://doi.org/10.1007/978-0-387-40065-5
+- D. F. Shanno and K.-H. Phua (1978), Matrix conditioning and nonlinear optimization, Mathematical Programming, 14(1), 149–160. https://doi.org/10.1007/BF01588962
+
+*/

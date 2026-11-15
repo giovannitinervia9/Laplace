@@ -1,0 +1,140 @@
+/**
+\addtogroup optimizers_second_order
+
+This page documents two second-order optimization methods in namespace `laplace::optimizers`: Newton's method in `<laplace/optimizers/newton.hpp>` and a trust-region method with the exact dense subproblem in `<laplace/optimizers/trust_region.hpp>`. Both are header-only templates that run on the host only; nothing is marked `LAPLACE_HD`. Because they call `laplace::dense` through \ref laplace::optimizers::dense_curvature_solver "dense_curvature_solver" and the symmetric eigendecomposition, a program that uses them links `Laplace::dense`. A run is `minimize(newton_optimizer<>{}, f, x0)`, using the objectives, stopping rules, line searches and report documented on \ref optimizers "the optimizers page". With the default decrement tolerance \f$10^{-6}\f$, both methods converge on the standard test problems and on quadratics with condition number up to \f$10^{12}\f$, with \f$f - f^*\f$ at most \f$6.0 \times 10^{-7}\f$ (Powell singular) in the runs measured below.
+
+## Newton's method
+
+The class template \ref laplace::optimizers::newton_optimizer "newton_optimizer" (`newton_optimizer<StopRule, LineSearch>`) minimizes an objective modeling \ref laplace::optimizers::curvature_objective "curvature_objective". Its template parameter `StopRule` defaults to \ref laplace::optimizers::decrement_stop_rule "decrement_stop_rule", and `LineSearch` defaults to \ref laplace::optimizers::armijo_line_search "armijo_line_search" (Dennis and Schnabel, 1996, Algorithm A6.3.1); any line search with the signature of `armijo_line_search` is accepted. Every stopping rule of the module is accepted at compile time through \ref laplace::optimizers::stop_rule_for "stop_rule_for", because the optimizer provides the gradient, the decrement, and the previous point and value.
+
+At each point \f$x \in \mathbb{R}^n\f$, the objective returns the value \f$f(x)\f$, the gradient \f$g\f$, and the symmetric curvature matrix \f$H\f$ in one evaluation. When \f$H\f$ has a Cholesky factor, the direction is the Newton step \f$d = -H^{-1} g\f$ and the decrement is \f$\tfrac12 g^\top H^{-1} g\f$, as defined in the "Report and status" section of \ref optimizers "the optimizers page". When \f$H\f$ has no Cholesky factor (indefinite, singular, or not finite), the decrement is quiet NaN, so that no such point is declared converged by the decrement rule, and the direction comes from the eigendecomposition \f$H = V \operatorname{diag}(w) V^\top\f$, with \f$w_1 \le \dots \le w_n\f$ and \f$v_i\f$ the columns of \f$V\f$:
+\f[ d = -\sum_i \frac{v_i^\top g}{\max(|w_i|, \omega)}\, v_i, \qquad \omega = \eta \max_i |w_i|, \f]
+with \f$\eta\f$ equal to `eigen_floor` (default \f$10^{-8}\f$; Nocedal and Wright, 2006, section 3.4). When \f$w_1 < -\omega\f$, the unit vector \f$v_1\f$, with the sign that makes \f$g^\top v_1 \le 0\f$, is added: a direction of negative curvature (Moré and Sorensen, 1979), which moves the point off a saddle even where \f$g^\top v_1 = 0\f$.
+
+Because \f$\omega\f$, not the curvature, sets the length of this modified direction, it is scaled down to a largest component of `max_modified_step` (default \f$1\f$); a shorter direction is left as it is. If the eigendecomposition fails, the direction is \f$-g\f$ scaled down to a largest component of \f$1\f$. Every direction is then scaled down to a largest component of `max_step`, a maximum step length in the sense of Dennis and Schnabel (1996); its default \f$+\infty\f$ sets no bound. A step is never lengthened.
+
+The line search starts at step \f$1\f$. When the direction is not a descent direction (\f$g^\top d = 0\f$, which happens at \f$g = 0\f$ on a saddle) and \f$d^\top H d < 0\f$, the step \f$s\f$ is halved from \f$1\f$ until
+\f[ f(x + s d) - f(x) \le \tfrac12 c_1 s^2 d^\top H d, \f]
+with \f$c_1\f$ the `sufficient_decrease` of the line search (Moré and Sorensen, 1979). The stopping rule is asked at the start (iteration \f$0\f$, without a previous point) and at every new point. The optional `trace` callback is called at every new point with its value, gradient, decrement, and the accepted step length of the line search.
+
+## The trust region
+
+The class template \ref laplace::optimizers::trust_region_optimizer "trust_region_optimizer" (`trust_region_optimizer<StopRule>`) requires a \ref laplace::optimizers::curvature_objective "curvature_objective" whose `curvature_type` is \ref laplace::optimizers::dense_curvature_matrix "dense_curvature_matrix". Its `StopRule` defaults to \ref laplace::optimizers::decrement_stop_rule "decrement_stop_rule", with the same accepted stopping rules as `newton_optimizer`.
+
+Each step \f$p\f$ minimizes the quadratic model \f$m(p) = g^\top p + \tfrac12 p^\top H p\f$ over \f$\lVert p\rVert_2 \le \Delta\f$, with \f$\Delta\f$ the trust-region radius. The solution satisfies \f$(H + \lambda I) p = -g\f$ with \f$H + \lambda I\f$ positive semidefinite, \f$\lambda \ge 0\f$, and \f$\lambda (\Delta - \lVert p\rVert_2) = 0\f$ (Moré and Sorensen, 1983). When \f$H\f$ has a Cholesky factor and the Newton step satisfies \f$\lVert H^{-1} g\rVert_2 \le \Delta\f$, \f$p\f$ is the Newton step. Otherwise, with the eigendecomposition \f$H = V \operatorname{diag}(w) V^\top\f$ as above and \f$\gamma = V^\top g\f$,
+\f[ \lVert p(\lambda)\rVert_2^2 = \sum_i \frac{\gamma_i^2}{(w_i + \lambda)^2}, \f]
+and \f$\lambda\f$ solves the secular equation \f$1 / \lVert p(\lambda)\rVert_2 = 1 / \Delta\f$ (Moré and Sorensen, 1983) by Newton's method, safeguarded by bisection on \f$[\max(0, -w_1),\ \max(0, -w_1) + \lVert g\rVert_2 / \Delta]\f$. The equation is solved in the eigenbasis: one eigendecomposition per accepted point, then \f$O(n)\f$ work per iteration of the equation.
+
+Sums \f$w_i + \lambda\f$ below \f$\delta = 8 n \varepsilon \max_i |w_i|\f$ are treated as zero, with \f$\varepsilon\f$ as defined on \ref optimizers "the optimizers page". When \f$\lVert p(\max(0, -w_1) + \delta)\rVert_2 \le \Delta\f$, the step is taken at \f$\lambda = \max(0, -w_1)\f$ without the components whose \f$w_i + \lambda\f$ is below \f$\delta\f$, and, when \f$w_1 < -\delta\f$, \f$\tau v_1\f$ is added with \f$\tau\f$ such that \f$\lVert p\rVert_2 = \Delta\f$ and its sign opposite to that of \f$\gamma_1\f$ (the hard case of Moré and Sorensen, 1983).
+
+Each trial step evaluates the ratio \f$\rho = (f(x) - f(x + p)) / (m(0) - m(p))\f$. When \f$\rho < 1/4\f$ or \f$f(x + p)\f$ is not finite (a refused point), the radius becomes \f$\lVert p\rVert_2 / 4\f$; when \f$\rho > 3/4\f$ and \f$\lVert p\rVert_2 \ge 0.99\,\Delta\f$, it doubles, up to `max_radius`; the point moves when \f$\rho >\f$ `acceptance` (Nocedal and Wright, 2006, Algorithm 4.1). The decrement is \f$\tfrac12 g^\top H^{-1} g\f$ as defined on \ref optimizers "the optimizers page", and quiet NaN where \f$H\f$ has no Cholesky factor. The stopping rule is asked at the start and at every accepted point, and `trace` is called at every accepted point with the step length \f$\lVert p\rVert_2\f$.
+
+## Settings and status
+
+| Class | Member | Default | Role |
+|---|---|---|---|
+| `newton_optimizer` | `stop_rule` | `decrement_stop_rule{}` | Stopping rule queried at each point |
+| `newton_optimizer` | `line_search` | `armijo_line_search{}` | Line search along each direction |
+| `newton_optimizer` | `max_iterations` | \f$200\f$ | Maximum number of iterations |
+| `newton_optimizer` | `max_value_evaluations` | \f$10^5\f$ | Value-evaluation budget |
+| `newton_optimizer` | `max_step` | \f$+\infty\f$ | Maximum component magnitude of any step |
+| `newton_optimizer` | `eigen_floor` | \f$10^{-8}\f$ | Relative floor \f$\eta\f$ on eigenvalues |
+| `newton_optimizer` | `max_modified_step` | \f$1\f$ | Maximum component magnitude of modified direction |
+| `newton_optimizer` | `trace` | empty | Optional \ref laplace::optimizers::optimizer_trace "optimizer_trace" callback |
+| `trust_region_optimizer` | `stop_rule` | `decrement_stop_rule{}` | Stopping rule queried at accepted points |
+| `trust_region_optimizer` | `max_iterations` | \f$1000\f$ | Maximum trial steps, accepted or not |
+| `trust_region_optimizer` | `max_value_evaluations` | \f$10^5\f$ | Value-evaluation budget |
+| `trust_region_optimizer` | `initial_radius` | \f$1\f$ | Initial trust-region radius \f$\Delta\f$ |
+| `trust_region_optimizer` | `max_radius` | \f$+\infty\f$ | Upper bound on the trust-region radius |
+| `trust_region_optimizer` | `acceptance` | \f$10^{-4}\f$ | Minimum ratio \f$\rho\f$ to accept a step |
+| `trust_region_optimizer` | `trace` | empty | Optional \ref laplace::optimizers::optimizer_trace "optimizer_trace" callback |
+
+In both methods, a non-finite \f$f\f$ at the start gives `start_not_admissible`, and the stopping rule's verdict gives `converged`, `converged_at_resolution`, or `stopped_on_change`. The budget `max_value_evaluations` is checked before each step, so a run can exceed it by the evaluations of one step, and gives `evaluation_budget`; reaching `max_iterations` gives `iteration_budget`. In `newton_optimizer`, a line search failing with `step_below_rounding` gives `stalled`, and any other failure gives `line_search_failed`. In `trust_region_optimizer`, `max_iterations` counts every trial step, accepted or not, and so does `iterations` in the \ref laplace::optimizers::optimizer_report "optimizer_report"; the accepted steps are `gradient_evaluations` less \f$1\f$, and a model predicting no decrease (\f$m(0) - m(p) \le 0\f$, as at \f$g = 0\f$ with \f$H\f$ semidefinite) or a trial point equal to \f$x\f$ in every coordinate gives `stalled`. In both, `final_factorization` is the outcome of the Cholesky factorization at the last point.
+
+## Accuracy and cost
+
+The figures below were measured with gcc on one thread and the default decrement tolerance \f$10^{-6}\f$. Every run in the table converges, and adding \f$10^6\f$ to \f$f\f$ gives the same counts.
+
+| Problem | Newton iterations | Newton value evaluations | Trust-region iterations | Trust-region value evaluations |
+|---|---|---|---|---|
+| Rosenbrock, \f$n = 2\f$ | 23 | 55 | 24 | 46 |
+| extended Rosenbrock, \f$n = 100\f$ | 23 | 55 | 23 | 45 |
+| Powell singular | 12 | 25 | 12 | 25 |
+| Beale | 6 | 15 | 6 | 12 |
+| Brown badly scaled | 184 | 375 | 31 | 63 |
+| helical valley | 14 | 31 | 8 | 16 |
+| Wood | 41 | 102 | 44 | 83 |
+| quadratic, \f$n = 10\f$, condition number \f$\kappa = 10^2\f$ | 1 | 3 | 5 | 11 |
+| quadratic, \f$\kappa = 10^6\f$ | 1 | 3 | 5 | 11 |
+| quadratic, \f$\kappa = 10^{12}\f$ | 1 | 3 | 5 | 11 |
+| \f$x_1^2 + x_2^4 / 4 - x_2^2 / 2\f$ from \f$(1, 0)\f$ | 1 | 3 | 5 | 11 |
+| Rosenbrock from \f$(0, 1)\f$ | 2 | 5 | 4 | 9 |
+
+On extended Rosenbrock with \f$n = 100\f$, a run takes 1529 microseconds for Newton and 1966 microseconds for the trust region; the other problems take between 5 and 155 microseconds per run.
+
+Setting `max_step` to \f$5\f$ or to \f$10^3 \max(1, \max_i |x_{0,i}|)\f$ ends Brown badly scaled on the budget of 200 iterations, because its minimizer is at \f$(10^6, 2 \times 10^{-6})\f$. With `max_modified_step` equal to \f$1\f$ against no cap, Newton takes 6 against 14 iterations on Beale, 14 against 21 on helical valley, 41 against 57 on Wood, 2 against 22 on Rosenbrock from \f$(0, 1)\f$, and 184 against 5 on Brown badly scaled.
+
+The tests check that the standard problems with constants \f$0\f$, \f$1\f$, \f$10^3\f$, and \f$10^6\f$ added to \f$f\f$, and quadratics with condition number \f$\kappa\f$ from \f$10^2\f$ to \f$10^{12}\f$, end converged with \f$f - f^* \le 2 \times 10^{-6} + 8 \varepsilon |f^*|\f$ and a positive definite final factorization; on the quadratics, they also check \f$|x_i - x^*_i| \le \sqrt{4 \times 10^{-6}} + 10^{-9} \kappa\f$ and that Newton takes at most 2 iterations. Both methods reach a minimum \f$(0, \pm 1)\f$ of \f$x_1^2 + x_2^4 / 4 - x_2^2 / 2\f$ from \f$(1, 0)\f$, where \f$H\f$ is indefinite and \f$g_2 = 0\f$, and from the saddle \f$(0, 0)\f$ itself, and both converge on Rosenbrock from \f$(0, 1)\f$. A non-finite trial value is refused (\f$x - \log x\f$ from \f$10\f$), and a non-finite start gives `start_not_admissible`. None of these ends with a success: a noisy objective, \f$\sum_i \cosh x_i\f$ from \f$700\f$ with 100 iterations (`iteration_budget`), \f$\sum_i |x_i|\f$ (decrement NaN throughout), and a change rule (`stopped_on_change`). For details of the measurements, see `docs/numerics.md`.
+
+## Example
+
+The example minimizes the Rosenbrock function \f$f(x) = 100 (x_2 - x_1^2)^2 + (1 - x_1)^2\f$ from \f$x_0 = (-1.2, 1)\f$ with `trust_region_optimizer`, after `Kokkos::initialize`.
+
+```cpp
+#include <laplace/optimizers/minimize.hpp>
+#include <laplace/optimizers/trust_region.hpp>
+
+struct rosenbrock_curvature_objective {
+  using curvature_type = laplace::optimizers::dense_curvature_matrix;
+
+  double value(const laplace::optimizers::optimizer_point& x) const {
+    const double t1 = x(1) - x(0) * x(0);
+    const double t2 = 1.0 - x(0);
+    return 100.0 * t1 * t1 + t2 * t2;
+  }
+
+  double value_gradient(const laplace::optimizers::optimizer_point& x,
+                        const laplace::optimizers::optimizer_vector& g) const {
+    const double t1 = x(1) - x(0) * x(0);
+    const double t2 = 1.0 - x(0);
+    g(0) = -400.0 * x(0) * t1 - 2.0 * t2;
+    g(1) = 200.0 * t1;
+    return 100.0 * t1 * t1 + t2 * t2;
+  }
+
+  double value_gradient_curvature(const laplace::optimizers::optimizer_point& x,
+                                  const laplace::optimizers::optimizer_vector& g,
+                                  laplace::optimizers::dense_curvature_matrix& H) const {
+    H(0, 0) = 1200.0 * x(0) * x(0) - 400.0 * x(1) + 2.0;
+    H(0, 1) = -400.0 * x(0);
+    H(1, 0) = H(0, 1);
+    H(1, 1) = 200.0;
+    return value_gradient(x, g);
+  }
+};
+
+bool rosenbrock_trust_region_example() {
+  laplace::optimizers::optimizer_vector x0("x0", 2);
+  x0(0) = -1.2;
+  x0(1) = 1.0;
+  rosenbrock_curvature_objective f;
+  laplace::optimizers::trust_region_optimizer<> opt;
+  const laplace::optimizers::optimizer_report report = laplace::optimizers::minimize(opt, f, x0);
+  return laplace::optimizers::optimizer_succeeded(report.status);
+}
+```
+
+## Module types
+
+In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::newton_optimizer "newton_optimizer"
+- \ref laplace::optimizers::trust_region_optimizer "trust_region_optimizer"
+
+## References
+
+- J. E. Dennis and R. B. Schnabel (1996), Numerical Methods for Unconstrained Optimization and Nonlinear Equations, Society for Industrial and Applied Mathematics. https://doi.org/10.1137/1.9781611971200
+- J. Nocedal and S. J. Wright (2006), Numerical Optimization, 2nd edition, Springer. https://doi.org/10.1007/978-0-387-40065-5
+- J. J. Moré and D. C. Sorensen (1983), Computing a trust region step, SIAM Journal on Scientific and Statistical Computing, 4(3), 553–572. https://doi.org/10.1137/0904038
+- J. J. Moré and D. C. Sorensen (1979), On the use of directions of negative curvature in a modified Newton method, Mathematical Programming, 16(1), 1–20. https://doi.org/10.1007/BF01582091
+
+*/
