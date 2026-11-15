@@ -35,6 +35,7 @@ struct Deriv {
     if constexpr (K == 3) r = upper ? lm::log_ibetac_d3(a, b, x) : lm::log_ibeta_d3(a, b, x);
     if constexpr (K == 4) r = upper ? lm::log_ibetac_d4(a, b, x) : lm::log_ibeta_d4(a, b, x);
     if constexpr (K == 5) r = upper ? lm::log_ibetac_d5(a, b, x) : lm::log_ibeta_d5(a, b, x);
+    if constexpr (K == 6) r = upper ? lm::log_ibetac_d6(a, b, x) : lm::log_ibeta_d6(a, b, x);
     for (int j = 0; j <= K; ++j) o[j] = r.c[j];
   }
 };
@@ -74,7 +75,7 @@ void check_beta_shape_deriv(bool upper, double max_ulpN, double max_ulpL) {
   const auto hx = bench::to_host_args(x);
   bench::DArgs dx("x", n);
   Kokkos::deep_copy(dx, hx);
-  Kokkos::View<double* [6], Kokkos::LayoutRight, bench::Exec::memory_space> dy("y", n);
+  Kokkos::View<double* [7], Kokkos::LayoutRight, bench::Exec::memory_space> dy("y", n);
   const Deriv<K> f{upper};
   Kokkos::parallel_for(
       "beta_deriv", Kokkos::RangePolicy<bench::Exec>(0, n), KOKKOS_LAMBDA(const std::size_t r) {
@@ -135,6 +136,7 @@ TEST_CASE("derivatives of log I_x(a, b) in the shapes against mpmath") {
   check_beta_shape_deriv<3>(false, 3100.0, 315.0);
   check_beta_shape_deriv<4>(false, 1800.0, 115.0);
   check_beta_shape_deriv<5>(false, 3300.0, 420.0);
+  check_beta_shape_deriv<6>(false, 2330.0, 650.0);
 }
 
 TEST_CASE("derivatives of log(1 - I_x(a, b)) in the shapes against mpmath") {
@@ -143,4 +145,5 @@ TEST_CASE("derivatives of log(1 - I_x(a, b)) in the shapes against mpmath") {
   check_beta_shape_deriv<3>(true, 2450.0, 80.0);
   check_beta_shape_deriv<4>(true, 2950.0, 75.0);
   check_beta_shape_deriv<5>(true, 2950.0, 690.0);
+  check_beta_shape_deriv<6>(true, 8050.0, 265.0);
 }

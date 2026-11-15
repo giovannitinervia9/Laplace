@@ -6,7 +6,7 @@ Usage (from the repository root):
     python -I tools/reference/student_owen.py student|sn|owen [n_points] [workers]
 
 Files (format as in incomplete.py: the arguments, then hi, lo):
-    log_student_cdf.csv, log_student_cdf_d{i}{j}.csv   z, nu      log T_nu(z) and d^(i+j)/dz^i dnu^j, 1 <= i + j <= 5
+    log_student_cdf.csv, log_student_cdf_d{i}{j}.csv   z, nu      log T_nu(z) and d^(i+j)/dz^i dnu^j, 1 <= i + j <= 6
     log_sn_cdf.csv, log_sn_cdf_d{i}{j}.csv             z, alpha   log F(z; alpha) of the standard skew normal, likewise in (z, alpha)
     owens_t.csv                                         h, a       T(h, a)
 
@@ -44,7 +44,7 @@ import mpmath
 
 OUT = Path(__file__).resolve().parents[2] / "tests" / "data" / "reference"
 SEED = 20261109
-KMAX = 5
+KMAX = 6
 KEYS = [(i, k - i) for k in range(1, KMAX + 1) for i in range(k, -1, -1)]
 
 

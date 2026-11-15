@@ -1,5 +1,5 @@
 // Owen's T function and the distribution function of the standard skew normal
-// on the log scale, with its derivatives in (z, alpha) to order five.
+// on the log scale, with its derivatives in (z, alpha) to order six.
 //
 // Notation. phi and Phi are the standard normal density and distribution
 // function, Q(h) = Phi(-h), erfcx(x) = exp(x^2) erfc(x). For h >= 0 and real a,
@@ -352,8 +352,9 @@ LAPLACE_HD void ser_log(const double* g, double* l) {
 }
 
 LAPLACE_HD_FORCEINLINE double binom(int m, int r) {
-  constexpr double c[6][6] = {{1, 0, 0, 0, 0, 0},  {1, 1, 0, 0, 0, 0},   {1, 2, 1, 0, 0, 0},
-                              {1, 3, 3, 1, 0, 0},  {1, 4, 6, 4, 1, 0},   {1, 5, 10, 10, 5, 1}};
+  constexpr double c[7][7] = {{1, 0, 0, 0, 0, 0, 0},   {1, 1, 0, 0, 0, 0, 0},    {1, 2, 1, 0, 0, 0, 0},
+                              {1, 3, 3, 1, 0, 0, 0},   {1, 4, 6, 4, 1, 0, 0},    {1, 5, 10, 10, 5, 1, 0},
+                              {1, 6, 15, 20, 15, 6, 1}};
   return c[m][r];
 }
 
@@ -798,7 +799,7 @@ LAPLACE_HD void log_g0_series(double h, double* L) {
     const int Kr = K + 20 + (kk < 20000.0 ? static_cast<int>(Kokkos::ceil(kk)) : 20000);
     const double K1 = Kr + 1.0;
     double rr = 2.0 * K1 / (1.0 + Kokkos::sqrt(1.0 + 4.0 * K1 * w));
-    double r[K + 1], mu[6];
+    double r[K + 1], mu[K + 1];
     for (int j = Kr; j >= 1; --j) {
       rr = j / (1.0 + w * rr);
       if (j <= K) r[j] = rr;
@@ -830,7 +831,7 @@ LAPLACE_HD void ttilde_series(double h, double alpha, double* T) {
       v *= x2;
     }
   }
-  constexpr double inv_fact[6] = {1.0, 1.0, 0.5, 1.0 / 6.0, 1.0 / 24.0, 1.0 / 120.0};
+  constexpr double inv_fact[7] = {1.0, 1.0, 0.5, 1.0 / 6.0, 1.0 / 24.0, 1.0 / 120.0, 1.0 / 720.0};
   double hp[K + 1];
   hp[0] = 1.0;
   for (int k = 1; k <= K; ++k) hp[k] = hp[k - 1] * h;
@@ -1040,7 +1041,7 @@ LAPLACE_HD_FORCEINLINE mixed_partials<K> sn_deriv(double z, double alpha, const 
   if constexpr (K == 1) {
     if (method == 0) return sn_d1(z, alpha, p);
   }
-  constexpr double fact[6] = {1.0, 1.0, 2.0, 6.0, 24.0, 120.0};
+  constexpr double fact[7] = {1.0, 1.0, 2.0, 6.0, 24.0, 120.0, 720.0};
   double L[nc<K>];
   scale sc_p, sc_m;
   sn_series<K>(z, alpha, p, method, L, sc_p, sc_m);
@@ -1183,6 +1184,25 @@ LAPLACE_HD mixed_partials<5> log_sn_cdf_d5(double z, double alpha) {
   return detail_owen::sn_deriv<5>(z, alpha, detail_owen::params{}, 0);
 }
 
+/**
+ * \ingroup owen
+ * \brief Sixth derivatives in \f$(z, \alpha)\f$ of \f$\log F(z; \alpha)\f$.
+ *
+ * Computes \f$c_j = \frac{\partial^6}{\partial z^{6-j} \partial \alpha^j} \log F(z; \alpha)\f$ for \f$j = 0, \dots, 6\f$; see \ref owen for the bivariate series, cumulant methods, and conditioning near zeros.
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param alpha Real shape parameter \f$\alpha \in \mathbb{R}\f$.
+ * \return A mixed_partials of order 6 with \f$c_j\f$ in `c[j]` for \f$j = 0, \dots, 6\f$, or quiet NaN in all components if either input is NaN.
+ *
+ * \par Measured accuracy
+ * Maximum error 840845 ulpN (96270 ulpL) on gcc and 841118 ulpN (96302 ulpL) on CUDA; test bound \f$1.27 \times 10^6\f$ ulpN (\f$1.45 \times 10^5\f$ ulpL).
+ *
+ * \see owen, mixed_partials, log_sn_cdf(), log_sn_cdf_d5()
+ */
+LAPLACE_HD mixed_partials<6> log_sn_cdf_d6(double z, double alpha) {
+  return detail_owen::sn_deriv<6>(z, alpha, detail_owen::params{}, 0);
+}
+
 }  // namespace laplace::math::own
 
 namespace laplace::math {
@@ -1195,5 +1215,6 @@ LAPLACE_HD_FORCEINLINE mixed_partials<2> log_sn_cdf_d2(double z, double alpha) {
 LAPLACE_HD_FORCEINLINE mixed_partials<3> log_sn_cdf_d3(double z, double alpha) { return own::log_sn_cdf_d3(z, alpha); }
 LAPLACE_HD_FORCEINLINE mixed_partials<4> log_sn_cdf_d4(double z, double alpha) { return own::log_sn_cdf_d4(z, alpha); }
 LAPLACE_HD_FORCEINLINE mixed_partials<5> log_sn_cdf_d5(double z, double alpha) { return own::log_sn_cdf_d5(z, alpha); }
+LAPLACE_HD_FORCEINLINE mixed_partials<6> log_sn_cdf_d6(double z, double alpha) { return own::log_sn_cdf_d6(z, alpha); }
 
 }  // namespace laplace::math

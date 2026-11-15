@@ -92,3 +92,69 @@ TEST_CASE("special arguments of log K") {
     CHECK(std::fabs(lm::log_bessel_k_dx1(0.5, x) + 0.5 / x + 1.0) <= 4e-16 * (0.5 / x + 1.0));
   }
 }
+
+namespace {
+
+// the joint routine: out[0] = log K, out[n] = the derivative of order n, from one evaluation of the shared work
+struct LogKJoint {
+  int n;
+  int top;  // highest order requested of the joint routine (3 or 7)
+  KOKKOS_INLINE_FUNCTION double operator()(double nu, double x) const {
+    double out[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    if (top == 3) lm::log_bessel_k_dx_upto<3>(nu, x, out);
+    else lm::log_bessel_k_dx_upto<7>(nu, x, out);
+    return out[n];
+  }
+};
+
+}  // namespace
+
+// log_bessel_k_dx_upto<N> against the single-order functions: the same double on the CPU builds, where the two
+// repeat the same arithmetic in every regime (checked bit for bit: 0 of 146792 entries differ on gcc). On the
+// CUDA build nvcc contracts and schedules the two functions differently and 20744 of the 146792 entries
+// differ in the last bits, by at most 1.2e-15 relative (bound 1.8e-15). The points are the
+// reference grids of the seven orders and the boundaries between the three regimes (nu = 20 of the Debye
+// expansion, x = 200 of the asymptotic one, x = 1 of Steed's fraction in double-double).
+TEST_CASE("log_bessel_k_dx_upto against the single-order functions, every regime and boundary") {
+  std::vector<bench::Args> pts;
+  for (int n = 1; n <= 7; ++n) {
+    const auto r = bench::read_ref(refdir + "/log_bessel_k_dx" + std::to_string(n) + ".csv");
+    pts.insert(pts.end(), r.x.begin(), r.x.end());
+  }
+  for (double nu : {0.0, 0.1, 0.5, 1.0, 2.0, 19.99, 20.0, 20.01, 50.0, 300.0})
+    for (double x : {0.5, 0.99, 1.0, 1.01, 2.0, 5.0, 199.9, 200.0, 200.1, 1000.0}) pts.push_back({nu, x, 0.0});
+#ifdef KOKKOS_ENABLE_CUDA
+  const double tol = 1.8e-15;
+#else
+  const double tol = 0.0;
+#endif
+  double worst = 0.0;
+  std::size_t differing = 0;
+  for (int n = 0; n <= 7; ++n) {
+    const auto single = bench::eval_kernel(pts, LogK{n});
+    const auto joint7 = bench::eval_kernel(pts, LogKJoint{n, 7});
+    for (std::size_t i = 0; i < pts.size(); ++i)
+      if (!(std::fabs(single[i] - joint7[i]) <= tol * std::fabs(single[i]))) {
+        ++differing;
+        worst = std::max(worst, std::fabs(single[i] - joint7[i]) / std::max(std::fabs(single[i]), 1e-300));
+      }
+    if (n <= 3) {
+      const auto joint3 = bench::eval_kernel(pts, LogKJoint{n, 3});
+      for (std::size_t i = 0; i < pts.size(); ++i)
+        if (!(std::fabs(single[i] - joint3[i]) <= tol * std::fabs(single[i]))) {
+          ++differing;
+          worst = std::max(worst, std::fabs(single[i] - joint3[i]) / std::max(std::fabs(single[i]), 1e-300));
+        }
+    }
+  }
+  INFO("entries that differ: ", differing, " of ", 8 * pts.size(), ", worst relative difference ", worst);
+  CHECK(differing == 0);  // entries outside the tolerance
+  // the special arguments
+  double o[8];
+  lm::log_bessel_k_dx_upto<7>(2.0, -1.0, o);
+  for (int n = 1; n <= 7; ++n) CHECK(std::isnan(o[n]));
+  lm::log_bessel_k_dx_upto<7>(2.0, INFINITY, o);
+  CHECK(o[0] == -INFINITY);
+  CHECK(o[1] == -1.0);
+  for (int n = 2; n <= 7; ++n) CHECK(o[n] == 0.0);
+}

@@ -207,6 +207,8 @@ struct distrib_sample_summary {
   double mean = 0.0;
   /// Sample variance with divisor \f$n\f$, \f$\frac{1}{n}\sum_i (y_i - \bar{y})^2\f$.
   double variance = 0.0;
+  /// Sample skewness with divisor \f$n\f$, the third central moment over the second to the power \f$3/2\f$; zero for a sample of no spread.
+  double skewness = 0.0;
   /// Sample median (type-7 quantile at \f$p = 0.5\f$).
   double median = 0.0;
   /// Mean absolute deviation from the median, \f$\frac{1}{n}\sum_i |y_i - q_{0.5}|\f$.

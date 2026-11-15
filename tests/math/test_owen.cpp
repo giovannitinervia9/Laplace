@@ -64,6 +64,7 @@ struct Deriv {
     if constexpr (K == 3) r = own::log_sn_cdf_d3(z, alpha);
     if constexpr (K == 4) r = own::log_sn_cdf_d4(z, alpha);
     if constexpr (K == 5) r = own::log_sn_cdf_d5(z, alpha);
+    if constexpr (K == 6) r = own::log_sn_cdf_d6(z, alpha);
     for (int j = 0; j <= K; ++j) o[j] = r.c[j];
   }
 };
@@ -85,7 +86,7 @@ void check_skew_normal_cdf_deriv(double max_ulpN, double max_ulpL) {
   const auto hx = bench::to_host_args(x);
   bench::DArgs dx("x", n);
   Kokkos::deep_copy(dx, hx);
-  Kokkos::View<double* [6], Kokkos::LayoutRight, bench::Exec::memory_space> dy("y", n);
+  Kokkos::View<double* [7], Kokkos::LayoutRight, bench::Exec::memory_space> dy("y", n);
   const Deriv<K> f{};
   Kokkos::parallel_for(
       "sn_deriv", Kokkos::RangePolicy<bench::Exec>(0, n), KOKKOS_LAMBDA(const std::size_t r) {
@@ -130,4 +131,5 @@ TEST_CASE("derivatives of log F of the skew normal in (z, alpha) against mpmath"
   check_skew_normal_cdf_deriv<3>(3400.0, 760.0);
   check_skew_normal_cdf_deriv<4>(2300.0, 1200.0);
   check_skew_normal_cdf_deriv<5>(1.8e5, 4.2e4);
+  check_skew_normal_cdf_deriv<6>(1.27e6, 1.45e5);
 }

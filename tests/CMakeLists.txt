@@ -56,6 +56,11 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_betabinom.cpp
   distrib/test_pig.cpp
   distrib/test_location_scale.cpp
+  distrib/test_student_t.cpp
+  distrib/test_enet.cpp
+  distrib/test_skewnormal.cpp
+  distrib/test_pseudohuber.cpp
+  distrib/test_skewt.cpp
   math/test_chain_pair.cpp
   pdmat/test_pilot.cpp
   pdmat/test_unstructured.cpp
@@ -83,7 +88,13 @@ laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})
 target_link_libraries(laplace_tests PRIVATE Laplace::laplace Laplace::dense laplace_doctest)
 # reference values (tests/data/reference) and the shared measurement helpers (benchmarks/)
-target_compile_definitions(laplace_tests PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
+# The per-thread stack the CUDA build asks the driver for before the first kernel
+# (tests/main.cpp says why; -DLAPLACE_TEST_CUDA_STACK=n to measure another value)
+if(NOT DEFINED LAPLACE_TEST_CUDA_STACK)
+  set(LAPLACE_TEST_CUDA_STACK 8192)
+endif()
+target_compile_definitions(laplace_tests PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference"
+  LAPLACE_TEST_CUDA_STACK=${LAPLACE_TEST_CUDA_STACK})
 target_include_directories(laplace_tests PRIVATE ${PROJECT_SOURCE_DIR}/benchmarks)
 
 # The kernel of the scalar-bijector check, one translation unit per total order

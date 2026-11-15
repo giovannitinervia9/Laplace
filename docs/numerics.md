@@ -5755,7 +5755,7 @@ anything. Worst error in ulps, gcc and CUDA (one figure when they agree):
 | I and its derivatives to order 4 | 1.1 to 2.3 | 1.0 to 2.1 | 1.7 to 4.4 |
 | log F | 0.5 to 4.9 | 4.7 | 63.5 / 82.5 (value), 2.6 to 60.3 |
 | log(1 - F) | 0.5 to 2.6 | 4.3 | 1.1 to 7.1 |
-| F, 1 - F | exact | 79, 124 / 461 | â€” |
+| F, 1 - F | exact | 79, 124 / 461 | — |
 
 The derivatives of the mass are scored in ulps of the larger of their two
 terms, since near the mode they are small against both (the binomial's order 3
@@ -6606,6 +6606,126 @@ zero of the value would need an expansion of sqrt(pi/2) erfcx(x / sqrt 2) - 1
 around x = 0.30246, and nothing asks for it, since the quantity is used
 additively.
 
+## Order six everywhere: the incomplete beta, the Student cdf and the skew normal cdf
+
+**What.** Three modules stopped at total order five and now reach six, which
+is the order every other derivative family in the library already had
+(Giovanni, 2026-11-15):
+
+    own::log_ibeta_d6(a, b, x), own::log_ibetac_d6(a, b, x)   in (a, b)
+    own::log_student_cdf_d6(z, nu)                            in (z, nu)
+    own::log_sn_cdf_d6(z, alpha)                              in (z, alpha)
+
+each returning `mixed_partials<6>`, whose component c[j] is the derivative with
+j differentiations in the second variable. The gamma side
+(`incomplete_gamma_deriv`, `incomplete_gamma_mixed`,
+`incomplete_gamma_ratio`) reached order six in phase 2 and does not change; no
+public derivative family of the library stops at five any more.
+
+**How.** Nothing in the three algorithms is specific to the order. Each
+carries its quantities as truncated bivariate Taylor polynomials in one array
+with the multi-index (i, j) at (i + j)(i + j + 1)/2 + j, and every step —
+the moment-to-cumulant recursion, the truncated product, the composition for
+the complementary side, the series, the quadrature's moment accumulation, the
+polygamma differences of the log-beta terms — is a loop over the total order.
+So the work was the size of the arrays and the per-order pieces that are
+written out:
+
+- `detail_ibd::NC`, the number of coefficients of a bivariate polynomial of
+  total order at most five, becomes 28 for order six. It is the array size
+  shared by all three modules (student.hpp and owen.hpp carry their own
+  polynomials in `ibd::NC`-sized arrays and index them with `ibd::ix`), so
+  one constant covers them.
+- the buffers that hold one value per order, which are indexed 0..K: the
+  polygamma differences of `assemble` and of `series_lower`
+  (psi^(n)(a) - psi^(n)(s) and its three companions, now n = 0..5, which
+  `dpsi_all` already supplied since the discrete families needed psi^(5)),
+  the recurrence terms of `psi_all`, the Taylor coefficients of c(nu) and of
+  the anchor in student.hpp, the factorials and the binomial table of
+  owen.hpp.
+- `lower_beta` in student.hpp writes its pure shape coefficients out by
+  order, so it gains the order-6 term `pure_a<6>(...) / 720`, which reads the
+  incomplete beta at its new order.
+- the quadrature of the incomplete beta chooses between two ways of placing
+  the moments: storing the nodes and summing them twice about their mean
+  (orders 3 and 5) or keeping a first pass at a coarser step (order 4).
+  Measured for order six on the 519 reference rows, worst ulpN over the rows
+  where the quadrature is used: with the stored nodes 1.30e3 for log I and
+  1.16e3 for log(1 - I), without them 1.67e3 and 815. The stored nodes are
+  kept, because for log I they set the worst error of the whole order and for
+  log(1 - I) the worst comes from the series rows (5.36e3) either way.
+
+**Measured.** References by the routes already in `tools/reference/`, extended
+to degree six:
+
+- `incomplete_deriv.py beta6` (new kind) writes the 14 files
+  `log_ibeta_d{i}{j}.csv` and `log_ibetac_d{i}{j}.csv` with i + j = 6, 519
+  rows, on the same points as the kind `beta` (same seed) so that the two sets
+  describe the same grid. It also recomputes orders 1 to 5 at degree six and
+  compares them with the committed files: over 10380 values the largest
+  relative difference is 1.08e-16 for both sides, which is the check that the
+  higher degree did not disturb the lower orders.
+- `student_owen.py` now has KMAX = 6, so the kinds `student` and `sn` write
+  every order from one to six on their own grids. Here the higher degree left
+  the lower orders untouched to the last bit: over the rows the two sets share,
+  the recomputed orders 1 to 5 are identical to the committed ones, 15600
+  values for the Student and 15980 for the skew normal. One row of the skew
+  normal (of 800) no longer passes the agreement of the two working precisions
+  at degree six and is dropped; the Student keeps all 780 of its rows.
+
+Worst error over every row and component, relative, in ulps of the
+normalization each module uses (ulpN for the incomplete beta, as before):
+
+| quantity | gcc | CUDA | worst component and argument (gcc) |
+|---|---|---|---|
+| log I_x(a, b), order 6 | 1298 ulpN, 433 ulpL | 1550 ulpN, 433 ulpL | d06 at a = 2756.91, b = 12.6704, x = 0.9978 |
+| log(1 - I_x(a, b)), order 6 | 5357 ulpN, 110 ulpL | 1640 ulpN, 176 ulpL | d06 at a = 3.96153, b = 0.0688547, x = 6.4e-18 |
+| log T_nu(z), order 6 | 30089 ulpN, 329 ulp1, 2433 ulpL | 19289 ulpN, 274 ulp1, 1560 ulpL | d60 at z = -7.0277, nu = 4.5762 (ulpN); d60 at z = -0.8326, nu = 19174.6 (ulp1) |
+| log F(z; alpha), order 6 | 840845 ulpN, 96270 ulpL | 841118 ulpN, 96302 ulpL | d60 at z = -0.8789, alpha = -0.0124 |
+
+For comparison, order five on the same grids measures 1440 and 1950 ulpN
+(185 and 342 ulpL) for the two sides of the incomplete beta, so order six
+costs a factor of about one to three, which is what each added order has cost
+in that module.
+
+The two cdfs' worst points are both the pure z-component near one of its
+zeros. The derivatives of order six of log T and of log F cross zero inside
+|z| < 1 in the region where the family approaches the normal (nu large,
+alpha near zero), as the high derivatives of log Phi do, and there one ulp of
+the value is many ulps of the component. The Student's test already measured
+the pure z-components of odd order near z = 0 by their absolute error rather
+than their relative one (ulps of max(|f|, 1)); that clause now covers order
+six as well, which is why the Student's ulpN falls from 1.68e5 to 3.01e4 and
+the point that carried it is reported as 329 ulp1 instead. The skew normal's
+test has no such clause and keeps its relative measure at every point, as it
+does at orders one to five, so its 8.4e5 ulpN is that conditioning and not an
+error of the route: the measure, not the computation, is what grows there.
+
+**What this says.** The step from five to six is the arrays and the few
+written-out per-order terms, not the algorithms: every route was already a
+loop over the total order, and the one real choice, how the quadrature places
+its moments at the new order, was measured rather than assumed. The error
+grows with the order as it did before, and the references confirm that the
+higher degree leaves the lower orders where they were.
+
+**Chosen.** As above. Bounds in the tests, each about one and a half times the
+larger of the two builds' maxima: `tests/math/test_beta_deriv.cpp` 2330 ulpN
+and 650 ulpL for log I at order 6, 8050 and 265 for log(1 - I);
+`tests/math/test_student.cpp` 45200 ulpN, 495 ulp1 and 3650 ulpL at order 6;
+`tests/math/test_owen.cpp` 1.27e6 ulpN and 1.45e5 ulpL. The incomplete beta's
+two sides differ by a factor of three between the builds at this order (5357
+against 1640 ulpN for log(1 - I)), as they already did at order five, so each
+bound is set on the build that is worse for it.
+
+**Found on the way.** The three tests and the three benches collected the
+components of one row into a buffer of six doubles (`std::array<double, 6>`, a
+Kokkos `View<double* [6]>`), which the seven components of order six overran.
+It is the kind of defect that shows as an impossible number rather than as a
+crash: the first measurements of order six reported infinities and errors of
+1e28 to 1e47 ulps, while the same arguments computed in isolation were right
+to the last bit. Every one of those buffers is now one longer than the highest
+order.
+
 ## The beta-binomial and the Poisson-inverse Gaussian: betabinom and pig
 
 **What.** `betabinom_distrib` (mean proportion mu in (0, 1), dispersion sigma > 0, known size n)
@@ -6949,3 +7069,712 @@ The pig's cost does not follow the count, which is what the walk from the larges
 1e3, 1e4, 1e5 and 1e6, and the order-6 tensor 2131 to 2232 ns over the same counts. For scale,
 negbin2's order-6 tensor is 16 us. betabinom's cost is proportional to n in every quantity, and the
 generic sums over the support are sums of sums, so they cost n^2.
+
+## The cdf of a continuous distribution by quadrature of its density
+
+**What.** `cdf_by_integral(d, y)`, `ccdf_by_integral`, `log_cdf_by_integral`,
+`log_ccdf_by_integral` and the derivatives in the parameters
+`log_cdf_dk_by_integral<K>(d, y)`, `log_ccdf_dk_by_integral<K>` for K = 1..6
+(`include/laplace/distrib/generic_cdf.hpp`), the route that
+`note/distrib.md` section 4 foresaw for a continuous distribution with no
+closed cdf. The dispatchers `distrib_cdf`, `distrib_ccdf`, `distrib_log_cdf`,
+`distrib_log_ccdf`, `distrib_log_cdf_dk<K>` and `distrib_log_ccdf_dk<K>` now
+take the distribution's own member when it has one, the sum over the mass when
+it is discrete, and this quadrature when it is continuous.
+
+**How.** The mirror of the discrete walk. The side of y that does not hold
+`center()` is integrated, and the density at the end point y is divided out, so
+that a tail far below the double range still gives its logarithm:
+log S = l(y) + log W with W the integral of f / f(y). The other side is the
+complement on the log scale. For the derivatives,
+
+    d_T F = int f B_T(l),
+
+with B_T the complete Bell polynomial of the derivatives of l over the
+multiset T, built on the derivatives centred at y; the composition to log F
+reuses `log_tail_dk_from_ratios` and `ratios_from_log_tail_dk`, the same two
+relations the discrete route uses. A component whose parameter has finite
+regularity is NaN: the parameter moves a kink of l in y, and differentiating
+the integrand across it would leave a boundary term.
+
+One quadrature serves every component. The integrands are the Bell polynomials
+of every multi-index of order at most K, in the layout of
+`log_density_partials` (84 of them for three parameters at order six), so the
+density's six derivative tensors are evaluated once per node instead of once
+per component; and the index arithmetic of the Bell recursion is hoisted into a
+table of single bytes, built once per call, which leaves the per-node work a
+sequence of multiply-adds.
+
+**Measured.** Against the closed forms of the two families that write out log F
+and its six derivatives, the cauchy and the logistic, over sigma = 0.25, 1 and
+7 and y from -40 to 25 on both sides, as the error over max(|f|, 1) (the pure
+derivatives in the scale vanish at y = mu, where a measure relative to the
+component itself says nothing):
+
+| quantity | cauchy | logistic |
+|---|---|---|
+| log F and log(1 - F) | 5.6e-16 | 4.4e-16 |
+| order 1 | 1.8e-15 | |
+| order 2 | 1.4e-14 | |
+| order 3 | 5.7e-14 | |
+| order 4 | 9.1e-13 | |
+| order 5 | 2.2e-11 | |
+| order 6 | 5.8e-10 | 1.5e-9 |
+
+The value is exact to rounding into the deep tails (y = -300 at sigma = 0.25,
+where F is far below the double range), and the derivatives lose about one
+digit and a half per order, which is the conditioning of the Bell composition
+and not of the quadrature. The figures are the host's, since the comparison is
+between two closed-form routes evaluated there; the route itself is exercised
+on the device by the kernel case of the same test, where it compiles and runs
+on both builds.
+
+Cost per call on one thread, and what each step of the design bought:
+
+| order | one quadrature per component | one pass, indices computed per node | one pass, index table |
+|---|---|---|---|
+| 1 | 110 us | 66 us | 72 us |
+| 2 | 938 us | 320 us | 424 us |
+| 4 | 9.5 ms | 2.4 ms | 2.9 ms |
+| 6 | 94 ms | 56 ms | 34 ms |
+
+**What this says.** The accuracy is that of the identity, not of the
+arithmetic: the same numbers came out of all three versions, to the last digit.
+The cost is dominated by the density's own derivative tensors at every node,
+which is why one pass over the components bought 1.7 times at order six and
+hoisting the index arithmetic another 1.6: neither touches the number of nodes,
+and the rule refines to its maximum level because some components never pass
+their own stopping test. Those are the high pure derivatives in the scale in
+the far tail, where the Bell polynomial carries powers of z that cancel; they
+are accurate to 1.9e-8 there, so the value is returned rather than a NaN, which
+would poison the whole tensor. A further factor needs fewer nodes, that is the
+rule's options threaded through `panels_vec` and a stopping test on the
+dominant components; it is not written, because at 34 ms per call the route is
+a reference and a fallback, not something a fit calls per observation.
+
+**Chosen.** As above, with the test
+`tests/distrib/test_generic.cpp` ("continuous cdf family by quadrature of the
+density"): the value within 8 ulps of max(|log F|, 1) against both families,
+the derivatives within about three times the measured error, through the
+dispatcher, and the route run inside a Kokkos kernel in the same file's case
+"every route inside a kernel". The regularity of a parameter is read through
+`regularities_of<D>()`, the helper the expected information already had, since
+a static constexpr array member cannot be indexed in device code: nvcc refuses
+`D::params[j]` there, and the gcc build does not.
+
+**Open.** The number of nodes, above. The same one-pass shape would serve the
+discrete route, whose 103 us at order six come from the same 28 walks over the
+support; it is unchanged for now, since its bounds and its tests are measured
+on the per-component version. At four parameters the pass needs 210 integrands,
+which is a good deal of local memory on the device: to measure when the skew t
+asks for it.
+
+## enet, the elastic-net distribution
+
+**What.** `enet_distrib{mu, lambda, alpha}`
+(`include/laplace/distrib/enet.hpp`), the density whose negative logarithm is
+the elastic-net penalty: a Laplace and a Gaussian at the same location,
+multiplied and normalized. With z = y - mu, a = lambda alpha,
+c = lambda (1 - alpha), x = a / sqrt(c) and M the Mills ratio,
+
+    f(y) = exp(-a |z| - c z^2/2) / Z,   Z = 2 M(x) / sqrt(c),
+    l = -a |z| - c z^2/2 - log 2 + log(c)/2 - log M(x),
+
+with mu on the whole line, lambda > 0 and alpha in (0, 1); at alpha -> 1 the
+family is the Laplace and at alpha -> 0 the Gaussian, both of them families of
+their own. Every member is closed: the log-density and its six orders, the
+derivatives in y and the mixed ones, the expected information and its four
+orders, the cdf family with six orders, the quantile, the descriptors and the
+starting value. Only the draw is inherited (`rng_by_inversion`).
+
+It is the one family of this batch whose log-density is not differentiable in
+the location: l is C^0 in mu with the kink at y = mu, and log F and log(1 - F)
+are C^1 there, their second derivative jumping by 4 a f(mu) across the
+location (d^2 log F / dmu^2 = f'(z)/F - (f/F)^2, F(mu) = 1/2 by symmetry, and
+f'(z) = f (-a sgn(z) - c z) jumps by -2 a f(0)); at the Laplace limit
+f(mu) = a/2 and the jump is 2 a^2, which is the 2/sigma^2 of
+`note/distrib.md` point D with sigma = 1/a.
+
+**How.** Everything rests on log Z and its derivatives in (a, c) to order six,
+carried to (lambda, alpha) by the chain rule through the bilinear map. Two
+forms, switched at x = 1.5 (measured at x = 0.5, 1, 1.5, 2 and 3: the second
+loses digits below x = 1, the first above x = 2, and 1.5 gave the smallest
+worst error at orders 5 and 6):
+
+- x < 1.5: log Z = log 2 + log M(x) - log(c)/2, from `log_mills_d1 .. _d6`
+  composed with x(a, c) by `chain_rule_pair_dk`;
+- x >= 1.5: log Z = log 2 - log a + F(t) with t = c/a^2 and F = log(x M(x)),
+  whose m-th derivative in t is the m-th cumulant of -U^2/2 under the same
+  density as the Mills ratio, from the downward ratio recursion of
+  `detail_normal::mills_cumulant` in scaled form.
+
+The expected information is closed and must not come from -E[l_ab], which
+misses the point mass at the kink: I_mumu = c + 2 a exp(-log Z), the
+(lambda, alpha) block is read off the derivatives of log Z
+(I_ll = A_ll, I_la = A_la - A_a/lambda, I_aa = A_aa with A = log Z), and
+I_mu,lambda = I_mu,alpha = 0 by symmetry, as is every derivative with an index
+in mu. The derivatives of I_mumu are written in the two forms
+c (1 + x/M(x)) and a^2 (t + exp(-F(t))) rather than through exp(log Z), which
+cancelled the pure powers of alpha exactly and lost 4e9 ulp at
+(lambda, alpha) = (1e6, 0.5).
+
+The cdf is closed, with the tail beyond D = |z| as exp(T),
+
+    T = -a D - c D^2/2 - log 2 + log M(x + sD) - log M(x),   s = sqrt(c),
+
+so that the normalizer's own table serves the cdf as well. The form through
+log Phi, log Phi(-(sD + x)) - log Phi(-x) - log 2, was tried and dropped: near
+alpha = 1 it subtracts two terms of size x^2/2 and keeps nothing. T <= -log 2
+always, which leaves log1p(-e^T) as the only branch of log(1 - e^u) that is
+needed. The quantile is Newton's method on a D + c D^2/2 - (log M(x + sD) -
+log M(x)) = -log(2 p), whose left side is convex and increasing and whose
+start, the root of the quadratic part, lies to the right of the root; the
+closed form through `Phi_inv_logp` was dropped for the same reason as the cdf's.
+
+**Measured.** `tools/reference/distrib_enet.py` writes 35595 rows
+(`tests/data/reference/distrib_enet.csv`): 17 parameter points, 12 values of y
+for the cdf and 4 for the density, the orders 0 to 6, the information to order
+4 and 9 quantile probabilities, each row computed at 500 bits with step 2^-40
+and at 600 bits with step 2^-48 and kept when the two agree to 2^-80. The
+quantities come from the definition (mpmath's `ncdf` for Z, the closed tail,
+the moments by integration by parts), checked against `mpmath.quad` at the
+start of the script. Units: ulp of the largest component of that order at that
+point. The gcc and CUDA tables are identical to the digits kept.
+
+| quantity | order 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| log f | 157 | 2.9 | 5.5 | 24 | 116 | 1650 | 2030 |
+| log F | 478 | 493 | 1800 | 4940 | 2790 | 9570 | 16500 |
+| log(1 - F) | 628 | 965 | 1800 | 4940 | 2790 | 9570 | 16500 |
+| the information and its derivatives | 19.5 | 31.7 | 116 | 412 | 7.8e5 | | |
+| quantile | 4.86 | | | | | | |
+
+Where the worst points are: the orders 5 and 6 of log f at
+(lambda, alpha) = (1.7, 0.4), in the pure alpha-derivatives, which is the
+accuracy of `log_mills_d5` and `_d6` (96 and 536 ulp) amplified by the
+cancellation between the derivatives in a and in c; the orders 3 to 6 of the
+two cumulative functions for y within about 0.01 scale units of mu at x
+between 0.7 and 2, where the derivatives in (lambda, alpha) are differences of
+two tables of log Z with an absolute error of about 1e-12; their orders 0 and 1
+in the far tail, which is the conditioning of exp(T) at |T| = 170, about 2 ulp
+per unit of the logarithm; the order-4 derivative of I_mumu in alpha at
+(lambda, alpha) = (1e6, 0.5), where the component is 1.2e4 against
+I_mumu = 1e12, so 6e-11 of the component and 1e-14 of the matrix entry; and
+I_la itself at alpha = 1 - 1e-12, which is 3.7e-13 with an absolute error of
+7e-17, where an entry-wise relative error means nothing.
+
+The two forms of the (a, c) table agree to 9e-14, 3e-14, 5e-14, 2e-13 and
+6e-12 at x = 1, 1.5, 2, 3 and 4.
+
+The two limits hold. At alpha = 1 - 1e-10 the (mu, lambda) block of every order
+of log f and of the two cumulative functions agrees with `laplace2_distrib` to
+1e-8 of the order's scale, with an absolute floor of 1e-9 because the Laplace's
+far-tail derivatives are exactly zero while the enet's are about 1e-15; the
+information and the quantile agree to 1e-8. At alpha = 1e-10, log f and the
+information agree with `gaussian1_distrib` and `gaussian3_distrib` to 1e-8, and
+the cumulative derivatives to 1e-6, since the orders 5 and 6 amplify the O(a)
+difference between the two families to about 1e-7.
+
+**What this says.** The kink is handled exactly, and the expected information
+agrees both with the variance of the score and with
+`expected_info_by_integral<K, score>` for K = 0, 1 and 2, which is the check
+that the point mass at the kink is where it belongs. What limits the high
+orders is the accuracy of the Mills ratio's own fifth and sixth derivatives and
+genuine cancellation between the derivatives in a and in c, not the closed
+forms: the two independent forms of the table agree to 1e-13.
+
+**Chosen.** As above, with the bounds in `tests/distrib/test_enet.cpp` (17
+cases, 44647 assertions) at 1.5 times the worst of the two builds, per kind and
+order: for log f 240, 5, 9, 40, 175, 2500 and 3100; for log F 720, 740, 2700,
+7400, 4200, 14400 and 24800; for log(1 - F) 950, 1450 and then the same; for
+the information 30, 48, 175, 620 and 1.18e6; for the quantile 7.3. The test
+also checks the 2a jump of dl/dy at the kink, the 4 a f(mu) jump of the second
+derivative of log F, that the density integrates to one, the quantile's round
+trips, and the family inside a Kokkos kernel (host and device within 1.9e-12).
+
+**Open.** The orders 4 to 6 of log F and log(1 - F) within about 0.01 scale
+units of mu, where a Taylor or integral form in D for the components with no
+derivative in mu would replace the difference of two tables. The order-4
+derivative of I_mumu in alpha at lambda >= 1e5, which an accurate series for
+exp(-F(t)) - 1 - t would fix. I_la near alpha = 1 is accurate absolutely and
+not relatively. Better fifth and sixth derivatives of the Mills ratio would
+lower the two worst rows of log f.
+
+## skewnormal, the skew normal in its centred parametrization
+
+**What.** `skewnormal_distrib{mu, sigma, gamma}`
+(`include/laplace/distrib/skewnormal.hpp`): the mean, the standard deviation
+and the skewness, all three moments of the law, which is what the centred
+parametrization means. gamma lies in (-g, g) with
+g = ((4 - pi)/2) (b / sqrt(1 - b^2))^3 = 0.9952717..., b = sqrt(2/pi), the
+supremum of the skewness over the family, attained only in the half-normal
+limit. The density is the classic skew normal at the triple the centred
+parameters imply,
+
+    cc = sign(gamma) (2 |gamma| / (4 - pi))^(1/3),
+    xi = mu - sigma cc,   omega = sigma sqrt(1 + cc^2),
+    alpha = cc / (b sqrt(1 - q)),   1 - q = -expm1((2/3) log(|gamma| / g)),
+
+so that, with t = (y - xi)/omega and u = alpha t,
+l = log 2 - log omega - log(2 pi)/2 - t^2/2 + log Phi(u). The log-density and
+its six orders, the derivatives in y and the mixed ones, the cdf family with
+six orders, the descriptors and the starting value are written; the expected
+information, the quantile and the draw are the generic routes.
+
+**How.** The composition is carried on cc and only at the last step replaced by
+gamma. The table of mixed derivatives of W = -log s - t^2/2 + log Phi(u) in
+(z, cc) comes first: t and u are linear in z with coefficients that depend on
+cc alone, so the z-derivatives are Leibniz plus log_Phi_dj(u) C^j, and the
+cc-derivative of that is Leibniz over the one-variable Faa di Bruno sum
+(`bell_partial`); the cc-derivatives of the coefficients are exact recurrences
+from (1 + x^2) A' = -x A and (1 - kappa x^2) E' = kappa x E, written in 1 - q so
+that they stay accurate near the boundary. Only then is cc replaced by gamma,
+by Faa di Bruno with cc^(n) = cc (1/3)(1/3 - 1)...(1/3 - n + 1) / gamma^n, so
+that the gamma^(1/3 - n) blow-up enters once instead of in every term; the
+table then goes to `detail_location_scale::mixed_shape_dk<K>`. log F is the
+(t, alpha) table of `log_sn_cdf_d1 .. _d6` composed with t(z, cc) and
+alpha(cc) and then carried to gamma the same way, and log(1 - F) is the same
+code at (-t, -alpha).
+
+Two things the family needed that were not foreseen. The supremum g as a
+`constexpr` double is 2 ulp from its true value, which costs 1e-6 of relative
+error in 1 - q at |gamma| = g - 1e-10, so the map carries g as a pair of
+doubles (the low part, -1.9209167999475743e-16, from mpmath at 300 bits). And
+at gamma = 0 exactly the components with one index in gamma are written in
+closed form (l_gamma = He_3(z)/6 and d log F / dgamma =
+-(z^2 - 1) phi / (6 Phi)), while those with two or more are NaN, for the reason
+under "What this says".
+
+**Measured.** `tools/reference/distrib_skewnormal.py` evaluates the definition
+in truncated three-variable Taylor arithmetic of total degree 6 at 300 and 400
+bits, keeping a row when the two agree to 2^-80, and writes 54539 rows
+(`tests/data/reference/distrib_skewnormal.csv`): gamma = +-1e-12, 1e-8, 1e-4,
+1e-2, 0.5, 0.9, g - 1e-6 and g - 1e-10, z from -12 to 12 (so u reaches 2e6),
+(mu, sigma) = (0.4, 1.3) and (-2, 0.25), with (1e5, 1e-6) and (3, 1e6) on a
+subset. Units: ulp of the largest reference component of the same order and
+with the same number of indices in gamma at that point, the maximum over the
+log-density, log F and log(1 - F), and over both builds, which agree within a
+factor of three everywhere.
+
+| gamma | order 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| 1e-12 | 1.9e9 | 1.0e14 | 5.9e17 | 2.3e18 | 5.7e18 | 9.4e18 |
+| 1e-8 | 1.4e6 | 6.8e9 | 1.7e12 | 8.4e12 | 1.7e13 | 2.3e13 |
+| 1e-4 | 1.6e5 | 9.1e5 | 3.3e6 | 5.3e6 | 6.0e6 | 8.5e6 |
+| 1e-2 | 130 | 8.3e3 | 2.3e4 | 4.9e4 | 5.5e4 | 1.4e5 |
+| 0.5 | 272 | 678 | 513 | 475 | 2.8e3 | 1.7e4 |
+| 0.9 | 1.2e3 | 1.6e3 | 1.4e3 | 1.7e3 | 1.8e3 | 6.4e3 |
+| g - 1e-6 | 54 | 331 | 330 | 5.6e4 | 873 | 1.4e3 |
+| g - 1e-10 | 100 | 68 | 86 | 1.7e4 | 683 | 208 |
+
+The log-density alone is far better than the worst of each row: from
+|gamma| = 0.5 to g - 1e-10 it stays between 8 and 520 ulp at every order, with
+u reaching 2e6. The expected information by the generic route agrees in its two
+forms to 1e-9 relative and with the variance of the score, and at gamma = 0
+gives diag(1/sigma^2, 2/sigma^2, 1/6), whose (mu, sigma) block is the
+Gaussian's closed form; its first two derivatives agree with differences to
+1e-7 and 1e-6.
+
+**What this says.** Away from zero the family is accurate, and the pair of
+doubles for g is what makes the two rows nearest the boundary work.
+
+Near gamma = 0 the derivatives in gamma of order two and above lose most of
+their digits, and the reason belongs to the law and not to the route: the
+expansion in cc gives gamma He_3(z)/6 and then a term of order
+cc^4 ~ gamma^(4/3), so the log-density is only C^1 in gamma at zero and every
+derivative of order two or more diverges like gamma^(-2/3). The expected
+information stays finite there (E[l_gamma gamma] = 1/6 at zero), which is why
+the generic route still answers. Composing in cc does not remove the
+cancellation inside the (z, cc) table, whose entries with at least one
+cc-index are O(cc^2) formed from O(1) terms, so they carry an absolute error of
+about 1e-16 and are then multiplied by cc^(n): at |gamma| = 1e-2 the loss is
+about five digits at order six, at 1e-4 about ten, and at 1e-12 the first order
+keeps seven digits, the second two and the rest none. The value and the orders
+in (mu, sigma) alone are untouched.
+
+**Chosen.** As above, with the bounds in
+`tests/distrib/test_skewnormal.cpp` (12 cases, 53195 assertions) at 1.5 times
+the worst of the two builds, per class of gamma and order; the orders 3 to 6
+at |gamma| = 1e-12 are not compared, which the file states. The test also
+checks the Gaussian limit at gamma = 0 against `gaussian1_distrib`, that the
+three parameters are the three moments by quadrature, the reflection in the
+sign of gamma, the derivatives of log F against differences of its own log F,
+and the family inside a Kokkos kernel (host and device within 6.4e-13).
+
+**Open.** A series in cc of W for |cc| < 0.05, whose coefficients start at
+cc^3 He_3, would repair the score and the orders two and three near zero; it is
+not written. The descriptors say `infinitely_smooth` with no non-smooth points,
+while the law is only C^1 in gamma at zero: declaring a non-smooth point there
+with `continuous_order` 1 would be truthful, and would make the generic
+information NaN for the components with two or more indices in gamma although
+they are finite — a decision to take rather than to settle silently. The
+starting value, now that `distrib_sample_summary` carries the sample skewness
+(added for this family, the standardized third central moment with divisor n),
+is the three sample moments; `start_inside` can still land it at
+g (1 - 16 eps), where alpha is about 1e7, so a wider margin there is worth
+considering.
+
+## student_t1 and student_t2, the Student t in its two parametrizations
+
+**What.** `student_t1_distrib(mu, sigma, nu)` with sigma the scale and nu > 0,
+and `student_t2_distrib(mu, sigma, nu)` with sigma the standard deviation and
+nu > 2, both with
+
+    l = c(nu) - log sigma - ((nu + 1)/2) log(1 + z^2/nu),   z = (y - mu)/sigma,
+    c(nu) = log Gamma((nu + 1)/2) - log Gamma(nu/2) - (1/2) log(nu pi).
+
+Each supplies the log-density and its orders one to six in (mu, sigma, nu),
+the derivatives in y and the mixed ones, the expected information in closed
+form with its orders one to four, and the cdf family with the orders one to six
+of log F and of log(1 - F). The quantile and the draw are the generic routes.
+`student_t2_distrib` is `student_t1_distrib` at the scale
+s = sigma sqrt((nu - 2)/nu), composed with `chain_rule_pair_dk`, whose inner
+map needs the derivatives of r(nu) = sqrt((nu - 2)/nu) from the one-signed
+recurrence
+
+    r^(q) = [-2 (-1)^q q! nu^-(q+1) - sum_i C(q, i) r^(i) r^(q-i)] / (2 r).
+
+**How.** The density's table D[c][j] of the mixed derivatives of
+Lambda = -((nu + 1)/2) log(1 + z^2/nu) in the shape nu and in z goes to
+`detail_location_scale::mixed_shape_dk`, and c(nu) and -log sigma are added to
+the all-nu and the all-sigma components. The closed forms, checked against
+SymPy for every c + j <= 6, are:
+
+- c = 0: -(nu + 1) (z g(1, j - 1) + (j - 1) g(1, j - 2)) with
+  g(m, n) = d^n/dz^n A^-m and A = nu + z^2;
+- c >= 1 and j >= 1: -(-1)^c c! d^(j-1)/dz^(j-1) [P A^-(c+1)] with
+  P = z(1 - z^2);
+- j = 0: with r = z^2/A, the value (1/2) log1pmx(-r) + r/(2 nu) at c = 1, and
+  for c >= 2 with m = c - 1,
+  (1/2)(-1)^m [(m - 1)! nu^-m B_m(r) + m! nu^-(m+1) r (1 + q + ... + q^m)],
+  B_m(r) = (1 + m r)(1 - r)^m - 1, a polynomial in r below 1/4.
+
+Subtracting the Gaussian part from the c = 0 row as well, which the other rows
+need, loses everything for z^2 much larger than nu; the c = 0 row is the direct
+product.
+
+The information is
+
+    I_mumu = (nu + 1)/((nu + 3) sigma^2),
+    I_sigmasigma = 2 nu/((nu + 3) sigma^2),
+    I_sigmanu = -2/(sigma (nu + 1)(nu + 3)),
+    I_nunu = (psi'(nu/2) - psi'((nu + 1)/2))/4 - (nu + 5)/(2 nu (nu + 1)(nu + 3)),
+
+with I_munu = I_musigma = 0 by the symmetry of the density, each verified
+against E[l_a l_b] by mpmath quadrature at 30 digits. I_nunu is
+7/(2 nu^4) as nu grows, not O(1/nu^3): the coefficients of nu^-2 and nu^-3 both
+vanish. Below nu = 18 it is formed from `dpsi_all` minus a sum of positive
+products; from 18 on from its series in nu^-4 to nu^-38, whose relative
+truncation error is 1e-18 at nu = 18. The derivatives in nu of the other
+entries are sums of positive products of powers of 1/(nu + a). For
+`student_t2_distrib` the transform J' I J simplifies, r cancelling, to
+A2 = nu(nu + 1)/((nu + 3)(nu - 2)), B2 = 2 nu/(nu + 3),
+E2 = 6/((nu + 3)(nu - 2)(nu + 1)) and
+F2 = I_nunu + 2/((nu + 3) nu (nu - 2)^2) - 4/(nu (nu - 2)(nu + 1)(nu + 3)),
+checked with SymPy.
+
+For log F one call of `detail_st::derivs<K>` gives the whole (z, nu) table,
+which feeds `mixed_shape_dk`. For |z| >= 1 on the side where the function tends
+to zero the polynomials of `mixed_dk` cancel, as they do for the Cauchy, so
+there the tensors are formed from those of the other tail by the
+complete-Bell recursion for log(1 - e^l) (`bell_log_one_minus_exp`): measured
+against the direct route with the Cauchy twin, 5e-6 before and 3e-12 for
+|z| < 20 after.
+
+**Measured.** Worst error in ulp of the largest component of that order at that
+point, worst of the gcc and the CUDA build; references by mpmath in
+`tools/reference/distrib_student_t.py`.
+
+| quantity | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| t1 log f | 13.5 | 31.7 | 100 | 260 | 940 | 2400 |
+| t2 log f | 5.8 | 9.3 | 12.8 | 55 | 178 | 632 |
+| t1 log F | 131 | 243 | 151 | 336 | 328 | 6450 |
+| t1 log(1 - F) | 131 | 243 | 151 | 336 | 328 | 805 |
+| t2 log F, nu >= 2.5 | 8.5 | 9.2 | 11.7 | 18.4 | 101 | 262 |
+| t2 log(1 - F), nu >= 2.5 | 8.5 | 9.2 | 38.8 | 24.4 | 101 | 262 |
+| t2 log F and log(1 - F), nu = 2 + 1e-6 | 17.9 | 1.5e5 | 5.9e6 | 1.6e7 | 4.6e7 | 1.3e8 |
+
+The worst argument of the density, for both families and at the orders four to
+six, is z = 1e8 (y = 93.37, mu = -2, sigma = 9.5e-7); of t1's log F at order
+six, z = 31.6 with nu = 3.5; of t1's log F and log(1 - F) at the orders two,
+four and five, |z| = 1e8 with nu = 0.01. The density of t2 at nu = 2 + 1e-6
+stays within 39 ulp, so the chain through r(nu) holds there; its log F keeps
+about eight digits at order six. The information and its orders one to four
+measure 161, 56, 51, 35 and 17 ulp for t1 and 321, 115, 100, 54 and 35 for t2,
+the worst point being I_nunu at nu = 17.9, just below the series cut, where
+the polygamma difference cancels; from nu = 19.9 on the error is a few ulp.
+
+Twins and limits: t1 at nu = 1 against `cauchy_distrib`, 9e-14 on the density
+and 3.2e-12 on log F and log(1 - F) for |z| < 20; t1 at nu = 1e8 and 1e12
+against `gaussian1_distrib`, where the differences are 0.5, 0.25 and 0.25 of
+the O(1/nu) scale and identical at both values of nu, so no digit is lost as nu
+grows and the nu-derivatives of order six down to 1e-82 are right; the generic
+quadrature route for the information in its score form, 1.1e-15 of the largest
+component at nu = 3.5, 9 and 30 for both families, and the variance of the
+score 7e-15; the host and the device within 8.7e-15 inside a Kokkos kernel.
+
+**Chosen.** As above, with the bounds of `tests/distrib/test_student_t.cpp`
+(18 cases, 78391 assertions) at 1.5 times the worst of the two builds. The
+region nu < 2.001 of t2 and the block of t1 at integer nu have their own
+treatment, which the file states: the first its own bound, the second none on
+the block alone, only on the whole tensor. The test also checks the two twins
+above, the derivatives against central differences in the centre and in the
+tails, the generic quantile against its own cdf, and the family inside a
+Kokkos kernel in a named function with external linkage.
+
+**Open.** Four corners. The (mu, sigma) block of t1 at integer nu up to 6 in
+the far tail: the tail is a power of sigma/(y - mu) with an integer exponent,
+so the components of order above nu are differences of terms of the size of the
+tail probability and lose their accuracy within the block (2e8 ulp of the
+block's own largest component at |z| <= 31, that is 2.7e-8 relative at order
+six and z = 30, and meaningless at z = 1e8), although they stay below 805 ulp
+of the whole tensor; the cure is a series in 1/z^2, which for the Student needs
+the nu-derivatives of the hypergeometric expansion of the incomplete beta and
+is not written. The log F of t2 as nu approaches 2. The reference itself at
+nu >= 1e4, where 78 (point, side) pairs are absent because `mpmath.diff` did
+not reach agreement to 2^-100 even at 560 bits, so log F there is checked only
+for |z| <= 4 and at |z| = 1e8 with nu = 1e8. And the 2400 ulp at order six of
+the log-density at |z| = 1e8, which comes from the z-polynomials of `mixed_dk`
+and which an assembly through Re(u + i sqrt(nu) sigma)^-K, as the Cauchy uses,
+would remove.
+
+## pseudohuber, the pseudo-Huber distribution in the standard deviation
+
+**What.** `pseudohuber_distrib(mu, sigma, nu)` with sigma the standard deviation and nu > 0 the
+shape, the one parametrization of the family Laplace carries, with density
+
+    f(y) = sqrt(R) / (2 sigma sqrt(nu) K_1(sqrt nu)) exp(-sqrt(nu + R z^2)),
+    z = (y - mu)/sigma,   R = R(nu) = sqrt(nu) K_2(sqrt nu)/K_1(sqrt nu),
+
+so sigma carries the whole variance and nu only the tails: the Laplace as nu -> 0 and the
+Gaussian as nu -> infinity, both with variance sigma^2. On the log scale
+
+    log f = -sqrt(nu + R z^2) + h(nu) - log 2 - log sigma,
+    h(nu) = (1/2) log R - (1/2) log nu - log K_1(sqrt nu).
+
+The header writes the log-density and its orders one to six in (mu, sigma, nu), the derivatives
+in y and the mixed ones, and the starting value; the expected information, the cdf family, the
+quantile and the draw are the generic routes.
+
+**How.** The Bessel ratio comes from the identity that removes the cancellation of the quotient:
+from K_nu'(x) = -K_(nu+1)(x) + (nu/x) K_nu(x) at nu = 1,
+
+    R = 1 - x (log K_1)'(x),   x = sqrt(nu),   d^k R/dx^k = -(x g^(k+1)(x) + k g^(k)(x)),
+
+with g^(j) = log_bessel_k_dx<j>(1, x), and the derivatives in nu by one Faa di Bruno composition
+with x = nu^(1/2). Both terms of the sum are of the same sign, so the quotient of two functions
+each of size exp(-x) is never formed. The normalizer h(nu) takes its nu-derivatives from the same
+set of Bessel derivatives, log R - log x being the same function as log K_2 - log K_1, so the
+whole family needs one evaluation of log_bessel_k and of its orders one to seven a tensor.
+
+Lambda = -sqrt(nu + R z^2) is written as -rho(nu) G(q(nu), z) with rho = sqrt(R), q = nu/R and
+G = sqrt(q + z^2); the table D[c][j] of its mixed (nu, z) derivatives feeds
+`detail_location_scale::mixed_shape_dk`. The z-derivatives of (q + z^2)^p come from a recurrence
+in p, except the pure z-derivatives at p = 1/2, which use the exact identity
+H_(1/2)^(m) = q H_(-3/2)^(m-2) because the plain recurrence cancels completely at large |z|.
+
+**Measured.** Log-density against mpmath (SymPy's derivative of the definition with R and h from
+mpmath Bessel values at 400 and 600 bits; the nu-derivatives of the Bessel pieces from truncated
+power series of the Bessel ODE system, `mpmath.diff` needing 90 s a point for R alone), in ulp of
+the largest component of the order, over 209 points with nu from 1e-6 to 1e8, |z| to 1e8 and
+sigma from 2^-20 to 2^20. The three regions have different causes, so they have their own bounds.
+
+| order | nu < 1 | 1 <= nu < 1e4 | nu >= 1e4 |
+|---|---|---|---|
+| value | 1.61 | 41.5 | 1.6e4 |
+| 1 | 29.2 | 1.5e3 | 1.2e4 |
+| 2 | 4.67 | 747 | 1.0e4 |
+| 3 | 5.49 | 1.0e3 | 5.3e3 |
+| 4 | 8.19 | 339 | 5.4e3 |
+| 5 | 13.5 | 869 | 8.6e3 |
+| 6 | 9.08 | 1.4e3 | 9.1e3 |
+
+The first column is the small-shape region after the series below, which replaced the Bessel
+route there: before it the same column read 9.4 on the value and 1.8e4, 1.8e6, 6.8e6, 1.4e7,
+1.5e7 and 1.7e7 at the orders one to six, and at nu = 1e-6 the worst was 1.7e7 ulp against the
+12.7 it is now.
+
+The limits: against `laplace1_distrib(mu, sigma/sqrt 2)`, every order of the (mu, sigma) block
+agrees to 3.3e-8 at nu = 1e-8 and 2.5e-6 at nu = 1e-6, that is about 3 nu, the rate of the limit
+itself; against `gaussian1_distrib` at nu = 1e8 and 1e10 the ratios to the stated scales are
+0.75 for the (mu, sigma) components, 0.19 for the nu components and 0.375 for the value. The
+density integrates to one and has variance sigma^2 to 4.5e-14 by quadrature. The expected
+information from the generic route: the score form against the variance of the score 3.5e-16,
+the hessian form against the score form 7.0e-13, the two entries that vanish by symmetry
+(I_mu,sigma and I_mu,nu) to 6.9e-16 of the largest entry, and against the two limits 1.57e-4 and
+1.5e-4, the corrections being O(sqrt nu) and O(1/sqrt nu); the orders one to four against
+differences 1.2e-11 to 1.0e-10. The generic cdf against differences of its own log F: 4.2e-12 at
+order one to 9.9e-11 at order six. The generic quantile needed no special treatment:
+cdf(quantile(p)) against p is 2.3e-15 relative and q(p) + q(1 - p) - 2 mu is 7e-16 at dyadic p.
+Device against host, orders one to six: 8.6e-16 at nu = 3.5, and 7.3e-16 to 1.4e-12 at
+nu = 0.05, where the cancellation of the small-nu corner reaches the device.
+
+Cost on one gcc thread, the whole tensor a call:
+
+| nu | order-6 tensor | before the two changes below |
+|---|---|---|
+| 0.1 | 5.6 us | 8.0 us |
+| 2 | 7.2 us | 19.5 us |
+| 100 | 6.3 us | 12.0 us |
+| 1e4 | 6.3 us | 11.0 us |
+
+and 5.7 us at nu = 1e-4, where log f alone costs 79 ns against the 282 ns it cost at nu = 0.1
+through the Bessel route. What is left is the assembly of Lambda and the packing of the
+symmetric tensor, not the Bessel functions.
+
+The generic information costs 3 ms (nu = 0.05) to 16 ms (nu = 2.5) at order zero and 60 to
+160 ms at order four, the score form being 1.5 to 2 times faster than the hessian form.
+
+**Chosen.** As above, with the bounds of `tests/distrib/test_pseudohuber.cpp` (15 cases, 21033
+assertions) at about 1.5 times the worst of the two builds, per region of nu and per order. The
+closed forms are checked against SymPy by
+`python -I tools/reference/distrib_pseudohuber.py forms` (the R identity, the recurrence for
+(q + z^2)^p, the identity at p = 1/2 and the whole table D, worst 1.4e-51 relative at five
+points), which also checks that the density integrates to one with variance one from nu = 1e-8
+to 1e8.
+
+**The two changes that followed the first measurement** (both decided with Giovanni, both in).
+
+*A series for R and h below nu = 1.* The components with every index in nu were losing about
+eps/nu, because d^k R/dx^k = -(x g^(k+1)(x) + k g^(k)(x)) is a difference of terms of size x^-k
+that cancels to size x^(2-k). Below the split the family does not call the Bessel functions at
+all: from the small-argument series of K_0 and K_1 (DLMF 10.31.1),
+
+    R = 2 + nu K_0/B,   B = x K_1 = 1 + (1/2) L J_1 - W_1,   L = log(x/2),
+    h = (1/2) log R - log B,
+
+where K_0 = -(L + gamma) P_0 + H_s with the series P_0, H_s, J_1 and W_1 in nu built by
+recurrences in a loop, fourteen terms, no table of constants. Writing h with B = x K_1 rather
+than with K_1 is what makes the pole and the log nu term cancel exactly. The derivatives follow
+by Leibniz's rule, Faa di Bruno and `chain_rule_d1 .. _d6`, one function per order as everywhere
+else. The split was chosen by measuring both routes against the definition at 32 values of nu
+from 1e-6 to 56: the series holds to 2e-15 from 1e-6 to 1 and then loses digits (4e-15 at 1.78,
+3e-14 at 3.2, 1e-8 at 10), the Bessel route holds to about 1e-15 from nu = 0.3 and loses them
+downwards (3e-15 at 0.1, 1e-14 at 1e-2, 2e-12 at 1e-4, 4e-10 at 1e-6), and between 0.3 and 1 the
+two are equal at 1e-15 to 2e-15, so the split is nu = 1, where the series is also the cheaper of
+the two. `python -I tools/reference/distrib_pseudohuber.py small` checks the tables against
+SymPy's series and the whole derivation against the definition, to 1e-20 at every order up to
+six.
+
+*Every order of log_bessel_k from one evaluation.* Each `log_bessel_k_dx<n>` used to recompute
+the shared work of its regime, so a tensor paid for it eight times. `log_bessel_k_dx_upto<N>`
+fills the value and the orders one to N from one evaluation in each of the three regimes (one
+`g_dd` and one pass for Riccati, one series sum for Hankel, one set of Taylor coefficients for
+Debye), and it is 2.9 to 5.7 times faster than the eight calls, the most at x = sqrt(2) where
+this family sits. It agrees with the single-order functions bit for bit on gcc (0 of 840 cases
+differ, every regime and both sides of nu = 20, x = 200 and x = 1) and to 1.2e-15 relative on
+CUDA, where nvcc contracts and schedules the two differently.
+
+**Open.** Two corners.
+- nu >= 1e4: the value and the first order reach 1.6e4 and 1.2e4 ulp, because log f is a
+  difference of numbers of size sqrt(nu); at nu = 1e8 the value carries an absolute error of
+  about 1e-12.
+- nu = 1 at order six: 1.4e3 ulp, which the series does not explain (using it at nu = 1 still
+  leaves 746), so it comes from the assembly of Lambda. Not chased.
+
+## skewt, Azzalini's skew t
+
+**What.** `skewt_distrib(mu, sigma, alpha, nu)` with sigma the scale, alpha the shape and nu > 0
+the degrees of freedom, the four-parameter family
+
+    f(y) = (2/sigma) t_nu(z) T_(nu+1)(w),   z = (y - mu)/sigma,
+    w = alpha z sqrt((nu + 1)/(nu + z^2)),
+
+with t_nu the Student density and T_m the Student cdf at m degrees of freedom. On the log scale
+
+    log f = log 2 + c(nu) - log sigma + Lambda(z, nu) + log T_(nu+1)(w),
+
+the Student log-density of `student_t1_distrib` plus one term. alpha = 0 is the Student,
+nu -> infinity the direct skew normal and |alpha| -> infinity the half t. The header writes the
+log-density and its orders one to six in the four parameters, the derivatives in y and the mixed
+ones, the starting value and the draw; the expected information, the cdf family and the quantile
+are the generic routes.
+
+**How.** The assembly is the location-scale one with two smooth shape parameters,
+`detail_location_scale::mixed_two_shape_dk` (added for this family: it is `mixed_shape_dk` with
+one shape more and is pure index work over `mixed_dk`), fed with the table of mixed
+(alpha, nu, z) derivatives of Lambda + log T_(nu+1)(w). The first term is student_t1's table.
+The second is a composition in three variables, which two facts reduce to compositions in two:
+
+- alpha enters w = alpha u(z, nu) linearly, with u free of alpha, so
+  d^c/dalpha^c log T_(nu+1)(w) = u^c (d^c log T/dw^c)(w, nu + 1) exactly: no Bell sum in alpha,
+  only a power of u, whose own (z, nu) derivatives come from
+  `math::chain_rule_pair_scalar_dk` on a power;
+- what is left is a function of the two arguments of the Student cdf composed with the two inner
+  maps w = alpha u(z, nu) and m = nu + 1 in the two variables (z, nu), which is
+  `math::chain_rule_pair_dk` with the outer table shifted by c in its first argument and the
+  second inner map linear.
+
+The two tables are then multiplied by Leibniz's rule. The only new closed forms are the mixed
+(z, nu) derivatives of u = z sqrt((nu + 1)/(nu + z^2)), from the recurrence
+
+    d/dz [z^m B^-s] = m z^(m-1) B^-s - 2 s z^(m+1) B^-(s+1),   B = nu + z^2,
+
+every exponent staying a half-integer, with d^q/dnu^q B^(-1/2) = prod_(i<q) (-1/2 - i)
+B^(-1/2-q) since dB/dnu = 1, and the factor z joined by
+d^p/dz^p [z W] = z d^p W + p d^(p-1) W. The derivatives in y follow from d/dy = -d/dmu.
+
+The draw is the exact representation and not the inversion of the cdf:
+
+    Y = mu + sigma (delta |N_1| + sqrt(1 - delta^2) N_2) / sqrt(G/nu),
+    delta = alpha/sqrt(1 + alpha^2),   G ~ chi^2_nu,
+
+with the two normals and the gamma each by inverting their own cdf
+(`standard_normal_by_inversion` and `standard_gamma_by_inversion`, added to `generic_rng.hpp`:
+`Phi_inv` and `gamma_p_inv` of one uniform). Inversion rather than a rejection method because one
+draw then consumes exactly one number of the stream, so the draw of an observation is the same on
+every thread and backend, and a kernel takes no divergent branch.
+
+**Measured.** Log-density against mpmath, in ulp of the largest component of the order, over 180
+points (18 parameter quadruples times ten values of z) with nu from 0.3 to 1e6, alpha from -20 to
+50, |z| to 1e8 and sigma from 2^-10 to 2^10; 37620 rows and none dropped.
+
+| order | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| gcc | 4 | 9 | 63 | 99 | 336 | 1.3e3 |
+
+The worst points are the small shape (nu = 0.3) at order six, the far tail with |alpha| large at
+the orders four and five, and nu = 6 with |z| in the thousands at the orders two and three. By
+nu the worst over every order is 1.3e3 at 0.3, 508 at 2, 1.12e3 at 4, 265 at 12, 203 at 200 and
+568, 298 and 387 at 1e3, 1e4 and 1e6: the large-nu region is as healthy as the centre.
+
+The reference deserves its own note. It is built by SymPy's own chain rule over the definition,
+with log T_(nu+1) carried as an unknown function of two variables whose derivatives are
+substituted, so no closed form of the header enters; those derivatives come from the integral of
+the density's nu-derivatives, which is legitimate because they decay like |u|^(-M-1) times powers
+of a logarithm. The first version of that integral used panels of fixed width and lost everything
+but three digits in the deep tail at large nu, where the density decays over a length
+(m + x^2)/((m + 1)|x|) of about 0.07: it disagreed with the library by 1e15 ulp, and a third route
+(mpmath's own incomplete beta) showed the library right to 2e-16 and the reference wrong. With
+geometric panels from that length outwards and the integrand scaled by its value at the endpoint
+the agreement with the incomplete beta is 3.2e-55 over the whole grid, and that comparison is now
+a mode of the script (`python -I tools/reference/distrib_skewt_ref.py check`).
+
+Other measurements: the value against the definition 3.8e-16; the orders one to three against
+nested central differences 2.0e-6, 1.1e-5 and 6.7e-5, which is the differences' own resolution;
+the mixed (y, theta) derivatives 1.1e-5; at alpha = 0 the family is `student_t1_distrib` to the
+last bit at every order in the three parameters they share, which also shows that the whole
+log T branch and its derivatives vanish exactly there; at nu = 1e6 and 1e8 the value against
+`skewnormal_distrib` at the parameters the direct-to-centred map implies, 7.7e-6 and 7.7e-8, the
+1/nu rate of the limit; the generic cdf against the density by central differences and against
+the quantile by root finding; the expected information in its two forms within 1e-7 of each other
+and of student_t1's closed information at alpha = 0; the tensor of order six identical on the
+host and in a Kokkos kernel.
+
+The draw costs 529 ns a call on one gcc thread, against 5.8 ms by inversion of the generic cdf
+(whose log F costs 442 us and whose quantile by root finding 8.3 ms), eleven thousand times less.
+The empirical cdf of 2e5 draws agrees with the generic cdf within two standard errors at five
+points, and the sample mean and variance with the closed moments.
+
+**Chosen.** As above, with the bounds of `tests/distrib/test_skewt.cpp` (13 cases, 40373
+assertions) at 1.5 times the worst of the two builds. The closed forms of u are checked against
+SymPy by `python -I tools/reference/distrib_skewt.py forms`, which verifies the three identities
+the recurrence encodes and a reimplementation of the whole recurrence against SymPy's own
+derivative of u for every p + q <= 6 at three points.
+
+**Open.** The generic cdf of a four-parameter family inside a CUDA kernel runs with the
+per-thread stack raised to 8192 bytes, which the test executable now asks the driver for before
+its first launch; the price measured on an RTX 4070 SUPER is 588 MB of device memory out of
+12282. A family with more parameters will need more, and the figure has to be measured again
+then.

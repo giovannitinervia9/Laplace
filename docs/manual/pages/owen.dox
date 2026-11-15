@@ -1,8 +1,8 @@
 /**
 \defgroup owen Owen's T function and the skew normal distribution function
-\brief Owen's \f$T(h, a)\f$, \f$\log F(z; \alpha)\f$, and its derivatives in \f$(z, \alpha)\f$ to order 5.
+\brief Owen's \f$T(h, a)\f$, \f$\log F(z; \alpha)\f$, and its derivatives in \f$(z, \alpha)\f$ to order 6.
 
-Header `<laplace/math/owen.hpp>` provides Owen's \f$T\f$ function, the logarithm of the standard skew normal distribution function \f$\log F(z; \alpha)\f$, and mixed partial derivatives up to order 5. Functions are called in `laplace::math` and marked `LAPLACE_HD` for host and Kokkos device execution.
+Header `<laplace/math/owen.hpp>` provides Owen's \f$T\f$ function, the logarithm of the standard skew normal distribution function \f$\log F(z; \alpha)\f$, and mixed partial derivatives up to order 6. Functions are called in `laplace::math` and marked `LAPLACE_HD` for host and Kokkos device execution.
 
 ## Definitions
 
@@ -22,7 +22,7 @@ F(z; \alpha) = 2\int_{-\infty}^z \phi(\tau)\Phi(\alpha\tau)\,\mathrm{d}\tau = \P
 \f]
 with standard normal density \f$\phi(\tau) = \frac{1}{\sqrt{2\pi}}e^{-\tau^2/2}\f$, dummy variable \f$\tau \le z\f$, and reflection \f$1 - F(z; \alpha) = F(-z; -\alpha)\f$.
 
-Because \f$F\f$ underflows in the lower tail and \f$\Phi(z) - 2T(z, \alpha)\f$ cancels there, this module evaluates \f$\log F(z; \alpha)\f$ directly. For \f$K \in \{1,\dots,5\}\f$, each derivative function returns \ref laplace::math::own::mixed_partials "mixed_partials" (`mixed_partials<K>`) whose entry `c[j]` stores \f$c_j = \frac{\partial^K}{\partial z^{K-j}\partial\alpha^j}\log F(z; \alpha)\f$ for \f$j = 0,\dots,K\f$ (\f$j\f$ derivatives in \f$\alpha\f$, \f$K - j\f$ in \f$z\f$).
+Because \f$F\f$ underflows in the lower tail and \f$\Phi(z) - 2T(z, \alpha)\f$ cancels there, this module evaluates \f$\log F(z; \alpha)\f$ directly. For \f$K \in \{1,\dots,6\}\f$, each derivative function returns \ref laplace::math::own::mixed_partials "mixed_partials" (`mixed_partials<K>`) whose entry `c[j]` stores \f$c_j = \frac{\partial^K}{\partial z^{K-j}\partial\alpha^j}\log F(z; \alpha)\f$ for \f$j = 0,\dots,K\f$ (\f$j\f$ derivatives in \f$\alpha\f$, \f$K - j\f$ in \f$z\f$).
 
 ## Domain and special values
 
@@ -58,7 +58,7 @@ For \f$h \ge 0\f$ and \f$a \ge 0\f$ (extended by parity), \f$T(h, a)\f$ uses \f$
 
 For \f$K = 1\f$, \f$\partial_z\log F = f/F\f$ and \f$\partial_\alpha\log F = -g/F\f$ with \f$f = 2\phi(z)\Phi(\alpha z)\f$ and \f$g = \frac{e^{-(1+\alpha^2)z^2/2}}{\pi(1+\alpha^2)}\f$. Cancelling Gaussian factors gives \f$f/F = \sqrt{\frac{\pi}{2}}\frac{\operatorname{erfcx}(\alpha h/\sqrt{2})}{\bar{J}}\f$, \f$g/F = \frac{1}{(1+\alpha^2)\bar{J}}\f$ in \f$\bar{J}\f$, and \f$f/F = \sqrt{2\pi}\frac{\Phi(-\alpha h)}{G}\f$, \f$g/F = \frac{e^{-(\alpha h)^2/2}}{(1+\alpha^2)G}\f$ in \f$G\f$; elsewhere, \f$f/F\f$ and \f$g/F\f$ keep the exponential apart as \f$m e^{-\sigma}\f$.
 
-For \f$K \in \{2,\dots,5\}\f$, the same four regions compute bivariate Taylor coefficients at \f$(h+d, a+e)\f$:
+For \f$K \in \{2,\dots,6\}\f$, the same four regions compute bivariate Taylor coefficients at \f$(h+d, a+e)\f$:
 
 - In \f$\bar{J}\f$, node moments \f$\sum w\,y^p\gamma_k(y/h)^l\f$ (\f$p, l \le K\f$, \f$\gamma_k = (-1)^{k+1}\operatorname{Im}(x + i)^{-(k+1)}\f$, \f$r(x+\xi) = \sum \gamma_k\xi^k\f$) feed the series logarithm and quadratic.
 - In \f$G_0 - \tilde{T}\f$, \f$\log G_0\f$ uses \f$s > 0\f$ cumulants under \f$e^{-hs - s^2/2}\f$, \f$\log(1 - \tilde{T}/G_0)\f$ uses \f$\tilde{T}\f$ moments, and \f$\partial_\alpha\log G = -\frac{e^{-\eta\alpha^2}}{(1+\alpha^2)G}\f$ integrates columnwise.
@@ -78,6 +78,7 @@ See \ref accuracy "How accuracy is measured" for error definitions and test boun
 | \ref laplace::math::own::log_sn_cdf_d3 "log_sn_cdf_d3()" | ulpN (ulpL) | 2240 (501) | 2150 (481) | 3400.0 (760.0) |
 | \ref laplace::math::own::log_sn_cdf_d4 "log_sn_cdf_d4()" | ulpN (ulpL) | 1500 (777) | 1490 (784) | 2300.0 (1200.0) |
 | \ref laplace::math::own::log_sn_cdf_d5 "log_sn_cdf_d5()" | ulpN (ulpL) | \f$1.16\times 10^5\f$ (\f$2.7\times 10^4\f$) | \f$1.17\times 10^5\f$ (\f$2.8\times 10^4\f$) | \f$1.8\times 10^5\f$ (\f$4.2\times 10^4\f$) |
+| \ref laplace::math::own::log_sn_cdf_d6 "log_sn_cdf_d6()" | ulpN (ulpL) | 840845 (96270) | 841118 (96302) | \f$1.27\times 10^6\f$ (\f$1.45\times 10^5\f$) |
 
 Near zeros of orders 3 to 5, a 1-ulp change in \f$F\f$ shifts derivatives by \f$1.4\times 10^4\f$ to \f$2.9\times 10^4\f$ ulps; \f$F\f$ and \f$f\f$ themselves agree within 2–8 ulps. See `docs/numerics.md` for reference details, regional breakdowns, and baseline comparisons.
 
@@ -118,6 +119,7 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::log_sn_cdf_d3 "log_sn_cdf_d3()" — Third-order derivatives
 - \ref laplace::math::own::log_sn_cdf_d4 "log_sn_cdf_d4()" — Fourth-order derivatives
 - \ref laplace::math::own::log_sn_cdf_d5 "log_sn_cdf_d5()" — Fifth-order derivatives
+- \ref laplace::math::own::log_sn_cdf_d6 "log_sn_cdf_d6()" — Sixth-order derivatives
 
 ## References
 

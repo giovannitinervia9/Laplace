@@ -1,11 +1,16 @@
-// The cdf family of a discrete distribution by summing its mass, and the
+// The cdf family of a distribution that has no closed form for it, and the
 // dispatchers that take a distribution's own member when it has one
-// (laplace::distrib; note/distrib.md section 4).
+// (laplace::distrib; note/distrib.md section 4). A discrete distribution sums
+// its mass, a continuous one integrates its density; the dispatchers choose by
+// kind.
 //
 //   cdf_by_sum(d, y), ccdf_by_sum, log_cdf_by_sum, log_ccdf_by_sum
 //   distrib_cdf(d, y), distrib_ccdf, distrib_log_cdf, distrib_log_ccdf
 //   log_cdf_dk_by_sum<K>(d, y), log_ccdf_dk_by_sum<K>  the derivatives in the
 //                               parameters of log F and log(1 - F), K = 1..6
+//   cdf_by_integral(d, y), ccdf_by_integral, log_cdf_by_integral,
+//   log_ccdf_by_integral, log_cdf_dk_by_integral<K>, log_ccdf_dk_by_integral<K>
+//                               the same for a continuous distribution
 //   distrib_log_cdf_dk<K>(d, y), distrib_log_ccdf_dk<K>
 //
 // With k = floor(y): below the centre the lower tail F(k) = sum_(i <= k) p(i) is
@@ -17,6 +22,17 @@
 // the support or when the geometric bound t r / (1 - r) on the rest (r the ratio
 // of the last two terms, below 1) falls below 2^-60 of the sum: the terms
 // decrease away from the mode, and the bound holds for log-concave masses.
+//
+// Continuous: the side of y that does not hold center() is integrated with
+// panels_quad over it, cut at the kinks in y, in panels of width scale(), and
+// the density at the end point y is divided out, so that a tail far below the
+// double range still gives its logarithm exactly (log S = l(y) + log of the
+// integral of f / f(y)). The other side is its complement on the log scale. The
+// derivatives in the parameters come from the same identity as the discrete
+// ones, d_T F = int f B_T(l), with the Bell polynomial of the derivatives of l
+// built on their difference from l(y); it is valid where every parameter is
+// smooth, since a parameter that moves a kink of l in y would leave a boundary
+// term, and such a component is NaN.
 #pragma once
 
 #include <laplace/core/config.hpp>
@@ -229,6 +245,258 @@ LAPLACE_HD sym_tensor<D::n_params, K> log_cdf_side_dk_by_sum(const D& d, double 
   return t;
 }
 
+// ---------------------------------------------------------------- continuous
+
+// The position of a sorted multi-index of length k in the layout of
+// log_density_partials<P, K>, which packs the derivatives order by order; the
+// same arithmetic as that type's at(), kept here because the integrals below are
+// indexed the same way.
+template <int P, int K>
+LAPLACE_HD_FORCEINLINE int mi_position(const int* s, int k) {
+  int pos = 0, prev = 0;
+  for (int j = 0; j < k; ++j) {
+    for (int w = prev; w < s[j]; ++w) pos += binomial_coef(P - w + k - j - 2, k - j - 1);
+    prev = s[j];
+  }
+  return log_density_partials<P, K>::offset(k) + pos;
+}
+
+// the next sorted multi-index of length k, with k at run time
+template <int P>
+LAPLACE_HD_FORCEINLINE void next_multi_index_k(int* c, int k) {
+  int i = k - 1;
+  while (i >= 0 && c[i] == P - 1) --i;
+  if (i < 0) return;
+  ++c[i];
+  for (int j = i + 1; j < k; ++j) c[j] = c[i];
+}
+
+// The number of multi-indices of order 0 to K over P parameters, which is the
+// length of the arrays below: B[0] and A[0] are the order-0 entry and
+// B[1 + mi_position(U)] the one of U.
+template <int P, int K>
+LAPLACE_HD_FORCEINLINE constexpr int mi_count() {
+  return 1 + log_density_partials<P, K>::offset(K + 1);
+}
+
+// The Bell recursion over the whole index space, as a table built once per call.
+//
+// B_U = d_U e^l / e^l, the complete Bell polynomial of the derivatives of l over
+// the multiset U, obeys
+//   B_U = sum_(V subset of U, V holds U's first slot) l_V B_(U - V),
+// which fills B by increasing order. Where the sum is written out at every node
+// of a quadrature, finding the positions of V and of U - V costs more than the
+// arithmetic, so the positions are computed once into bell_table and the
+// per-node loop is then a sequence of multiply-adds: for each multi-index U in
+// the order of the layout, count[U] entries, each the position of l_V in the
+// partials and the position of B_(U - V) (which is 0, where B is 1, when V is
+// all of U).
+template <int P, int K>
+LAPLACE_HD_FORCEINLINE constexpr int bell_entries() {
+  int e = 0;
+  for (int k = 1; k <= K; ++k) e += sym_tensor_size(P, k) * (1 << (k - 1));
+  return e;
+}
+
+template <int P, int K>
+struct bell_table {
+  static_assert(mi_count<P, K>() <= 256, "the table indexes the multi-indices in one byte");
+  unsigned char lv[bell_entries<P, K>()];  // position of l_V in the partials
+  unsigned char bw[bell_entries<P, K>()];  // position of B_(U - V), 0 for the empty complement
+  unsigned char count[mi_count<P, K>()];   // entries of each multi-index, in layout order
+  LAPLACE_HD bell_table() {
+    for (int m = 0; m < mi_count<P, K>(); ++m) count[m] = 0;
+    int e = 0, c[K];
+    for (int k = 1; k <= K; ++k) {
+      for (int j = 0; j < k; ++j) c[j] = 0;
+      for (int comp = 0; comp < sym_tensor_size(P, k); ++comp) {
+        const int rest = (1 << (k - 1)) - 1;  // the slots 1 .. k-1
+        int n = 0;
+        for (int sub = rest;; sub = (sub - 1) & rest) {
+          const int mask = (sub << 1) | 1;
+          int vi[K], wi[K];
+          int nv = 0, nw = 0;
+          for (int i = 0; i < k; ++i) {
+            if (mask >> i & 1) vi[nv++] = c[i];
+            else wi[nw++] = c[i];
+          }
+          lv[e] = static_cast<unsigned char>(mi_position<P, K>(vi, nv));
+          bw[e] = static_cast<unsigned char>(nw == 0 ? 0 : 1 + mi_position<P, K>(wi, nw));
+          ++e;
+          ++n;
+          if (sub == 0) break;
+        }
+        count[1 + mi_position<P, K>(c, k)] = static_cast<unsigned char>(n);
+        next_multi_index_k<P>(c, k);
+      }
+    }
+  }
+};
+
+// B over every multi-index of order 0 to K from the table and the partials L
+template <int P, int K, class L>
+LAPLACE_HD_FORCEINLINE void bell_all(const bell_table<P, K>& tb, const L& L_, double* B) {
+  B[0] = 1.0;
+  int e = 0;
+  for (int u = 1; u < mi_count<P, K>(); ++u) {
+    double acc = 0.0;
+    const int n = tb.count[u];
+    for (int i = 0; i < n; ++i, ++e) acc += L_.v[tb.lv[e]] * B[tb.bw[e]];
+    B[u] = acc;
+  }
+}
+
+// The derivatives of F in the parameters by quadrature of the density, every
+// multi-index of order 0 to K in one pass: A[U] / A[0] = d_U W / W for the
+// integral W of f / f(y) over the side of y that does not hold the centre. The
+// density at the end point y is divided out, so a tail far below the double
+// range still gives its logarithm (log S = l(y) + log W), and the Bell
+// polynomial is built on the derivatives of l centred at y, which the caller
+// recombines with those of l(y) as the discrete route does.
+//
+// One quadrature serves every component of every order: the l-partials, six
+// derivative tensors per node, are evaluated once instead of once per component
+// (decided with Giovanni on 2026-11-15, after the first version, which ran one
+// adaptive quadrature per component, measured 94 ms per call at order 6).
+template <int K, class D>
+LAPLACE_HD double cdf_partials_by_integral(const D& d, double y, bool upper, double* A) {
+  constexpr int P = D::n_params;
+  constexpr int M = mi_count<P, K>();
+  constexpr int n_partials = log_density_partials<P, K>::offset(K + 1);
+  for (int m = 0; m < M; ++m) A[m] = 0.0;
+  const double lf = d.logpdf(y);
+  // where the density at y is zero or not finite nothing can be factored out and
+  // the integrand is taken as it is
+  const double la = (lf > -distrib_infinity && lf < distrib_infinity) ? lf : 0.0;
+  log_density_partials<P, K> L0;
+  L0.fill(d, y);
+  const bell_table<P, K> tb;
+  const auto g = [&](double t, double* out) {
+    const double w = math::exp(d.logpdf(t) - la);
+    if (!(w > 0.0)) {
+      for (int m = 0; m < M; ++m) out[m] = 0.0;
+      return;
+    }
+    log_density_partials<P, K> L;
+    L.fill(d, t);
+    for (int j = 0; j < n_partials; ++j) L.v[j] -= L0.v[j];
+    double B[M];
+    bell_all<P, K>(tb, L, B);
+    for (int m = 0; m < M; ++m) out[m] = w * B[m];
+  };
+  const double lo = upper ? y : d.support_lower(), hi = upper ? d.support_upper() : y;
+  vec_expectation<M> q;
+  if constexpr (requires { d.y_kinks(); }) {
+    const distrib_kinks k = d.y_kinks();
+    panels_vec<M>(g, lo, hi, d.center(), d.scale(), k.point, k.count, q);
+  } else {
+    panels_vec<M>(g, lo, hi, d.center(), d.scale(), nullptr, 0, q);
+  }
+  if (!(q.value[0] > 0.0)) return -distrib_infinity;
+  // The per-component stopping test of the rule (the change of the last
+  // refinement against that component's own L1 norm) is conservative here: the
+  // components it leaves unconverged are the high pure derivatives in the scale
+  // in the far tail, where the Bell polynomial carries powers of z that cancel,
+  // and they were measured against the Cauchy's closed forms at 1.9e-8 relative
+  // at worst and 1e-13 elsewhere. A NaN would poison the whole tensor for a
+  // number of that quality, so the value is returned and the flag is not read;
+  // what is not usable (an empty or non-finite integral) is caught above.
+  for (int m = 0; m < M; ++m) A[m] = q.value[m] / q.value[0];
+  return la + math::log(q.value[0]);
+}
+
+// log F(y) (upper = false) or log(1 - F(y)) (upper = true) by quadrature of the
+// density over the side that does not hold the centre, the other side by the
+// complement on the log scale
+template <class D>
+LAPLACE_HD double log_cdf_side_by_integral(const D& d, double y, bool upper) {
+  static_assert(D::kind == distrib_kind::continuous,
+                "the cdf by quadrature of the density is for continuous distributions");
+  const double lo = d.support_lower(), hi = d.support_upper();
+  if (y <= lo) return upper ? 0.0 : -distrib_infinity;
+  if (y >= hi) return upper ? -distrib_infinity : 0.0;
+  const bool lower_side = y < d.center();
+  const bool integrated_is_asked = lower_side != upper;
+  const double lf = d.logpdf(y);
+  const double la = (lf > -distrib_infinity && lf < distrib_infinity) ? lf : 0.0;
+  const auto f = [&](double t) { return math::exp(d.logpdf(t) - la); };
+  math::quad::quad_result q;
+  const double a = lower_side ? lo : y, b = lower_side ? y : hi;
+  if constexpr (requires { d.y_kinks(); }) {
+    const distrib_kinks k = d.y_kinks();
+    q = math::quad::panels_quad(f, a, b, d.center(), d.scale(), k.point, k.count);
+  } else {
+    q = math::quad::panels_quad(f, a, b, d.center(), d.scale());
+  }
+  if (!q.converged || !(q.value > 0.0)) return q.value > 0.0 ? math::detail::quiet_nan() : -distrib_infinity;
+  const double log_s = la + math::log(q.value);
+  if (integrated_is_asked) return log_s;
+  return Kokkos::log1p(-math::exp(log_s));
+}
+
+// d^K log F / dtheta^K (upper = false) or d^K log(1 - F) / dtheta^K (upper = true)
+// by quadrature of the density: one pass for every component, from the
+// derivatives of F over all multi-indices. The identity d_T F = int f B_T(l)
+// holds where every parameter is smooth: a parameter of finite regularity moves
+// a kink of l in y, and differentiating the integrand across it would miss a
+// boundary term, so such a component is NaN.
+template <int K, class D>
+LAPLACE_HD sym_tensor<D::n_params, K> log_cdf_side_dk_by_integral(const D& d, double y, bool upper) {
+  static_assert(D::kind == distrib_kind::continuous,
+                "the derivatives of the log cdf by quadrature are for continuous distributions");
+  constexpr int P = D::n_params;
+  constexpr int full = (1 << K) - 1;
+  sym_tensor<P, K> t;
+  const double lo = d.support_lower(), hi = d.support_upper();
+  if (upper ? y >= hi : y <= lo) {  // the side asked for has probability 0
+    for (int i = 0; i < sym_tensor<P, K>::size; ++i) t[i] = math::detail::quiet_nan();
+    return t;
+  }
+  if (upper ? y <= lo : y >= hi) return t;  // probability 1, every derivative 0
+  const bool lower_side = y < d.center();
+  const bool integrated_is_asked = lower_side != upper;
+  double A[mi_count<P, K>()];
+  const double log_s = cdf_partials_by_integral<K>(d, y, !lower_side, A);
+  log_density_partials<P, K> L0;
+  L0.fill(d, y);
+  const double log_o = integrated_is_asked ? 0.0 : Kokkos::log1p(-math::exp(log_s));
+  const double fac = integrated_is_asked ? 0.0 : -math::exp(log_s - log_o);
+  // the descriptors as a value: a static constexpr array cannot be indexed on
+  // the device (the same helper the expected information uses)
+  constexpr regularity_orders<D> R = regularities_of<D>();
+  int c[K];
+  for (int j = 0; j < K; ++j) c[j] = 0;
+  for (int comp = 0; comp < sym_tensor<P, K>::size; ++comp) {
+    bool smooth = true;
+    for (int j = 0; j < K; ++j)
+      if (R.r[c[j]] != infinitely_smooth) smooth = false;
+    if (!smooth) {
+      t[comp] = math::detail::quiet_nan();
+      next_multi_index<P, K>(c);
+      continue;
+    }
+    double r[1 << K], u[1 << K];
+    r[0] = 1.0;
+    for (int mask = 1; mask <= full; ++mask) {  // the sub-multiset of c that the mask selects
+      int idx[K];
+      int n = 0;
+      for (int i = 0; i < K; ++i)
+        if (mask >> i & 1) idx[n++] = c[i];
+      r[mask] = A[1 + mi_position<P, K>(idx, n)];
+    }
+    log_tail_dk_from_ratios<K>(r, u);  // d_T log W
+    for (int m = 1; m <= full; ++m) u[m] += l_over(L0, nullptr, 0, c, m);  // + d_T l(y)
+    if (!integrated_is_asked) {
+      ratios_from_log_tail_dk<K>(u, r);
+      for (int m = 1; m <= full; ++m) r[m] *= fac;
+      log_tail_dk_from_ratios<K>(r, u);
+    }
+    t[comp] = u[full];
+    next_multi_index<P, K>(c);
+  }
+  return t;
+}
+
 }  // namespace detail_generic
 
 /**
@@ -280,6 +548,28 @@ LAPLACE_HD double log_cdf_by_sum(const D& d, double y) { return detail_generic::
  */
 template <class D>
 LAPLACE_HD double log_ccdf_by_sum(const D& d, double y) { return detail_generic::log_cdf_side_by_sum(d, y, true); }
+
+// The same four quantities for a continuous distribution, by quadrature of its
+// density over the side of y that does not hold the centre (note/distrib.md
+// section 4). They are what a continuous family without a closed cdf inherits.
+template <class D>
+LAPLACE_HD double log_cdf_by_integral(const D& d, double y) { return detail_generic::log_cdf_side_by_integral(d, y, false); }
+template <class D>
+LAPLACE_HD double log_ccdf_by_integral(const D& d, double y) { return detail_generic::log_cdf_side_by_integral(d, y, true); }
+template <class D>
+LAPLACE_HD double cdf_by_integral(const D& d, double y) { return math::exp(log_cdf_by_integral(d, y)); }
+template <class D>
+LAPLACE_HD double ccdf_by_integral(const D& d, double y) { return math::exp(log_ccdf_by_integral(d, y)); }
+// the derivatives in the parameters of log F and log(1 - F), K = 1..6, by
+// quadrature of f B_T(l): one quadrature per component of the tensor
+template <int K, class D>
+LAPLACE_HD sym_tensor<D::n_params, K> log_cdf_dk_by_integral(const D& d, double y) {
+  return detail_generic::log_cdf_side_dk_by_integral<K>(d, y, false);
+}
+template <int K, class D>
+LAPLACE_HD sym_tensor<D::n_params, K> log_ccdf_dk_by_integral(const D& d, double y) {
+  return detail_generic::log_cdf_side_dk_by_integral<K>(d, y, true);
+}
 
 /**
  * \ingroup distrib_generic
@@ -344,7 +634,8 @@ LAPLACE_HD double ccdf_by_sum(const D& d, double y) { return math::exp(log_ccdf_
 template <class D>
 LAPLACE_HD double distrib_cdf(const D& d, double y) {
   if constexpr (requires { d.cdf(y); }) return d.cdf(y);
-  else return cdf_by_sum(d, y);
+  else if constexpr (D::kind == distrib_kind::discrete) return cdf_by_sum(d, y);
+  else return cdf_by_integral(d, y);
 }
 
 /**
@@ -364,7 +655,8 @@ LAPLACE_HD double distrib_cdf(const D& d, double y) {
 template <class D>
 LAPLACE_HD double distrib_ccdf(const D& d, double y) {
   if constexpr (requires { d.ccdf(y); }) return d.ccdf(y);
-  else return ccdf_by_sum(d, y);
+  else if constexpr (D::kind == distrib_kind::discrete) return ccdf_by_sum(d, y);
+  else return ccdf_by_integral(d, y);
 }
 
 /**
@@ -384,7 +676,8 @@ LAPLACE_HD double distrib_ccdf(const D& d, double y) {
 template <class D>
 LAPLACE_HD double distrib_log_cdf(const D& d, double y) {
   if constexpr (requires { d.log_cdf(y); }) return d.log_cdf(y);
-  else return log_cdf_by_sum(d, y);
+  else if constexpr (D::kind == distrib_kind::discrete) return log_cdf_by_sum(d, y);
+  else return log_cdf_by_integral(d, y);
 }
 
 /**
@@ -404,7 +697,8 @@ LAPLACE_HD double distrib_log_cdf(const D& d, double y) {
 template <class D>
 LAPLACE_HD double distrib_log_ccdf(const D& d, double y) {
   if constexpr (requires { d.log_ccdf(y); }) return d.log_ccdf(y);
-  else return log_ccdf_by_sum(d, y);
+  else if constexpr (D::kind == distrib_kind::discrete) return log_ccdf_by_sum(d, y);
+  else return log_ccdf_by_integral(d, y);
 }
 
 /**
@@ -471,22 +765,28 @@ template <int K, class D>
 LAPLACE_HD sym_tensor<D::n_params, K> distrib_log_cdf_dk(const D& d, double y) {
   if constexpr (K == 1) {
     if constexpr (requires { d.log_cdf_d1(y); }) return d.log_cdf_d1(y);
-    else return log_cdf_dk_by_sum<1>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_cdf_dk_by_sum<1>(d, y);
+    else return log_cdf_dk_by_integral<1>(d, y);
   } else if constexpr (K == 2) {
     if constexpr (requires { d.log_cdf_d2(y); }) return d.log_cdf_d2(y);
-    else return log_cdf_dk_by_sum<2>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_cdf_dk_by_sum<2>(d, y);
+    else return log_cdf_dk_by_integral<2>(d, y);
   } else if constexpr (K == 3) {
     if constexpr (requires { d.log_cdf_d3(y); }) return d.log_cdf_d3(y);
-    else return log_cdf_dk_by_sum<3>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_cdf_dk_by_sum<3>(d, y);
+    else return log_cdf_dk_by_integral<3>(d, y);
   } else if constexpr (K == 4) {
     if constexpr (requires { d.log_cdf_d4(y); }) return d.log_cdf_d4(y);
-    else return log_cdf_dk_by_sum<4>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_cdf_dk_by_sum<4>(d, y);
+    else return log_cdf_dk_by_integral<4>(d, y);
   } else if constexpr (K == 5) {
     if constexpr (requires { d.log_cdf_d5(y); }) return d.log_cdf_d5(y);
-    else return log_cdf_dk_by_sum<5>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_cdf_dk_by_sum<5>(d, y);
+    else return log_cdf_dk_by_integral<5>(d, y);
   } else {
     if constexpr (requires { d.log_cdf_d6(y); }) return d.log_cdf_d6(y);
-    else return log_cdf_dk_by_sum<6>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_cdf_dk_by_sum<6>(d, y);
+    else return log_cdf_dk_by_integral<6>(d, y);
   }
 }
 
@@ -504,22 +804,28 @@ template <int K, class D>
 LAPLACE_HD sym_tensor<D::n_params, K> distrib_log_ccdf_dk(const D& d, double y) {
   if constexpr (K == 1) {
     if constexpr (requires { d.log_ccdf_d1(y); }) return d.log_ccdf_d1(y);
-    else return log_ccdf_dk_by_sum<1>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_ccdf_dk_by_sum<1>(d, y);
+    else return log_ccdf_dk_by_integral<1>(d, y);
   } else if constexpr (K == 2) {
     if constexpr (requires { d.log_ccdf_d2(y); }) return d.log_ccdf_d2(y);
-    else return log_ccdf_dk_by_sum<2>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_ccdf_dk_by_sum<2>(d, y);
+    else return log_ccdf_dk_by_integral<2>(d, y);
   } else if constexpr (K == 3) {
     if constexpr (requires { d.log_ccdf_d3(y); }) return d.log_ccdf_d3(y);
-    else return log_ccdf_dk_by_sum<3>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_ccdf_dk_by_sum<3>(d, y);
+    else return log_ccdf_dk_by_integral<3>(d, y);
   } else if constexpr (K == 4) {
     if constexpr (requires { d.log_ccdf_d4(y); }) return d.log_ccdf_d4(y);
-    else return log_ccdf_dk_by_sum<4>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_ccdf_dk_by_sum<4>(d, y);
+    else return log_ccdf_dk_by_integral<4>(d, y);
   } else if constexpr (K == 5) {
     if constexpr (requires { d.log_ccdf_d5(y); }) return d.log_ccdf_d5(y);
-    else return log_ccdf_dk_by_sum<5>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_ccdf_dk_by_sum<5>(d, y);
+    else return log_ccdf_dk_by_integral<5>(d, y);
   } else {
     if constexpr (requires { d.log_ccdf_d6(y); }) return d.log_ccdf_d6(y);
-    else return log_ccdf_dk_by_sum<6>(d, y);
+    else if constexpr (D::kind == distrib_kind::discrete) return log_ccdf_dk_by_sum<6>(d, y);
+    else return log_ccdf_dk_by_integral<6>(d, y);
   }
 }
 

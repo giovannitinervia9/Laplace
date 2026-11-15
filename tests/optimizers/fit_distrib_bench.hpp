@@ -23,6 +23,7 @@
 #pragma once
 
 #include <laplace/bijector/scalar.hpp>
+#include <laplace/dense/dense.hpp>
 #include <laplace/distrib/core.hpp>
 #include <laplace/distrib/binomial.hpp>
 #include <laplace/distrib/generic_expectation.hpp>
@@ -168,26 +169,27 @@ struct fit_distrib_objective {
     return false;
   }
 
-  // sqrt((H^-1)_jj) with H the expected curvature n I(theta) h' h'^T in u (P <= 2)
+  // sqrt((H^-1)_jj) with H the expected curvature n I(theta) h' h'^T in u, for
+  // any number of parameters: H is symmetric positive definite, so the diagonal
+  // of its inverse comes from one Cholesky and P triangular solves on the
+  // identity (laplace::dense). The first version inverted a 2 x 2 by hand in a
+  // double H[2][2] indexed by P, which wrote out of bounds for a family with
+  // three parameters (found on 2026-11-15 by the skew normal).
   std::vector<double> free_standard_errors(const lo::optimizer_point& u) const {
     double t[P];
     theta_of(u, t);
     const auto I = ld::distrib_expected_info<0>(build(t));
     const double n = static_cast<double>(y.extent(0));
-    double H[2][2] = {};
+    Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace> H("H", P, P), L("L", P, P), X("X", P, P);
     for (int j = 0; j < P; ++j)
       for (int k = 0; k < P; ++k) {
         const int idx[2] = {j < k ? j : k, j < k ? k : j};
-        H[j][k] = n * I[ld::sym_tensor_position<P, 2>(idx)] * h[j].inverse_d1(u(j)) * h[k].inverse_d1(u(k));
+        H(j, k) = n * I[ld::sym_tensor_position<P, 2>(idx)] * h[j].inverse_d1(u(j)) * h[k].inverse_d1(u(k));
+        X(j, k) = j == k ? 1.0 : 0.0;
       }
-    std::vector<double> se(P);
-    if constexpr (P == 1) {
-      se[0] = std::sqrt(1.0 / H[0][0]);
-    } else {
-      const double det = H[0][0] * H[1][1] - H[0][1] * H[1][0];
-      se[0] = std::sqrt(H[1][1] / det);
-      se[1] = std::sqrt(H[0][0] / det);
-    }
+    std::vector<double> se(P, std::numeric_limits<double>::infinity());
+    if (!laplace::dense::spd_solve(H, L, X).success) return se;  // not positive definite: no finite error
+    for (int j = 0; j < P; ++j) se[j] = std::sqrt(X(j, j));
     return se;
   }
 

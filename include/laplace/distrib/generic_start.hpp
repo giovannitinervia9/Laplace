@@ -60,6 +60,12 @@ inline distrib_sample_summary summarize_sample(std::vector<double> y) {
   s.mean /= n;
   for (double v : y) s.variance += (v - s.mean) * (v - s.mean);
   s.variance /= n;
+  // the standardized third central moment, which the one family whose third
+  // parameter is the skewness starts from; zero where the sample has no spread
+  if (s.variance > 0.0) {
+    for (double v : y) s.skewness += (v - s.mean) * (v - s.mean) * (v - s.mean);
+    s.skewness /= n * s.variance * std::sqrt(s.variance);
+  }
   s.minimum = *std::min_element(y.begin(), y.end());
   s.maximum = *std::max_element(y.begin(), y.end());
   for (double v : y)

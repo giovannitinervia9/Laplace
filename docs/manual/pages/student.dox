@@ -1,8 +1,8 @@
 /**
 \defgroup student Student t distribution function
-\brief Natural logarithm of the standard Student t distribution function, \f$\log T_\nu(z)\f$, and its mixed partial derivatives in \f$(z, \nu)\f$ to order 5.
+\brief Natural logarithm of the standard Student t distribution function, \f$\log T_\nu(z)\f$, and its mixed partial derivatives in \f$(z, \nu)\f$ to order 6.
 
-The header `<laplace/math/student.hpp>` evaluates \f$\log T_\nu(z)\f$ and its mixed partial derivatives in \f$(z, \nu)\f$ up to total order 5. Every public function is called in `laplace::math` (forwarding to definitions in `laplace::math::own`) and is marked `LAPLACE_HD` for host and Kokkos device execution. Across the reference tests, the value function stays within 188 ulp (10.8 ulp1), and the derivatives stay within 525 ulpN on gcc and 1480 ulpN on CUDA (at most 281 ulpL).
+The header `<laplace/math/student.hpp>` evaluates \f$\log T_\nu(z)\f$ and its mixed partial derivatives in \f$(z, \nu)\f$ up to total order 6. Every public function is called in `laplace::math` (forwarding to definitions in `laplace::math::own`) and is marked `LAPLACE_HD` for host and Kokkos device execution. Across the reference tests, the value function stays within 188 ulp (10.8 ulp1), and the derivatives stay within 30089 ulpN on gcc and 19289 ulpN on CUDA (at most 2433 ulpL).
 
 ## Definitions
 
@@ -17,7 +17,7 @@ k(s, \nu) = -\frac{\nu + 1}{2} \log\left(1 + \frac{s^2}{\nu}\right)
 \f]
 are the normalizing constant and the density kernel. The distribution function satisfies \f$1 - T_\nu(z) = T_\nu(-z)\f$, so the survival function requires no separate routine.
 
-For each total order \f$K \in \{1, \dots, 5\}\f$, the derivative functions return a \ref laplace::math::own::mixed_partials "mixed_partials" container whose component `c[j]` holds
+For each total order \f$K \in \{1, \dots, 6\}\f$, the derivative functions return a \ref laplace::math::own::mixed_partials "mixed_partials" container whose component `c[j]` holds
 \f[
 c[j] = \frac{\partial^K}{\partial z^{K-j} \partial \nu^j} \log T_\nu(z), \qquad j = 0, \dots, K.
 \f]
@@ -39,7 +39,7 @@ For \f$z > 0\f$, evaluation complements the lower tail \f$S = T_\nu(-z) = \exp(l
 
 ### Derivatives
 
-Derivatives of order \f$K \in \{1, \dots, 5\}\f$ use a three-region numerical quadrature. Every function of \f$(z, \nu)\f$ is carried as a truncated bivariate Taylor polynomial in the increments \f$(\mathrm{d}z, \mathrm{d}\nu)\f$ with 21 coefficients representing \f$\mathrm{d}z^i \mathrm{d}\nu^j / (i! j!)\f$ for \f$i, j \ge 0\f$ and \f$i + j \le 5\f$.
+Derivatives of order \f$K \in \{1, \dots, 6\}\f$ use a three-region numerical quadrature. Every function of \f$(z, \nu)\f$ is carried as a truncated bivariate Taylor polynomial in the increments \f$(\mathrm{d}z, \mathrm{d}\nu)\f$ with 28 coefficients representing \f$\mathrm{d}z^i \mathrm{d}\nu^j / (i! j!)\f$ for \f$i, j \ge 0\f$ and \f$i + j \le 6\f$.
 
 Comparing the lower-tail probability \f$T_\nu(-|z|)\f$ from \ref laplace::math::own::beta_inc "beta_inc()" against \f$0.2\f$ selects between the centre and tail regimes. Outside the centre, \f$|z|^2 < 4\nu\f$ selects the Gaussian tail and \f$|z|^2 \ge 4\nu\f$ selects the power tail. For \f$z > 0\f$ outside the centre, evaluation computes the lower tail at \f$-z\f$, substitutes \f$\mathrm{d}z \to -\mathrm{d}z\f$, and composes through \f$\log(1 - S)\f$.
 
@@ -63,7 +63,7 @@ With \f$b = \nu / 2\f$, the normalizing constant is \f$c(\nu) = f(b) - \frac{1}{
 
 See \ref accuracy "How accuracy is measured" for error definitions, reference generation, and test bounds. The value function \ref laplace::math::own::log_student_cdf "log_student_cdf()" is measured in \ref accuracy_ulp "ulp" and \ref accuracy_ulp1 "ulp1". It reaches a maximum error of 188 ulp (10.8 ulp1) in the upper tail, with test bounds of 285.0 ulp and 17.0 ulp1.
 
-Mixed partial derivatives are measured in \ref accuracy_mixed "ulpN" (with \f$z\f$ as the first variable and \f$\nu\f$ as the second) and its logarithmic variant ulpL in the upper tail. Pure \f$z\f$-derivatives of orders 3 and 5 on \f$|z| < 1\f$ use \ref accuracy_ulp1 "ulp1", because those components pass near zero and cancel against their constituent terms.
+Mixed partial derivatives are measured in \ref accuracy_mixed "ulpN" (with \f$z\f$ as the first variable and \f$\nu\f$ as the second) and its logarithmic variant ulpL in the upper tail. Pure \f$z\f$-derivatives of orders 3, 5, and 6 on \f$|z| < 1\f$ use \ref accuracy_ulp1 "ulp1", because those components pass near zero and cancel against their constituent terms.
 
 | Function | Order \f$K\f$ | Measured max gcc (ulpN) | Measured max CUDA (ulpN) | Measured max (ulpL) | Test bound (ulpN) | Test bound (ulp1) | Test bound (ulpL) |
 |---|---|---|---|---|---|---|---|
@@ -72,6 +72,7 @@ Mixed partial derivatives are measured in \ref accuracy_mixed "ulpN" (with \f$z\
 | \ref laplace::math::own::log_student_cdf_d3 "log_student_cdf_d3()" | 3 | 337 | 319 | 33 | 510.0 | 18.0 | 50.0 |
 | \ref laplace::math::own::log_student_cdf_d4 "log_student_cdf_d4()" | 4 | 506 | 1480 | 281 | 2200.0 | — | 420.0 |
 | \ref laplace::math::own::log_student_cdf_d5 "log_student_cdf_d5()" | 5 | 470 | 470 | 96 | 710.0 | 145.0 | 145.0 |
+| \ref laplace::math::own::log_student_cdf_d6 "log_student_cdf_d6()" | 6 | 30089 | 19289 | 2433 | 45200.0 | 495.0 | 3650.0 |
 
 See `docs/numerics.md` for reference details, alternative-method comparisons, and deep-tail consistency checks.
 
@@ -120,6 +121,7 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::log_student_cdf_d3 "log_student_cdf_d3()" — Third mixed partial derivatives in \f$(z, \nu)\f$
 - \ref laplace::math::own::log_student_cdf_d4 "log_student_cdf_d4()" — Fourth mixed partial derivatives in \f$(z, \nu)\f$
 - \ref laplace::math::own::log_student_cdf_d5 "log_student_cdf_d5()" — Fifth mixed partial derivatives in \f$(z, \nu)\f$
+- \ref laplace::math::own::log_student_cdf_d6 "log_student_cdf_d6()" — Sixth mixed partial derivatives in \f$(z, \nu)\f$
 
 ## References
 

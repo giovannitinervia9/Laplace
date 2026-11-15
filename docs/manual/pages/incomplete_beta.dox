@@ -3,7 +3,7 @@
  *
  * The incomplete beta module evaluates the regularized incomplete beta function, its
  * complement, their natural logarithms, mixed partial derivatives with respect to both shape
- * parameters up to order \f$5\f$, and their scalar and log-probability inverses on host and
+ * parameters up to order \f$6\f$, and their scalar and log-probability inverses on host and
  * device (`LAPLACE_HD`). All routines are declared across
  * `<laplace/math/incomplete_beta.hpp>`, `<laplace/math/incomplete_beta_deriv.hpp>`, and
  * `<laplace/math/incomplete_inverse.hpp>` in namespace `laplace::math` (with bundled result
@@ -29,8 +29,8 @@
  * calls \ref laplace::math::own::beta_inc "beta_inc()" and keeps one field, so evaluating all
  * four together costs no more than one scalar call.
  *
- * The derivative functions `log_ibeta_d1()` through `log_ibeta_d5()` and `log_ibetac_d1()`
- * through `log_ibetac_d5()` compute all mixed partial derivatives of order \f$K \in \{1, \dots, 5\}\f$
+ * The derivative functions `log_ibeta_d1()` through `log_ibeta_d6()` and `log_ibetac_d1()`
+ * through `log_ibetac_d6()` compute all mixed partial derivatives of order \f$K \in \{1, \dots, 6\}\f$
  * with respect to \f$(a, b)\f$. They return a
  * \ref laplace::math::own::mixed_partials "mixed_partials<K>" value whose entry `c[j]` stores
  * \f$\partial^K / \partial a^{K-j} \partial b^j\f$ for \f$j = 0, \dots, K\f$. Subtracting the
@@ -144,6 +144,7 @@
  * | 3 | 1620 | 3100.0 / 315.0 | 2450.0 / 80.0 |
  * | 4 | 1370 | 1800.0 / 115.0 | 2950.0 / 75.0 |
  * | 5 | 1950 | 3300.0 / 420.0 | 2950.0 / 690.0 |
+ * | 6 | 5357 | 2330.0 / 650.0 | 8050.0 / 265.0 |
  *
  * For all four inverses, OpenMP \f$8\f$-thread host runs and CUDA device runs match single-thread
  * gcc accuracy on both \f$x\f$ and \f$1 - x\f$.
@@ -203,8 +204,8 @@
  * - \ref laplace::math::log_ibeta "log_ibeta()"
  * - \ref laplace::math::log_ibetac "log_ibetac()"
  * - \ref laplace::math::own::mixed_partials "mixed_partials"
- * - \ref laplace::math::own::log_ibeta_d1 "log_ibeta_d1()", \ref laplace::math::own::log_ibeta_d2 "log_ibeta_d2()", \ref laplace::math::own::log_ibeta_d3 "log_ibeta_d3()", \ref laplace::math::own::log_ibeta_d4 "log_ibeta_d4()", \ref laplace::math::own::log_ibeta_d5 "log_ibeta_d5()"
- * - \ref laplace::math::own::log_ibetac_d1 "log_ibetac_d1()", \ref laplace::math::own::log_ibetac_d2 "log_ibetac_d2()", \ref laplace::math::own::log_ibetac_d3 "log_ibetac_d3()", \ref laplace::math::own::log_ibetac_d4 "log_ibetac_d4()", \ref laplace::math::own::log_ibetac_d5 "log_ibetac_d5()"
+ * - \ref laplace::math::own::log_ibeta_d1 "log_ibeta_d1()", \ref laplace::math::own::log_ibeta_d2 "log_ibeta_d2()", \ref laplace::math::own::log_ibeta_d3 "log_ibeta_d3()", \ref laplace::math::own::log_ibeta_d4 "log_ibeta_d4()", \ref laplace::math::own::log_ibeta_d5 "log_ibeta_d5()", \ref laplace::math::own::log_ibeta_d6 "log_ibeta_d6()"
+ * - \ref laplace::math::own::log_ibetac_d1 "log_ibetac_d1()", \ref laplace::math::own::log_ibetac_d2 "log_ibetac_d2()", \ref laplace::math::own::log_ibetac_d3 "log_ibetac_d3()", \ref laplace::math::own::log_ibetac_d4 "log_ibetac_d4()", \ref laplace::math::own::log_ibetac_d5 "log_ibetac_d5()", \ref laplace::math::own::log_ibetac_d6 "log_ibetac_d6()"
  * - \ref laplace::math::own::beta_inv_result "beta_inv_result"
  * - \ref laplace::math::ibeta_inv "ibeta_inv()", \ref laplace::math::own::ibeta_inv "own::ibeta_inv()"
  * - \ref laplace::math::ibetac_inv "ibetac_inv()", \ref laplace::math::own::ibetac_inv "own::ibetac_inv()"

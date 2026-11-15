@@ -1,9 +1,9 @@
 // Derivatives of log I_x(a, b) and log(1 - I_x(a, b)) with respect to the
-// shapes a and b, all mixed components of total order 1 to 5, Laplace's own
+// shapes a and b, all mixed components of total order 1 to 6, Laplace's own
 // (a, b > 0, 0 < x < 1). I_x(a, b) is the regularized incomplete beta function.
 //
-// One function per order: own::log_ibeta_d1 .. log_ibeta_d5 and
-// own::log_ibetac_d1 .. log_ibetac_d5. Order K returns mixed_partials<K>, whose
+// One function per order: own::log_ibeta_d1 .. log_ibeta_d6 and
+// own::log_ibetac_d1 .. log_ibetac_d6. Order K returns mixed_partials<K>, whose
 // component c[j] is d^K / da^(K-j) db^j. They share the private helpers below,
 // which compute every component up to the order asked for.
 //
@@ -70,7 +70,7 @@
 // starts at d = 1e-6 sigma, one node at the weighted mean of the omitted ones
 // standing for them. On the side with the maximum, towards the end point tanh-sinh when the
 // exponent drops by less than 4.5 there, otherwise the ray from t_c minus the
-// ray from x. The 21 moments of (X, Y) about their means (orders 3 and 5: the
+// ray from x. The 28 moments of (X, Y) about their means (orders 3, 5 and 6: the
 // nodes stored and summed twice; order 4: the means from a first pass at 4h;
 // orders 1-2: about the anchor) come from one evaluation per node; the cumulants follow from the
 // moments by the bivariate recursion
@@ -127,7 +127,7 @@ namespace laplace::math::own {
  * - Student \f$t\f$: \f$u = z\f$ and \f$v = \nu\f$, where `c[j]` holds \f$\frac{\partial^K}{\partial z^{K-j} \partial \nu^j} \log T_\nu(z)\f$.
  * - Skew normal: \f$u = z\f$ and \f$v = \alpha\f$, where `c[j]` holds \f$\frac{\partial^K}{\partial z^{K-j} \partial \alpha^j} \log F(z; \alpha)\f$.
  *
- * \tparam K Total order of differentiation, \f$K \in \{1, \dots, 5\}\f$.
+ * \tparam K Total order of differentiation, \f$K \in \{1, \dots, 6\}\f$.
  */
 template <int K>
 struct mixed_partials {
@@ -139,8 +139,8 @@ namespace detail_ibd {
 
 namespace ibx = detail_ibx;
 
-// derivatives up to order 5 in one array: (i, j) at (i + j)(i + j + 1)/2 + j
-constexpr int NC = 21;
+// derivatives up to order 6 in one array: (i, j) at (i + j)(i + j + 1)/2 + j
+constexpr int NC = 28;
 LAPLACE_HD_FORCEINLINE constexpr int ix(int i, int j) { return (i + j) * (i + j + 1) / 2 + j; }
 
 LAPLACE_HD_FORCEINLINE double binom(int n, int k) {
@@ -334,13 +334,13 @@ LAPLACE_HD_FORCEINLINE void dpsi_any_all(double z, double w, double d, int N, do
   }
 }
 
-// psi^(n)(s), n = 1..N (N <= 4), with one shift to Z = s + M >= 15 and the
+// psi^(n)(s), n = 1..N (N <= 5), with one shift to Z = s + M >= 15 and the
 // asymptotic expansion there (as own::polygamma, polygamma.hpp)
 LAPLACE_HD void psi_all(double s, int N, double* out) {
   const int M = s < 15.0 ? static_cast<int>(15.0 - s) + 1 : 0;
   const double Z = s + M, iZ = 1.0 / Z, w2 = iZ * iZ;
   const double fact[6] = {1.0, 1.0, 2.0, 6.0, 24.0, 120.0};
-  double rec[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+  double rec[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   for (int k = M - 1; k >= 0; --k) {
     const double iw = 1.0 / (s + k);
     double wp = iw;
@@ -471,7 +471,7 @@ template <int K>
 LAPLACE_HD void assemble(double a, double b, double c1off, double c2off, const double* kap, double* l, double* lt,
                          bool want_lt) {
   const double s = a + b;
-  double Pa[5], Pb[5], Ps[5], Pt[5], Da, Db;
+  double Pa[6], Pb[6], Ps[6], Pt[6], Da, Db;
   dpsi_all(a, b, K - 1, Pa, Da);  // psi^(n)(a) - psi^(n)(s)
   dpsi_all(b, a, K - 1, Pb, Db);  // psi^(n)(b) - psi^(n)(s)
   if (K >= 2) psi_all(s, K - 1, Ps);
@@ -1309,11 +1309,11 @@ LAPLACE_IBD_NOINLINE LAPLACE_HD void quad_lower(const ibx::args& p, const quad_p
   double cx = 0.0, cy = 0.0;
   for (int i = 0; i < NC; ++i) m[i] = 0.0;
   bool done = false;
-  // stored nodes for orders 3 and 5; order 4 keeps the first pass (with the
+  // stored nodes for orders 3, 5 and 6; order 4 keeps the first pass (with the
   // stored nodes the worst row of log(1 - I) at order 4, a = 1.4999,
   // b = 19.04, x = 0.0571, moved from 65 to 78 ulpL by rounding, above the bound
   // of the test; measured 2026-11-09)
-  if ((K == 3 || K == 5) && qp.store) {
+  if ((K == 3 || K == 5 || K == 6) && qp.store) {
     store_sink st;
     integrate(pc, np, 1.0, qp, st);
     if (!st.overflow) {
@@ -1403,7 +1403,7 @@ LAPLACE_IBD_NOINLINE LAPLACE_HD void series_lower(const ibx::args& p, double* l,
   // + log Gamma(b) - log Gamma(s); for lt, log(a B(a, b) / b) with log Gamma(b + 1)
   // shared polygamma differences: psi^(n)(a + 1) - psi^(n)(s), psi^(n)(b) - psi^(n)(s),
   // psi^(n)(b + 1) - psi^(n)(s) (for lt), psi^(n)(s)
-  double Pa[5], Pb[5], Pt[5], Ps[5], Db;
+  double Pa[6], Pb[6], Pt[6], Ps[6], Db;
   dpsi_any_all(a + 1.0, s, b - 1.0, K - 1, Pa);
   dpsi_all(b, a, K - 1, Pb, Db);
   if (want_lt) dpsi_any_all(b + 1.0, s, a - 1.0, K - 1, Pt);
@@ -1538,7 +1538,7 @@ LAPLACE_HD mixed_partials<K> order(double a, double b, double x, bool upper) {
  * Computes \f$c[0] = \frac{\partial}{\partial a} \log I_x(a, b) = \kappa_{1,0} - (\psi(a) - \psi(a+b))\f$
  * and \f$c[1] = \frac{\partial}{\partial b} \log I_x(a, b) = \kappa_{0,1} - (\psi(b) - \psi(a+b))\f$
  * from the truncated beta cumulants \f$\kappa_{i,j}\f$. Shared domain across `log_ibeta_d1()`
- * through `log_ibeta_d5()`: finite \f$a, b \in (0, \infty)\f$ and \f$x \in (0, 1]\f$, returning
+ * through `log_ibeta_d6()`: finite \f$a, b \in (0, \infty)\f$ and \f$x \in (0, 1]\f$, returning
  * all zeros at \f$x = 1\f$ and quiet NaN at \f$x = 0\f$ or for invalid/infinite inputs (see \ref incomplete_beta).
  *
  * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
@@ -1625,6 +1625,24 @@ LAPLACE_HD mixed_partials<4> log_ibeta_d4(double a, double b, double x) { return
  */
 LAPLACE_HD mixed_partials<5> log_ibeta_d5(double a, double b, double x) { return detail_ibd::order<5>(a, b, x, false); }
 
+/**
+ * \ingroup incomplete_beta
+ * \brief Sixth shape derivatives of \f$\log I_x(a, b)\f$.
+ *
+ * Computes \f$c[j] = \frac{\partial^6}{\partial a^{6-j} \partial b^j} \log I_x(a, b) = \kappa_{6-j, j} - \frac{\partial^6}{\partial a^{6-j} \partial b^j} \log B(a, b)\f$ for \f$j = 0, \dots, 6\f$. Returns zeros at \f$x = 1\f$; see `log_ibeta_d1()` for shared domain rules.
+ *
+ * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second finite positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in (0, 1]\f$.
+ * \return A \ref mixed_partials of order 6 with \f$c[j] = \partial^6 \log I_x / \partial a^{6-j} \partial b^j\f$.
+ *
+ * \par Accuracy
+ * Max error 1298 ulpN (433 ulpL) on gcc and 1550 ulpN (433 ulpL) on CUDA; test bound 2330.0 ulpN / 650.0 ulpL.
+ *
+ * \see incomplete_beta, mixed_partials, log_ibeta_d1(), log_ibeta_d5(), log_ibetac_d6()
+ */
+LAPLACE_HD mixed_partials<6> log_ibeta_d6(double a, double b, double x) { return detail_ibd::order<6>(a, b, x, false); }
+
 // d^K log(1 - I_x(a, b)) / da^(K-j) db^j in c[j]
 /**
  * \ingroup incomplete_beta
@@ -1633,7 +1651,7 @@ LAPLACE_HD mixed_partials<5> log_ibeta_d5(double a, double b, double x) { return
  * Computes \f$c[0] = \frac{\partial}{\partial a} \log(1 - I_x(a, b))\f$ and
  * \f$c[1] = \frac{\partial}{\partial b} \log(1 - I_x(a, b))\f$, reflected via
  * \f$1 - I_x(a, b) = I_{1-x}(b, a)\f$ or composed from \f$S = I_x(a, b)\f$ by Faà di Bruno recursion.
- * Shared domain across `log_ibetac_d1()` through `log_ibetac_d5()`: finite \f$a, b \in (0, \infty)\f$
+ * Shared domain across `log_ibetac_d1()` through `log_ibetac_d6()`: finite \f$a, b \in (0, \infty)\f$
  * and \f$x \in [0, 1)\f$, returning all zeros at \f$x = 0\f$ and quiet NaN at \f$x = 1\f$ or for
  * invalid/infinite inputs (see \ref incomplete_beta).
  *
@@ -1721,6 +1739,24 @@ LAPLACE_HD mixed_partials<4> log_ibetac_d4(double a, double b, double x) { retur
  */
 LAPLACE_HD mixed_partials<5> log_ibetac_d5(double a, double b, double x) { return detail_ibd::order<5>(a, b, x, true); }
 
+/**
+ * \ingroup incomplete_beta
+ * \brief Sixth shape derivatives of \f$\log(1 - I_x(a, b))\f$.
+ *
+ * Computes \f$c[j] = \frac{\partial^6}{\partial a^{6-j} \partial b^j} \log(1 - I_x(a, b))\f$ for \f$j = 0, \dots, 6\f$. Returns zeros at \f$x = 0\f$; see `log_ibetac_d1()` for shared domain rules.
+ *
+ * \param a First finite positive shape parameter \f$a \in (0, \infty)\f$.
+ * \param b Second finite positive shape parameter \f$b \in (0, \infty)\f$.
+ * \param x Argument \f$x \in [0, 1)\f$.
+ * \return A \ref mixed_partials of order 6 with \f$c[j] = \partial^6 \log(1 - I_x) / \partial a^{6-j} \partial b^j\f$.
+ *
+ * \par Accuracy
+ * Max error 5357 ulpN (110 ulpL) on gcc and 1640 ulpN (176 ulpL) on CUDA; test bound 8050.0 ulpN / 265.0 ulpL.
+ *
+ * \see incomplete_beta, mixed_partials, log_ibetac_d1(), log_ibetac_d5(), log_ibeta_d6()
+ */
+LAPLACE_HD mixed_partials<6> log_ibetac_d6(double a, double b, double x) { return detail_ibd::order<6>(a, b, x, true); }
+
 }  // namespace laplace::math::own
 
 namespace laplace::math {
@@ -1733,10 +1769,12 @@ LAPLACE_HD_FORCEINLINE mixed_partials<2> log_ibeta_d2(double a, double b, double
 LAPLACE_HD_FORCEINLINE mixed_partials<3> log_ibeta_d3(double a, double b, double x) { return own::log_ibeta_d3(a, b, x); }
 LAPLACE_HD_FORCEINLINE mixed_partials<4> log_ibeta_d4(double a, double b, double x) { return own::log_ibeta_d4(a, b, x); }
 LAPLACE_HD_FORCEINLINE mixed_partials<5> log_ibeta_d5(double a, double b, double x) { return own::log_ibeta_d5(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<6> log_ibeta_d6(double a, double b, double x) { return own::log_ibeta_d6(a, b, x); }
 LAPLACE_HD_FORCEINLINE mixed_partials<1> log_ibetac_d1(double a, double b, double x) { return own::log_ibetac_d1(a, b, x); }
 LAPLACE_HD_FORCEINLINE mixed_partials<2> log_ibetac_d2(double a, double b, double x) { return own::log_ibetac_d2(a, b, x); }
 LAPLACE_HD_FORCEINLINE mixed_partials<3> log_ibetac_d3(double a, double b, double x) { return own::log_ibetac_d3(a, b, x); }
 LAPLACE_HD_FORCEINLINE mixed_partials<4> log_ibetac_d4(double a, double b, double x) { return own::log_ibetac_d4(a, b, x); }
 LAPLACE_HD_FORCEINLINE mixed_partials<5> log_ibetac_d5(double a, double b, double x) { return own::log_ibetac_d5(a, b, x); }
+LAPLACE_HD_FORCEINLINE mixed_partials<6> log_ibetac_d6(double a, double b, double x) { return own::log_ibetac_d6(a, b, x); }
 
 }  // namespace laplace::math

@@ -91,12 +91,12 @@ struct Sum {
 };
 
 template <int K, class C>
-std::vector<std::array<double, 6>> eval_rows(const std::vector<bench::Args>& x, C c) {
+std::vector<std::array<double, 7>> eval_rows(const std::vector<bench::Args>& x, C c) {
   const std::size_t n = x.size();
   const auto hx = bench::to_host_args(x);
   bench::DArgs dx("x", n);
   Kokkos::deep_copy(dx, hx);
-  Kokkos::View<double* [6], Kokkos::LayoutRight, bench::Exec::memory_space> dy("y", n);
+  Kokkos::View<double* [7], Kokkos::LayoutRight, bench::Exec::memory_space> dy("y", n);
   Kokkos::parallel_for(
       "eval", Kokkos::RangePolicy<bench::Exec>(0, n), KOKKOS_LAMBDA(const std::size_t r) {
         double o[K + 1];
@@ -104,7 +104,7 @@ std::vector<std::array<double, 6>> eval_rows(const std::vector<bench::Args>& x, 
         for (int j = 0; j <= K; ++j) dy(r, j) = o[j];
       });
   auto hy = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), dy);
-  std::vector<std::array<double, 6>> y(n);
+  std::vector<std::array<double, 7>> y(n);
   for (std::size_t r = 0; r < n; ++r)
     for (int j = 0; j <= K; ++j) y[r][j] = hy(r, j);
   return y;
@@ -152,7 +152,7 @@ ibd::quad_par qpar() {
 
 // references: ref[side][i][j]
 struct Refs {
-  bench::Ref r[2][6][6];
+  bench::Ref r[2][7][7];
   std::vector<int> region;  // 0..7: tail*4 + shape
   std::vector<bool> series_row;
 };
@@ -163,7 +163,7 @@ const char* region_name[8] = {"body/small", "body/skew", "body/mid", "body/large
 Refs load(const std::string& dir) {
   Refs R;
   for (int side = 0; side < 2; ++side)
-    for (int n = 1; n <= 5; ++n)
+    for (int n = 1; n <= 6; ++n)
       for (int j = 0; j <= n; ++j) {
         const int i = n - j;
         const std::string name = std::string(side ? "log_ibetac_d" : "log_ibeta_d") + std::to_string(i) + std::to_string(j);
@@ -197,7 +197,7 @@ struct Err {
 };
 
 template <int K>
-Err errors(const Refs& R, int side, const std::vector<std::array<double, 6>>& y, bool worst_rows) {
+Err errors(const Refs& R, int side, const std::vector<std::array<double, 7>>& y, bool worst_rows) {
   Err e;
   const auto& base = R.r[side][1][0];
   struct Row {
@@ -558,5 +558,6 @@ int main(int argc, char* argv[]) {
   run_order<3>(R, mode, filter, t);
   run_order<4>(R, mode, filter, t);
   run_order<5>(R, mode, filter, t);
+  run_order<6>(R, mode, filter, t);
   return 0;
 }

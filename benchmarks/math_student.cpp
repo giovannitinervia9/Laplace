@@ -103,12 +103,12 @@ struct Sum {
 };
 
 template <int K, class C>
-std::vector<std::array<double, 6>> eval_rows(const std::vector<bench::Args>& x, C c) {
+std::vector<std::array<double, 7>> eval_rows(const std::vector<bench::Args>& x, C c) {
   const std::size_t n = x.size();
   const auto hx = bench::to_host_args(x);
   bench::DArgs dx("x", n);
   Kokkos::deep_copy(dx, hx);
-  Kokkos::View<double* [6], Kokkos::LayoutRight, bench::Exec::memory_space> dy("y", n);
+  Kokkos::View<double* [7], Kokkos::LayoutRight, bench::Exec::memory_space> dy("y", n);
   Kokkos::parallel_for(
       "eval", Kokkos::RangePolicy<bench::Exec>(0, n), KOKKOS_LAMBDA(const std::size_t r) {
         double o[K + 1];
@@ -116,7 +116,7 @@ std::vector<std::array<double, 6>> eval_rows(const std::vector<bench::Args>& x, 
         for (int j = 0; j <= K; ++j) dy(r, j) = o[j];
       });
   auto hy = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), dy);
-  std::vector<std::array<double, 6>> y(n);
+  std::vector<std::array<double, 7>> y(n);
   for (std::size_t r = 0; r < n; ++r)
     for (int j = 0; j <= K; ++j) y[r][j] = hy(r, j);
   return y;
@@ -164,7 +164,7 @@ struct Err {
 };
 
 template <int K>
-Err errors(const Refs& R, const std::vector<std::array<double, 6>>& y, bool worst_rows) {
+Err errors(const Refs& R, const std::vector<std::array<double, 7>>& y, bool worst_rows) {
   Err e;
   struct Row {
     double eN, u;

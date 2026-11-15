@@ -1,9 +1,9 @@
 // The distribution function of the standard Student t with real degrees of
 // freedom nu > 0, on the log scale, and its mixed partial derivatives in
-// (z, nu) of total order 1 to 5, Laplace's own.
+// (z, nu) of total order 1 to 6, Laplace's own.
 //
 //   own::log_student_cdf(z, nu)          log T_nu(z), by own::beta_inc (below)
-//   own::log_student_cdf_d1 .. _d5        one function per order K, returning
+//   own::log_student_cdf_d1 .. _d6        one function per order K, returning
 //                                         mixed_partials<K> with c[j] = d^K / dz^(K-j) dnu^j
 //
 // The survival function needs no function of its own: 1 - T_nu(z) = T_nu(-z).
@@ -331,7 +331,7 @@ LAPLACE_HD void fder(double b, int K, double* f) {
 
 // normalized Taylor coefficients of c(nu + d), j = 0..K
 LAPLACE_HD void cpoly(double nu, int K, double* c) {
-  double f[6];
+  double f[7];
   fder(0.5 * nu, K, f);
   c[0] = f[0] - half_log_2pi;
   double s = 1.0;
@@ -354,7 +354,7 @@ LAPLACE_HD void anchor_k(double z, double nu, double* KA, double* Qa, double* N)
   pzero(KA);
   const double F0 = Kokkos::log1p(z2 / nu), e = z2 / A;
   KA[0] = -0.5 * m * F0;
-  double C[6];
+  double C[7];
   pure_nu(K, nu, e, nu / A, g1_of(e, F0), 1.0, C);
   for (int j = 1; j <= K; ++j) KA[ix(0, j)] = C[j];
   N[0] = z * (1.0 - z) * (1.0 + z);
@@ -509,10 +509,10 @@ LAPLACE_HD_FORCEINLINE void tm_node(int k, double h, double alpha, double start,
 template <int K>
 LAPLACE_ST_NOINLINE LAPLACE_HD void centre(double z, double nu, const par& pp, double* L) {
   const double a = Kokkos::fabs(z), sgn = z < 0.0 ? -1.0 : 1.0, m = nu + 1.0;
-  double cp[6];
+  double cp[7];
   cpoly(nu, K, cp);
   // H_j = int_0^a d^j exp(k(s, nu)) / dnu^j ds / j!
-  double H[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double H[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   const double sq = Kokkos::sqrt(nu), tz = Kokkos::asinh(a / sq);
   const int off = gleg_offset(pp.gl_n), nh = pp.gl_n / 2;
   double lo = 0.0;
@@ -524,7 +524,7 @@ LAPLACE_ST_NOINLINE LAPLACE_HD void centre(double z, double nu, const par& pp, d
       const double tau = mid + (i < nh ? -hw * xg : hw * xg);
       const double sh = Kokkos::sinh(tau), ch = Kokkos::sqrt(1.0 + sh * sh);
       const double q = sh * sh, F0 = Kokkos::log1p(q), e = q / (1.0 + q);
-      double C[6], E[6];
+      double C[7], E[7];
       pure_nu(K, nu, e, 1.0 / (1.0 + q), g1_of(e, F0), 1.0, C);
       uexp(K, C, E);
       const double val = math::exp(-0.5 * m * F0) * wg * hw * sq * ch;
@@ -534,7 +534,7 @@ LAPLACE_ST_NOINLINE LAPLACE_HD void centre(double z, double nu, const par& pp, d
     lo = hi;
   }
   // G's pure nu-coefficients: sgn exp(c) * H
-  double ec[6], Gp[6];
+  double ec[7], Gp[7];
   uexp(K, cp, ec);
   const double e0 = math::exp(cp[0]);
   for (int j = 0; j <= K; ++j) {
@@ -595,7 +595,7 @@ LAPLACE_ST_NOINLINE LAPLACE_HD void tail_shift(double a, double nu, const par& p
     {
       const double e = ez / Eu, rho = 1.0 / Eu;
       const double G1 = zeta <= 1.0 ? ibd::expm1mx(-zeta) : zeta - e;
-      double C[6];
+      double C[7];
       pure_nu(K, A, e, rho, G1, mP, C);
       for (int j = 1; j <= K; ++j) P[ix(0, j)] = C[j];
     }
@@ -630,7 +630,7 @@ LAPLACE_ST_NOINLINE LAPLACE_HD void tail_shift(double a, double nu, const par& p
     pexp<K>(P, E);
     for (int c = 0; c < nk<K>(); ++c) M[c] += W * E[c];
   }
-  double cp[6], lm[NC];
+  double cp[7], lm[NC];
   cpoly(nu, K, cp);
   plog<K>(M, lm);
   pzero(L);
@@ -652,7 +652,7 @@ LAPLACE_ST_NOINLINE LAPLACE_HD void tail_shift(double a, double nu, const par& p
 // Hh: its pure nu-coefficients and constant (the z-coefficients are set by the caller).
 LAPLACE_HD void small_nu_anchor(double a, double nu, int K, double* Hh) {
   const double A = nu + a * a, m = nu + 1.0, a2 = 0.5 * nu, lnu = math::log(nu), lA = math::log(A);
-  double dp[5], dD;
+  double dp[6], dD;
   ibd::dpsi_all(a2 + 0.5, 0.5, K > 1 ? K - 1 : 0, dp, dD);  // psi^(n)(a2 + 1/2) - psi^(n)(a2 + 1)
   Hh[0] = (math::lgamma(a2 + 0.5) - math::lgamma(a2 + 1.0)) + 0.5 * nu * lnu - 0.5 * ln2 - half_log_2pi + math::log(a) -
           0.5 * m * lA;
@@ -680,7 +680,7 @@ LAPLACE_ST_NOINLINE LAPLACE_HD void tail_scale(double a, double nu, const par& p
   if (!fw) {
     const double F0 = Kokkos::log1p(z2 / nu), e = z2 / A;
     Hh[0] = math::log(a) - 0.5 * m * F0;
-    double C[6];
+    double C[7];
     pure_nu(K, nu, e, x, g1_of(e, F0), 1.0, C);
     for (int j = 1; j <= K; ++j) Hh[ix(0, j)] = C[j];
   } else {
@@ -754,7 +754,7 @@ LAPLACE_ST_NOINLINE LAPLACE_HD void tail_scale(double a, double nu, const par& p
       } else {
         // at fixed w = nu v: m_v = 1 - exp(-2 w/(nu + dnu)) is a polynomial in dnu,
         // phi = -2w/(nu + dnu) = -2v sum_j (-dnu/nu)^j
-        double phi[6], ep[6], mh[6];
+        double phi[7], ep[7], mh[7];
         double r = 1.0;
         phi[0] = 0.0;
         for (int j = 1; j <= K; ++j) {
@@ -788,7 +788,7 @@ LAPLACE_ST_NOINLINE LAPLACE_HD void tail_scale(double a, double nu, const par& p
     }
     for (int c = 0; c < nk<K>(); ++c) M[c] += W * E[c];
   }
-  double cp[6], lm[NC];
+  double cp[7], lm[NC];
   if (fw) {
     for (int j = 0; j <= K; ++j) cp[j] = 0.0;
   } else {
@@ -897,8 +897,9 @@ LAPLACE_ST_NOINLINE LAPLACE_HD void lower_beta(double a, double nu, double* Lz) 
   if constexpr (K >= 3) Lab[ix(3, 0)] = pure_a<3>(upper, sa, xi) / 6.0;
   if constexpr (K >= 4) Lab[ix(4, 0)] = pure_a<4>(upper, sa, xi) / 24.0;
   if constexpr (K >= 5) Lab[ix(5, 0)] = pure_a<5>(upper, sa, xi) / 120.0;
+  if constexpr (K >= 6) Lab[ix(6, 0)] = pure_a<6>(upper, sa, xi) / 720.0;
   // log density (a - 1) log x - log(y)/2 - log B(a, 1/2), log B = -f(a) - log(a)/2 + log(pi)/2
-  double f[6];
+  double f[7];
   fder(sa, K, f);
   const double lx = x < 0.5 ? math::log(x) : Kokkos::log1p(-y), ly = x < 0.5 ? Kokkos::log1p(-x) : math::log(y);
   Gd[0] = (sa - 1.0) * lx - 0.5 * ly + f[0] + 0.5 * math::log(sa) - 0.5723649429247001;
@@ -1147,6 +1148,26 @@ LAPLACE_HD mixed_partials<4> log_student_cdf_d4(double z, double nu) { return de
  */
 LAPLACE_HD mixed_partials<5> log_student_cdf_d5(double z, double nu) { return detail_st::order<5>(z, nu); }
 
+/**
+ * \ingroup student
+ * \brief Sixth mixed partial derivatives in \f$(z, \nu)\f$ of \f$\log T_\nu(z)\f$.
+ *
+ * Computes the sixth-order components:
+ * \f[
+ * c[j] = \frac{\partial^6}{\partial z^{6-j} \partial \nu^j} \log T_\nu(z), \qquad j = 0, \dots, 6.
+ * \f]
+ *
+ * \param z Real argument \f$z \in \mathbb{R}\f$.
+ * \param nu Real degrees of freedom \f$\nu \in (0, \infty)\f$.
+ * \return A mixed_partials of order 6 holding \f$c[j]\f$ for \f$j = 0, \dots, 6\f$.
+ *
+ * Shared domain and special values are documented in \ref student "the student module".
+ * Maximum error is 30089 ulpN, 329 ulp1 (for \f$c[0]\f$ on \f$|z| < 1\f$), and 2433 ulpL on gcc, and 19289 ulpN, 274 ulp1, and 1560 ulpL on CUDA, with test bounds of 45200.0 ulpN, 495.0 ulp1, and 3650.0 ulpL.
+ *
+ * \see student, mixed_partials, log_student_cdf(), log_student_cdf_d5()
+ */
+LAPLACE_HD mixed_partials<6> log_student_cdf_d6(double z, double nu) { return detail_st::order<6>(z, nu); }
+
 }  // namespace laplace::math::own
 
 namespace laplace::math {
@@ -1159,5 +1180,6 @@ LAPLACE_HD_FORCEINLINE mixed_partials<2> log_student_cdf_d2(double z, double nu)
 LAPLACE_HD_FORCEINLINE mixed_partials<3> log_student_cdf_d3(double z, double nu) { return own::log_student_cdf_d3(z, nu); }
 LAPLACE_HD_FORCEINLINE mixed_partials<4> log_student_cdf_d4(double z, double nu) { return own::log_student_cdf_d4(z, nu); }
 LAPLACE_HD_FORCEINLINE mixed_partials<5> log_student_cdf_d5(double z, double nu) { return own::log_student_cdf_d5(z, nu); }
+LAPLACE_HD_FORCEINLINE mixed_partials<6> log_student_cdf_d6(double z, double nu) { return own::log_student_cdf_d6(z, nu); }
 
 }  // namespace laplace::math

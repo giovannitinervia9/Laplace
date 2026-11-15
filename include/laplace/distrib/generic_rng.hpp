@@ -6,6 +6,8 @@
 //                                counter_uniform_source{seed, index}
 //   open_unit_uniform(gen)       u = (n + 1/2) 2^-53, n the top 53 bits of gen.urand64()
 //   counter_uniform_source       a source keyed by (seed, index): SplitMix64
+//   standard_normal_by_inversion(gen)      Phi^-1(u)
+//   standard_gamma_by_inversion(a, gen)    P^-1(a, u), shape a and unit scale
 //
 // gen is any object with urand64(): a state of a Kokkos::Random_XorShift64_Pool
 // or Random_XorShift1024_Pool (pool.get_state() ... pool.free_state(gen)), or a
@@ -23,6 +25,8 @@
 #include <laplace/core/config.hpp>
 #include <laplace/distrib/core.hpp>
 #include <laplace/distrib/generic_quantile.hpp>
+#include <laplace/math/incomplete_inverse.hpp>
+#include <laplace/math/normal.hpp>
 
 #include <cstdint>
 
@@ -118,6 +122,48 @@ template <class D>
 LAPLACE_HD double rng_by_inversion(const D& d, std::uint64_t seed, std::uint64_t index) {
   counter_uniform_source src{seed, index};
   return rng_by_inversion(d, src);
+}
+
+/**
+ * \ingroup distrib_generic
+ * \brief Standard normal draw by inversion, \f$\Phi^{-1}(u)\f$ of one uniform.
+ *
+ * Draws one uniform with open_unit_uniform() and returns math::Phi_inv() of it. There is no
+ * rejection step, so one draw consumes exactly one number of the stream and the result is the same
+ * on every thread and backend, which the polar and ratio-of-uniforms methods do not give.
+ *
+ * 	param Gen Generator type providing `std::uint64_t urand64()`.
+ * \param gen Generator instance.
+ * 
+eturn A standard normal pseudorandom draw.
+ *
+ * \see open_unit_uniform(), standard_gamma_by_inversion()
+ */
+template <class Gen>
+LAPLACE_HD_FORCEINLINE double standard_normal_by_inversion(Gen& gen) {
+  return math::Phi_inv(open_unit_uniform(gen));
+}
+
+/**
+ * \ingroup distrib_generic
+ * \brief Standard gamma draw of shape \f$a\f$ and unit scale, by inversion of \f$P(a, x)\f$.
+ *
+ * Draws one uniform with open_unit_uniform() and returns math::gamma_p_inv() of it, the inverse of
+ * the regularized lower incomplete gamma in its argument. As for the normal above there is no
+ * rejection step: one draw is one number of the stream, on every thread and backend, and a kernel
+ * takes no divergent branch.
+ *
+ * 	param Gen Generator type providing `std::uint64_t urand64()`.
+ * \param a Shape parameter \f$a > 0\f$.
+ * \param gen Generator instance.
+ * 
+eturn A gamma pseudorandom draw of shape \f$a\f$ and scale one.
+ *
+ * \see open_unit_uniform(), standard_normal_by_inversion()
+ */
+template <class Gen>
+LAPLACE_HD_FORCEINLINE double standard_gamma_by_inversion(double a, Gen& gen) {
+  return math::gamma_p_inv(a, open_unit_uniform(gen));
 }
 
 }  // namespace laplace::distrib

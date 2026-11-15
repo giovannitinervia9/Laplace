@@ -4,13 +4,14 @@ log I_x(a, b) and log(1 - I_x(a, b)) with respect to the shapes, orders 1 to 5
 computed with mpmath.
 
 Usage (from the repository root):
-    python -I tools/reference/incomplete_deriv.py gamma|gamma6|beta [n_points] [workers]
+    python -I tools/reference/incomplete_deriv.py gamma|gamma6|beta|beta6 [n_points] [workers]
 
 Files (format as in incomplete.py: the arguments, then hi, lo):
     log_gamma_p_da{k}.csv, log_gamma_q_da{k}.csv        a, x       d^k/da^k, k = 1..5
     log_gamma_p_da6.csv, log_gamma_q_da6.csv            a, x       d^6/da^6 (kind gamma6)
     log_gamma_p_da5_edges.csv, log_gamma_q_da5_edges.csv  a, x     d^5/da^5 on the edge points only
     log_ibeta_d{i}{j}.csv, log_ibetac_d{i}{j}.csv       a, b, x    d^(i+j)/da^i db^j, 1 <= i + j <= 5
+                                                                   (i + j = 6 from kind beta6)
 
 Method. With v = log t (gamma) the incomplete integral of one side is
     J(a) = int t^(a-1) e^-t dt = int exp(a v - e^v) dv
@@ -420,7 +421,11 @@ def work_gamma(args):
 
 
 def work_beta(args):
-    a, b, x = args
+    global KMAX
+    if len(args) == 4:
+        a, b, x, KMAX = args
+    else:
+        a, b, x = args
     try:
         i1, c1, S1, chk = beta_row(a, b, x, 240, 8)
         i2, c2, S2, _ = beta_row(a, b, x, 320, 10)
@@ -441,12 +446,59 @@ def write(path, header, rows):
     print(f"{path}: {len(rows)} rows", flush=True)
 
 
+def read_ref3(path):
+    rows = {}
+    with path.open() as fh:
+        next(fh)
+        for line in fh:
+            f = line.strip().split(",")
+            key = (float.fromhex(f[0]), float.fromhex(f[1]), float.fromhex(f[2]))
+            rows[key] = mpmath.mpf(float.fromhex(f[3])) + mpmath.mpf(float.fromhex(f[4]))
+    return rows
+
+
+def main_beta6(n, workers):
+    """Order 6 of the beta on the same points as kind beta (same seed), with the
+    orders 1 to 5 recomputed at degree 6 and compared against the files that
+    kind beta wrote; only the order-6 files are written."""
+    args = [(a, b, x, 6) for a, b, x in beta_args(random.Random(f"{SEED}-beta"), n)]
+    with Pool(workers) as pool:
+        res = pool.map(work_beta, args, chunksize=4)
+    counts = {}
+    for r in res:
+        counts[r[0]] = counts.get(r[0], 0) + 1
+        if r[0] != "ok" and counts[r[0]] <= 5:
+            print("dropped", r[0], r[1], r[2] if r[0] == "error" else "", flush=True)
+    print("counts", counts, flush=True)
+    good = [r for r in res if r[0] == "ok"]
+    for side, name in ((0, "log_ibeta"), (1, "log_ibetac")):
+        worst, cnt = mpmath.mpf(0), 0
+        for i in range(6):
+            for j in range(6 - i):
+                if i + j == 0:
+                    continue
+                old = read_ref3(OUT / f"{name}_d{i}{j}.csv")
+                for r in good:
+                    if r[1] in old:
+                        v = r[2][side][(i, j)]
+                        worst = max(worst, abs(v - old[r[1]]) / max(abs(v), 1))
+                        cnt += 1
+        print(f"{name} orders 1-5: {cnt} common values, max |new - old| / max(|f|, 1) = {mpmath.nstr(worst, 3)}",
+              flush=True)
+    for side, name in ((0, "log_ibeta"), (1, "log_ibetac")):
+        for i in range(7):
+            j = 6 - i
+            write(OUT / f"{name}_d{i}{j}.csv", "a,b,x", [(r[1], r[2][side][(i, j)]) for r in good])
+
+
 def main():
     kind = sys.argv[1]
     n = int(sys.argv[2]) if len(sys.argv) > 2 else (1500 if kind == "gamma" else 600)
     workers = int(sys.argv[3]) if len(sys.argv) > 3 else 4
     if kind == "gamma6":
         return main_gamma6(n, workers)
+    if kind == "beta6":
+        return main_beta6(n, workers)
     rng = random.Random(f"{SEED}-{kind}")
     args = gamma_args(rng, n) if kind == "gamma" else beta_args(rng, n)
     with Pool(workers) as pool:

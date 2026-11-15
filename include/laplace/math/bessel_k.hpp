@@ -3,6 +3,8 @@
 //
 //   log_bessel_k(nu, x)        log K_nu(x), x > 0 (K_-nu = K_nu)
 //   log_bessel_k_dx1 ... _dx7  d^n/dx^n log K_nu(x), n = 1..7
+//   log_bessel_k_dx_upto<N>(nu, x, out)  out[0] = log K, out[n] = the derivative of order n, n = 1..N,
+//                              from one evaluation of the shared work (same numbers as the above)
 //
 // The pseudo-Huber distributions use K_0 ... K_4 at x = sqrt(nu_ph), the
 // Poisson-inverse Gaussian log K_(y - 1/2)(alpha) with derivatives in alpha;
@@ -534,6 +536,206 @@ LAPLACE_HD double derivative(double nu, double x, const params& p) {
   return riccati<N>(g_dd(nu, x, p), nu, x);
 }
 
+
+// ---------------------------------------------------------------- every order from one evaluation
+//
+// The joint routine log_bessel_k_dx_upto<N> fills the orders 1..N with the arithmetic of the single-order
+// functions above, operation for operation, so that order n is the same double wherever the two take the
+// same path: the Riccati regime computes d[0..N-1] in one pass anyway, the Hankel regime sums one series
+// S^(0..N) and takes the logarithmic derivatives of every order from the same recursion, and the Debye
+// regime builds h, q, the Taylor coefficients of log P and of t(z) once and composes them for every order
+// (the order-n coefficient of the composition only reads the powers j <= n, the others being exact zeros).
+
+// d^n/dx^n log S for n = 1..N from S^(0..N): the recursion of log_derivative, keeping every order
+template <int N>
+LAPLACE_HD_FORCEINLINE void log_derivative_all(const double (&S)[N + 1], double* out) {
+  double L[N + 1];
+  L[0] = 0.0;
+  for (int n = 1; n <= N; ++n) {
+    double s = S[n], c = 1.0;  // C(n-1, k-1)
+    for (int k = 1; k < n; ++k) {
+      s -= c * L[k] * S[n - k];
+      c = c * double(n - k) / double(k);
+    }
+    L[n] = s / S[0];
+    out[n] = L[n];
+  }
+}
+
+// out[n] = d^n/dx^n log K, n = 1..N, by the Riccati identity in double-double from g
+template <int N>
+LAPLACE_HD void riccati_all(const dd& g, double nu, double x, double* out) {
+  const dd ix = dd(1.0) / dd(x);
+  const dd nu2 = ddm::two_prod(nu, nu);
+  dd inv[N > 1 ? N - 1 : 1], inv2[N > 1 ? N - 1 : 1];  // (1/x)^(m), (1/x^2)^(m)
+  {
+    dd p = ix, p2 = ix * ix;
+    double f = 1.0, f2 = 1.0;  // m!, (m+1)!
+    for (int m = 0; m < N - 1; ++m) {
+      f2 *= double(m + 1);
+      inv[m] = (m % 2) ? -(p * f) : p * f;
+      inv2[m] = (m % 2) ? -(p2 * f2) : p2 * f2;
+      p = p * ix;
+      p2 = p2 * ix;
+      f *= double(m + 1);
+    }
+  }
+  dd d[N];
+  d[0] = g;
+  for (int n = 0; n < N - 1; ++n) {
+    dd s = nu2 * inv2[n];
+    double c = 1.0;  // C(n, j)
+    for (int j = 0; j <= n; ++j) {
+      s = s - (d[j] * (inv[n - j] + d[n - j])) * c;
+      c = c * double(n - j) / double(j + 1);
+    }
+    d[n + 1] = (n == 0) ? s + 1.0 : s;
+  }
+  for (int n = 0; n < N; ++n) out[n + 1] = d[n].hi;
+}
+
+// out[n] = d^n/dx^n log K, n = 1..N, from the asymptotic expansion in 1/x
+template <int N>
+LAPLACE_HD void hankel_all(double nu, double x, double* out) {
+  const double mu4 = 4.0 * nu * nu, u = 1.0 / x;
+  double S[N + 1];
+  for (int m = 0; m <= N; ++m) S[m] = 0.0;
+  double a = 1.0, uk = 1.0, prev = 1e300;
+  for (int k = 0; k < 200; ++k) {
+    if (k > 0) {
+      a *= (mu4 - double(2 * k - 1) * (2 * k - 1)) / (8.0 * k);
+      uk *= u;
+    }
+    const double t = a * uk;
+    const double at = Kokkos::fabs(t);
+    if (k > 2 && at > prev) break;  // the divergent tail
+    double um = t, fac = 1.0;
+    for (int m = 0; m <= N; ++m) {
+      S[m] += (m % 2 ? -fac : fac) * um;
+      fac *= double(k + m);
+      um *= u;
+    }
+    if (at == 0.0 || at <= 0x1p-60) break;
+    prev = at;
+  }
+  double L[N + 1];
+  log_derivative_all<N>(S, L);
+  for (int n = 1; n <= N; ++n) {
+    double f = 1.0;  // d^n of -log(x)/2 - x
+    for (int j = 2; j < n; ++j) f *= j;
+    double xn = 1.0;
+    for (int j = 0; j < n; ++j) xn *= x;
+    double base = (n % 2 ? -0.5 : 0.5) * f / xn;
+    if (n == 1) base -= 1.0;
+    out[n] = base + L[n];
+  }
+}
+
+// out[n] = d^n/dx^n log K, n = 1..N, from the Debye form
+template <int N>
+LAPLACE_HD void debye_all(double nu, double x, double* out) {
+  const double z = x / nu, z2 = z * z, opz = 1.0 + z2;
+  const double s = Kokkos::sqrt(opz), t0 = 1.0 / s;
+  double h[N];
+  h[0] = s / z;
+  {
+    double zp = 1.0 / (z2 * z), fac = 1.0;
+    for (int n = 0; n < N - 1; ++n) {
+      fac *= double(n + 2) / (n == 0 ? 2.0 : 1.0);
+      const double dz3 = (n % 2 ? -fac : fac) * zp;
+      zp /= z;
+      double acc = -dz3, c = 1.0;
+      for (int i = 1; i <= n; ++i) {
+        c = c * double(n - i + 1) / double(i);
+        acc -= c * h[i] * h[n + 1 - i];
+      }
+      h[n + 1] = acc / h[0];
+    }
+  }
+  double q[N + 1];
+  q[0] = Kokkos::log1p(z2);
+  q[1] = 2.0 * z / opz;
+  for (int n = 1; n < N; ++n) q[n + 1] = ((n == 1 ? 2.0 : 0.0) - 2.0 * n * z * q[n] - n * (n - 1.0) * q[n - 1]) / opz;
+  double Pc[N + 1];
+  for (int j = 0; j <= N; ++j) Pc[j] = 0.0;
+  {
+    double tp[3 * debye_terms + 1];
+    tp[0] = 1.0;
+    for (int e = 1; e <= 3 * debye_terms; ++e) tp[e] = tp[e - 1] * t0;
+    double w = 1.0;
+    for (int k = 0; k <= debye_terms; ++k) {
+      if (k > 0) {
+        if (nu >= nu_enough(k - 1)) break;
+        w *= -1.0 / nu;
+      }
+      for (int i = 0; i <= k; ++i) {
+        const int e = k + 2 * i;
+        const double c = w * debye(k, i);
+        double binom = 1.0;
+        for (int j = 0; j <= N && j <= e; ++j) {
+          Pc[j] += c * binom * tp[e - j];
+          binom = binom * double(e - j) / double(j + 1);
+        }
+      }
+    }
+  }
+  double LP[N + 1];
+  series_log<N>(Pc, LP);
+  double T[N + 1];
+  {
+    double dt[N + 1];
+    dt[0] = t0;
+    for (int n = 0; n < N; ++n) {
+      const double tn1 = n >= 1 ? dt[n - 1] : 0.0;
+      dt[n + 1] = (-(z * dt[n] + n * tn1) - 2.0 * n * z * dt[n] - n * (n - 1.0) * tn1) / opz;
+    }
+    double f = 1.0;
+    for (int n = 0; n <= N; ++n) {
+      if (n > 0) f *= n;
+      T[n] = dt[n] / f;
+    }
+  }
+  double comp[N + 1];  // comp[i] = coefficient of e^i of log P(t(z0 + e)) = sum_j LP_j (dt)^j
+  for (int i = 0; i <= N; ++i) comp[i] = 0.0;
+  {
+    double pw[N + 1], nw[N + 1];
+    for (int i = 0; i <= N; ++i) pw[i] = i == 0 ? 1.0 : 0.0;
+    for (int j = 1; j <= N; ++j) {
+      for (int i = 0; i <= N; ++i) {
+        double acc = 0.0;
+        for (int l = 1; l <= i; ++l) acc += T[l] * pw[i - l];
+        nw[i] = acc;
+      }
+      for (int i = 0; i <= N; ++i) pw[i] = nw[i];
+      for (int i = j; i <= N; ++i) comp[i] += LP[j] * pw[i];
+    }
+  }
+  double fN = 1.0, nuN = 1.0;
+  for (int n = 1; n <= N; ++n) {
+    fN *= n;
+    nuN *= nu;
+    out[n] = (-nu * h[n - 1] - 0.25 * q[n] + fN * comp[n]) / nuN;
+  }
+}
+
+// out[0] = log K, out[n] = d^n/dx^n log K, n = 1..N
+template <int N>
+LAPLACE_HD void derivatives_upto(double nu, double x, const params& p, double* out) {
+  out[0] = log_k(nu, x, p);
+  if (!(x > 0.0) || nu != nu) {
+    for (int n = 1; n <= N; ++n) out[n] = nan();
+    return;
+  }
+  nu = Kokkos::fabs(nu);
+  if (!(x < 1e308)) {
+    for (int n = 1; n <= N; ++n) out[n] = (n == 1) ? -1.0 : 0.0;
+    return;
+  }
+  if (nu >= p.nu_debye) debye_all<N>(nu, x, out);
+  else if (x >= p.x_hankel) hankel_all<N>(nu, x, out);
+  else riccati_all<N>(g_dd(nu, x, p), nu, x, out);
+}
+
 }  // namespace detail_bessel_k
 
 /**
@@ -706,6 +908,30 @@ LAPLACE_HD double log_bessel_k_dx6(double nu, double x) { return detail_bessel_k
  */
 LAPLACE_HD double log_bessel_k_dx7(double nu, double x) { return detail_bessel_k::derivative<7>(nu, x, detail_bessel_k::params{}); }
 
+
+/**
+ * \ingroup bessel_k
+ * \brief The value and the derivatives of orders 1 to \f$N\f$ in \f$x\f$ of \f$\log K_\nu(x)\f$ from one evaluation of the shared work.
+ *
+ * Fills `out[0] = log_bessel_k(nu, x)` and `out[n]` with the same number as `log_bessel_k_dx<n>(nu, x)` for
+ * \f$n = 1, \dots, N\f$, \f$N \le 7\f$. The three regimes of the single-order functions share their work
+ * differently: the Riccati regime builds the double-double ratio \f$K_{\nu+1}/K_\nu\f$ once and recurs through all orders,
+ * the asymptotic regime sums one series, and the Debye regime forms its coefficient tables once. The value is
+ * evaluated separately, as in `log_bessel_k`.
+ *
+ * \tparam N Highest order, \f$1 \le N \le 7\f$.
+ * \param nu Order \f$\nu\f$ (\f$K_{-\nu} = K_\nu\f$).
+ * \param x Argument \f$x > 0\f$.
+ * \param out Array of at least \f$N + 1\f$ doubles that receives the value and the derivatives.
+ *
+ * \see bessel_k, log_bessel_k(), log_bessel_k_dx1()
+ */
+template <int N>
+LAPLACE_HD void log_bessel_k_dx_upto(double nu, double x, double* out) {
+  static_assert(N >= 1 && N <= 7, "orders 1 to 7");
+  detail_bessel_k::derivatives_upto<N>(nu, x, detail_bessel_k::params{}, out);
+}
+
 }  // namespace own
 
 using own::log_bessel_k;
@@ -716,5 +942,6 @@ using own::log_bessel_k_dx4;
 using own::log_bessel_k_dx5;
 using own::log_bessel_k_dx6;
 using own::log_bessel_k_dx7;
+using own::log_bessel_k_dx_upto;
 
 }  // namespace laplace::math

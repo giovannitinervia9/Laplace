@@ -15,6 +15,8 @@
 #include <laplace/distrib/generic_quantile.hpp>
 #include <laplace/distrib/generic_rng.hpp>
 #include <laplace/distrib/laplace1.hpp>
+#include <laplace/distrib/logistic.hpp>
+#include <laplace/distrib/cauchy.hpp>
 #include <laplace/distrib/poisson.hpp>
 
 #include <Kokkos_Core.hpp>
@@ -263,6 +265,67 @@ TEST_CASE("distrib generic: Poisson log F derivatives by summing the mass, again
     std::printf("[generic log F derivatives] Poisson, order %d: worst %.3g ulp of the component\n", K, worst[K]);
 }
 
+// The cdf family of a continuous distribution by quadrature of its density,
+// against the closed forms of the Cauchy and of the logistic (the families whose
+// log F and its six derivatives are written out), on both sides and at both ends
+// of the range. The quantity compared is the error relative to max(|f|, 1): the
+// pure derivatives in the scale vanish at y = mu, where a relative measure of
+// the component itself has no meaning.
+template <int K, class D>
+double worst_log_cdf_dk_by_integral(const D& d) {
+  double w = 0.0;
+  const auto h = hide(d);
+  for (double y : {-40.0, -9.0, -3.0, -1.0, -0.2, 0.0, 0.4, 2.0, 6.0, 25.0})
+    for (int side = 0; side < 2; ++side) {
+      const auto gen = side ? ld::distrib_log_ccdf_dk<K>(h, y) : ld::distrib_log_cdf_dk<K>(h, y);
+      const auto own = side ? d.template log_ccdf_dk<K>(y) : d.template log_cdf_dk<K>(y);
+      for (int i = 0; i < ld::sym_tensor<2, K>::size; ++i) {
+        INFO("K = " << K << ", y = " << y << ", side = " << side << ", component " << i);
+        const double e = std::fabs(gen[i] - own[i]) / std::fmax(std::fabs(own[i]), 1.0);
+        CHECK(std::isfinite(gen[i]));
+        w = std::fmax(w, e);
+      }
+    }
+  return w;
+}
+
+TEST_CASE("distrib generic: continuous cdf family by quadrature of the density") {
+  // the value, on both sides and into the tails where F underflows
+  for (double sigma : {0.25, 1.0, 7.0}) {
+    const ld::cauchy_distrib c{0.0, sigma};
+    const ld::logistic_distrib g{0.0, sigma};
+    const auto hc = hide(c);
+    const auto hg = hide(g);
+    for (double y : {-300.0, -40.0, -9.0, -1.0, 0.0, 0.4, 6.0, 25.0, 300.0}) {
+      INFO("sigma = " << sigma << ", y = " << y);
+      CHECK(err(ld::log_cdf_by_integral(hc, y), c.log_cdf(y), 1.0) <= 8.0);
+      CHECK(err(ld::log_ccdf_by_integral(hc, y), c.log_ccdf(y), 1.0) <= 8.0);
+      CHECK(err(ld::log_cdf_by_integral(hg, y), g.log_cdf(y), 1.0) <= 8.0);
+      CHECK(err(ld::log_ccdf_by_integral(hg, y), g.log_ccdf(y), 1.0) <= 8.0);
+    }
+    CHECK(ld::cdf_by_integral(hc, -1e300) == 0.0);
+    CHECK(ld::ccdf_by_integral(hc, 1e300) == 0.0);
+  }
+  // the derivatives, through the dispatcher (which takes this route for a
+  // continuous distribution without a log_cdf_dk member); bounds at about three
+  // times the error measured on 2026-11-15 on gcc and CUDA
+  const ld::cauchy_distrib c{0.0, 0.25};
+  const ld::logistic_distrib g{0.0, 0.25};
+  const double w1 = worst_log_cdf_dk_by_integral<1>(c), w2 = worst_log_cdf_dk_by_integral<2>(c);
+  const double w3 = worst_log_cdf_dk_by_integral<3>(c), w4 = worst_log_cdf_dk_by_integral<4>(c);
+  const double w5 = worst_log_cdf_dk_by_integral<5>(c), w6 = worst_log_cdf_dk_by_integral<6>(c);
+  const double wg = worst_log_cdf_dk_by_integral<6>(g);
+  std::printf("[generic cdf] by quadrature, worst over max(|f|, 1): cauchy orders 1-6 %.1e %.1e %.1e %.1e %.1e %.1e, logistic order 6 %.1e\n",
+              w1, w2, w3, w4, w5, w6, wg);
+  CHECK(w1 <= 6e-15);
+  CHECK(w2 <= 5e-14);
+  CHECK(w3 <= 2e-13);
+  CHECK(w4 <= 3e-12);
+  CHECK(w5 <= 7e-11);
+  CHECK(w6 <= 2e-09);
+  CHECK(wg <= 5e-09);
+}
+
 TEST_CASE("distrib generic: log F derivatives by sum, ends of the support and dispatcher") {
   const ld::poisson_distrib d{3.5};
   const auto h = hide(d);
@@ -420,6 +483,15 @@ void generic_routes_kernel_case() {
   run_kernel(out, "log_cdf_by_sum poisson", KOKKOS_LAMBDA(int i) { return ld::log_cdf_by_sum(hide(p), double(i)); });
   run_kernel(out, "log_cdf_dk_by_sum poisson", KOKKOS_LAMBDA(int i) { return ld::log_cdf_dk_by_sum<6>(hide(p), double(i))[0]; });
   run_kernel(out, "log_ccdf_dk_by_sum poisson", KOKKOS_LAMBDA(int i) { return ld::log_ccdf_dk_by_sum<3>(hide(p), double(i))[0]; });
+  run_kernel(out, "log_cdf_by_integral gaussian1", KOKKOS_LAMBDA(int i) {
+    return ld::log_cdf_by_integral(hide(g), 0.4 + 0.2 * i);
+  });
+  run_kernel(out, "log_cdf_dk_by_integral gaussian1", KOKKOS_LAMBDA(int i) {
+    return ld::log_cdf_dk_by_integral<2>(hide(g), 0.4 + 0.2 * i)[0];
+  });
+  run_kernel(out, "log_ccdf_dk_by_integral gaussian1", KOKKOS_LAMBDA(int i) {
+    return ld::log_ccdf_dk_by_integral<3>(hide(g), 0.4 + 0.2 * i)[1];
+  });
   run_kernel(out, "moment gamma1", KOKKOS_LAMBDA(int) { return ld::moment_by_integral(hide(ga), 2, 2.0); });
   run_kernel(out, "info d0 laplace score", KOKKOS_LAMBDA(int) {
     return ld::expected_info_by_integral<0, ld::info_form::score>(hide(l))[0];

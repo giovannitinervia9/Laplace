@@ -2,8 +2,8 @@
 // (include/laplace/distrib/detail/location_scale.hpp). mixed_dk and
 // mixed_power_dk are measured through the families that use them (gaussian1,
 // laplace1, cauchy, gaussian2, gaussian3); what is checked here is
-// mixed_shape_dk, which adds a smooth shape parameter and is pure index work
-// over mixed_dk: the components it writes must agree with mixed_dk where there
+// mixed_shape_dk and mixed_two_shape_dk, which add one and two smooth shape
+// parameters and are pure index work over mixed_dk: the components it writes must agree with mixed_dk where there
 // is no derivative in the shape, must be the shape derivative itself where
 // there is no other, and must agree with central differences of the value
 // everywhere else.
@@ -97,6 +97,92 @@ void check_order(double mu, double sigma, double s, double y, double tol) {
     }
 }
 
+// d^c/dt^c cos(t): cos, -sin, -cos, sin, ...
+double cos_dc(int c, double t) {
+  switch (c % 4) {
+    case 0: return std::cos(t);
+    case 1: return -std::sin(t);
+    case 2: return -std::cos(t);
+    default: return std::sin(t);
+  }
+}
+
+// Lambda(z, s, t) = sin(z) exp(-s) cos(t): every entry of the table is
+// non-zero at the points used below, so an error in the packing or in the
+// order of the three directions cannot cancel
+template <int K>
+void fill_table2(double z, double s, double tt, double* D) {
+  const double e = std::exp(-s);
+  for (int c1 = 0; c1 <= K; ++c1) {
+    const double sc = (c1 % 2 == 0) ? e : -e;
+    for (int c2 = 0; c2 <= K; ++c2)
+      for (int j = 0; j <= K; ++j)
+        D[(c1 * (K + 1) + c2) * (K + 1) + j] =
+            (c1 + c2 + j <= K) ? sc * cos_dc(c2, tt) * sin_dj(j, z) : 0.0;
+  }
+}
+
+double value2(double mu, double sigma, double s, double tt, double y) {
+  return std::sin((y - mu) / sigma) * std::exp(-s) * std::cos(tt);
+}
+
+// Central difference of order n in the parameters named by idx
+// (0 = mu, 1 = sigma, 2 = s, 3 = t)
+double fd2(const int* idx, int n, double mu, double sigma, double s, double tt, double y) {
+  if (n == 0) return value2(mu, sigma, s, tt, y);
+  const double base[4] = {std::fabs(mu) + 1.0, sigma, s, std::fabs(tt) + 1.0};
+  const double h = 1e-3 * base[idx[0]];
+  double up[4] = {mu, sigma, s, tt}, dn[4] = {mu, sigma, s, tt};
+  up[idx[0]] += h;
+  dn[idx[0]] -= h;
+  return (fd2(idx + 1, n - 1, up[0], up[1], up[2], up[3], y) -
+          fd2(idx + 1, n - 1, dn[0], dn[1], dn[2], dn[3], y)) /
+         (2.0 * h);
+}
+
+template <int K>
+void check_order2(double mu, double sigma, double s, double tt, double y, double tol) {
+  const double z = (y - mu) / sigma;
+  double D[(K + 1) * (K + 1) * (K + 1)];
+  fill_table2<K>(z, s, tt, D);
+  const laplace::distrib::sym_tensor<4, K> t = ls::mixed_two_shape_dk<K>(D, z, sigma);
+
+  // no derivative in either shape: the two-parameter assembly, component for component
+  const laplace::distrib::sym_tensor<2, K> m = ls::mixed_dk<K>(D, z, sigma);
+  for (int b = 0; b <= K; ++b) {
+    int idx[K];
+    int p = 0;
+    for (int i = 0; i < K - b; ++i) idx[p++] = 0;
+    for (int i = 0; i < b; ++i) idx[p++] = 1;
+    CHECK(t[laplace::distrib::sym_tensor_position<4, K>(idx)] == m[b]);
+  }
+  // every derivative in one shape or the other
+  for (int which = 2; which <= 3; ++which) {
+    int idx[K];
+    for (int i = 0; i < K; ++i) idx[i] = which;
+    const int c1 = which == 2 ? K : 0, c2 = which == 2 ? 0 : K;
+    CHECK(t[laplace::distrib::sym_tensor_position<4, K>(idx)] ==
+          D[(c1 * (K + 1) + c2) * (K + 1)]);
+  }
+  // every component against the central differences
+  for (int c1 = 0; c1 <= K; ++c1)
+    for (int c2 = 0; c1 + c2 <= K; ++c2)
+      for (int b = 0; b + c1 + c2 <= K; ++b) {
+        const int a = K - b - c1 - c2;
+        int idx[K];
+        int p = 0;
+        for (int i = 0; i < a; ++i) idx[p++] = 0;
+        for (int i = 0; i < b; ++i) idx[p++] = 1;
+        for (int i = 0; i < c1; ++i) idx[p++] = 2;
+        for (int i = 0; i < c2; ++i) idx[p++] = 3;
+        const double got = t[laplace::distrib::sym_tensor_position<4, K>(idx)];
+        const double want = fd2(idx, K, mu, sigma, s, tt, y);
+        INFO("K = ", K, ", a = ", a, ", b = ", b, ", c1 = ", c1, ", c2 = ", c2, ": got ", got,
+             ", fd ", want);
+        CHECK(std::fabs(got - want) <= tol * (std::fabs(want) + 1e-3));
+      }
+}
+
 }  // namespace
 
 TEST_CASE("mixed_shape_dk: a location, a scale and one shape") {
@@ -113,4 +199,18 @@ TEST_CASE("mixed_shape_dk: a location, a scale and one shape") {
   check_order<4>(0.3, 1.0, 0.4, 1.1, 1e300);
   check_order<5>(0.3, 1.0, 0.4, 1.1, 1e300);
   check_order<6>(0.3, 1.0, 0.4, 1.1, 1e300);
+}
+
+TEST_CASE("mixed_two_shape_dk: a location, a scale and two shapes") {
+  for (double sigma : {0.7, 1.0, 2.5})
+    for (double s : {0.4, 1.3}) {
+      check_order2<1>(0.3, sigma, s, 0.6, 1.1, 1e-5);
+      check_order2<2>(0.3, sigma, s, 0.6, 1.1, 1e-4);
+      check_order2<3>(0.3, sigma, s, 0.6, 1.1, 1e-3);
+    }
+  // the exact identities alone at the orders where a central difference of
+  // order four and above is noise
+  check_order2<4>(0.3, 1.0, 0.4, 0.6, 1.1, 1e300);
+  check_order2<5>(0.3, 1.0, 0.4, 0.6, 1.1, 1e300);
+  check_order2<6>(0.3, 1.0, 0.4, 0.6, 1.1, 1e300);
 }

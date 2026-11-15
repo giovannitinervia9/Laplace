@@ -41,6 +41,7 @@ struct Deriv {
     if constexpr (K == 3) r = lo::log_student_cdf_d3(z, nu);
     if constexpr (K == 4) r = lo::log_student_cdf_d4(z, nu);
     if constexpr (K == 5) r = lo::log_student_cdf_d5(z, nu);
+    if constexpr (K == 6) r = lo::log_student_cdf_d6(z, nu);
     for (int j = 0; j <= K; ++j) o[j] = r.c[j];
   }
 };
@@ -62,7 +63,7 @@ void check_student_cdf_deriv(double max_ulpN, double max_ulp1, double max_ulpL) 
   const auto hx = bench::to_host_args(x);
   bench::DArgs dx("x", n);
   Kokkos::deep_copy(dx, hx);
-  Kokkos::View<double* [6], Kokkos::LayoutRight, bench::Exec::memory_space> dy("y", n);
+  Kokkos::View<double* [7], Kokkos::LayoutRight, bench::Exec::memory_space> dy("y", n);
   const Deriv<K> f{};
   Kokkos::parallel_for(
       "student_deriv", Kokkos::RangePolicy<bench::Exec>(0, n), KOKKOS_LAMBDA(const std::size_t r) {
@@ -88,8 +89,9 @@ void check_student_cdf_deriv(double max_ulpN, double max_ulp1, double max_ulpL) 
       const double u = d / bench::ulp_of(std::max({std::fabs(hi), N, tiny}));
       const double u1 = d / bench::ulp_of(std::max(std::fabs(hi), 1.0));
       const double uL = hi != 0.0 ? u / std::max(1.0, std::fabs(std::log(std::fabs(hi)))) : u;
-      // the pure z-components of odd order near z = 0 are bounded by ulp1 only
-      const bool zero_z = j == 0 && (K == 3 || K == 5) && std::fabs(x[r][0]) < 1.0;
+      // the pure z-components of odd order near z = 0, and that of order six near
+      // its own zero, are bounded by ulp1 only
+      const bool zero_z = j == 0 && (K == 3 || K == 5 || K == 6) && std::fabs(x[r][0]) < 1.0;
       if (!zero_z && u > eN) eN = u, wN = r, jN = j;
       if (zero_z && u1 > e1) e1 = u1, w1 = r, j1 = j;
       if (!zero_z && uL > eL) eL = uL, wL = r, jL = j;
@@ -123,4 +125,5 @@ TEST_CASE("derivatives of log T_nu(z) in (z, nu) against mpmath") {
   check_student_cdf_deriv<3>(510.0, 18.0, 50.0);
   check_student_cdf_deriv<4>(2200.0, 1.0, 420.0);
   check_student_cdf_deriv<5>(710.0, 145.0, 145.0);
+  check_student_cdf_deriv<6>(45200.0, 495.0, 3650.0);
 }
