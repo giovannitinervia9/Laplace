@@ -17,7 +17,9 @@
 
 #include <Kokkos_Core.hpp>
 
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
@@ -112,6 +114,33 @@ struct x_minus_log_x {
   }
 };
 
+// f = 1000 + |x|^2 / 2 with a relative rounding noise of 1024 eps, a
+// deterministic function of the bits of x (as a sum reduced in another order
+// on a GPU); the gradient x is exact. Near the optimum no trial point of a
+// line search shows an acceptable decrease.
+struct rounding_noise_at_optimum {
+  static double noise(const lo::optimizer_point& x) {  // in [-1, 1), splitmix64 of the bits
+    std::uint64_t h = 1;
+    for (std::size_t i = 0; i < x.extent(0); ++i) {
+      h ^= std::bit_cast<std::uint64_t>(x(i)) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+      h += 0x9e3779b97f4a7c15ULL;
+      h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9ULL;
+      h = (h ^ (h >> 27)) * 0x94d049bb133111ebULL;
+      h ^= h >> 31;
+    }
+    return static_cast<double>(h >> 11) * 0x1.0p-52 - 1.0;
+  }
+  double value(const lo::optimizer_point& x) {
+    double f = 1000.0;
+    for (std::size_t i = 0; i < x.extent(0); ++i) f += 0.5 * x(i) * x(i);
+    return f * (1.0 + 1024.0 * std::numeric_limits<double>::epsilon() * noise(x));
+  }
+  double value_gradient(const lo::optimizer_point& x, const lo::optimizer_vector& g) {
+    for (std::size_t i = 0; i < x.extent(0); ++i) g(i) = x(i);
+    return value(x);
+  }
+};
+
 }  // namespace
 
 TEST_CASE("optimizers: BFGS on the More-Garbow-Hillstrom problems, f* = 0, 1, 1e3, 1e6") {
@@ -173,6 +202,18 @@ TEST_CASE("optimizers: quasi-Newton start, refused points, budgets, trace") {
       CHECK(std::abs(b.point(0) - 1.0) < 2e-3);  // f - f* ~ (x - 1)^2 / 2 <= 1e-6
       CHECK(std::abs(l.point(0) - 1.0) < 2e-3);
     }
+  }
+  SUBCASE("a confirming line search that spends its budget on rounding noise keeps the verdict") {
+    rounding_noise_at_optimum f;
+    const lo::optimizer_vector x0 = start_of({1e-6, 1e-6, 1e-6});  // decrement 1.5e-12
+    const lo::optimizer_report b = lo::minimize(lo::bfgs_optimizer<>{}, f, x0);
+    const lo::optimizer_report l = lo::minimize(lo::lbfgs_optimizer<>{}, f, x0);
+    INFO("BFGS status ", int(b.status), " after ", b.value_evaluations, " evaluations; L-BFGS ", int(l.status));
+    CHECK(b.status == lo::optimizer_status::converged);
+    CHECK(l.status == lo::optimizer_status::converged);
+    CHECK(b.iterations == 0);  // the confirming search found no acceptable step
+    CHECK(b.value_evaluations == 31);  // the start and the 30 of the Wolfe search
+    CHECK(distance(b, {0.0, 0.0, 0.0}) <= 1e-6);
   }
   SUBCASE("evaluation budget") {
     tp::extended_rosenbrock_problem p(2);

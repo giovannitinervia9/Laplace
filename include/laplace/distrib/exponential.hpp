@@ -414,6 +414,16 @@ struct exponential_distrib {
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
   /// Kinks in observation \f$y\f$ (none).
   LAPLACE_HD distrib_kinks y_kinks() const { return {}; }
+  /**
+   * \ingroup distrib_exponential
+   * \brief Starting value from a sample summary: \f$\mu = \bar{y}\f$ (`s.mean`), the maximum likelihood estimate, kept strictly inside \f$(0, \infty)\f$.
+   * \param s Sample summary computed by summarize_sample().
+   * \return An \c exponential_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): the sample mean, the MLE; strictly inside the domain.
+  exponential_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.mean, params[0])}; }
+
 };
 
 }  // namespace laplace::distrib

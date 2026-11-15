@@ -491,6 +491,16 @@ struct gumbel_distrib {
    * \return Kinks descriptor with \c count = 0.
    */
   LAPLACE_HD distrib_kinks y_kinks() const { return distrib_kinks{}; }
+  /**
+   * \ingroup distrib_gumbel
+   * \brief Starting value from a sample summary: moment estimate \f$\mu = \bar{y} - \gamma\sqrt{6 s^2}/\pi\f$ and \f$\sigma = \sqrt{6 s^2}/\pi\f$ from `s.mean` (\f$\bar{y}\f$) and `s.variance` (\f$s^2\f$), where \f$\gamma\f$ is Euler's constant, kept strictly inside the open domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c gumbel_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): moments, sigma = sqrt(6 variance) / pi and mu = mean - gamma sigma (gamma Euler's constant); strictly inside the domain.
+  gumbel_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.mean - 0.57721566490153286061 * Kokkos::sqrt(6.0 * s.variance) / 3.14159265358979323846, params[0]), start_inside(Kokkos::sqrt(6.0 * s.variance) / 3.14159265358979323846, params[1])}; }
+
 };
 
 }  // namespace laplace::distrib

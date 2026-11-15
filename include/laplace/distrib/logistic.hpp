@@ -417,6 +417,16 @@ struct logistic_distrib {
    * \return Kinks descriptor \c distrib_kinks with \c count = 0.
    */
   LAPLACE_HD distrib_kinks y_kinks() const { return distrib_kinks{}; }
+  /**
+   * \ingroup distrib_logistic
+   * \brief Starting value from a sample summary: moment estimate \f$\mu = \bar{y}\f$ (`s.mean`) and \f$\sigma = \sqrt{3 s^2}/\pi\f$ (`s.variance` \f$s^2\f$), kept strictly inside the open domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c logistic_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): moments, mu = mean and sigma = sqrt(3 variance) / pi; strictly inside the domain.
+  logistic_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.mean, params[0]), start_inside(Kokkos::sqrt(3.0 * s.variance) / 3.14159265358979323846, params[1])}; }
+
 };
 
 }  // namespace laplace::distrib

@@ -309,6 +309,16 @@ struct lognormal1_distrib {
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
   /// Kinks in observation \f$y\f$ (none).
   LAPLACE_HD distrib_kinks y_kinks() const { return {}; }
+  /**
+   * \ingroup distrib_lognormal1
+   * \brief Starting value from a sample summary: \f$\mu = \bar{z}_+\f$ (`s.mean_log`) and \f$v = s_z^2\f$ (`s.variance_log`), the maximum likelihood estimate, kept strictly inside the open domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c lognormal1_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): the mean and variance (divisor n) of log y, the MLE; strictly inside the domain.
+  lognormal1_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.mean_log, params[0]), start_inside(s.variance_log, params[1])}; }
+
 };
 
 }  // namespace laplace::distrib

@@ -517,6 +517,16 @@ struct gamma2_distrib {
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
   /// Kinks in observation \f$y\f$ (none).
   LAPLACE_HD distrib_kinks y_kinks() const { return {}; }
+  /**
+   * \ingroup distrib_gamma2
+   * \brief Starting value from a sample summary: \f$\mu = \bar{y}\f$ (`s.mean`, the MLE of \f$\mu\f$) and moment estimate \f$\sigma^2 = s^2\f$ (`s.variance`), kept strictly inside the open domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c gamma2_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): the sample mean (the MLE of mu) and variance (moments); strictly inside the domain.
+  gamma2_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.mean, params[0]), start_inside(s.variance, params[1])}; }
+
 };
 
 }  // namespace laplace::distrib

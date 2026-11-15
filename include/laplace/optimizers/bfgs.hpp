@@ -34,8 +34,12 @@
 //   across a region of varying curvature can still mislead the floor
 //   (f = x - log x from 0.01: one step to 1.01, s'y / y'y = 0.0101 against
 //   the inverse curvature 1 there, "converged" with f - f* = 5e-5). When the
-//   confirming line search cannot move the point (below rounding, or no
-//   descent direction left), the pending verdict stands.
+//   confirming line search finds no acceptable step (below rounding, below
+//   its resolution, no descent direction left, or its evaluation budget
+//   spent), the pending verdict stands: the confirmation exists to unmask a
+//   false success, which shows as an acceptable descent step being found. A
+//   start at the optimum with f rounded at about 1e3 eps |f| (a sum reduced
+//   in another order on a GPU) spent the 30 evaluations of the Wolfe search.
 
 #include "laplace/optimizers/line_search.hpp"
 #include "laplace/optimizers/objective.hpp"
@@ -55,7 +59,7 @@ namespace laplace::optimizers {
  * \ingroup optimizers_quasi_newton
  * \brief Bitmask of stopping-rule inputs provided by quasi-Newton methods.
  *
- * Combines `stop_needs_gradient`, `stop_needs_decrement`, and `stop_needs_previous`.
+ * Combines `stop_needs_gradient`, `stop_needs_decrement`, and `stop_needs_previous`, so any `stop_rule` needing at most the gradient, the decrement, and the previous point and value satisfies `stop_rule_for`.
  *
  * \see \ref optimizers_quasi_newton, bfgs_optimizer, lbfgs_optimizer, stop_rule_for
  */
@@ -63,12 +67,6 @@ namespace laplace::optimizers {
 inline constexpr unsigned quasi_newton_provides = stop_needs_gradient | stop_needs_decrement | stop_needs_previous;
 
 namespace detail {
-
-inline double max_abs(const optimizer_point& v) {
-  double m = 0.0;
-  for (std::size_t i = 0; i < v.extent(0); ++i) m = std::max(m, std::abs(v(i)));
-  return m;
-}
 
 // d = -min(1, 1 / |g|_inf) g, the direction without curvature.
 inline void scaled_steepest_descent(const optimizer_point& g, const optimizer_vector& d) {
@@ -196,10 +194,11 @@ optimizer_report quasi_newton_run(Model& model, const Rule& stop_rule, const Lin
     }
     report.value_evaluations += r.value_evaluations;
     report.gradient_evaluations += r.gradient_evaluations;
-    // a pass whose confirming step cannot move the point keeps its verdict
+    // a pass whose confirming search finds no acceptable step keeps its verdict
     if (!r.accepted() && pending != stop_verdict::none &&
         (r.outcome == line_search_outcome::step_below_rounding || r.outcome == line_search_outcome::below_resolution ||
-         r.outcome == line_search_outcome::not_descent_direction))
+         r.outcome == line_search_outcome::not_descent_direction ||
+         r.outcome == line_search_outcome::evaluation_budget))
       return finish(verdict_status(pending));
     if (!r.accepted())
       return finish(r.outcome == line_search_outcome::step_below_rounding ||
@@ -244,13 +243,135 @@ optimizer_report quasi_newton_run(Model& model, const Rule& stop_rule, const Lin
 
 /**
  * \ingroup optimizers_quasi_newton
- * \brief BFGS optimizer with a dense \f$n \times n\f$ inverse-Hessian approximation.
+ * \brief BFGS quasi-Newton optimizer with a dense \f$n \times n\f$ inverse-Hessian approximation.
  *
- * Minimizes an objective modeling `gradient_objective` using \f$O(n^2)\f$ memory and work per iteration, with `wolfe_line_search` and `decrement_stop_rule` by default.
+ * `bfgs_optimizer<Rule, LineSearch>` minimizes an unconstrained objective
+ * modeling gradient_objective in \f$\mathbb{R}^n\f$, where \f$n\f$ is the
+ * parameter dimension, using a dense \f$n \times n\f$ symmetric positive
+ * definite model of the inverse Hessian. Everything runs on the host only;
+ * nothing is marked `LAPLACE_HD`. A run is started with
+ * `minimize(bfgs_optimizer<>{}, f, x0)`.
+ *
+ * ### Algorithm
+ *
+ * Let \f$x_k \in \mathbb{R}^n\f$ be the iterate at step \f$k\f$,
+ * \f$g_k = \nabla f(x_k)\f$ its gradient, \f$B_k\f$ the \f$n \times n\f$ model
+ * of the inverse Hessian, \f$d_k = -B_k g_k\f$ the search direction, and
+ * \f$t_k\f$ the step length accepted by the line search started at \f$t = 1\f$.
+ * Set \f$s_k = x_{k+1} - x_k = t_k d_k\f$, \f$y_k = g_{k+1} - g_k\f$, and
+ * \f$\rho_k = 1 / (s_k^\top y_k)\f$. The BFGS update (Nocedal and Wright, 2006,
+ * Algorithm 6.1) is
+ * \f[
+ * B_{k+1} = (I - \rho_k s_k y_k^\top) B_k (I - \rho_k y_k s_k^\top) + \rho_k s_k s_k^\top,
+ * \f]
+ * where \f$I\f$ is the \f$n \times n\f$ identity matrix, evaluated in
+ * \f$O(n^2)\f$ operations as
+ * \f[
+ * B_{k+1} = B_k - \rho_k \bigl(s_k (B_k y_k)^\top + (B_k y_k) s_k^\top\bigr) + \bigl(\rho_k^2\, y_k^\top B_k y_k + \rho_k\bigr)\, s_k s_k^\top.
+ * \f]
+ *
+ * Before any curvature pair has been accepted, and after a reset, the model
+ * starts at \f$B = \min\bigl(1,\, 1 / \lVert g\rVert_\infty\bigr) I\f$, giving
+ * the steepest-descent direction \f$-g\f$ scaled so that its largest component
+ * magnitude is at most \f$1\f$. When the first pair \f$(s, y)\f$ is accepted,
+ * the model first sets \f$B = \bigl((s^\top y) / (y^\top y)\bigr) I\f$
+ * (Shanno and Phua, 1978) and then applies the BFGS update.
+ *
+ * A curvature pair \f$(s, y)\f$ is accepted only when \f$s^\top y\f$ is finite
+ * and \f$s^\top y > \tau \lVert s\rVert_2 \lVert y\rVert_2\f$, where
+ * \f$\tau\f$ is `curvature_tolerance` and \f$\lVert \cdot\rVert_2\f$ is the
+ * Euclidean norm; otherwise the update is skipped. After `max_skipped_updates`
+ * consecutive skips, \f$B\f$ is reset. Whenever a computed direction \f$d\f$
+ * is not finite (its directional slope \f$g^\top d\f$ is not finite) or
+ * satisfies \f$g^\top d \ge 0\f$, \f$B\f$ is reset and \f$d\f$ is recomputed
+ * from the reset model.
+ *
+ * Each iteration searches along \f$d_k\f$ from \f$t = 1\f$ using `LineSearch`,
+ * which defaults to wolfe_line_search (see \ref optimizers "the optimizers page").
+ * When armijo_line_search (Dennis and Schnabel, 1996) is used instead, the
+ * optimizer evaluates the gradient once more at each accepted point.
+ *
+ * ### Stationarity and confirmation
+ *
+ * At every iteration \f$k\f$, including the start \f$k = 0\f$, the optimizer
+ * computes the next direction \f$d_k\f$ and sets the stationarity decrement
+ * to
+ * \f[
+ * \delta_k = \frac{1}{2} \max\bigl(|g_k^\top d_k|,\ \gamma_{\max}\, g_k^\top g_k\bigr),
+ * \f]
+ * where \f$\gamma_{\max}\f$ is the largest \f$(s^\top y) / (y^\top y)\f$ over
+ * all accepted pairs (\f$0\f$ before any pair). This \f$\delta_k\f$ is passed to
+ * `stop_rule` as `decrement` and stored in `optimizer_report::decrement`.
+ * The floor \f$\gamma_{\max} g_k^\top g_k\f$ is needed because \f$B_k\f$ is
+ * accurate only along directions its pairs have sampled.
+ *
+ * A `stop_verdict::converged` or `stop_verdict::converged_at_resolution`
+ * verdict from `stop_rule` must hold at two consecutive iterations before the
+ * run ends. If the confirming line search finds no acceptable step, with
+ * outcome `line_search_outcome::step_below_rounding`,
+ * `line_search_outcome::below_resolution`,
+ * `line_search_outcome::not_descent_direction` or
+ * `line_search_outcome::evaluation_budget`, the pending verdict stands: the
+ * confirmation unmasks a false success, which shows as an acceptable descent
+ * step, and near the optimum the rounding of \f$f\f$ can leave none. A
+ * `stop_verdict::stopped_on_change` verdict is not confirmed and terminates at
+ * once. Starting at an exact stationary point with \f$g = 0\f$ ends with
+ * status `optimizer_status::converged` after \f$0\f$ iterations under the
+ * default rule.
+ *
+ * ### Settings
+ *
+ * | Member | Default | Effect |
+ * |---|---|---|
+ * | `stop_rule` | `decrement_stop_rule{}` | Stopping rule queried at each iteration; tolerance \f$10^{-6}\f$ in the objective's units, accepting any rule needing at most gradient, decrement, and previous point and value (checked against quasi_newton_provides) |
+ * | `line_search` | `wolfe_line_search{}` | Line search along each direction from step \f$1\f$, with \f$c_1 = 10^{-4}\f$ and \f$c_2 = 0.9\f$ |
+ * | `max_iterations` | \f$1000\f$ | Maximum number of iterations before returning `optimizer_status::iteration_budget` |
+ * | `max_evaluations` | \f$10^5\f$ | Value-evaluation budget checked before each line search, so a run can exceed it by one search |
+ * | `curvature_tolerance` | \f$10^{-10}\f$ | Cosine threshold \f$\tau\f$ for accepting pairs; larger values skip more updates |
+ * | `max_skipped_updates` | \f$5\f$ | Consecutive skipped updates before resetting \f$B\f$ |
+ * | `trace` | empty | Optional optimizer_trace callback invoked once per accepted iteration with iteration, point, value, gradient, decrement, and step |
+ *
+ * ### Statuses
+ *
+ * - `optimizer_status::converged` and `optimizer_status::converged_at_resolution` are returned when the stopping rule's convergence verdict is confirmed.
+ * - `optimizer_status::stopped_on_change` is returned immediately when a change rule issues `stop_verdict::stopped_on_change`.
+ * - `optimizer_status::stalled` is returned when the line search fails with `line_search_outcome::step_below_rounding` or `line_search_outcome::below_resolution` outside confirmation.
+ * - `optimizer_status::line_search_failed` is returned on any other line search failure, such as its evaluation budget or a non-descent direction after a reset.
+ * - `optimizer_status::iteration_budget` is returned when `max_iterations` iterations complete without stopping.
+ * - `optimizer_status::evaluation_budget` is returned when `value_evaluations` reaches `max_evaluations` before a line search.
+ * - `optimizer_status::start_not_admissible` is returned when the objective value or gradient is non-finite at \f$x_0\f$.
+ *
+ * In optimizer_report, `curvature_evaluations` is always \f$0\f$ and
+ * `final_factorization` is `curvature_factorization::not_evaluated`.
+ *
+ * ### Cost and measured behaviour
+ *
+ * Each iteration performs \f$O(n^2)\f$ work and stores \f$n^2\f$ `double`
+ * entries for \f$B\f$; each Wolfe trial evaluates the objective value and
+ * gradient once. Measured with gcc on one thread, Rosenbrock with \f$n = 100\f$
+ * takes 356 microseconds (36 iterations, 42 value evaluations).
+ *
+ * In the same gcc measurements with the default settings, BFGS converges on
+ * all standard test problems (with \f$f^*\f$ shifted by \f$0\f$, \f$1\f$,
+ * \f$10^3\f$, and \f$10^6\f$) with \f$f - f^* \le 6.3 \times 10^{-8}\f$, and on
+ * \f$10\f$-dimensional quadratics up to condition number \f$\kappa = 10^8\f$
+ * (with \f$f - f^* \le 4.7 \times 10^{-9}\f$); at \f$\kappa = 10^{10}\f$ and
+ * \f$10^{12}\f$ it ends `optimizer_status::stalled`. It does not converge on a
+ * non-smooth objective such as \f$\sum_i |x_i|\f$ (tested for \f$n = 2, 4, 10\f$
+ * under both line searches).
+ *
+ * ### Example
+ *
+ * \code
+ * bfgs_optimizer<> opt;
+ * opt.stop_rule.tolerance = 1e-8;
+ * const optimizer_report report = minimize(opt, f, x0);
+ * const bool ok = optimizer_succeeded(report.status);
+ * \endcode
  *
  * \tparam Rule Stopping rule type satisfying `stop_rule_for<Rule, quasi_newton_provides>`.
  * \tparam LineSearch Line search type such as `wolfe_line_search` or `armijo_line_search`.
- * \see \ref optimizers_quasi_newton, lbfgs_optimizer, quasi_newton_provides, minimize()
+ * \see \ref optimizers_quasi_newton, lbfgs_optimizer, quasi_newton_provides, minimize(), optimizer_report
  */
 // BFGS with a dense n x n inverse-Hessian approximation: O(n^2) memory and
 // work per iteration. Settings are members; minimize(bfgs_optimizer<>{}, f, x0).
@@ -259,37 +380,37 @@ template <class Rule = decrement_stop_rule, class LineSearch = wolfe_line_search
 struct bfgs_optimizer {
   /**
    * \ingroup optimizers_quasi_newton
-   * \brief Stopping rule instance queried at each iteration.
+   * \brief Stopping rule instance queried at each iteration (default `decrement_stop_rule{}`).
    */
   Rule stop_rule{};
   /**
    * \ingroup optimizers_quasi_newton
-   * \brief Line search instance used along each search direction from step \f$1\f$.
+   * \brief Line search instance used along each search direction from step \f$1\f$ (default `wolfe_line_search{}`).
    */
   LineSearch line_search{};
   /**
    * \ingroup optimizers_quasi_newton
-   * \brief Maximum number of iterations before returning `optimizer_status::iteration_budget` (default 1000).
+   * \brief Maximum number of iterations before returning `optimizer_status::iteration_budget` (default \f$1000\f$).
    */
   int max_iterations = 1000;
   /**
    * \ingroup optimizers_quasi_newton
-   * \brief Value-evaluation budget checked before each line search, default \f$10^5\f$ (a run may exceed it by one search).
+   * \brief Value-evaluation budget checked before each line search (default \f$10^5\f$; a run may exceed it by one search).
    */
   long max_evaluations = 100000;       // checked before each line search
   /**
    * \ingroup optimizers_quasi_newton
-   * \brief Minimum cosine threshold \f$\tau\f$ for accepting a curvature pair when \f$s^\top y > \tau \lVert s \rVert \lVert y \rVert\f$ (default \f$10^{-10}\f$).
+   * \brief Minimum cosine threshold \f$\tau\f$ for accepting a curvature pair when \f$s^\top y > \tau \lVert s\rVert_2 \lVert y\rVert_2\f$ (default \f$10^{-10}\f$).
    */
   double curvature_tolerance = 1e-10;  // the pair is used when s'y > tol |s| |y|
   /**
    * \ingroup optimizers_quasi_newton
-   * \brief Number of consecutive skipped updates before resetting the inverse-Hessian approximation (default 5).
+   * \brief Number of consecutive skipped updates before resetting the inverse-Hessian approximation (default \f$5\f$).
    */
   int max_skipped_updates = 5;         // consecutive skips before B is reset
   /**
    * \ingroup optimizers_quasi_newton
-   * \brief Optional trace callback invoked once per accepted iteration.
+   * \brief Optional trace callback invoked once per accepted iteration (default empty).
    */
   optimizer_trace trace;
 
@@ -297,13 +418,13 @@ struct bfgs_optimizer {
    * \ingroup optimizers_quasi_newton
    * \brief Minimizes `objective` starting from `x0` using BFGS.
    *
-   * Returns `optimizer_status::start_not_admissible` if the initial value or gradient is non-finite, and sets `curvature_evaluations` to \f$0\f$.
+   * See bfgs_optimizer for the update, stationarity confirmation, and termination statuses.
    *
    * \tparam O Objective type satisfying `gradient_objective`.
    * \param objective Objective to minimize.
    * \param x0 Starting point \f$x_0 \in \mathbb{R}^n\f$.
-   * \return Summary `optimizer_report` of the run.
-   * \see \ref optimizers_quasi_newton, minimize(), optimizer_report
+   * \return Summary optimizer_report of the run.
+   * \see \ref optimizers_quasi_newton, bfgs_optimizer, minimize(), optimizer_report
    */
   template <gradient_objective O>
   optimizer_report run(O& objective, const optimizer_point& x0) const {

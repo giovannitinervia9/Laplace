@@ -114,3 +114,8 @@ target_link_libraries(optimizers_quasi_newton PRIVATE Laplace::laplace)
 laplace_kokkos_sources(optimizers_second_order.cpp)
 add_executable(optimizers_second_order optimizers_second_order.cpp)
 target_link_libraries(optimizers_second_order PRIVATE Laplace::dense)
+
+laplace_kokkos_sources(optimizers_fit_distrib.cpp)
+add_executable(optimizers_fit_distrib optimizers_fit_distrib.cpp)
+target_link_libraries(optimizers_fit_distrib PRIVATE Laplace::laplace Laplace::dense)
+target_compile_definitions(optimizers_fit_distrib PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")

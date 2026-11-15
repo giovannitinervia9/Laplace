@@ -1,0 +1,86 @@
+/**
+\defgroup distrib_start Starting values
+\brief Sample summaries and starting parameters for univariate distributions on the host.
+
+This module computes a summary of an observation sample and derives starting parameter values for a univariate distribution (`distrib`): the closed-form maximum likelihood estimate (MLE) where one exists, or a moment or robust estimate otherwise. Include `<laplace/distrib/generic_start.hpp>`, which includes `<laplace/distrib/core.hpp>`; every type and function lives in namespace `laplace::distrib` and is called as `laplace::distrib::NAME`. Every function in this module runs on the host only, and none is marked `LAPLACE_HD`. Given a `Kokkos::View` in any memory space, `summarize_sample()` copies it to the host once. The starting values are formulas in the summary statistics, so the page has no accuracy table; the summary takes time linear in the sample size \f$n\f$.
+
+## Sample summary
+
+For a sample \f$y_1, \dots, y_n\f$ of size \f$n\f$, \ref laplace::distrib::summarize_sample(std::vector<double>) "summarize_sample()" populates a \ref laplace::distrib::distrib_sample_summary "distrib_sample_summary" struct. The full-sample fields hold `count` (\f$n\f$), `minimum` (\f$\min_i y_i\f$), `maximum` (\f$\max_i y_i\f$), `mean` (\f$\bar{y} = \frac{1}{n}\sum_{i=1}^n y_i\f$), and `variance` with divisor \f$n\f$ (\f$s^2 = \frac{1}{n}\sum_{i=1}^n (y_i - \bar{y})^2\f$).
+
+The order-statistic fields `lower_quartile` (\f$q_{0.25}\f$), `median` (\f$q_{0.5}\f$), and `upper_quartile` (\f$q_{0.75}\f$) are the sample quantiles of type 7 (Hyndman and Fan, 1996). For ordered observations \f$y_{(1)} \le \dots \le y_{(n)}\f$ and probability \f$p \in (0, 1)\f$, let \f$h = (n - 1) p\f$ and \f$j = \lfloor h \rfloor\f$; the type-7 quantile is
+\f[
+q_p = \begin{cases} y_{(j+1)} + (h - j)\bigl(y_{(j+2)} - y_{(j+1)}\bigr), & j + 1 < n, \\ y_{(n)}, & j + 1 = n. \end{cases}
+\f]
+The quartiles are computed by selection (partial sorting) in time linear in \f$n\f$. From the median, `mean_abs_dev_median` is \f$\bar{d} = \frac{1}{n}\sum_{i=1}^n |y_i - q_{0.5}|\f$.
+
+Four additional fields summarize the positive observations (\f$y_i > 0\f$) only: `positive_count` is their number \f$n_+\f$, `mean_log` is \f$\bar{z}_+ = \frac{1}{n_+}\sum_{y_i > 0} \log y_i\f$, `variance_log` is \f$s_z^2 = \frac{1}{n_+}\sum_{y_i > 0} (\log y_i - \bar{z}_+)^2\f$ with divisor \f$n_+\f$, and `mean_inverse` is \f$\bar{r}_+ = \frac{1}{n_+}\sum_{y_i > 0} 1/y_i\f$. An empty sample (\f$n = 0\f$) sets `count` and all other fields to \f$0\f$. When \f$n_+ = 0\f$, the four positive-only fields are all \f$0\f$.
+
+## Starting values and open domains
+
+Given a distribution `prototype` and a summary, \ref laplace::distrib::distrib_start_value "distrib_start_value()" returns `prototype.start_value(summary)`, a copy of `prototype` whose natural parameters are set from `summary`. The `prototype` carries any fields that are not natural parameters, such as the `size` field of `binomial_distrib`; for all other distributions, any value of the type serves, such as `gaussian1_distrib{}`. A distribution without a `start_value` member is rejected at compile time by a `static_assert` with the message `"distrib_start_value: this distrib has no start_value member; supply a start"`, so the caller supplies its own starting parameters in that case.
+
+Every `start_value` member returns parameters strictly inside their open natural domains \f$(l, u)\f$ (declared in `params[j]` on \ref distrib_core "the core distribution page") by passing each raw value \f$x\f$ through \ref laplace::distrib::start_inside "start_inside()". When \f$x \le l\f$ at a finite lower bound \f$l\f$, the result is \f$10^{-8}\max(|x|, 1)\f$ if \f$l = 0\f$, and \f$l + 16\varepsilon|l|\f$ otherwise, where \f$\varepsilon\f$ is double-precision machine epsilon. When \f$x \ge u\f$, the result is \f$10^{300}\f$ if \f$u = +\infty\f$, \f$-10^{-8}\f$ if \f$u = 0\f$, and \f$u - 16\varepsilon|u|\f$ for any other finite upper bound. Inputs strictly inside \f$(l, u)\f$ and `NaN` inputs are returned unchanged. For example, on a sample of zeros under `bernoulli_distrib`, the maximum likelihood estimate \f$\mu = 0\f$ lies outside the open domain \f$(0, 1)\f$, so `start_value()` returns \f$\mu = 10^{-8}\f$.
+
+## Starting values by distribution
+
+The table below lists the nineteen distributions with a `start_value` member, using the summary quantities above together with \f$s = \sqrt{s^2}\f$, the `size` field \f$N\f$ of `binomial_distrib`, and Euler's constant \f$\gamma \approx 0.5772\f$.
+
+| Distribution | Parameters | Formula | Exact MLE |
+|---|---|---|---|
+| \ref distrib_bernoulli "bernoulli_distrib" | \f$\mu\f$ | \f$\mu = \bar{y}\f$ | Yes |
+| \ref distrib_binomial "binomial_distrib" | \f$\mu\f$ | \f$\mu = \bar{y} / N\f$ | Yes |
+| \ref distrib_cauchy "cauchy_distrib" | \f$(\mu, \sigma)\f$ | \f$\mu = q_{0.5}\f$, \f$\sigma = (q_{0.75} - q_{0.25})/2\f$ | No (robust) |
+| \ref distrib_chisq "chisq_distrib" | \f$\mu\f$ | \f$\mu = \bar{y}\f$ | No (moment) |
+| \ref distrib_exponential "exponential_distrib" | \f$\mu\f$ | \f$\mu = \bar{y}\f$ | Yes |
+| \ref distrib_gamma1 "gamma1_distrib" | \f$(\mu, \phi)\f$ | \f$\mu = \bar{y}\f$, \f$\phi = s^2 / \bar{y}^2\f$ | \f$\mu\f$ only (\f$\phi\f$ moment) |
+| \ref distrib_gamma2 "gamma2_distrib" | \f$(\mu, \sigma^2)\f$ | \f$\mu = \bar{y}\f$, \f$\sigma^2 = s^2\f$ | \f$\mu\f$ only (\f$\sigma^2\f$ moment) |
+| \ref distrib_gaussian1 "gaussian1_distrib" | \f$(\mu, \sigma)\f$ | \f$\mu = \bar{y}\f$, \f$\sigma = s\f$ | Yes |
+| \ref distrib_gaussian2 "gaussian2_distrib" | \f$(\mu, v)\f$ | \f$\mu = \bar{y}\f$, \f$v = s^2\f$ | Yes |
+| \ref distrib_gaussian3 "gaussian3_distrib" | \f$(\mu, \tau)\f$ | \f$\mu = \bar{y}\f$, \f$\tau = 1 / s^2\f$ | Yes |
+| \ref distrib_geometric "geometric_distrib" | \f$\mu\f$ | \f$\mu = \bar{y}\f$ | Yes |
+| \ref distrib_gumbel "gumbel_distrib" | \f$(\mu, \sigma)\f$ | \f$\mu = \bar{y} - \gamma \sqrt{6 s^2}/\pi\f$, \f$\sigma = \sqrt{6 s^2}/\pi\f$ | No (moment) |
+| \ref distrib_invgauss "invgauss_distrib" | \f$(\mu, \phi)\f$ | \f$\mu = \bar{y}\f$, \f$\phi = \bar{r}_+ - 1/\bar{y}\f$ | Yes |
+| \ref distrib_laplace1 "laplace1_distrib" | \f$(\mu, \sigma)\f$ | \f$\mu = q_{0.5}\f$, \f$\sigma = \bar{d}\f$ | Yes |
+| \ref distrib_laplace2 "laplace2_distrib" | \f$(\mu, \lambda)\f$ | \f$\mu = q_{0.5}\f$, \f$\lambda = 1 / \bar{d}\f$ | Yes |
+| \ref distrib_logistic "logistic_distrib" | \f$(\mu, \sigma)\f$ | \f$\mu = \bar{y}\f$, \f$\sigma = \sqrt{3 s^2}/\pi\f$ | No (moment) |
+| \ref distrib_lognormal1 "lognormal1_distrib" | \f$(\mu, v)\f$ | \f$\mu = \bar{z}_+\f$, \f$v = s_z^2\f$ | Yes |
+| \ref distrib_lognormal2 "lognormal2_distrib" | \f$(m, v)\f$ | \f$m = \bar{y}\f$, \f$v = s^2\f$ | No (moment) |
+| \ref distrib_poisson "poisson_distrib" | \f$\mu\f$ | \f$\mu = \bar{y}\f$ | Yes |
+
+Because the Cauchy law has no moments, `cauchy_distrib` uses the median and half the interquartile range as a robust estimate. For `laplace1_distrib` and `laplace2_distrib` at even \f$n\f$, every value of \f$\mu\f$ between the two middle order statistics maximizes the likelihood, and the type-7 median (their midpoint) is one of them.
+
+## Example
+
+The following host function summarizes a sample of positive values for `gamma2_distrib` and a sample of counts for `binomial_distrib` with `size` equal to 10:
+
+\code{.cpp}
+#include <laplace/distrib/binomial.hpp>
+#include <laplace/distrib/gamma2.hpp>
+#include <laplace/distrib/generic_start.hpp>
+#include <vector>
+
+double compute_starts() {
+  const std::vector<double> y = {1.2, 2.5, 1.8, 3.1, 2.4};
+  const auto s = laplace::distrib::summarize_sample(y);
+  const auto g = laplace::distrib::distrib_start_value(laplace::distrib::gamma2_distrib{}, s);
+
+  const std::vector<double> counts = {2.0, 4.0, 3.0, 5.0, 1.0};
+  const auto s2 = laplace::distrib::summarize_sample(counts);
+  const auto b = laplace::distrib::distrib_start_value(laplace::distrib::binomial_distrib{0.0, 10.0}, s2);
+  return g.mu + b.mu;
+}
+\endcode
+
+## Module functions
+
+- \ref laplace::distrib::distrib_sample_summary "distrib_sample_summary" — summary statistics of a sample
+- \ref laplace::distrib::summarize_sample(std::vector<double>) "summarize_sample(y)" — summary of a sample in a `std::vector<double>`
+- \ref laplace::distrib::summarize_sample(const Kokkos::View<const double*, Props...>&) "summarize_sample(view)" — summary of a sample in a `Kokkos::View`, copied to the host once
+- \ref laplace::distrib::distrib_start_value "distrib_start_value()" — starting parameters of a distribution from a sample summary
+- \ref laplace::distrib::start_inside "start_inside()" — moves a value strictly inside a parameter's open natural domain
+
+## References
+
+- R. J. Hyndman and Y. Fan (1996), Sample Quantiles in Statistical Packages, The American Statistician, 50(4), 361–365. https://doi.org/10.1080/00031305.1996.10473566
+*/

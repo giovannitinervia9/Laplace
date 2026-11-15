@@ -1,0 +1,82 @@
+/**
+\addtogroup optimizers_multistart
+
+This page documents the multistart wrapper \ref laplace::optimizers::multistart_optimizer "multistart_optimizer" (`multistart_optimizer<Inner>`) in namespace `laplace::optimizers`, defined in `<laplace/optimizers/multistart.hpp>`. It is a header-only template that runs on the host only; nothing is marked `LAPLACE_HD` and no library is linked. It executes any inner optimizer `Inner` sequentially from several starting points and keeps the best run, using the objectives and report documented on \ref optimizers "the optimizers page" and any inner method such as BFGS or L-BFGS on \ref optimizers_quasi_newton "the quasi-Newton page". Because it models \ref laplace::optimizers::optimizer_for "optimizer_for" for every objective accepted by `Inner`, a run is `minimize(multistart_optimizer<bfgs_optimizer<>>{}, f, x0)`. On the four-dimensional Styblinski-Tang function started in the basin of its worst minimum, BFGS from \f$40\f$ starts finds all \f$5\f$ distinct optimum values including the global minimum in \f$0.49\f$ ms.
+
+## Starting points
+
+The wrapper takes its starting points either from caller-supplied vectors or from deterministic Latin hypercube sampling around \f$x_0\f$ (McKay, Beckman, and Conover, 1979). When `starts` is not empty, its points are used as given in that order and `x0` is ignored. Otherwise `generated_starts(x0)` returns \f$x_0\f$ followed by \f$m\f$ Latin-hypercube points, where \f$m\f$ equals `start_count` minus \f$1\f$ (and `start_count` equal to \f$1\f$ gives \f$x_0\f$ alone). On each coordinate \f$j\f$, the interval \f$[x_{0,j} - h_j,\, x_{0,j} + h_j]\f$ with half-width \f$h_j = 3 \sigma \max(1, |x_{0,j}|)\f$ and \f$\sigma\f$ equal to `spread` is cut into \f$m\f$ equal strata, each used once in a shuffled order with a uniform offset inside the stratum; the exact formula is given under \ref laplace::optimizers::multistart_optimizer "multistart_optimizer". A 64-bit linear congruential generator seeded with `seed` produces identical starts across platforms and compilers. Because the points live in the free parametrization of the objective, no start can fall outside the domain of a constrained parameter when the objective maps the constraints away.
+
+## Run selection
+
+Starts are executed one after the other and compared in execution order so that the wrapper keeps the best run rather than the last. A run whose objective value is not finite is never kept while a finite run exists; if every run produces a non-finite value, the first run is reported. A converged run, for which \ref laplace::optimizers::optimizer_succeeded "optimizer_succeeded()" returns `true`, always beats a non-converged run regardless of their objective values. Between two runs of the same convergence kind, a later run replaces the kept run only when its objective value is lower by more than `distinct_tolerance`.
+
+## Report and counts
+
+Calling `run(objective, x0)`, or \ref laplace::optimizers::minimize "minimize()" on a `multistart_optimizer`, returns the kept run's \ref laplace::optimizers::optimizer_report "optimizer_report" with the iterations, the evaluation counts and the time summed over all starts. Calling `run_multistart(objective, x0)` returns a \ref laplace::optimizers::multistart_report "multistart_report", which adds every start's own report and counts of the starts, of the converged starts, of the distinct optima and of the starts that found the kept value. A count of distinct optima above \f$1\f$ shows that the objective has several local minima; the rule that counts them is given in the entry of `multistart_report`.
+
+## Settings
+
+The settings are public members of \ref laplace::optimizers::multistart_optimizer "multistart_optimizer", whose entry gives each default and its effect: the inner optimizer, the number of starts (10), the caller's starts, the spread (1), the seed (1) and `distinct_tolerance` (\f$10^{-5}\f$). The tolerance should not be tighter than the accuracy of the inner optimizer's stopping rule, since runs that reach the same minimum differ in value by about that accuracy.
+
+## Measurements and limits
+
+Measured with gcc on one thread using `bfgs_optimizer` inside on the Styblinski-Tang function
+\f[ f(x) = \frac{1}{2} \sum_{i=1}^n \left(x_i^4 - 16 x_i^2 + 5 x_i\right) \f]
+from \f$x_0 = (2.5, \dots, 2.5)\f$, which lies in the basin of the worst of its \f$2^n\f$ local minima (taking \f$n + 1\f$ distinct optimum values), a single start remains at the worst minimum while multiple starts find the global minimum.
+
+| Dimension \f$n\f$ | Starts | Converged | Distinct optima | Global found | Evaluations of \f$f\f$ and \f$g\f$ | Time (ms) |
+|---|---|---|---|---|---|---|
+| 2 | 1 | 1 | 1 | no | 6 | 0.010 |
+| 2 | 10 | 10 | 3 | yes | 130 | 0.086 |
+| 2 | 40 | 40 | 3 | yes | 533 | 0.33 |
+| 4 | 10 | 10 | 3 | no | 193 | 0.12 |
+| 4 | 40 | 40 | 5 | yes | 805 | 0.49 |
+
+The tests check the selection rule on scripted runs (converged against non-converged in both orders, the tolerance, non-finite values, and keeping the best rather than the last), the optimum counts on a scripted list, the generated starts (\f$x_0\f$ first, each stratum visited once on every coordinate, determinism for the same seed and distinct points for another seed), caller-given starts, and the global minimum of Styblinski-Tang for \f$n = 2\f$ and \f$n = 4\f$ with \f$40\f$ starts within \f$10^{-5}\f$ in value. See `docs/numerics.md` for details of the measurements.
+
+The runtime cost is the sum of the inner runs plus negligible start generation, and memory holds the starts and one report per start, each \f$O(n)\f$ in the parameter dimension. Starts run sequentially on one thread; generated starts cover only the box around `x0`, so a minimum outside it is found only if an inner run walks there; selection and counts compare values, so two minima within `distinct_tolerance` count as one optimum; and whether the kept run is a minimum is as good as the inner optimizer's own verdict.
+
+## Example
+
+The example minimizes the one-dimensional function \f$f(x) = x^4 - 3 x^2 + x\f$ from \f$x_0 = 1.5\f$ using \f$10\f$ starts with BFGS and returns the number of distinct optima found, after `Kokkos::initialize`.
+
+```cpp
+#include <laplace/optimizers/bfgs.hpp>
+#include <laplace/optimizers/multistart.hpp>
+
+struct double_well_objective {
+  double value(const laplace::optimizers::optimizer_point& x) const {
+    const double v = x(0);
+    return v * v * v * v - 3.0 * v * v + v;
+  }
+  double value_gradient(const laplace::optimizers::optimizer_point& x,
+                        const laplace::optimizers::optimizer_vector& g) const {
+    const double v = x(0);
+    g(0) = 4.0 * v * v * v - 6.0 * v + 1.0;
+    return v * v * v * v - 3.0 * v * v + v;
+  }
+};
+
+int double_well_example() {
+  laplace::optimizers::optimizer_vector x0("x0", 1);
+  x0(0) = 1.5;
+  double_well_objective f;
+  laplace::optimizers::multistart_optimizer<laplace::optimizers::bfgs_optimizer<>> ms;
+  ms.start_count = 10;
+  const laplace::optimizers::multistart_report r = ms.run_multistart(f, x0);
+  return r.distinct_optimum_count;
+}
+```
+
+## Module types
+
+In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::multistart_report "multistart_report"
+- \ref laplace::optimizers::multistart_optimizer "multistart_optimizer"
+
+## References
+
+- M. D. McKay, R. J. Beckman and W. J. Conover (1979), Comparison of three methods for selecting values of input variables in the analysis of output from a computer code, Technometrics, 21(2), 239–245. https://doi.org/10.1080/00401706.1979.10489755
+
+*/

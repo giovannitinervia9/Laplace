@@ -449,6 +449,16 @@ struct gaussian1_distrib {
   /// \ingroup distrib_gaussian1
   /// \brief Kinks in observation \f$y\f$ (none).
   LAPLACE_HD distrib_kinks y_kinks() const { return {}; }
+  /**
+   * \ingroup distrib_gaussian1
+   * \brief Starting value from a sample summary: \f$\mu = \bar{y}\f$ (`s.mean`) and \f$\sigma = \sqrt{s^2}\f$ (`s.variance`), the maximum likelihood estimate, kept strictly inside the open domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c gaussian1_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): the sample mean and standard deviation (divisor n), the MLE; strictly inside the domain.
+  gaussian1_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.mean, params[0]), start_inside(Kokkos::sqrt(s.variance), params[1])}; }
+
 };
 
 }  // namespace laplace::distrib

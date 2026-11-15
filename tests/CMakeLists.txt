@@ -71,6 +71,8 @@ set(LAPLACE_TEST_SOURCES
   optimizers/test_optimizers.cpp
   optimizers/test_quasi_newton.cpp
   optimizers/test_multistart.cpp
+  optimizers/test_fit_distrib.cpp
+  optimizers/test_all_headers.cpp
   optimizers/test_second_order.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})

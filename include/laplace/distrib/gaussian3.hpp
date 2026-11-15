@@ -388,6 +388,16 @@ struct gaussian3_distrib {
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
   /// Kinks in observation \f$y\f$ (none).
   LAPLACE_HD distrib_kinks y_kinks() const { return {}; }
+  /**
+   * \ingroup distrib_gaussian3
+   * \brief Starting value from a sample summary: \f$\mu = \bar{y}\f$ (`s.mean`) and \f$\tau = 1 / s^2\f$ (`s.variance`), the maximum likelihood estimate, kept strictly inside the open domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c gaussian3_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): the sample mean and the inverse of the variance (divisor n), the MLE; strictly inside the domain.
+  gaussian3_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.mean, params[0]), start_inside(1.0 / s.variance, params[1])}; }
+
 };
 
 }  // namespace laplace::distrib

@@ -5937,8 +5937,15 @@ Stationarity: the decrement
 (1/2) max(g' B g, gamma_max g' g), with g' B g = |g' d| for the next
 direction d and gamma_max the largest s'y / y'y of the accepted pairs (0
 before any pair), and a convergence verdict of the stopping rule confirmed
-on the next iteration (if the confirming line search cannot move the point,
-the verdict stands).
+on the next iteration (if the confirming line search finds no acceptable
+step, below rounding, below its resolution, without a descent direction or
+with its evaluation budget spent, the verdict stands). The budget case was
+added after a run started at the optimum on the GPU, where f varies with the
+order of the reduction: the confirming Wolfe search spent its 30 evaluations
+and the run ended line search failed. Reproduced on the host with
+f = 1000 + |x|^2 / 2 carrying a relative noise of 1024 eps, n = 3, from
+x = 1e-6 (decrement 1.5e-12): before, line search failed after 31
+evaluations; now converged.
 
 Why both. (1/2) g' B g alone, with the default tolerance 1e-6, declared BFGS
 converged far from x* on the quadratics of the battery (n = 10, x0 = 0,
@@ -6160,3 +6167,142 @@ max_iterations 200 for Newton and 1000 trial steps for the trust region,
 costs Brown badly scaled 37 times its iterations. The trust region takes an
 eigendecomposition at every accepted point where the Newton step does not
 fit; at n = 100 it is 1.3 times slower than Newton for the same iterations.
+
+## The fit_distrib bench: starting values, Newton and BFGS on iid data
+
+What. The optimizers of wave 1 fitted to iid samples of the 16 parametrizations
+with frozen references (cauchy, chisq, exponential, gamma1, gamma2, gaussian1-3,
+gumbel, invgauss, laplace1, laplace2, logistic, lognormal1, lognormal2, poisson)
+and of bernoulli, binomial and geometric, with starting values from the library.
+The bench is a test, not an API (`tests/optimizers/fit_distrib_bench.hpp`); the
+starting values are in the library (`include/laplace/distrib/generic_start.hpp`
+and a `start_value` member in each distrib).
+
+How. The objective is f(u) = -sum_i l(theta(u); y_i), summed over the n
+observations, in free coordinates u with theta_j = h_j(u_j): the identity on R,
+exp on (0, inf), the logistic map on (0, 1). One Kokkos `parallel_reduce` per
+call accumulates 1 sum (value), 1 + P (value and score) or 1 + P + P(P+1)/2
+(also the observed second derivatives); the chain rule through h is applied on
+the host. The expected curvature is n I(theta) h' h'^T, with I(theta) evaluated
+once on the host, so Fisher scoring costs one order-1 pass per iteration. The
+observed curvature is refused for a parameter whose log-density has regularity
+r_j < 2 (mu of laplace1 and laplace2). Methods: Newton with the observed
+curvature, Newton with the expected one, BFGS (Wolfe search); stop rule
+decrement <= 1e-6 in log-likelihood units.
+
+Starting values. `summarize_sample(y)` (mean and variance with divisor n,
+median and quartiles of type 7, mean |y - median|, moments of log y and the
+mean of 1/y over y > 0) and `distrib_start_value(prototype, summary)`, which
+calls the distrib's own `start_value`; a distrib without one does not compile.
+The member gives the closed-form MLE where one exists (gaussian1-3, lognormal1,
+exponential, poisson, geometric, bernoulli, binomial, invgauss with phi =
+mean(1/y) - 1/mean, laplace1 and laplace2 from the median and mean |y - median|)
+and a moment estimate otherwise (gamma1, gamma2, lognormal2, logistic, gumbel,
+chisq; cauchy from the median and half the interquartile range). Each value is
+moved strictly inside its domain (`start_inside`: 1e-8 max(|v|, 1) at an end 0,
+16 eps relative at another finite end), so that u is finite even when the MLE is
+on the boundary.
+
+Results (gcc and CUDA builds alike). All 16 x {n = 1e3, 1e5} x {library start,
+poor start (u + 1 in every coordinate)} x {Newton observed (14 distribs), Newton
+expected, BFGS}: 188 of 188 runs converged. Every estimate is within the bound
+the decrement rule allows, |u_j - u_j*| <= sqrt(4 tol (H^-1)_jj) with H the
+expected curvature in u, of the closed-form MLE where it exists and of the frozen
+statmodels7 estimate. The largest relative distance from the closed forms at
+n = 1e3 is 4.0e-5 (Newton observed, stopping at a decrement of up to 1.4e-7 after
+one step); BFGS 1.1e-6. The log-likelihood is never below the reference's by more
+than 2 tol. Bernoulli (mu 0.3), binomial (mu 0.3, size 10) and geometric (mu 2.5)
+on 1e3 and 1e5 draws in C++ (inversion, counter-based source, fixed seed) reach
+the sample mean within the same bound.
+
+- laplace1, laplace2: at even n the log-likelihood is flat in mu between the two
+  middle order statistics, and every mu there is an MLE. Newton with the expected
+  curvature and BFGS end inside that interval (log-likelihood equal to the
+  reference within 4e-13); the test checks the interval, not the midpoint.
+- Boundary data (bernoulli all 0 or all 1, geometric all 0, n = 1e3 and 1e5):
+  every run ends converged, correctly in the objective's units: -l tends to its
+  infimum 0 only as u tends to infinity, and the decrement n mu / 2 is the true
+  remaining decrease (bernoulli all 0: mu = 1.35e-9, -l = 1.35e-6, decrement
+  6.8e-7 after 2 Newton iterations). The bench flags such a fit as on the boundary
+  of the domain; the flag is about the fit, and the optimizer's verdict is about f.
+  The rule: some parameter with a finite end of its domain has a standard error
+  above 10 in its free coordinate, sqrt((H^-1)_jj) with H = n I(theta) h' h'^T
+  the expected information in u. These coordinates are log or logit maps, so the
+  measure is relative and does not depend on the scale of theta; parameters on
+  all of R are not checked. Measured, Newton (both curvatures) and BFGS from the
+  library start: on boundary data the standard error is 860 to 1080 (bernoulli
+  and geometric all 0, n = 1e3 and 1e5), 5.3e4 and 5.3e5 (bernoulli all 1), 3.2e3
+  to 7.5e3 (bernoulli 0.01 drawn at n = 2 to 10, every draw 0). On genuine fits it
+  is at most 0.076 for every reference fit at n = 1e3 and 1e5, 0.045 for gaussian3
+  with tau = 1e-6 on data of scale 1e3 (n = 1e3, estimate 9.5e-7), 0.022 for
+  gaussian1 with sigma = 1e-4, 0.032 for exponential with mu = 1e-5, 0.042 for
+  gamma1 with mu = 1e3, and at most 1.41 on samples of n = 2, 3, 5 and 10 of the
+  same laws and of bernoulli 0.5 and geometric 0.05 (the largest: bernoulli 0.5 at
+  n = 2, mu = 0.5). A threshold of 10 lies more than 7 times inside either side.
+  Two alternatives fail: theta within 1e-6 relative of the end measured against
+  the start does not flag bernoulli all 0, whose start is already 1e-8; a large
+  move of u from its start does not separate it either (2 units, against 1 unit
+  for every run from the poor start).
+- BFGS from a start at the optimum on the GPU: the reduction sums in an order that
+  depends on the backend, so f varies at a few eps |f|; the step that confirms a
+  convergence (two consecutive passes) found no acceptable point and ended with
+  its evaluation budget (gaussian3, lognormal1, poisson at n = 1e5: start
+  decrement 1e-19, line search failed after 30 evaluations). BFGS and L-BFGS now
+  keep a pending verdict also when the confirming search exhausts its budget, and
+  these runs end converged.
+
+Times (ms per fit, the fastest of repeated fits; library start; gcc 14.2 with
+OpenMP on 1 and 16 threads, CUDA 13.1 on an RTX 4070 SUPER; n = 1e6 drawn in C++
+at the references' true values). Iterations are those of n = 1e5 (in brackets
+where n = 1e6 differs).
+
+| distrib | method | it | 1e3: 1 / 16 / GPU | 1e5: 1 / 16 / GPU | 1e6: 1 / 16 / GPU |
+|---|---|---|---|---|---|
+| gaussian1 | Newton expected | 0 | 0.011 / 0.041 / 0.029 | 0.55 / 0.11 / 0.055 | 5.5 / 0.71 / 0.25 |
+| lognormal1 | Newton expected | 0 | 0.020 / 0.045 / 0.032 | 1.46 / 0.20 / 0.080 | 15.2 / 1.73 / 0.48 |
+| laplace1 | Newton expected | 0 | 0.012 / 0.043 / 0.028 | 0.80 / 0.11 / 0.051 | 7.8 / 0.82 / 0.21 |
+| poisson | Newton expected | 0 | 0.092 / 0.056 / 0.078 | 9.7 / 1.10 / 0.42 | 98 / 10.7 / 3.7 |
+| cauchy | Newton expected | 1 | 0.15 / 0.24 / 0.14 | 9.7 / 0.93 / 0.28 | 100 / 8.2 / 2.0 |
+| logistic | Newton observed | 1 | 0.63 / 0.23 / 0.16 | 63 / 7.1 / 0.83 | 632 / 70 / 7.1 |
+| logistic | Newton expected | 1 | 0.22 / 0.26 / 0.15 | 13.9 / 1.40 / 0.35 | 140 / 12.4 / 2.6 |
+| logistic | BFGS | 7 (6) | 0.42 / 0.47 / 0.30 | 54 / 5.4 / 1.5 | 1953 / 50 / 12.4 |
+| gumbel | Newton expected | 1 | 0.16 / 0.25 / 0.11 | 10.5 / 1.17 / 0.18 | 105 / 10.5 / 1.0 |
+| gamma1 | Newton expected | 2 (1) | 0.98 / 0.35 / 0.59 | 98 / 11.1 / 3.9 | 626 / 68 / 20 |
+| gamma2 | Newton observed | 2 (1) | 2.5 / 0.54 / 1.08 | 248 / 27 / 7.9 | 1573 / 168 / 42 |
+| gamma2 | Newton expected | 2 (1) | 1.35 / 0.41 / 0.68 | 133 / 15.0 / 4.7 | 867 / 91 / 24 |
+| gamma2 | BFGS | 4 (3) | 3.4 / 0.89 / 1.6 | 303 / 34 / 10.6 | 3693 / 396 / 104 |
+| lognormal2 | Newton expected | 2 (1) | 0.88 / 0.35 / 0.20 | 88 / 7.3 / 0.93 | 553 / 46 / 4.5 |
+| chisq | Newton expected | 1 | 0.39 / 0.20 / 0.26 | 41 / 4.4 / 1.5 | 392 / 43 / 12.6 |
+
+Cost of one pass at n = 1e6 (us per pass, 1 thread / 16 threads / GPU), order 0
+(value) and order 2 (value, score, observed second derivatives):
+
+| distrib | order 0 | order 2 |
+|---|---|---|
+| gaussian1 | 4381 / 547 / 171 | 7478 / 922 / 379 |
+| logistic | 40795 / 3277 / 434 | 313360 / 30911 / 3250 |
+| gamma2 | 125386 / 12995 / 3861 | 748667 / 73881 / 18731 |
+| poisson | 96760 / 10728 / 3588 | 97440 / 10299 / 3719 |
+
+What it says. The start decides most of the work: with the closed-form MLE as the
+start, nine of the sixteen fits take no iteration (one pass; at 1e6 0.2-0.5 ms on
+the GPU, poisson 3.7 ms). An iteration of Fisher scoring needs an order-1 pass
+only, so it is 2-5 times faster per fit than Newton with the observed curvature
+wherever the second derivatives are expensive (logistic 4.5 times at 1e5, gamma2
+1.9 times); it is slower where it needs one more iteration (gumbel and logistic
+at n = 1e3, 2 iterations instead of 1). BFGS takes 2-5 times the time of Fisher
+scoring (more passes, no curvature). At n = 1e5 and 1e6, 16 threads give 8-12
+times one thread for the costly densities and 5-10 times for the cheap ones; at
+n = 1e3 the fork-join overhead (about 37 us a pass) makes them slower than one
+thread for the cheap distribs. At 1e6 the GPU gives 20-37 times one thread for
+most distribs, 54 times for logistic and 102 times for gumbel.
+
+Open. (1) The confirming step of BFGS (decision 5, V3) costs up to 30 value
+evaluations when f is noisy at its rounding level just above the resolution
+(logistic at 1e6 on one thread: 39 value evaluations and 1953 ms, against 11
+evaluations and 50 ms on 16 threads);
+a resolution of a few tens of eps |f| would remove it, at the price of stopping
+earlier where the curvature is small. (2) Poisson, chisq and the gamma
+parametrizations evaluate lgamma or the Stirling error at every pass although
+the terms that depend only on y could be summed once; that is an engine
+optimization (sufficient statistics), not done here.

@@ -582,6 +582,16 @@ struct lognormal2_distrib {
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
   /// Kinks in observation \f$y\f$ (none).
   LAPLACE_HD distrib_kinks y_kinks() const { return {}; }
+  /**
+   * \ingroup distrib_lognormal2
+   * \brief Starting value from a sample summary: moment estimate \f$m = \bar{y}\f$ (`s.mean`) and \f$v = s^2\f$ (`s.variance`), kept strictly inside the open domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c lognormal2_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): the sample mean and variance (moments); strictly inside the domain.
+  lognormal2_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.mean, params[0]), start_inside(s.variance, params[1])}; }
+
 };
 
 }  // namespace laplace::distrib

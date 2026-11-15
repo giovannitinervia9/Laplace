@@ -467,6 +467,16 @@ struct cauchy_distrib {
    * \return Kinks descriptor \c distrib_kinks with \c count = 0.
    */
   LAPLACE_HD distrib_kinks y_kinks() const { return distrib_kinks{}; }
+  /**
+   * \ingroup distrib_cauchy
+   * \brief Starting value from a sample summary: \f$\mu = q_{0.5}\f$ (`s.median`) and \f$\sigma = (q_{0.75} - q_{0.25}) / 2\f$ (from `s.upper_quartile` and `s.lower_quartile`), a robust estimate, kept strictly inside the open domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c cauchy_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): the median and half the interquartile range (the law has no moments); strictly inside the domain.
+  cauchy_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.median, params[0]), start_inside(0.5 * (s.upper_quartile - s.lower_quartile), params[1])}; }
+
 };
 
 }  // namespace laplace::distrib

@@ -189,14 +189,178 @@ class trust_region_subproblem {
 
 /**
  * \ingroup optimizers_second_order
- * \brief Trust-region method with the exact dense subproblem (Moré and Sorensen).
+ * \brief Trust-region method with the exact dense subproblem.
  *
- * Minimizes an objective modeling `curvature_objective` with `dense_curvature_matrix` on the host
- * by solving the quadratic trust-region subproblem \f$\min_{\lVert p\rVert_2 \le \Delta} g^\top p + \tfrac12 p^\top H p\f$
- * at each trial step.
+ * Minimizes an objective modeling curvature_objective whose `curvature_type`
+ * is dense_curvature_matrix, starting from `x0` on the host. Because it calls
+ * `laplace::dense` internally, programs using it link `Laplace::dense`. Runs
+ * are invoked through minimize() or `run()`. The template parameter `StopRule`
+ * defaults to decrement_stop_rule, and stop_rule_for admits any stopping rule
+ * requiring at most the gradient, the decrement, and the previous point and
+ * value.
  *
- * \tparam StopRule Stopping rule accepting the gradient, decrement, and previous point and value;
- *   `decrement_stop_rule` by default.
+ * ### Model and subproblem
+ *
+ * Let \f$x \in \mathbb{R}^n\f$ be the current point with value \f$f(x)\f$,
+ * gradient \f$g = \nabla f(x)\f$, and symmetric curvature matrix \f$H\f$. Each
+ * trial step \f$p \in \mathbb{R}^n\f$ minimizes the quadratic model
+ * \f[
+ *   m(p) = g^\top p + \tfrac{1}{2} p^\top H p
+ * \f]
+ * over \f$\lVert p\rVert_2 \le \Delta\f$, where \f$\Delta > 0\f$ is the
+ * trust-region radius. The optimality conditions are
+ * \f[
+ *   (H + \lambda I) p = -g, \qquad
+ *   \lambda \ge 0, \qquad
+ *   \lambda (\Delta - \lVert p\rVert_2) = 0,
+ * \f]
+ * with \f$H + \lambda I\f$ positive semidefinite, where \f$I\f$ is the
+ * identity matrix and \f$\lambda\f$ is the Lagrange multiplier (Moré and
+ * Sorensen, 1983).
+ *
+ * ### Solving the subproblem
+ *
+ * Each subproblem is solved in one of three cases:
+ * - When \f$H\f$ has a Cholesky factor and the Newton step satisfies
+ *   \f$\lVert H^{-1} g\rVert_2 \le \Delta\f$, the step is \f$p = -H^{-1} g\f$
+ *   with \f$\lambda = 0\f$.
+ * - Otherwise the method forms the symmetric eigendecomposition
+ *   \f$H = V \operatorname{diag}(w) V^\top\f$ with eigenvalues
+ *   \f$w_1 \le \dots \le w_n\f$ and eigenvectors \f$v_1, \dots, v_n\f$ as the
+ *   columns of \f$V\f$. Let \f$\gamma = V^\top g\f$,
+ *   \f$\lVert p(\lambda)\rVert_2^2 = \sum_i \gamma_i^2 / (w_i + \lambda)^2\f$,
+ *   and \f$\delta = 8 n \varepsilon \max_i |w_i|\f$, with \f$\varepsilon\f$ as
+ *   defined on \ref optimizers "the optimizers page". Let \f$\lambda_0 = 0\f$
+ *   when \f$w_1 > \delta\f$ and \f$\lambda_0 = \max(0, -w_1) + \delta\f$
+ *   otherwise, the smallest \f$\lambda\f$ at which every \f$w_i + \lambda\f$ is
+ *   resolved. When \f$\lVert p(\lambda_0)\rVert_2 > \Delta\f$, \f$\lambda\f$ solves
+ *   the secular equation \f$1 / \lVert p(\lambda)\rVert_2 = 1 / \Delta\f$
+ *   (Moré and Sorensen, 1983) by Newton's method safeguarded with bisection on
+ *   \f$[\max(0, -w_1),\ \max(0, -w_1) + \lVert g\rVert_2 / \Delta]\f$. Iteration
+ *   stops when \f$\lVert p\rVert_2\f$ is within \f$10^{-12} \Delta\f$ of
+ *   \f$\Delta\f$ or after 200 iterations. While solving, both \f$\gamma\f$ and
+ *   \f$\Delta\f$ are divided by \f$\max_i |\gamma_i|\f$ so that the squares
+ *   cannot overflow.
+ * - When \f$\lVert p(\lambda_0)\rVert_2 \le \Delta\f$, the step is taken at
+ *   \f$\lambda = 0\f$ if \f$w_1 > \delta\f$ and at \f$\lambda = \max(0, -w_1)\f$
+ *   otherwise, without the components whose \f$w_i + \lambda\f$ is below
+ *   \f$\delta\f$; for a singular positive semidefinite \f$H\f$ this is the
+ *   step of least norm. When \f$w_1 < -\delta\f$ (the hard case of Moré and
+ *   Sorensen, 1983), \f$\tau v_1\f$ is added, with \f$\tau\f$ chosen so that
+ *   \f$\lVert p\rVert_2 = \Delta\f$ and with sign opposite to that of
+ *   \f$\gamma_1\f$.
+ *
+ * ### Trial acceptance and radius update
+ *
+ * Each trial evaluates \f$f(x + p)\f$ and computes the ratio
+ * \f$\rho = (f(x) - f(x + p)) / (m(0) - m(p))\f$. When \f$\rho < 1/4\f$ or
+ * \f$f(x + p)\f$ is not finite, the radius shrinks to \f$\lVert p\rVert_2 / 4\f$.
+ * When \f$\rho > 3/4\f$ and \f$\lVert p\rVert_2 \ge 0.99\,\Delta\f$, it doubles
+ * up to `max_radius`. The step is accepted when \f$\rho >\f$ `acceptance`
+ * (Nocedal and Wright, 2006, Algorithm 4.1). A rejected trial keeps \f$x\f$,
+ * \f$g\f$, \f$H\f$, and their factorizations and solves the subproblem again
+ * with the new radius.
+ *
+ * ### Stationarity and stopping
+ *
+ * At the start (iteration 0) and at every accepted point, the method computes
+ * the decrement \f$\tfrac{1}{2} g^\top H^{-1} g\f$, as defined in the
+ * "Report and status" section of \ref optimizers "the optimizers page". Where
+ * \f$H\f$ has no Cholesky factor, the decrement is quiet NaN, so the default
+ * rule does not declare convergence there. The stopping rule is queried at
+ * iteration 0 and at every accepted point, never after a rejected trial.
+ *
+ * ### Settings
+ *
+ * The table lists the public members, their defaults, and what they control.
+ *
+ * | Member | Default | Effect |
+ * |---|---|---|
+ * | `stop_rule` | `decrement_stop_rule{}` | Stopping rule queried at the start and at every accepted point |
+ * | `max_iterations` | \f$1000\f$ | Maximum number of trial steps, accepted or not |
+ * | `max_value_evaluations` | \f$10^5\f$ | Value-evaluation budget checked before each trial step |
+ * | `initial_radius` | \f$1\f$ | Initial trust-region radius \f$\Delta\f$ |
+ * | `max_radius` | \f$+\infty\f$ | Upper bound on the trust-region radius \f$\Delta\f$ |
+ * | `acceptance` | \f$10^{-4}\f$ | Threshold on \f$\rho\f$ above which a trial step is accepted |
+ * | `trace` | empty | Optional optimizer_trace callback called at every accepted point with \f$\lVert p\rVert_2\f$ |
+ *
+ * Measured with gcc on one thread, setting `initial_radius` to 10 instead of
+ * 1 gives 2 instead of 5 trials on the quadratics and 26 instead of 31 on Brown
+ * badly scaled, but 12 instead of 4 on Rosenbrock from \f$(0, 1)\f$ and 11
+ * instead of 8 on helical valley.
+ *
+ * ### Report and statuses
+ *
+ * A run ends with one of the following statuses from
+ * \ref optimizers "the optimizers page":
+ * - `optimizer_status::start_not_admissible` is returned when \f$f(x_0)\f$ is
+ *   not finite.
+ * - `optimizer_status::converged`,
+ *   `optimizer_status::converged_at_resolution`, and
+ *   `optimizer_status::stopped_on_change` are returned directly from `stop_rule`.
+ * - `optimizer_status::iteration_budget` is returned when `max_iterations`
+ *   trial steps are reached.
+ * - `optimizer_status::evaluation_budget` is returned when `value_evaluations`
+ *   reaches `max_value_evaluations` before a trial step, so a run can exceed
+ *   the budget by the evaluations of one step.
+ * - `optimizer_status::stalled` is returned when the model predicts no decrease
+ *   (\f$m(0) - m(p) \le 0\f$, as at \f$g = 0\f$ with \f$H\f$ semidefinite, or
+ *   when the eigendecomposition fails) or when the trial point equals \f$x\f$
+ *   in every coordinate.
+ *
+ * The status `optimizer_status::line_search_failed` never occurs because there
+ * is no line search. In optimizer_report, `iterations` counts every trial step,
+ * the accepted steps are `gradient_evaluations` less 1, and
+ * `final_factorization` is the Cholesky outcome at the last accepted point.
+ *
+ * ### Cost and measured behaviour
+ *
+ * Each trial step performs one value evaluation and \f$O(n^2)\f$ work to form
+ * \f$p\f$. Each accepted point performs one evaluation of value, gradient, and
+ * curvature and one Cholesky factorization (\f$O(n^3)\f$). When the Newton step
+ * does not fit, the method also computes one symmetric eigendecomposition
+ * (\f$O(n^3)\f$, a larger constant), after which every secular iteration costs
+ * \f$O(n)\f$. Measured with gcc on one thread and the default decrement
+ * tolerance \f$10^{-6}\f$, extended Rosenbrock with \f$n = 100\f$ takes 23
+ * trials and 1966 microseconds per run.
+ *
+ * In the same gcc measurements and the test suite, Brown badly scaled converges
+ * to its minimizer at \f$(10^6, 2 \times 10^{-6})\f$ in 31 trials by doubling
+ * the radius, and quadratics of dimension \f$n = 10\f$ with condition number
+ * \f$10^2\f$ to \f$10^{12}\f$ converge in 5 trials from radius 1. On
+ * \f$x_1^2 + x_2^4 / 4 - x_2^2 / 2\f$, the method converges from \f$(1, 0)\f$,
+ * where \f$H\f$ is indefinite and \f$g_2 = 0\f$, in 5 trials, and from the
+ * saddle \f$(0, 0)\f$ itself through the hard case. On \f$x - \log x\f$ from 10
+ * with `initial_radius` equal to 100, the first trial goes to \f$-80\f$, where
+ * the non-finite value shrinks the radius and the run converges.
+ *
+ * ### Example
+ *
+ * The function below sets `initial_radius` and `max_radius`, calls minimize()
+ * on any curvature_objective `f` from `x0`, and reads `status`, `iterations`,
+ * and `gradient_evaluations`. See \ref optimizers_second_order for a complete
+ * objective definition.
+ *
+ * ```cpp
+ * #include <laplace/optimizers/minimize.hpp>
+ * #include <laplace/optimizers/trust_region.hpp>
+ *
+ * template <laplace::optimizers::curvature_objective O>
+ *   requires std::same_as<typename O::curvature_type, laplace::optimizers::dense_curvature_matrix>
+ * bool solve_with_trust_region(O& f, const laplace::optimizers::optimizer_point& x0) {
+ *   laplace::optimizers::trust_region_optimizer<> opt;
+ *   opt.initial_radius = 1.0;
+ *   opt.max_radius = 100.0;
+ *   const laplace::optimizers::optimizer_report report =
+ *       laplace::optimizers::minimize(opt, f, x0);
+ *   const int trials = report.iterations;
+ *   const long accepted = report.gradient_evaluations - 1;
+ *   return laplace::optimizers::optimizer_succeeded(report.status) && trials >= accepted;
+ * }
+ * ```
+ *
+ * \tparam StopRule Stopping rule accepting the gradient, decrement, and
+ *   previous point and value; `decrement_stop_rule` by default.
  * \see \ref optimizers_second_order, \ref optimizers, newton_optimizer, minimize()
  */
 template <class StopRule = decrement_stop_rule>

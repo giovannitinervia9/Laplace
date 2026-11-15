@@ -35,6 +35,7 @@ Every distribution provides static metadata, log-density or log-mass evaluations
 | `log_cdf_d1(y)` ... `_d6(y)` | `sym_tensor<P, K>` | Optional | Parameter derivatives \f$\frac{\partial^K}{\partial\theta^K} \log F(y; \theta)\f$ for \f$K \in \{1, \dots, 6\}\f$. |
 | `log_ccdf_d1(y)` ... `_d6(y)` | `sym_tensor<P, K>` | Optional | Parameter derivatives \f$\frac{\partial^K}{\partial\theta^K} \log(1 - F(y; \theta))\f$ for \f$K \in \{1, \dots, 6\}\f$. |
 | `quantile(p)` | `double` | Optional | Quantile function \f$F^{-1}(p)\f$ for \f$p \in (0, 1)\f$. |
+| `start_value(s)` | The distrib itself | Optional | Host only: parameters from a `distrib_sample_summary` (see \ref distrib_start "Starting values"). |
 
 ## Parameter and kink descriptors
 

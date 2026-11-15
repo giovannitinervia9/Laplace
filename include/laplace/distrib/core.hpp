@@ -15,6 +15,8 @@
 //   quantile(p)                   continuous: F^-1(p)
 //   support_lower(), _upper()     the ends of the support at theta
 //   center(), scale()             rough location and spread, for quadratures
+//   start_value(summary)          (host) a starting theta from a distrib_sample_summary
+//                                 (generic_start.hpp), strictly inside the domain
 //   param_kinks(j, y)             points of theta_j at which l is not smooth
 //   y_regularity, y_kinks()       (continuous) regularity of l in y and its non-smooth points
 //   logpdf_dy_dk<J, K>(y)         (continuous) J derivatives in y and the symmetric tensor of
@@ -184,5 +186,78 @@ struct expected_info_tensor {
   /// Array of derivative tensors, one per parameter pair.
   sym_tensor<P, K> pair[n_pairs];
 };
+
+/**
+ * \ingroup distrib_start
+ * \brief Sample summary statistics read by distribution \c start_value() members.
+ *
+ * Holds sample size, mean, variance (divisor \f$n\f$), type-7 quartiles, mean absolute
+ * deviation from the median, extremes, and moments over positive observations (\f$y_i > 0\f$).
+ * Computed on the host by summarize_sample().
+ * \see summarize_sample(), distrib_start_value(), distrib_start
+ */
+// What the starting values of a fit read from a sample (generic_start.hpp
+// computes it, each distrib's start_value member reads it). Divisor n in the
+// variances; the quartiles are R's type 7; the log moments and the mean of 1/y
+// are taken over y > 0 only (positive_count of them).
+struct distrib_sample_summary {
+  /// Total number of observations \f$n\f$.
+  double count = 0.0;
+  /// Sample mean \f$\bar{y} = \frac{1}{n}\sum_i y_i\f$.
+  double mean = 0.0;
+  /// Sample variance with divisor \f$n\f$, \f$\frac{1}{n}\sum_i (y_i - \bar{y})^2\f$.
+  double variance = 0.0;
+  /// Sample median (type-7 quantile at \f$p = 0.5\f$).
+  double median = 0.0;
+  /// Mean absolute deviation from the median, \f$\frac{1}{n}\sum_i |y_i - q_{0.5}|\f$.
+  double mean_abs_dev_median = 0.0;  // mean of |y - median|
+  /// Lower quartile (type-7 quantile at \f$p = 0.25\f$).
+  double lower_quartile = 0.0;
+  /// Upper quartile (type-7 quantile at \f$p = 0.75\f$).
+  double upper_quartile = 0.0;
+  /// Sample minimum \f$\min_i y_i\f$.
+  double minimum = 0.0;
+  /// Sample maximum \f$\max_i y_i\f$.
+  double maximum = 0.0;
+  /// Number of positive observations (\f$y_i > 0\f$).
+  double positive_count = 0.0;
+  /// Mean of \f$\log y_i\f$ over positive observations (\f$y_i > 0\f$).
+  double mean_log = 0.0;
+  /// Variance of \f$\log y_i\f$ with divisor \f$n_+\f$ over positive observations (\f$y_i > 0\f$).
+  double variance_log = 0.0;
+  /// Mean of \f$1 / y_i\f$ over positive observations (\f$y_i > 0\f$).
+  double mean_inverse = 0.0;
+};
+
+/**
+ * \ingroup distrib_start
+ * \brief Moves a candidate parameter value strictly inside its open natural domain.
+ *
+ * At a finite lower bound \f$l\f$ (\f$v \le l\f$), returns \f$10^{-8}\max(|v|, 1)\f$ when \f$l = 0\f$
+ * and \f$l + 16\varepsilon|l|\f$ otherwise. At an upper bound \f$u\f$ (\f$v \ge u\f$), returns
+ * \f$10^{300}\f$ when \f$u = +\infty\f$, \f$-10^{-8}\f$ when \f$u = 0\f$, and \f$u - 16\varepsilon|u|\f$
+ * otherwise, where \f$\varepsilon\f$ is double-precision machine epsilon. Values inside \f$(l, u)\f$
+ * and \c NaN stay unchanged.
+ * \param v Candidate parameter value.
+ * \param p Parameter descriptor carrying \c lower and \c upper domain bounds.
+ * \return Value strictly inside the open domain \f$(l, u)\f$, or \c NaN if \p v is \c NaN.
+ * \see distrib_param_info, distrib_start_value(), distrib_start
+ */
+// v moved strictly inside the open domain (lower, upper) of a parameter: at a
+// lower end 0 to 1e-8 max(|v|, 1), at another finite end by 16 eps relative
+// (1e-8 absolute at 0), at an infinite one to 1e300; NaN stays NaN.
+inline double start_inside(double v, const distrib_param_info& p) {
+  constexpr double e16 = 16.0 * std::numeric_limits<double>::epsilon();
+  if (v <= p.lower) {
+    if (p.lower == 0.0) return 1e-8 * (v < -1.0 || v > 1.0 ? (v < 0 ? -v : v) : 1.0);
+    return p.lower + (p.lower < 0 ? -p.lower : p.lower) * e16;
+  }
+  if (v >= p.upper) {
+    if (p.upper == distrib_infinity) return 1e300;
+    if (p.upper == 0.0) return -1e-8;
+    return p.upper - (p.upper < 0 ? -p.upper : p.upper) * e16;
+  }
+  return v;
+}
 
 }  // namespace laplace::distrib

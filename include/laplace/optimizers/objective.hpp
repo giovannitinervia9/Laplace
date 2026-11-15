@@ -22,6 +22,9 @@
 
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
+#include <cmath>
+
 #include <concepts>
 
 namespace laplace::optimizers {
@@ -55,6 +58,18 @@ using optimizer_vector = Kokkos::View<double*, Kokkos::HostSpace>;
 // declares its own type of H as curvature_type, and the curvature solver is
 // chosen from it (dense_curvature_solver.hpp).
 using dense_curvature_matrix = Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace>;
+
+namespace detail {
+
+// max_i |v_i|, shared by the optimizers. NaN entries are skipped by max;
+// callers test the finiteness of the whole vector.
+inline double max_abs(const optimizer_point& v) {
+  double m = 0.0;
+  for (std::size_t i = 0; i < v.extent(0); ++i) m = std::max(m, std::abs(v(i)));
+  return m;
+}
+
+}  // namespace detail
 
 /**
  * \ingroup optimizers

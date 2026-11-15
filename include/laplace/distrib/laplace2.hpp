@@ -443,6 +443,16 @@ struct laplace2_distrib {
     k.point[0] = mu;
     return k;
   }
+  /**
+   * \ingroup distrib_laplace2
+   * \brief Starting value from a sample summary: \f$\mu = q_{0.5}\f$ (`s.median`) and \f$\lambda = 1 / \bar{d}\f$ (`s.mean_abs_dev_median`), the maximum likelihood estimate, kept strictly inside the open domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c laplace2_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): the median and the inverse of the mean absolute deviation from it, the MLE; strictly inside the domain.
+  laplace2_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.median, params[0]), start_inside(1.0 / s.mean_abs_dev_median, params[1])}; }
+
 };
 
 }  // namespace laplace::distrib

@@ -726,6 +726,16 @@ struct invgauss_distrib {
   LAPLACE_HD distrib_kinks param_kinks(int /*j*/, double /*y*/) const { return distrib_kinks{}; }
   /// No non-smooth points in y.
   LAPLACE_HD distrib_kinks y_kinks() const { return distrib_kinks{}; }
+  /**
+   * \ingroup distrib_invgauss
+   * \brief Starting value from a sample summary: \f$\mu = \bar{y}\f$ (`s.mean`) and \f$\phi = \bar{r}_+ - 1/\bar{y}\f$ (`s.mean_inverse` and `s.mean`), the maximum likelihood estimate, kept strictly inside the open domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return An \c invgauss_distrib with parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): the sample mean and phi = mean(1/y) - 1/mean, the MLE; strictly inside the domain.
+  invgauss_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.mean, params[0]), start_inside(s.mean_inverse - 1.0 / s.mean, params[1])}; }
+
 };
 
 }  // namespace laplace::distrib

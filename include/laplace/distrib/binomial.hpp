@@ -252,6 +252,16 @@ struct binomial_distrib {
   /// \ingroup distrib_binomial
   /// \brief Non-smooth points in parameter \f$\mu\f$ (none).
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
+  /**
+   * \ingroup distrib_binomial
+   * \brief Starting value from a sample summary: \f$\mu = \bar{y} / N\f$ (`s.mean` over `size` \f$N\f$), the maximum likelihood estimate, kept strictly inside \f$(0, 1)\f$.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c binomial_distrib preserving \c size with \c mu strictly inside \f$(0, 1)\f$.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  // Starting value from a sample (generic_start.hpp): the sample mean over the size, the MLE; strictly inside the domain.
+  binomial_distrib start_value(const distrib_sample_summary& s) const { return {start_inside(s.mean / size, params[0]), size}; }
+
 };
 
 }  // namespace laplace::distrib
