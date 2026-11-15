@@ -7778,3 +7778,80 @@ per-thread stack raised to 8192 bytes, which the test executable now asks the dr
 its first launch; the price measured on an RTX 4070 SUPER is 588 MB of device memory out of
 12282. A family with more parameters will need more, and the figure has to be measured again
 then.
+
+## Which side the derivatives of the incomplete beta compute
+
+**What.** `log_ibeta_dK` and `log_ibetac_dK` each ask for one side of the
+distribution, and the module can either compute that side or compute the other
+one and compose the complement. Which it does was decided by the sign of
+lambda = a - (a + b) x, the quantity whose sign says which side is monotone away
+from its end point: the monotone side was computed, and when that was not the
+side asked for, the answer came from the complement. The composition is the
+lossy step, and the choice ignored how well the requested side's own
+computation would do.
+
+**What it cost.** At x equal to the mean a/(a + b), lambda is zero in exact
+arithmetic and comes out negative by one rounding (at (a, b, x) = (1, 9, 0.1),
+where 9 * 0.1 is not 0.9, lambda is -5.55e-17), so the complement was taken
+there. Against mpmath at 60 digits on the pure-a derivatives:
+
+| (a, b, x) | probability of the requested side | the complement | the side's own computation |
+|---|---|---|---|
+| (1, 9, 0.1) | 0.6126 | 2.7e-7, 1.4e-4 | 1.9e-16, 1.1e-13 |
+| (1, 9, 0.16) | 0.7918 | 5.5e-9, 1.4e-6 | 7.1e-16, 1.8e-13 |
+| (1, 30, 0.0516) | 0.7960 | 4.7e-9, 1.4e-6 | 1.7e-16, 1.4e-12 |
+| (1, 2, 0.5333) | 0.7822 | 1.9e-16, 2.0e-15 | 3.7e-16, 1.8e-12 |
+
+the pairs being the orders one and six. It is a region and not a point: every
+lambda < 0 took the complement, and the loss is largest where the requested
+side holds between a half and nine tenths of the mass.
+
+**How it is chosen now.** The monotone side is still computed first, and when it
+is the side asked for nothing changes. When it is not, the requested side is
+computed directly instead of composing the complement, under two conditions,
+both measured:
+
+- its own shape is at least `own_min`, as in the first choice of the route.
+  Below that its own logarithm carries the pole of a small shape, whose
+  derivatives (n-1)!/shape^n cancel in it, and only the composition from the
+  other side avoids them: at (5.47, 0.21, 0.864) the upper side taken directly
+  gives 4.1e7 ulp against the complement's 2e3;
+- its probability is at most `p_own = 0.7`. Above that the side holds nearly all
+  the mass, its logarithm is near zero and its derivatives are differences of
+  large cumulants, which is what the complement from the small side exists for.
+  Sweeping x on log I_x(1, 9), the two routes cross at a probability of about
+  0.99 in the relative error of a component (at 0.9899 both are at 1e-14 and
+  2e-11, and at 0.998 the direct route gives 2.6e-5 against the complement's
+  1.6e-17), but in the ulp measures of the module's own test the crossover is
+  lower: at 0.9 and at 0.8 a point or two of the reference grid lost digits,
+  and at 0.7 every order of both functions is at or below what it measured
+  before.
+
+**Measured.** The module's reference grid, worst over it, before and after, on
+gcc; the bounds in `tests/math/test_beta_deriv.cpp` are 1.5 times the worst of
+the two builds.
+
+| order | log I_x ulpN before / after | log(1 - I_x) ulpN before / after |
+|---|---|---|
+| 1 | 1067 / 751 | 1600 / 1205 |
+| 2 | 1200 / 836 | 1367 / 1444 |
+| 3 | 2067 / 768 | 1633 / 1616 |
+| 4 | 1200 / 822 | 1967 / 1600 |
+| 5 | 2200 / 1437 | 1967 / 1640 |
+| 6 | 1553 / 1298 | 5367 / 5357 |
+
+Two cells of the bounds are set by CUDA rather than by gcc, through the
+contraction of a product and a sum into one operation: `log_ibeta_d5` measures
+298.6 ulpL there against 184.9 on gcc, and `log_ibetac_d6` 175.8 against 110.0.
+
+**What it says.** A branch keyed on the sign of a quantity that vanishes
+identically on a surface is wrong on one side of that surface, and here the
+surface is the mean of the distribution equalling the observation, which is not
+an exotic place to evaluate a cdf. The repair does not trade one region for
+another: every order of both functions improved or stayed, and the region that
+was losing seven digits at order one now keeps them all.
+
+**Open.** The condition is a pair of thresholds, not a criterion derived from
+the conditioning of the two routes. A criterion would compare the two directly,
+which costs what it saves, so the thresholds stay until a cheap estimate of the
+complement's conditioning is worth writing.

@@ -515,6 +515,9 @@ struct quad_par {
   double pole_min = 1.0;  // the requested side directly when its pole shape is below this
   double p_direct = 0.75; // and its probability at most this
   double own_min = 1.0;   // and its own shape at least this, unless the series applies
+  double p_own = 0.7;     // the requested side directly, rather than by the complement of the
+                          // other one, when its own probability is at most this (the two routes
+                          // cross there; derivs below has the measurement)
   double drop_lo = 0.5;   // the scale search stops when the drop is in [drop_lo, drop_hi]
   double drop_hi = 2.0;
   bool own_elem = false;  // own::exp and own::log in the nodes (a variant for measurement)
@@ -1498,6 +1501,29 @@ LAPLACE_HD void derivs(double a, double b, double x, bool upper, int method, con
     if (!(logS <= lp_mono)) {
       logS = side<K>(mono_lower ? ps : p, false, mono_lower != upper, qp, l, lt);
       lower = !mono_lower;
+    }
+    // The side held is the one not asked for, so the requested side's derivatives would
+    // come from the complement below, and that composition is the lossy step: on
+    // log I_x(1, 9) the complement gives 3.3e-7 to 2.5e-7 at order 1 and 6.0e-5 to 6.8e-4
+    // at order 6 for a probability of the requested side from 0.17 to 0.53, while that
+    // side's own computation gives 3e-16 and 4e-14 there (measured 2026-11-15). The two
+    // cross at a probability of about 0.99: at 0.9899 both are at 1e-14 and 2e-11, and
+    // above it only the complement works, the derivatives of log(1 - S) with S tiny
+    // having to be formed from the small side (at 0.998 the direct route gives 2.6e-5 and
+    // 2.1e-2, the complement 1.6e-17 and 1.2e-12). So the requested side is computed
+    // directly below p_own and the complement is kept above it. Its probability is
+    // 1 - S of the side held, read on the log scale.
+    // Two conditions, both measured: the requested side's own shape is at least own_min, as
+    // in the first choice above, because below it that side's own logarithm carries the pole
+    // of a small shape and the composition from the other side is what avoids it (at
+    // (a, b, x) = (5.47, 0.21, 0.864) the upper side taken directly gives 4.1e7 ulp against
+    // the complement's 2e3); and its probability is at most p_own.
+    if (lower == upper && fr.a >= qp.own_min) {
+      const double lq = Kokkos::log1p(-math::exp(logS));
+      if (lq <= math::log(qp.p_own)) {
+        logS = side<K>(fr, false, false, qp, l, lt);
+        lower = !upper;
+      }
     }
   }
   if (lower != upper) {
