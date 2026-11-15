@@ -256,6 +256,48 @@ TEST_CASE("distrib negbin: derivatives of the expected information against diffe
   check_info_derivs_sum<ld::negbin1_distrib>({0.5, 0.5}, 3, 1e-6);
 }
 
+TEST_CASE("distrib negbin: starting values from a sample summary") {
+  // the moment estimates invert exactly: a summary whose mean and variance are the family's own
+  // returns the parameters it was built from
+  for (double mu : {0.5, 3.5, 40.0, 1e4})
+    for (double theta : {0.05, 0.5, 2.0, 50.0}) {
+      ld::distrib_sample_summary s;
+      s.count = 1000.0;
+      s.mean = mu;
+      s.variance = mu + mu * mu / theta;
+      const auto a = ld::negbin2_distrib{1.0, 1.0}.start_value(s);
+      INFO("negbin2, mu " << mu << ", theta " << theta);
+      CHECK(a.mu == doctest::Approx(mu).epsilon(1e-14));
+      CHECK(a.theta == doctest::Approx(theta).epsilon(1e-12));
+      s.variance = mu * (1.0 + theta);
+      const auto b = ld::negbin1_distrib{1.0, 1.0}.start_value(s);
+      INFO("negbin1, mu " << mu << ", theta " << theta);
+      CHECK(b.mu == doctest::Approx(mu).epsilon(1e-14));
+      CHECK(b.theta == doctest::Approx(theta).epsilon(1e-12));
+    }
+  // a sample with no overdispersion: negbin2 is floored at theta = 100 mu (a variance of 1.01 mu)
+  // and negbin1 at the lower end of its domain, which is its own Poisson limit
+  ld::distrib_sample_summary u;
+  u.count = 1000.0;
+  u.mean = 7.0;
+  u.variance = 5.0;  // below the mean
+  const auto a = ld::negbin2_distrib{1.0, 1.0}.start_value(u);
+  CHECK(a.theta == doctest::Approx(700.0).epsilon(1e-12));
+  CHECK(a.mu == 7.0);
+  const auto b = ld::negbin1_distrib{1.0, 1.0}.start_value(u);
+  CHECK(b.theta > 0.0);
+  CHECK(b.theta < 1e-6);
+  // both are strictly inside the open domains, and the mass is finite there
+  for (int j = 0; j < 2; ++j) {
+    CHECK(ld::negbin2_distrib::params[j].lower < (j == 0 ? a.mu : a.theta));
+    CHECK(ld::negbin1_distrib::params[j].lower < (j == 0 ? b.mu : b.theta));
+  }
+  CHECK(std::isfinite(a.logpmf(7.0)));
+  CHECK(std::isfinite(b.logpmf(7.0)));
+  CHECK(std::isfinite(a.logpmf_d1(7.0)[1]));
+  CHECK(std::isfinite(b.logpmf_d1(7.0)[1]));
+}
+
 TEST_CASE("distrib negbin: cdf identities") {
   for (double theta : {1e-2, 0.5, 3.0, 1e4}) {
     const ld::negbin2_distrib d2{3.5, theta};

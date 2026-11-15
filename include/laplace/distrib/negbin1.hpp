@@ -32,6 +32,8 @@
 // distrib_log_ccdf_dk<K> of generic_cdf.hpp), and the expected information and its
 // derivatives from the generic sum over the support (distrib_expected_info<K> of
 // generic_info.hpp): no block of this family's information is orthogonal or closed.
+// start_value inverts the moments, theta = s^2 / mu - 1, which needs no floor: an
+// underdispersed sample puts it at the lower end of theta, which is this family's Poisson limit.
 #pragma once
 
 #include <laplace/core/config.hpp>
@@ -188,6 +190,24 @@ struct negbin1_distrib {
   /// \ingroup distrib_negbin1
   /// \brief Non-smooth points in the parameters (none).
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
+
+  /**
+   * \ingroup distrib_negbin1
+   * \brief Starting value from a sample summary: \f$\mu = \bar{y}\f$ (`s.mean`, the mean's moment
+   * estimate and its maximum likelihood estimate) and \f$\theta = s^2/\mu - 1\f$ (`s.variance`),
+   * the moment estimate inverted from \f$\mathrm{Var} = \mu(1 + \theta)\f$.
+   *
+   * A sample with no overdispersion gives \f$\theta \le 0\f$, which start_inside() moves to the
+   * lower end of the domain: that is the Poisson limit of this parametrization, so the estimate
+   * needs no floor of its own.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c negbin1_distrib with both parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  negbin1_distrib start_value(const distrib_sample_summary& s) const {
+    const double m = start_inside(s.mean, params[0]);
+    return {m, start_inside(s.variance / m - 1.0, params[1])};
+  }
 };
 
 }  // namespace laplace::distrib

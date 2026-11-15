@@ -6475,5 +6475,11 @@ through the mixed derivatives of the incomplete beta in its shape and its
 argument is the same open point the binomial records. The cumulative functions
 inherit the conditioning of I_p(r, k + 1) in p, which costs theta ulp per ulp of
 p: the two parametrizations agree on the mass to 1e-12 and on the cumulative
-function only to 1e-15 theta. Neither family implements `start_value`, the
-member the fitting interface is adding.
+function only to 1e-15 theta. The starting values are the moment estimates
+inverted from the variance, mu = mean for both and theta = mu^2 / (s^2 - mu) for
+negbin2 and s^2/mu - 1 for negbin1; a sample with no overdispersion gives an
+estimate outside the domain, and the two families need opposite treatment there,
+since negbin1's Poisson limit is the lower end of theta (where `start_inside`
+already puts it) while negbin2's is the upper one, so its denominator is floored
+at mu/100, which starts it at theta = 100 mu, a variance of 1.01 times the mean.
+The floor is a convention, not a measurement.

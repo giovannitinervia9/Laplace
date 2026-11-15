@@ -127,6 +127,8 @@ void eval_negbin2(Kokkos::View<const double*> y, Kokkos::View<double*> out, doub
   incomplete beta; `success_prob()` returns \f$\theta/(\theta + \mu)\f$.
 - `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`: the support, the
   location and spread used by the generic routes, and the empty set of non-smooth points.
+- `start_value()`: a starting point for a fit from a sample summary, the moment estimates moved
+  strictly inside the open domains.
 
 ## References
 
@@ -253,6 +255,8 @@ void eval_negbin1(Kokkos::View<const double*> y, Kokkos::View<double*> out, doub
   \f$1/(1 + \theta)\f$.
 - `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`: the support, the
   location and spread used by the generic routes, and the empty set of non-smooth points.
+- `start_value()`: a starting point for a fit from a sample summary, the moment estimates moved
+  strictly inside the open domains.
 
 ## References
 

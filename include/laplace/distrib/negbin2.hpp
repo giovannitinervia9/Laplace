@@ -20,6 +20,8 @@
 // generic_cdf.hpp). The expected information and its derivatives likewise come from the generic
 // sum over the support (distrib_expected_info<K> of generic_info.hpp), which is exact in
 // I_mu_mu = 1 / (mu + mu^2 / theta) and in I_mu_theta = 0 to the accuracy of the sum.
+// start_value inverts the moments, theta = mu^2 / (s^2 - mu) with the denominator floored at
+// mu / 100, since an underdispersed sample puts the estimate past this family's Poisson limit.
 #pragma once
 
 #include <laplace/core/config.hpp>
@@ -174,6 +176,25 @@ struct negbin2_distrib {
   /// \ingroup distrib_negbin2
   /// \brief Non-smooth points in the parameters (none).
   LAPLACE_HD distrib_kinks param_kinks(int, double) const { return {}; }
+
+  /**
+   * \ingroup distrib_negbin2
+   * \brief Starting value from a sample summary: \f$\mu = \bar{y}\f$ (`s.mean`, the mean's moment
+   * estimate and its maximum likelihood estimate) and \f$\theta = \mu^2/(s^2 - \mu)\f$
+   * (`s.variance`), the moment estimate inverted from \f$\mathrm{Var} = \mu + \mu^2/\theta\f$.
+   *
+   * The denominator is floored at \f$\mu/100\f$, so a sample with no overdispersion
+   * (\f$s^2 \le \mu\f$, where the estimate is negative or infinite) starts at
+   * \f$\theta = 100\mu\f$, a variance of \f$1.01\mu\f$, instead of at an end of the domain.
+   * \param s Sample summary computed by summarize_sample().
+   * \return A \c negbin2_distrib with both parameters strictly inside their open domains.
+   * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
+   */
+  negbin2_distrib start_value(const distrib_sample_summary& s) const {
+    const double m = start_inside(s.mean, params[0]);
+    const double floor_d = 0.01 * m, d = s.variance - m;
+    return {m, start_inside(m * m / (d > floor_d ? d : floor_d), params[1])};
+  }
 };
 
 }  // namespace laplace::distrib
