@@ -45,13 +45,13 @@ Double-exponential rules (Takahasi and Mori, 1974) map \f$x\f$ to \f$t\f$ with \
 
 1. Finite \f$[a, b]\f$ (`tanh_sinh_quad()`): \f$x(t) = \frac{a+b}{2} + \frac{b-a}{2}\tanh q\f$, endpoint distance \f$d = (b - a)\frac{e^{-2|q|}}{1 + e^{-2|q|}}\f$, and \f$w(t) = \frac{\pi}{2}\cosh(t)(b - a)\frac{2e^{-2|q|}}{(1 + e^{-2|q|})^2}\f$.
 2. Semi-infinite \f$[a, \infty)\f$ (`exp_sinh_quad()`): \f$x(t) = a + s e^q\f$, \f$w(t) = s\frac{\pi}{2}\cosh(t)e^q\f$.
-3. Infinite \f$(-\infty, \infty)\f$ (`sinh_sinh_quad()`): \f$x(t) = c + s \sinh q\f$, \f$w(t) = s\frac{\pi}{2}\cosh(t)\cosh q\f$.
+3. Infinite \f$(-\infty, \infty)\f$ (`sinh_sinh_quad()`): \f$x(t) = c + s \sinh q\f$, \f$w(t) = s\frac{\pi}{2}\cosh(t)\cosh q\f$ (Mori and Sugihara, 2001).
 
 After tail trimming, step \f$h\f$ halves up to `max_level` (default 8), summing \f$S = \sum v_k\f$ and \f$L_1 = \sum |v_k|\f$ with \f$v_k = f(x_k)w(k h)\f$. Refinement stops when \f$|\mathrm{est} - \mathrm{prev}| \le \mathrm{stop} \cdot L_1 h\f$ (default \f$10^{-9}\f$), yielding error \f$\mathrm{rel}^2 L_1 h\f$ for \f$\mathrm{rel} = |\mathrm{est} - \mathrm{prev}|/(L_1 h)\f$; otherwise `value` is `est` and `error` is \f$|\mathrm{est} - \mathrm{prev}|\f$.
 
 ### Adaptive Gauss-Kronrod quadrature
 
-`gauss_kronrod_quad()` runs a Boost.Math 7–15 Gauss-Kronrod rule on \f$[a, b]\f$, bisecting the subinterval with largest error until \f$\sum \mathrm{err}_i \le \mathrm{tol} \cdot |\sum \mathrm{val}_i|\f$ (default \f$10^{-14}\f$), `max_intervals` (cap 64) are reached, or bisection underflows; it fails on endpoint singularities.
+`gauss_kronrod_quad()` runs a Boost.Math 7–15 Gauss-Kronrod rule (Boost.Math; Kronrod, 1965) on \f$[a, b]\f$, bisecting the subinterval with largest error until \f$\sum \mathrm{err}_i \le \mathrm{tol} \cdot |\sum \mathrm{val}_i|\f$ (default \f$10^{-14}\f$), `max_intervals` (cap 64) are reached, or bisection underflows; it fails on endpoint singularities.
 
 ### Geometric panel quadrature
 
@@ -59,7 +59,7 @@ After tail trimming, step \f$h\f$ halves up to `max_level` (default 8), summing 
 
 ### Fixed Gauss rules
 
-Nodes and weights come from 256-bit Golub-Welsch. `gauss_legendre_quad<N>()` (\f$N \in \{16, 32, 64\}\f$) is exact to degree \f$2N - 1\f$. `gauss_hermite32_quad()` and `gauss_laguerre32_quad()` evaluate \f$s\sum_{i=0}^{31} w_i e^{y_i^2} f(c + s y_i)\f$ and \f$s\sum_{i=0}^{31} w_i e^{y_i} f(a + s y_i)\f$.
+Nodes and weights come from 256-bit Golub-Welsch (Golub and Welsch, 1969). `gauss_legendre_quad<N>()` (\f$N \in \{16, 32, 64\}\f$) is exact to degree \f$2N - 1\f$. `gauss_hermite32_quad()` and `gauss_laguerre32_quad()` evaluate \f$s\sum_{i=0}^{31} w_i e^{y_i^2} f(c + s y_i)\f$ and \f$s\sum_{i=0}^{31} w_i e^{y_i} f(a + s y_i)\f$.
 
 ## Accuracy
 
@@ -138,5 +138,10 @@ All symbols below belong to `laplace::math::quad`.
 
 ## References
 
-- H. Takahasi and M. Mori (1974), Double exponential formulas for numerical integration, Publications of the Research Institute for Mathematical Sciences, 9(3), 721–741.
+- Boost.Math, C++ library of special functions and numerical tools, https://www.boost.org/libs/math
+- G. H. Golub and J. H. Welsch (1969), Calculation of Gauss quadrature rules, Mathematics of Computation, 23(106), 221–230. https://doi.org/10.1090/s0025-5718-69-99647-1
+- A. S. Kronrod (1965), Nodes and Weights of Quadrature Formulas: Sixteen-Place Tables, Consultants Bureau.
+- M. Mori and M. Sugihara (2001), The double-exponential transformation in numerical analysis, Journal of Computational and Applied Mathematics, 127(1-2), 287–296. https://doi.org/10.1016/s0377-0427(00)00501-x
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- H. Takahasi and M. Mori (1974), Double Exponential Formulas for Numerical Integration, Publications of the Research Institute for Mathematical Sciences, 9(3), 721–741. https://doi.org/10.2977/prims/1195192451
 */

@@ -29,7 +29,7 @@ Dimensions, domains, and sorted indices \f$0 \le i_1 \le \dots \le i_k < n\f$ ar
 
 ### Additive log-ratio
 
-\ref laplace::bijector::alr_bijector "alr_bijector" maps the open \f$K\f$-simplex onto \f$\mathbb{R}^{K-1}\f$ (Aitchison 1986). Forward evaluates \f$u_a = \log\pi_a - \log\pi_{K-1}\f$ (\f$a = 0, \dots, K - 2\f$) using \f$\pi_{K-1}\f$ as given, with \f$\log\lvert\det J_g(v)\rvert = -\sum_{a=0}^{K-1}\log\pi_a\f$. Inverse computes \f$\pi_a = \exp(u_a + l)\f$ and \f$\pi_{K-1} = \exp(l)\f$, factoring \f$u_{\max} = \max_b u_b\f$ in \f$l = \log\pi_{K-1}\f$:
+\ref laplace::bijector::alr_bijector "alr_bijector" maps the open \f$K\f$-simplex onto \f$\mathbb{R}^{K-1}\f$ (Aitchison, 1986). Forward evaluates \f$u_a = \log\pi_a - \log\pi_{K-1}\f$ (\f$a = 0, \dots, K - 2\f$) using \f$\pi_{K-1}\f$ as given, with \f$\log\lvert\det J_g(v)\rvert = -\sum_{a=0}^{K-1}\log\pi_a\f$. Inverse computes \f$\pi_a = \exp(u_a + l)\f$ and \f$\pi_{K-1} = \exp(l)\f$, factoring \f$u_{\max} = \max_b u_b\f$ in \f$l = \log\pi_{K-1}\f$:
 \f[
 l = \begin{cases}
 -\operatorname{log1p}\left(\sum_{b=0}^{K-2} e^{u_b}\right) & \text{if } u_{\max} \le 0, \\
@@ -54,13 +54,13 @@ summing \f$1 - \pi_c = \sum_{a \ne c}\pi_a\f$ to avoid cancellation near \f$\pi_
 
 ### Log-Cholesky
 
-\ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector" maps positive definite \f$\Sigma = L L^\top\f$ (\f$L_{ii} > 0\f$) via \f$u_{ii} = \log L_{ii}\f$ and \f$u_{ij} = L_{ij}\f$ (\f$i > j\f$), with \f$\log\lvert\det J_g(v)\rvert = -\big(p\log 2 + \sum_{i=0}^{p-1}(p - i + 1)\log L_{ii}\big)\f$ (Pinheiro and Bates 1996). Inverse sets \f$L_{ii} = \exp(u_{ii})\f$, \f$L_{ij} = u_{ij}\f$, \f$\Sigma_{ij} = \sum_{q \le j} L_{iq} L_{jq}\f$, and \f$\log\lvert\det J_h(u)\rvert = p\log 2 + \sum_{i=0}^{p-1}(p - i + 1)u_{ii}\f$.
+\ref laplace::bijector::log_cholesky_bijector "log_cholesky_bijector" maps positive definite \f$\Sigma = L L^\top\f$ (\f$L_{ii} > 0\f$) via \f$u_{ii} = \log L_{ii}\f$ and \f$u_{ij} = L_{ij}\f$ (\f$i > j\f$), with \f$\log\lvert\det J_g(v)\rvert = -\big(p\log 2 + \sum_{i=0}^{p-1}(p - i + 1)\log L_{ii}\big)\f$ (Pinheiro and Bates, 1996). Inverse sets \f$L_{ii} = \exp(u_{ii})\f$, \f$L_{ij} = u_{ij}\f$, \f$\Sigma_{ij} = \sum_{q \le j} L_{iq} L_{jq}\f$, and \f$\log\lvert\det J_h(u)\rvert = p\log 2 + \sum_{i=0}^{p-1}(p - i + 1)u_{ii}\f$.
 
 Inverse derivatives vanish unless the tuple touches at most two variables in one column \f$c\f$. A single variable \f$(r, c)\f$ of multiplicity \f$k\f$ reaches \f$\Sigma_{rr}\f$ and \f$\Sigma_{r, r'}\f$ (\f$r' \ge c\f$): for \f$r = c\f$, derivatives are \f$2^k e^{2 u_{rr}}\f$ and \f$e^{u_{rr}} L_{r', c}\f$; for \f$r > c\f$, nonzero only at \f$k \le 2\f$ on \f$\Sigma_{rr}\f$ (\f$2u_{rc}\f$ then \f$2\f$) and \f$k = 1\f$ on \f$\Sigma_{r, r'}\f$ (\f$L_{r', c}\f$). A pair \f$(r_1, c)\f$, \f$(r_2, c)\f$ (multiplicity 1 if off-diagonal) affects only \f$\Sigma_{r_1, r_2}\f$ with \f$f_1 f_2\f$ (\f$f_\nu = e^{u_{r_\nu c}}\f$ if \f$r_\nu = c\f$, else 1). Inverse log-Jacobian derivatives are \f$p - i + 1\f$ at \f$k = 1\f$ on \f$(i, i)\f$ and 0 otherwise; \f$L(u)\f$ derivatives are nonzero only on pure tuples (\f$e^{u_{ii}}\f$ on diagonal, 1 off-diagonal at \f$k = 1\f$). Forward derivatives differentiate \f$L_{jj}^2 = \Sigma_{jj} - \sum_{q < j} L_{jq}^2\f$, \f$L_{ij} L_{jj} = \Sigma_{ij} - \sum_{q < j} L_{iq} L_{jq}\f$, and \f$L_{ii}\,\partial y_i = \partial L_{ii}\f$ (\f$y_i = \log L_{ii}\f$) over subsets \f$A\f$ via Leibniz's rule, giving forward log-Jacobian derivative \f$-\sum_{i=0}^{p-1}(p - i + 1)y_i[A_{\mathrm{full}}]\f$.
 
 ### Partial correlations
 
-\ref laplace::bijector::partial_corr_bijector "partial_corr_bijector" maps correlation matrices \f$R\f$ via canonical partial correlations \f$z_{ab} = \tanh u_{ab}\f$ (Lewandowski, Kurowicka, and Joe 2009). `inverse_cholesky()` constructs \f$L\f$ without \f$1 - z_{ab}^2\f$:
+\ref laplace::bijector::partial_corr_bijector "partial_corr_bijector" maps correlation matrices \f$R\f$ via canonical partial correlations \f$z_{ab} = \tanh u_{ab}\f$ (Joe, 2006; Lewandowski and others, 2009). `inverse_cholesky()` constructs \f$L\f$ without \f$1 - z_{ab}^2\f$:
 \f[
 L_{ab} = \tanh(u_{ab})\prod_{q<b}\operatorname{sech}(u_{aq}) \quad (a > b),
 \qquad
@@ -68,17 +68,17 @@ L_{aa} = \prod_{q<a}\operatorname{sech}(u_{aq}),
 \f]
 giving \f$R = L L^\top\f$ (\f$R_{aa} = 1\f$) and \f$\log\lvert\det J_h(u)\rvert = -\sum_{a>b}(p - b)\log\cosh u_{ab}\f$. Forward computes \f$Q_{ab}^2 = \sum_{q=b+1}^a L_{aq}^2\f$ and \f$u_{ab} = \operatorname{asinh}(L_{ab}/Q_{ab})\f$ (\f$a > b\f$) from unit-diagonal \f$R = L L^\top\f$, with \f$\log\lvert\det J_g(v)\rvert = \sum_{a>b}(p - b)\log r_{ab}\f$ (\f$r_{ab} = \sqrt{1 + (L_{ab}/Q_{ab})^2}\f$).
 
-Inverse derivatives multiply \f$\tanh^{(k)}\f$ and \f$\operatorname{sech}^{(k)} u = \operatorname{sech}(u) P_k\f$ along rows, with SymPy 1.14.0 polynomials \f$P_k\f$ (Meurer et al. 2017) in \f$T^2\f$ (\f$T^2 < 1/2\f$) or \f$\operatorname{sech}^2 u\f$ beyond (\f$T = \tanh u\f$). Derivatives of \f$R\f$ vanish beyond two rows: on \f$i_0 < i_1\f$, only \f$R_{i_1, i_0}\f$ is nonzero when all tuple columns in \f$i_1\f$ are \f$\le i_0\f$; on row \f$a\f$, derivatives affect \f$R_{aj}\f$ (\f$j \ne a\f$). Inverse Cholesky derivatives require one row; inverse log-Jacobian derivatives are \f$-(p - b)\tanh^{(k-1)}(u_{ab})\f$ on pure tuples and 0 otherwise. Forward derivatives recurse over subsets \f$A\f$ for unit-diagonal \f$L\f$, \f$Q_{ab}\f$, \f$w_{ab} = L_{ab}/Q_{ab}\f$, \f$r_{ab}\f$, \f$r_{ab}\,\partial u_{ab} = \partial w_{ab}\f$, and \f$\sum_{a>b}(p - b)\log r_{ab}[A_{\mathrm{full}}]\f$.
+Inverse derivatives multiply \f$\tanh^{(k)}\f$ and \f$\operatorname{sech}^{(k)} u = \operatorname{sech}(u) P_k\f$ along rows, with SymPy 1.14.0 polynomials \f$P_k\f$ (Meurer and others, 2017) in \f$T^2\f$ (\f$T^2 < 1/2\f$) or \f$\operatorname{sech}^2 u\f$ beyond (\f$T = \tanh u\f$). Derivatives of \f$R\f$ vanish beyond two rows: on \f$i_0 < i_1\f$, only \f$R_{i_1, i_0}\f$ is nonzero when all tuple columns in \f$i_1\f$ are \f$\le i_0\f$; on row \f$a\f$, derivatives affect \f$R_{aj}\f$ (\f$j \ne a\f$). Inverse Cholesky derivatives require one row; inverse log-Jacobian derivatives are \f$-(p - b)\tanh^{(k-1)}(u_{ab})\f$ on pure tuples and 0 otherwise. Forward derivatives recurse over subsets \f$A\f$ for unit-diagonal \f$L\f$, \f$Q_{ab}\f$, \f$w_{ab} = L_{ab}/Q_{ab}\f$, \f$r_{ab}\f$, \f$r_{ab}\,\partial u_{ab} = \partial w_{ab}\f$, and \f$\sum_{a>b}(p - b)\log r_{ab}[A_{\mathrm{full}}]\f$.
 
 ### Matrix logarithm
 
-\ref laplace::bijector::matrix_log_bijector "matrix_log_bijector" maps positive definite \f$\Sigma\f$ via \f$S = \log\Sigma\f$. Cyclic Jacobi eigendecomposition evaluates \f$S = V\operatorname{diag}(\log\sigma)V^\top\f$ (forward) and \f$\Sigma = \exp(S) = V\operatorname{diag}(\exp(s))V^\top\f$ (inverse). Log-Jacobians are \f$\sum_{i\le j}\log f[s_i, s_j]\f$ (inverse) and \f$-\sum_{i\le j}\log f[\log\sigma_i, \log\sigma_j]\f$ (forward), where \f$f[x, y] = e^{\max(x, y)}\operatorname{exprel}(-|x - y|)\f$ (\ref laplace::math::exprel "exprel()").
+\ref laplace::bijector::matrix_log_bijector "matrix_log_bijector" maps positive definite \f$\Sigma\f$ via \f$S = \log\Sigma\f$ (Chiu and others, 1996). Cyclic Jacobi eigendecomposition (Forsythe and Henrici, 1960) evaluates \f$S = V\operatorname{diag}(\log\sigma)V^\top\f$ (forward) and \f$\Sigma = \exp(S) = V\operatorname{diag}(\exp(s))V^\top\f$ (inverse). Log-Jacobians are \f$\sum_{i\le j}\log f[s_i, s_j]\f$ (inverse) and \f$-\sum_{i\le j}\log f[\log\sigma_i, \log\sigma_j]\f$ (forward), where \f$f[x, y] = e^{\max(x, y)}\operatorname{exprel}(-|x - y|)\f$ (\ref laplace::math::exprel "exprel()").
 
-Derivatives use truncated Taylor arithmetic: each distinct coordinate \f$\alpha\f$ (multiplicity \f$m_\alpha\f$) gets nilpotent \f$\epsilon_\alpha\f$ (\f$\epsilon_\alpha^{m_\alpha+1} = 0\f$), storing one \f$p \times p\f$ matrix per monomial \f$\prod_\alpha \epsilon_\alpha^{\gamma_\alpha}\f$, multiplying in \f$\prod_\alpha (m_\alpha+1)(m_\alpha+2)/2\f$ matrix products (\f$3^k p^3\f$ for \f$k\f$ distinct coordinates), and scaling the top monomial by \f$\prod_\alpha m_\alpha!\f$. Inverse evaluates \f$\exp(S + \sum_\alpha \epsilon_\alpha E_\alpha)\f$ by scaling and squaring; forward solves \f$X = \log(\Sigma + \sum_\alpha \epsilon_\alpha E_\alpha)\f$ via \f$k\f$ Newton steps \f$X \mathrel{+}= \mathcal{L}^{-1}[\Sigma(\epsilon) - \exp(X)]\f$ in the eigenbasis. Log-Jacobians evaluate \f$\log\det J(S(\epsilon))\f$ in the eigenbasis of \f$S_0\f$ using one column symbol \f$d\f$ (\f$d^2 = 0\f$) and pivoted LU in scalar Taylor arithmetic.
+Derivatives use truncated Taylor arithmetic: each distinct coordinate \f$\alpha\f$ (multiplicity \f$m_\alpha\f$) gets nilpotent \f$\epsilon_\alpha\f$ (\f$\epsilon_\alpha^{m_\alpha+1} = 0\f$), storing one \f$p \times p\f$ matrix per monomial \f$\prod_\alpha \epsilon_\alpha^{\gamma_\alpha}\f$, multiplying in \f$\prod_\alpha (m_\alpha+1)(m_\alpha+2)/2\f$ matrix products (\f$3^k p^3\f$ for \f$k\f$ distinct coordinates), and scaling the top monomial by \f$\prod_\alpha m_\alpha!\f$. Inverse evaluates \f$\exp(S + \sum_\alpha \epsilon_\alpha E_\alpha)\f$ by scaling and squaring (Higham, 2009); forward solves \f$X = \log(\Sigma + \sum_\alpha \epsilon_\alpha E_\alpha)\f$ via \f$k\f$ Newton steps \f$X \mathrel{+}= \mathcal{L}^{-1}[\Sigma(\epsilon) - \exp(X)]\f$ in the eigenbasis (Higham, 2008). Log-Jacobians evaluate \f$\log\det J(S(\epsilon))\f$ in the eigenbasis of \f$S_0\f$ using one column symbol \f$d\f$ (\f$d^2 = 0\f$) and pivoted LU in scalar Taylor arithmetic.
 
 ## Measured accuracy
 
-See \ref accuracy "How accuracy is measured" for metrics and bounds. Coupled errors use normwise `ulpN` (\ref accuracy_mixed): order-0 log-Jacobians scale by \f$\max(|\mathrm{ref}|, 1.0)\f$, mixed tuples by the geometric mean of pure derivatives, and vanishing derivatives by the largest derivative of their order (or nearest nonvanishing lower order). `tools/reference/bijector_coupled.py` writes `bijector_coupled.csv` using SymPy/mpmath at 300 bits and mixed central differences at 1200 bits.
+See \ref accuracy "How accuracy is measured" for metrics and bounds. Coupled errors use normwise `ulpN` (\ref accuracy_mixed): order-0 log-Jacobians scale by \f$\max(|\mathrm{ref}|, 1.0)\f$, mixed tuples by the geometric mean of pure derivatives, and vanishing derivatives by the largest derivative of their order (or nearest nonvanishing lower order). `tools/reference/bijector_coupled.py` writes `bijector_coupled.csv` using SymPy/mpmath (mpmath) at 300 bits and mixed central differences at 1200 bits.
 
 Maximum errors over orders 0 to 6 on gcc/OpenMP and CUDA (RTX 4070 SUPER), with the largest per-order test bound across orders 0 to 6 in `tests/bijector/test_coupled.cpp` (`ulpN` for maps and \f$L(u)\f$, `ulp` for log-Jacobians):
 
@@ -140,9 +140,14 @@ Kokkos::parallel_for("eval_log_cholesky", num_items, KOKKOS_LAMBDA(int i) {
 
 ## References
 
-- J. Aitchison (1986), The Statistical Analysis of Compositional Data, Chapman and Hall.
-- J. C. Pinheiro and D. M. Bates (1996), Unconstrained parametrizations for variance-covariance matrices, Statistics and Computing 6:289-296.
-- D. Lewandowski, D. Kurowicka, and H. Joe (2009), Generating random correlation matrices based on vines and extended onion method, Journal of Multivariate Analysis 100:1989-2001.
-- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science 3:e103.
-- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/
+- J. Aitchison (1986), The Statistical Analysis of Compositional Data. https://doi.org/10.1007/978-94-009-4109-0
+- T. Y. M. Chiu, T. Leonard and K. Tsui (1996), The Matrix-Logarithmic Covariance Model, Journal of the American Statistical Association, 91(433), 198–210. https://doi.org/10.1080/01621459.1996.10476677
+- G. E. Forsythe and P. Henrici (1960), The cyclic Jacobi method for computing the principal values of a complex matrix, Transactions of the American Mathematical Society, 94(1), 1–23. https://doi.org/10.1090/s0002-9947-1960-0109825-2
+- N. J. Higham (2008), Functions of Matrices: Theory and Computation, SIAM. https://doi.org/10.1137/1.9780898717778
+- N. J. Higham (2009), The Scaling and Squaring Method for the Matrix Exponential Revisited, SIAM Review, 51(4), 747–764. https://doi.org/10.1137/090768539
+- H. Joe (2006), Generating random correlation matrices based on partial correlations, Journal of Multivariate Analysis, 97(10), 2177–2189. https://doi.org/10.1016/j.jmva.2005.05.010
+- D. Lewandowski, D. Kurowicka and H. Joe (2009), Generating random correlation matrices based on vines and extended onion method, Journal of Multivariate Analysis, 100(9), 1989–2001. https://doi.org/10.1016/j.jmva.2009.04.008
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- J. C. Pinheiro and D. M. Bates (1996), Unconstrained parametrizations for variance-covariance matrices, Statistics and Computing, 6(3), 289–296. https://doi.org/10.1007/bf00140873
 */

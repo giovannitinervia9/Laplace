@@ -26,7 +26,7 @@ Template order \f$K\f$ has the unchecked precondition \f$1 \le K \le 6\f$; the h
 
 ## Numerical method
 
-Instead of multivariate Bell polynomials, the module evaluates a bivariate Leibniz recurrence. Let \f$\gamma = (p, q) \in \mathbb{N}_0^2\f$ and \f$k = (i, j) \in \mathbb{N}_0^2\f$ be multi-indices for derivatives in \f$(x_0, x_1)\f$ and \f$(u_0, u_1)\f$, with \f$G_k = \partial^{i+j} G / \partial u_0^i \partial u_1^j\f$. Writing \f$D[\gamma][k] = \partial^\gamma (G_k \circ u)\f$ and differentiating once more in coordinate \f$x_m\f$ for \f$m \in \{0, 1\}\f$ by Leibniz's rule gives
+Instead of multivariate Bell polynomials (Constantine and Savits, 1996), the module evaluates a bivariate Leibniz recurrence. Let \f$\gamma = (p, q) \in \mathbb{N}_0^2\f$ and \f$k = (i, j) \in \mathbb{N}_0^2\f$ be multi-indices for derivatives in \f$(x_0, x_1)\f$ and \f$(u_0, u_1)\f$, with \f$G_k = \partial^{i+j} G / \partial u_0^i \partial u_1^j\f$. Writing \f$D[\gamma][k] = \partial^\gamma (G_k \circ u)\f$ and differentiating once more in coordinate \f$x_m\f$ for \f$m \in \{0, 1\}\f$ by Leibniz's rule gives
 \f[
 D[\gamma + e_m][k] = \sum_{\alpha \le \gamma} \binom{\gamma}{\alpha} \sum_{r=0}^1 D[\alpha][k + e_r] \, \partial^{\gamma - \alpha + e_m} u_r,
 \f]
@@ -88,4 +88,8 @@ void compute_pair_derivatives(Kokkos::View<double**>& out_derivs, int n) {
 Functions in this module are called as `laplace::math::NAME`.
 
 - \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()" — Evaluates partial derivatives of \f$G(u_0(x), u_1(x))\f$ of total order \f$K\f$ in \f$x = (x_0, x_1)\f$ for \f$1 \le K \le 6\f$
+
+## References
+
+- G. Constantine and T. Savits (1996), A Multivariate Faa di Bruno Formula with Applications, Transactions of the American Mathematical Society, 348(2), 503–520. https://doi.org/10.1090/s0002-9947-96-01501-2
 */

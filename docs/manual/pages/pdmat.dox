@@ -39,15 +39,15 @@ In \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat", \f$\t
 \f[
 \log\det M = (p-1)\log\left(\frac{p}{p-1}\right) + \log p + (p-1)\log\operatorname{expit}(-\theta) + \log\operatorname{expit}(\theta),
 \f]
-with derivatives \f$\operatorname{expit}(-\theta) - (p-1)\operatorname{expit}(\theta)\f$ at \f$K = 1\f$ and \f$-p\,\operatorname{expit}^{(K-1)}(\theta)\f$ for \f$K \ge 2\f$. Sherman-Morrison gives \f$M^{-1}_{ii} = ((p^2-2p+2)+(p-1)^2 e^\theta + e^{-\theta})/p^2\f$ and \f$M^{-1}_{ij} = -((p-2)+(p-1)e^\theta - e^{-\theta})/p^2\f$ (\f$i \ne j\f$), differentiated for \f$K \ge 1\f$ by dropping the constant and multiplying \f$e^{-\theta}\f$ by \f$(-1)^K\f$. Cholesky \f$L\f$ uses \f$LDL^\top\f$ (\f$L_{i0} = \rho\f$, \f$L_{jj} = \exp(g_j)\f$, \f$L_{ij} = \rho\exp(r_j)\f$ for \f$i > j \ge 1\f$), differentiating \f$\exp(g_j)\f$ via \ref laplace::math::bell_partial "bell_partial()" and \f$L_{ij}\f$ via Leibniz's rule.
+with derivatives \f$\operatorname{expit}(-\theta) - (p-1)\operatorname{expit}(\theta)\f$ at \f$K = 1\f$ and \f$-p\,\operatorname{expit}^{(K-1)}(\theta)\f$ for \f$K \ge 2\f$. Sherman-Morrison (1950) gives \f$M^{-1}_{ii} = ((p^2-2p+2)+(p-1)^2 e^\theta + e^{-\theta})/p^2\f$ and \f$M^{-1}_{ij} = -((p-2)+(p-1)e^\theta - e^{-\theta})/p^2\f$ (\f$i \ne j\f$), differentiated for \f$K \ge 1\f$ by dropping the constant and multiplying \f$e^{-\theta}\f$ by \f$(-1)^K\f$. Cholesky \f$L\f$ uses \f$LDL^\top\f$ (\f$L_{i0} = \rho\f$, \f$L_{jj} = \exp(g_j)\f$, \f$L_{ij} = \rho\exp(r_j)\f$ for \f$i > j \ge 1\f$), differentiating \f$\exp(g_j)\f$ via \ref laplace::math::bell_partial "bell_partial()" (Comtet, 1974) and \f$L_{ij}\f$ via Leibniz's rule.
 
 ### Autoregressive structure
 
-In \ref laplace::pdmat::ar1_pdmat "ar1_pdmat", \f$\theta\f$ defines \f$M_{ij} = \rho^{|i-j|}\f$ with \f$\rho = \tanh\theta\f$. Computing \f$\rho\f$, \f$\operatorname{sech}\theta = 2e^{-|\theta|}/(1+e^{-2|\theta|})\f$, and \f$\operatorname{sech}^2\theta = 1-\rho^2\f$ from \f$e^{-2|\theta|}\f$ avoids cancellation at large \f$|\theta|\f$. Closed forms evaluate \f$\log\det M = -2(p-1)\log\cosh\theta\f$ (derivatives \f$-2(p-1)\tanh^{(K-1)}(\theta)\f$), tridiagonal \f$M^{-1}\f$ (\f$M^{-1}_{00}=M^{-1}_{p-1,p-1}=\frac{1}{2}(1+\cosh(2\theta))\f$, interior diagonal \f$\cosh(2\theta)\f$, subdiagonal \f$-\frac{1}{2}\sinh(2\theta)\f$, differentiated via \f$2^K\f$ and parity flips), and \f$L_{i0} = \rho^i\f$, \f$L_{ij} = \rho^{i-j}\operatorname{sech}\theta\f$ (\f$1 \le j \le i\f$).
+In \ref laplace::pdmat::ar1_pdmat "ar1_pdmat", \f$\theta\f$ defines \f$M_{ij} = \rho^{|i-j|}\f$ with \f$\rho = \tanh\theta\f$. Computing \f$\rho\f$, \f$\operatorname{sech}\theta = 2e^{-|\theta|}/(1+e^{-2|\theta|})\f$, and \f$\operatorname{sech}^2\theta = 1-\rho^2\f$ from \f$e^{-2|\theta|}\f$ avoids cancellation at large \f$|\theta|\f$. Closed forms (Kac and others, 1953) evaluate \f$\log\det M = -2(p-1)\log\cosh\theta\f$ (derivatives \f$-2(p-1)\tanh^{(K-1)}(\theta)\f$), tridiagonal \f$M^{-1}\f$ (\f$M^{-1}_{00}=M^{-1}_{p-1,p-1}=\frac{1}{2}(1+\cosh(2\theta))\f$, interior diagonal \f$\cosh(2\theta)\f$, subdiagonal \f$-\frac{1}{2}\sinh(2\theta)\f$, differentiated via \f$2^K\f$ and parity flips), and \f$L_{i0} = \rho^i\f$, \f$L_{ij} = \rho^{i-j}\operatorname{sech}\theta\f$ (\f$1 \le j \le i\f$).
 
 ### Unstructured matrices
 
-The template \ref laplace::pdmat::unstructured_pdmat "unstructured_pdmat\<B\>" wraps a coupled bijector `B` from \ref bijector_coupled "the coupled bijectors": `log_cholesky_bijector` (\f$q = p(p+1)/2\f$), `matrix_log_bijector` (\f$q = p(p+1)/2\f$), or `partial_corr_bijector` (\f$q = p(p-1)/2\f$, aliased as \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat"). Values and derivatives of \f$M\f$ (and \f$L\f$ when `B::closed_factor`) delegate to `B`. Writing \f$X[S]\f$ for the partial derivative along sub-mask \f$S \subseteq \{1, \dots, K\}\f$, generic structures compute \f$Y = L^{-1}\f$ and \f$M^{-1}\f$ by recursion:
+The template \ref laplace::pdmat::unstructured_pdmat "unstructured_pdmat\<B\>" wraps a coupled bijector `B` from \ref bijector_coupled "the coupled bijectors": `log_cholesky_bijector` (\f$q = p(p+1)/2\f$; Pinheiro and Bates, 1996), `matrix_log_bijector` (\f$q = p(p+1)/2\f$; Chiu and others, 1996), or `partial_corr_bijector` (\f$q = p(p-1)/2\f$, aliased as \ref laplace::pdmat::unstructured_corr_pdmat "unstructured_corr_pdmat"). Values and derivatives of \f$M\f$ (and \f$L\f$ when `B::closed_factor`) delegate to `B`. Writing \f$X[S]\f$ for the partial derivative along sub-mask \f$S \subseteq \{1, \dots, K\}\f$, generic structures compute \f$Y = L^{-1}\f$ and \f$M^{-1}\f$ by recursion:
 \f[
 L[\emptyset]\,Y[S] = -\sum_{\emptyset \ne T \subseteq S} L[T]\,Y[S \setminus T], \qquad
 M^{-1}[S] = \sum_{T \subseteq S} Y[T]^\top Y[S \setminus T],
@@ -56,12 +56,12 @@ in roughly \f$3^K p^3/6 + 2^K p^3/3\f$ operations, and differentiate \f$\log\det
 
 ### Toeplitz structure
 
-In \ref laplace::pdmat::toeplitz_pdmat "toeplitz_pdmat", \f$\theta_0, \dots, \theta_{p-2}\f$ define partial autocorrelations \f$\varphi_k = \tanh\theta_{k-1}\f$ (\f$k = 1, \dots, p-1\f$) and Toeplitz correlation \f$M_{ij} = m_{|i-j|}\f$ (\f$m_0 = 1\f$); \f$p = 2\f$ and \f$\theta = (t, 0, \dots, 0)\f$ match `ar1_pdmat`. With \f$c_k = \operatorname{sech}\theta_{k-1}\f$ and \f$v_k = \prod_{j=1}^k c_j^2\f$ (\f$v_0 = 1\f$), \f$L\f$ and \f$m_t = L_{t0}\f$ use orthogonal normalized lattice rotations:
+In \ref laplace::pdmat::toeplitz_pdmat "toeplitz_pdmat", \f$\theta_0, \dots, \theta_{p-2}\f$ define partial autocorrelations \f$\varphi_k = \tanh\theta_{k-1}\f$ (\f$k = 1, \dots, p-1\f$) and Toeplitz correlation \f$M_{ij} = m_{|i-j|}\f$ (\f$m_0 = 1\f$); \f$p = 2\f$ and \f$\theta = (t, 0, \dots, 0)\f$ match `ar1_pdmat`. With \f$c_k = \operatorname{sech}\theta_{k-1}\f$ and \f$v_k = \prod_{j=1}^k c_j^2\f$ (\f$v_0 = 1\f$), \f$L\f$ and \f$m_t = L_{t0}\f$ use orthogonal normalized lattice rotations (Makhoul, 1975):
 \f[
 E_{k-1}(t) = c_k E_k(t) + \varphi_k B_{k-1}(t-1), \qquad
 B_k(t) = c_k B_{k-1}(t-1) - \varphi_k E_k(t),
 \f]
-avoiding cancellation for small \f$c_k\f$. The inverse forms \f$M^{-1} = A^\top V^{-1} A\f$ via Durbin-Levinson coefficients \f$\varphi_{k,j}\f$ and \f$1/v_t = \prod_{a<t}\cosh^2\theta_a\f$ without divisions, and \f$\log\det M = -2\sum_{k=1}^{p-1}(p-k)\log\cosh\theta_{k-1}\f$ vanishes on mixed tuples. Sub-mask differentiation skips indices \f$\ge t\f$ at stage \f$t\f$; for \f$p \ge 2\f$, matrix derivatives never vanish.
+avoiding cancellation for small \f$c_k\f$. The inverse forms \f$M^{-1} = A^\top V^{-1} A\f$ via Durbin-Levinson coefficients \f$\varphi_{k,j}\f$ (Durbin, 1960) and \f$1/v_t = \prod_{a<t}\cosh^2\theta_a\f$ without divisions, and \f$\log\det M = -2\sum_{k=1}^{p-1}(p-k)\log\cosh\theta_{k-1}\f$ vanishes on mixed tuples. Sub-mask differentiation skips indices \f$\ge t\f$ at stage \f$t\f$; for \f$p \ge 2\f$, matrix derivatives never vanish.
 
 ### Scaled unit diagonal structure
 
@@ -75,11 +75,11 @@ with unit scale product for \f$L\f$ under `common_scale` (zero if \f$A\f$ has ov
 
 ### Factor-analytic structure
 
-In \ref laplace::pdmat::factor_analytic_pdmat "factor_analytic_pdmat" (\f$0 \le d \le p\f$), parameters hold lower-trapezoidal \f$p \times d\f$ loadings \f$\Lambda\f$ (\f$\Lambda_{jj} = e^\theta\f$, \f$j < d\f$) then \f$t_0, \dots, t_{p-1}\f$ giving \f$\Psi = \operatorname{diag}(e^{2t_0}, \dots, e^{2t_{p-1}})\f$ and \f$M = \Lambda\Lambda^\top + \Psi\f$. When \f$d = 0\f$, \f$M = \Psi\f$ matches `diagonal_pdmat`; at \f$d = p\f$, \f$\Psi\f$ is non-identifiable (\f$M - \Psi\f$ matches log-Cholesky). Identifiability requires Ledermann's bound \f$(p - d)^2 \ge p + d\f$; host-only \ref laplace::pdmat::factor_analytic_max_factors "factor_analytic_max_factors(p)" returns maximum \f$d\f$ (`0` at \f$p = 1\f$, `1` at \f$p = 3\f$, `2` at \f$p = 5\f$, `6` at \f$p = 10\f$). With \f$C = I_d + \Lambda^\top\Psi^{-1}\Lambda = L_C L_C^\top\f$, Woodbury's identity evaluates \f$\log\det M = 2\sum_{i=0}^{p-1}t_i + \log\det C\f$ and \f$M^{-1} = \Psi^{-1} - Z^\top Z\f$ (\f$Z = L_C^{-1}\Lambda^\top\Psi^{-1}\f$) in \f$O(pd^2 + d^3)\f$ operations, differentiating \f$\log\det C\f$ via sub-mask recursion on \f$C^{-1}\f$. Closed sparse derivatives of \f$M\f$ vanish when mixing \f$t\f$ and loadings, two columns, or three coordinates; \f$M^{-1}\f$ derivatives recurse on \f$M\f$ from its Cholesky inverse (\f$2^K p^3\f$ plus nonzero \f$M[T]\f$ products).
+In \ref laplace::pdmat::factor_analytic_pdmat "factor_analytic_pdmat" (\f$0 \le d \le p\f$), parameters hold lower-trapezoidal \f$p \times d\f$ loadings \f$\Lambda\f$ (\f$\Lambda_{jj} = e^\theta\f$, \f$j < d\f$) then \f$t_0, \dots, t_{p-1}\f$ giving \f$\Psi = \operatorname{diag}(e^{2t_0}, \dots, e^{2t_{p-1}})\f$ and \f$M = \Lambda\Lambda^\top + \Psi\f$ (Jennrich and Schluchter, 1986). When \f$d = 0\f$, \f$M = \Psi\f$ matches `diagonal_pdmat`; at \f$d = p\f$, \f$\Psi\f$ is non-identifiable (\f$M - \Psi\f$ matches log-Cholesky). Identifiability requires Ledermann's bound (1937) \f$(p - d)^2 \ge p + d\f$; host-only \ref laplace::pdmat::factor_analytic_max_factors "factor_analytic_max_factors(p)" returns maximum \f$d\f$ (`0` at \f$p = 1\f$, `1` at \f$p = 3\f$, `2` at \f$p = 5\f$, `6` at \f$p = 10\f$). With \f$C = I_d + \Lambda^\top\Psi^{-1}\Lambda = L_C L_C^\top\f$, Woodbury's identity (1950) evaluates \f$\log\det M = 2\sum_{i=0}^{p-1}t_i + \log\det C\f$ and \f$M^{-1} = \Psi^{-1} - Z^\top Z\f$ (\f$Z = L_C^{-1}\Lambda^\top\Psi^{-1}\f$) in \f$O(pd^2 + d^3)\f$ operations, differentiating \f$\log\det C\f$ via sub-mask recursion on \f$C^{-1}\f$. Closed sparse derivatives of \f$M\f$ vanish when mixing \f$t\f$ and loadings, two columns, or three coordinates; \f$M^{-1}\f$ derivatives recurse on \f$M\f$ from its Cholesky inverse (\f$2^K p^3\f$ plus nonzero \f$M[T]\f$ products).
 
 ## Measured accuracy
 
-Methodology is on \ref accuracy "How accuracy is measured". References were generated in mpmath at 640 bits (`tools/reference/pdmat_*.py`). Matrix errors are measured normwise with \f$\varepsilon = 2^{-52}\f$:
+Methodology is on \ref accuracy "How accuracy is measured". References were generated in mpmath (2023) at 640 bits (`tools/reference/pdmat_*.py`). Matrix errors are measured normwise with \f$\varepsilon = 2^{-52}\f$:
 \f[
 \mathrm{ulpN} = \frac{\max_{i,j}|y_{ij} - r_{ij}|}{\varepsilon\max\left(\max_{i,j}|r_{ij}|,\ 10^{-20}\right)},
 \f]
@@ -182,6 +182,16 @@ void eval_pdmat(const Kokkos::View<double*>& theta) {
 
 ## References
 
-- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/
+- T. Y. M. Chiu, T. Leonard and K. Tsui (1996), The Matrix-Logarithmic Covariance Model, Journal of the American Statistical Association, 91(433), 198–210. https://doi.org/10.1080/01621459.1996.10476677
+- L. Comtet (1974), Advanced Combinatorics: The Art of Finite and Infinite Expansions, Reidel. https://doi.org/10.1007/978-94-010-2196-8
+- J. Durbin (1960), The Fitting of Time-Series Models, Revue de l'Institut International de Statistique / Review of the International Statistical Institute, 28(3), 233. https://doi.org/10.2307/1401322
+- R. I. Jennrich and M. D. Schluchter (1986), Unbalanced Repeated-Measures Models with Structured Covariance Matrices, Biometrics, 42(4), 805. https://doi.org/10.2307/2530695
+- M. Kac, W. Murdock and G. Szego (1953), On the Eigen-Values of Certain Hermitian Forms, Indiana University Mathematics Journal, 2(4), 767–800. https://doi.org/10.1512/iumj.1953.2.52034
+- W. Ledermann (1937), On the Rank of the Reduced Correlational Matrix in Multiple-Factor Analysis, Psychometrika, 2(2), 85–93. https://doi.org/10.1007/bf02288062
+- J. Makhoul (1975), Linear prediction: A tutorial review, Proceedings of the IEEE, 63(4), 561–580. https://doi.org/10.1109/proc.1975.9792
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- J. C. Pinheiro and D. M. Bates (1996), Unconstrained parametrizations for variance-covariance matrices, Statistics and Computing, 6(3), 289–296. https://doi.org/10.1007/bf00140873
+- J. Sherman and W. J. Morrison (1950), Adjustment of an Inverse Matrix Corresponding to a Change in One Element of a Given Matrix, The Annals of Mathematical Statistics, 21(1), 124–127. https://doi.org/10.1214/aoms/1177729893
+- M. A. Woodbury (1950), Inverting modified matrices, Memorandum Report 42, Statistical Research Group, Princeton University.
 
 */

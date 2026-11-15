@@ -27,7 +27,7 @@ At \f$x = 0\f$, the functions return the exact values \f$\psi(0) = 1.0\f$ and \f
 
 ## Method
 
-For \f$x \ne 0\f$, the function value \f$\psi(x)\f$ is computed directly as `Kokkos::log1p(x) / x`. The derivatives \f$\psi^{(k)}(x)\f$ are evaluated across four regimes selected by \f$x\f$:
+For \f$x \ne 0\f$, the function value \f$\psi(x)\f$ is computed directly as `Kokkos::log1p(x) / x` (Trott and others, 2022). The derivatives \f$\psi^{(k)}(x)\f$ are evaluated across four regimes selected by \f$x\f$:
 
 1. **Power series** for \f$|x| < 1/4\f$. Differentiating the Maclaurin series of \f$\psi(x)\f$ gives
    \f[
@@ -39,7 +39,7 @@ For \f$x \ne 0\f$, the function value \f$\psi(x)\f$ is computed directly as `Kok
    \f]
    At \f$x = 0\f$, this returns the exact value \f$\tau_0\f$.
 
-2. **Gauss-Legendre quadrature** for \f$-4/5 < x \le 6\f$. The integral is evaluated with the 32-point Gauss-Legendre rule on \f$[0, 1]\f$,
+2. **Gauss-Legendre quadrature** for \f$-4/5 < x \le 6\f$. The integral is evaluated with the 32-point Gauss-Legendre rule (Davis and Rabinowitz, 1984) on \f$[0, 1]\f$,
    \f[
    \psi^{(k)}(x) = (-1)^k k! \sum_{i=0}^{31} w_i \frac{t_i^k}{(1 + x t_i)^{k+1}},
    \f]
@@ -106,4 +106,9 @@ All seven functions in this module are called as `laplace::math::NAME`:
 - \ref laplace::math::log1prel_d4 "log1prel_d4()" — fourth derivative \f$\psi^{(4)}(x)\f$
 - \ref laplace::math::log1prel_d5 "log1prel_d5()" — fifth derivative \f$\psi^{(5)}(x)\f$
 - \ref laplace::math::log1prel_d6 "log1prel_d6()" — sixth derivative \f$\psi^{(6)}(x)\f$
+
+## References
+
+- P. J. Davis and P. Rabinowitz (1984), Methods of Numerical Integration, 2nd edition, Academic Press. https://doi.org/10.1016/C2013-0-10566-1
+- C. R. Trott and others (2022), Kokkos 3: Programming Model Extensions for the Exascale Era, IEEE Transactions on Parallel and Distributed Systems, 33(4), 805–817. https://doi.org/10.1109/tpds.2021.3097283
 */

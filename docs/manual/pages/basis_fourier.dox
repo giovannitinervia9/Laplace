@@ -55,7 +55,7 @@ If \f$x\f$ is NaN, `row()` writes `1.0` to `out[0]` and NaN to remaining entries
 
 ## Numerical methods
 
-Harmonic pairs \f$(\sin(j \theta), \cos(j \theta))\f$ with \f$\theta = \nu x'\f$ are evaluated using the turn coordinate \f$u = x' / \omega\f$. At anchor harmonics \f$j = 1, 9, 17, \dots\f$, the exact reduction route forms \f$j u\f$ as an exact double-double product using `Kokkos::fma` on the device and Dekker's split on the host. It reduces \f$r = j u - \operatorname{round}(j u)\f$ by adding and subtracting \f$1.5 \times 2^{52}\f$, then evaluates \f$\sin(2\pi r)\f$ and \f$\cos(2\pi r)\f$. Intermediate harmonics advance by planar rotation:
+Harmonic pairs \f$(\sin(j \theta), \cos(j \theta))\f$ with \f$\theta = \nu x'\f$ are evaluated using the turn coordinate \f$u = x' / \omega\f$. At anchor harmonics \f$j = 1, 9, 17, \dots\f$, the exact reduction route forms \f$j u\f$ as an exact double-double product using `Kokkos::fma` on the device and Dekker's split (1971) on the host. It reduces \f$r = j u - \operatorname{round}(j u)\f$ by adding and subtracting \f$1.5 \times 2^{52}\f$, then evaluates \f$\sin(2\pi r)\f$ and \f$\cos(2\pi r)\f$. Intermediate harmonics advance by planar rotation:
 \f[
 \cos((j+1)\theta) = \cos(j\theta)\cos\theta - \sin(j\theta)\sin\theta, \quad
 \sin((j+1)\theta) = \sin(j\theta)\cos\theta + \cos(j\theta)\sin\theta.
@@ -75,7 +75,7 @@ while for \f$n = 0\f$ the cosine and sine integrals are \f$L\f$ and \f$0\f$. Whe
 
 See \ref accuracy "How accuracy is measured" for error metric definitions, reference generation, and test bound conventions.
 
-Reference values in `tools/reference/basis_fourier.py` use mpmath at 300 bits of precision across 27 configurations and harmonic counts \f$H \in \{0, 1, 4, 20, 100\}\f$. Full-period domains are \f$[0, 1]\f$, \f$[-3, 4.5]\f$ with \f$\omega = 7.5\f$, and \f$[1000, 1001]\f$ with \f$\omega = 1\f$; non-full-period domains are \f$[0, 10]\f$ with \f$\omega = 7\f$, \f$[0, 9]\f$ with \f$\omega = 12\f$, and \f$[1000, 1003]\f$ with \f$\omega = 0.7\f$. Evaluation points include random points, points outside the domain, and points where \f$j u\f$ is near an integer or half-integer. Reference Gram matrices are computed independently by exact integration of complex exponentials.
+Reference values in `tools/reference/basis_fourier.py` use mpmath (2023) at 300 bits of precision across 27 configurations and harmonic counts \f$H \in \{0, 1, 4, 20, 100\}\f$. Full-period domains are \f$[0, 1]\f$, \f$[-3, 4.5]\f$ with \f$\omega = 7.5\f$, and \f$[1000, 1001]\f$ with \f$\omega = 1\f$; non-full-period domains are \f$[0, 10]\f$ with \f$\omega = 7\f$, \f$[0, 9]\f$ with \f$\omega = 12\f$, and \f$[1000, 1003]\f$ with \f$\omega = 0.7\f$. Evaluation points include random points, points outside the domain, and points where \f$j u\f$ is near an integer or half-integer. Reference Gram matrices are computed independently by exact integration of complex exponentials.
 
 Row and integral errors are measured in ulp of \f$\max(1, \max_i |b_i^{(k)}(x)|)\f$, and Gram errors in ulp of the largest matrix entry. For derivative order \f$k\f$, the conditioning scale of column \f$j\f$ at \f$x'\f$ is \f$\max(1, 2\pi j |x'| / \omega) + k\f$. Row errors reflect the rounding of \f$x' / \omega\f$ scaled by this angle conditioning, peaking on the shifted domain with \f$x_{\mathrm{lo}} = 1000\f$, \f$\omega = 0.7\f$, and \f$x' \le 3\f$. The regression suite (`tests/basis/test_fourier.cpp`) enforces bounds set to about 1.5 times the measured maxima on gcc/OpenMP and CUDA (RTX 4070 SUPER):
 
@@ -158,4 +158,9 @@ void eval_fourier_kernel(const Kokkos::View<const double*>& x,
 - \ref laplace::basis::fourier_basis::period "period" — Fundamental period \f$\omega > 0\f$
 - \ref laplace::basis::fourier_basis::harmonics "harmonics" — Number of harmonics \f$H \ge 0\f$
 - \ref laplace::basis::fourier_basis::full_period "full_period" — Whether the domain is exactly one full period
+
+## References
+
+- T. J. Dekker (1971), A floating-point technique for extending the available precision, Numerische Mathematik, 18(3), 224–242. https://doi.org/10.1007/bf01397083
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 */

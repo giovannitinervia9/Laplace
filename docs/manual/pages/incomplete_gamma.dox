@@ -6,7 +6,7 @@ This module provides regularized incomplete gamma functions, logs, order-\f$6\f$
 
 ## Definitions
 
-For \f$a > 0\f$ and \f$x \ge 0\f$, the lower and upper regularized incomplete gamma functions are
+For \f$a > 0\f$ and \f$x \ge 0\f$, the lower and upper regularized incomplete gamma functions (DLMF §8.2) are
 \f[
 P(a, x) = \frac{1}{\Gamma(a)} \int_0^x t^{a-1} e^{-t} \, \mathrm{d}t, \qquad
 Q(a, x) = \frac{1}{\Gamma(a)} \int_x^\infty t^{a-1} e^{-t} \, \mathrm{d}t = 1 - P(a, x),
@@ -34,9 +34,9 @@ Direct \f$x^a e^{-x} / \Gamma(a)\f$ suffers \f$O(a \log a)\f$ cancellation and t
 \f[
 \frac{x^a e^{-x}}{\Gamma(a + 1)} = \frac{\exp(-a \phi(c))}{\sqrt{2\pi a} \, \Gamma^*(a)}, \qquad c = \frac{x}{a},
 \f]
-with \f$\phi(c) = -\mathrm{log1pmx}(c - 1)\f$ and Stirling's \f$\Gamma^*(a)\f$ (\f$a \ge 10\f$). For \f$a \ge 1, x \le a/2\f$, exponent-split double-double logs cut \f$-a\phi(c)\f$ error to \f$O(a\epsilon)\f$ (\f$\epsilon = 2^{-53}\f$), storing low parts in \ref laplace::math::own::gamma_inc_result "gamma_inc_result".
+with \f$\phi(c) = -\mathrm{log1pmx}(c - 1)\f$ and Stirling's \f$\Gamma^*(a)\f$ (\f$a \ge 10\f$; DLMF §5.11). For \f$a \ge 1, x \le a/2\f$, exponent-split double-double logs (Dekker, 1971) cut \f$-a\phi(c)\f$ error to \f$O(a\epsilon)\f$ (\f$\epsilon = 2^{-53}\f$), storing low parts in \ref laplace::math::own::gamma_inc_result "gamma_inc_result".
 
-For \f$a \ge 100\f$, \f$|\eta| \le 0.5\f$ (\f$\eta = \operatorname{sgn}(c - 1)\sqrt{2\phi(c)}\f$), `gamma_inc()` applies Temme's uniform expansion (Temme 1979; DiDonato and Morris 1986) in \f$O(1)\f$ time: \f$\exp(-a \phi(c))(E \pm r)\f$ with \f$E = \frac{1}{2}\operatorname{erfcx}(\sqrt{a \phi(c)})\f$ and \f$10\f$-term \f$r = \sum_{m=0}^9 c_m(\eta) a^{-m} / \sqrt{2\pi a}\f$, logging directly. For \f$a < 1, x < 1.5\f$, a series forms \f$P = g(1 + J)\f$ and \f$Q = -\operatorname{expm1}(\log g) - g J\f$ (\f$g = x^a / \Gamma(a + 1)\f$, \f$J = a \sum_{n=1}^\infty (-x)^n / (n!(a + n))\f$). Elsewhere it uses power series (\f$x < a + 1\f$) or Lentz continued fraction (\f$|\delta - 1| \le 4\epsilon\f$).
+For \f$a \ge 100\f$, \f$|\eta| \le 0.5\f$ (\f$\eta = \operatorname{sgn}(c - 1)\sqrt{2\phi(c)}\f$), `gamma_inc()` applies Temme's uniform expansion (Temme 1979; DiDonato and Morris 1986) in \f$O(1)\f$ time: \f$\exp(-a \phi(c))(E \pm r)\f$ with \f$E = \frac{1}{2}\operatorname{erfcx}(\sqrt{a \phi(c)})\f$ and \f$10\f$-term \f$r = \sum_{m=0}^9 c_m(\eta) a^{-m} / \sqrt{2\pi a}\f$, logging directly. For \f$a < 1, x < 1.5\f$, a series forms \f$P = g(1 + J)\f$ and \f$Q = -\operatorname{expm1}(\log g) - g J\f$ (\f$g = x^a / \Gamma(a + 1)\f$, \f$J = a \sum_{n=1}^\infty (-x)^n / (n!(a + n))\f$). Elsewhere it uses power series (\f$x < a + 1\f$; DLMF §8.7) or Lentz continued fraction (\f$|\delta - 1| \le 4\epsilon\f$; Lentz, 1976).
 
 ### Shape, mixed, and fixed-ratio derivatives
 
@@ -51,15 +51,15 @@ Mixed and ratio functions propagate degree-\f$K\f$ bivariate Taylor polynomials 
 
 Every family evaluates the smaller tail at \f$x < a - 1/3\f$ (keeping \f$\log P\f$ lower for \f$a < 2, x < 3/2\f$) and forms \f$\log(1 - S)\f$ via cumulants. Complements integrate \f$x \int_0^{\delta_x} f(a + h, x(1 + u)) \, \mathrm{d}u\f$ in log space for \f$a \ge 2, x \ge a/2\f$; upper \f$j = 1\f$ at \f$a < 2, 1/4 \le x < 3/2\f$ uses upper quadrature.
 
-Host and device dispatch across small-\f$x\f$ closed forms (\f$a < 2, x < 3/2\f$; ratio composes \f$(a, x)\f$), power series (\f$\le 300\f$ terms host, \f$\le 60\f$ device for \f$a < 2\f$), Temme Taylor (\f$a \ge 20, |c - 1| < 0.3\f$, reaching \f$0.4\f$ at \f$300\f$ and \f$0.5\f$ at \f$1000\f$; partial Temme for \f$50 \le a < 300, |c - 1| < 0.25\f$ with \f$x, c\f$ orders \f$0\f$ below \f$100\f$, \f$\le 2\f$ above), and exp-exp (\f$h = 1/8\f$, \f$\approx 65\f$ nodes) or \f$2\f$-panel tanh-sinh (\f$[0, \log(1/x)]\f$, upper \f$x < 1/4\f$). Host adds upper asymptotics (\f$x \ge 36\f$) and shape Lentz CF (\f$x \ge a + 0.75\sqrt{a}, x \ge 3/2\f$, order-\f$3\f$ complement).
+Host and device dispatch across small-\f$x\f$ closed forms (\f$a < 2, x < 3/2\f$; ratio composes \f$(a, x)\f$), power series (\f$\le 300\f$ terms host, \f$\le 60\f$ device for \f$a < 2\f$), Temme Taylor (\f$a \ge 20, |c - 1| < 0.3\f$, reaching \f$0.4\f$ at \f$300\f$ and \f$0.5\f$ at \f$1000\f$; partial Temme for \f$50 \le a < 300, |c - 1| < 0.25\f$ with \f$x, c\f$ orders \f$0\f$ below \f$100\f$, \f$\le 2\f$ above), and exp-exp (\f$h = 1/8\f$, \f$\approx 65\f$ nodes) or \f$2\f$-panel tanh-sinh (\f$[0, \log(1/x)]\f$, upper \f$x < 1/4\f$; Takahasi and Mori, 1974). Host adds upper asymptotics (\f$x \ge 36\f$; DLMF §8.11) and shape Lentz CF (\f$x \ge a + 0.75\sqrt{a}, x \ge 3/2\f$, order-\f$3\f$ complement).
 
 ### Inverse functions
 
-Inverses solve \f$g(v) = \log S(a, e^v) - \log \tau = 0\f$ (\f$v = \log x\f$) on the smaller tail, where concavity ensures monotonic convergence backed by bracket bisection. With \f$g' = \pm D/S\f$, \f$g'' = g'\xi\f$, \f$g''' = g'(\xi^2 - x - g'\xi)\f$ (\f$D = x^a e^{-x}/\Gamma(a)\f$, \f$\xi = a - x - g'\f$), each step uses Halley if \f$1 + dv\cdot\xi/2 > 1/2\f$ else Newton, updating \f$x \leftarrow x + x\operatorname{expm1}(dv)\f$. Initialized via DiDonato–Morris (1986) in \f$\log p, \log q\f$, iteration stops at residual \f$< \epsilon/16\f$, step \f$< 0.5\operatorname{ulp}(x)\f$ or \f$4\epsilon\f$, or \f$|g| < 10^{-6}\f$.
+Inverses solve \f$g(v) = \log S(a, e^v) - \log \tau = 0\f$ (\f$v = \log x\f$) on the smaller tail, where concavity ensures monotonic convergence backed by bracket bisection. With \f$g' = \pm D/S\f$, \f$g'' = g'\xi\f$, \f$g''' = g'(\xi^2 - x - g'\xi)\f$ (\f$D = x^a e^{-x}/\Gamma(a)\f$, \f$\xi = a - x - g'\f$), each step uses Halley (Gander, 1985) if \f$1 + dv\cdot\xi/2 > 1/2\f$ else Newton, updating \f$x \leftarrow x + x\operatorname{expm1}(dv)\f$. Initialized via DiDonato–Morris (1986) in \f$\log p, \log q\f$, iteration stops at residual \f$< \epsilon/16\f$, step \f$< 0.5\operatorname{ulp}(x)\f$ or \f$4\epsilon\f$, or \f$|g| < 10^{-6}\f$.
 
 ## Accuracy
 
-See \ref accuracy "How accuracy is measured" for error units (\ref accuracy_ulp "ulp", \ref accuracy_ulp1 "ulp1", \ref accuracy_ulpL "ulpL", \ref accuracy_inverse "ulpC"). References use `mpmath` (\f$200\f$-bit forward/inverse; \f$240\f$, \f$320\f$-bit derivatives) and `SymPy` \f$1.14.0\f$ (\ref derivation "How formulas are derived"). Forward general figures (\f$10000\f$ points) held after Temme and double-double updates.
+See \ref accuracy "How accuracy is measured" for error units (\ref accuracy_ulp "ulp", \ref accuracy_ulp1 "ulp1", \ref accuracy_ulpL "ulpL", \ref accuracy_inverse "ulpC"). References use `mpmath` (\f$200\f$-bit forward/inverse; \f$240\f$, \f$320\f$-bit derivatives; mpmath) and `SymPy` \f$1.14.0\f$ (Meurer and others, 2017; \ref derivation "How formulas are derived"). Forward general figures (\f$10000\f$ points) held after Temme and double-double updates.
 
 | Function | Set | Max ulp | Max ulp1 | Max ulpL | Bound ulp1 | Bound ulpL |
 |---|---|---|---|---|---|---|
@@ -181,7 +181,16 @@ Called as `laplace::math::NAME`.
 
 ## References
 
-- N. M. Temme, "The asymptotic expansion of the incomplete gamma functions," *SIAM Journal on Mathematical Analysis*, 10(4), 757–766, 1979.
-- A. R. DiDonato and A. H. Morris Jr., "Computation of the incomplete gamma function ratios and their inverse," *ACM Transactions on Mathematical Software*, 12(4), 377–393, 1986.
-- A. Meurer et al., "SymPy: symbolic computing in Python," *PeerJ Computer Science*, 3:e103, 2017.
+- T. J. Dekker (1971), A floating-point technique for extending the available precision, Numerische Mathematik, 18(3), 224–242. https://doi.org/10.1007/bf01397083
+- A. R. DiDonato and A. H. Morris (1986), Computation of the incomplete gamma function ratios and their inverse, ACM Transactions on Mathematical Software, 12(4), 377–393. https://doi.org/10.1145/22721.23109
+- W. Gander (1985), On Halley's Iteration Method, The American Mathematical Monthly, 92(2), 131–134. https://doi.org/10.1080/00029890.1985.11971554
+- W. J. Lentz (1976), Generating Bessel functions in Mie scattering calculations using continued fractions, Applied Optics, 15(3), 668. https://doi.org/10.1364/ao.15.000668
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §5.11 Asymptotic Expansions (Gamma Function), https://dlmf.nist.gov/5.11
+- NIST Digital Library of Mathematical Functions, §8.2 Definitions and Basic Properties (Incomplete Gamma Functions), https://dlmf.nist.gov/8.2
+- NIST Digital Library of Mathematical Functions, §8.7 Series Expansions (Incomplete Gamma Functions), https://dlmf.nist.gov/8.7
+- NIST Digital Library of Mathematical Functions, §8.11 Asymptotic Approximations and Expansions (Incomplete Gamma Functions), https://dlmf.nist.gov/8.11
+- H. Takahasi and M. Mori (1974), Double Exponential Formulas for Numerical Integration, Publications of the Research Institute for Mathematical Sciences, 9(3), 721–741. https://doi.org/10.2977/prims/1195192451
+- N. M. Temme (1979), The Asymptotic Expansion of the Incomplete Gamma Functions, SIAM Journal on Mathematical Analysis, 10(4), 757–766. https://doi.org/10.1137/0510071
 */

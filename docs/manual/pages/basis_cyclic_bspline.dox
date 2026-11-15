@@ -12,7 +12,7 @@ Column \f$j \in \{0, \dots, K - 1\}\f$ is the periodic function
 \f[
 b_j(x) = \sum_{m} B_{j + mK}(x),
 \f]
-summed over all integers \f$m\f$, where \f$B_i\f$ is the ordinary B-spline of degree \f$d\f$ on knots \f$t_i, \dots, t_{i+d+1}\f$ of the extended sequence (\ref basis_bspline). Each \f$b_j\f$ is supported on \f$[t_j, t_{j+d+1}]\f$ modulo \f$\omega\f$, satisfies \f$b_j(x + \omega) = b_j(x)\f$, and \f$\sum_{j=0}^{K-1} b_j(x) = 1\f$. At a knot of multiplicity \f$\mu\f$, including \f$x_{\mathrm{lo}}\f$ across the wrap, the functions are \f$C^{d - \mu}\f$. A knot value may appear at most \f$d + 1\f$ times in one period, and \f$K \ge d + 1\f$ makes the \f$d + 1\f$ columns of a row distinct. With equally spaced knots \f$t_j = x_{\mathrm{lo}} + j\omega / K\f$, every function is a translate of one cardinal B-spline.
+summed over all integers \f$m\f$ (de Boor, 1978), where \f$B_i\f$ is the ordinary B-spline of degree \f$d\f$ on knots \f$t_i, \dots, t_{i+d+1}\f$ of the extended sequence (\ref basis_bspline). Each \f$b_j\f$ is supported on \f$[t_j, t_{j+d+1}]\f$ modulo \f$\omega\f$, satisfies \f$b_j(x + \omega) = b_j(x)\f$, and \f$\sum_{j=0}^{K-1} b_j(x) = 1\f$. At a knot of multiplicity \f$\mu\f$, including \f$x_{\mathrm{lo}}\f$ across the wrap, the functions are \f$C^{d - \mu}\f$. A knot value may appear at most \f$d + 1\f$ times in one period, and \f$K \ge d + 1\f$ makes the \f$d + 1\f$ columns of a row distinct. With equally spaced knots \f$t_j = x_{\mathrm{lo}} + j\omega / K\f$, every function is a translate of one cardinal B-spline (Schoenberg, 1946).
 
 ## Domain and special values
 
@@ -157,4 +157,9 @@ void eval_cyclic_bspline(const Kokkos::View<const double*>& x,
 - \ref laplace::basis::cyclic_bspline_basis_owner::host "host()" — Host evaluation view
 - \ref laplace::basis::cyclic_bspline_basis_owner::device "device()" — Device evaluation view
 - \ref laplace::basis::cyclic_bspline_basis_owner::knots "knots()" — Knots of one period
+
+## References
+
+- C. d. Boor (1978), A Practical Guide to Splines, Applied Mathematical Sciences. https://doi.org/10.1007/978-1-4612-6333-3
+- I. J. Schoenberg (1946), Contributions to the problem of approximation of equidistant data by analytic functions. Part B. On the problem of osculatory interpolation. A second class of analytic approximation formulae, Quarterly of Applied Mathematics, 4(2), 112–141. https://doi.org/10.1090/qam/16705
 */

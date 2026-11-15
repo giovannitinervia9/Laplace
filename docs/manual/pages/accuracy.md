@@ -4,13 +4,13 @@ Every numerical module in Laplace documents measured accuracy alongside test err
 
 ## Reference generation
 
-Python scripts in `tools/reference/` generate reference values with `mpmath` (Johansson and others) at 200 bits, raising precision to 256 or 300 bits where cancellation or large arguments need headroom. Where `mpmath` lacks accuracy, scripts use alternative routes such as numerical integration at growing precision, noted on module pages.
+Python scripts in `tools/reference/` generate reference values with `mpmath` (2023) at 200 bits, raising precision to 256 or 300 bits where cancellation or large arguments need headroom. Where `mpmath` lacks accuracy, scripts use alternative routes such as numerical integration at growing precision, noted on module pages.
 
 Datasets are CSV files in `tests/data/reference/` with up to three inputs followed by `hi` and `lo` in hexadecimal (`%a`). Together, \f$hi, lo \in \mathbb{R}\f$ store the double-double sum \f$hi + lo\f$ (Dekker 1971): \f$hi\f$ is the 53-bit rounding and \f$lo\f$ is the rounded residual, giving about 106 bits of significand (\f$2^{-106}\f$ storage rounding). Grids concentrate points in asymptotic tails, near zeros and turning points, and at expansion boundaries.
 
 ## Backend evaluation
 
-Functions run in Kokkos parallel kernels on CPU via gcc with Serial and OpenMP, and on GPU via NVIDIA nvcc for CUDA. Backends can differ in the last bit for two reasons: nvcc contracts \f$a \cdot b + c\f$ into `fma` (Muller et al. 2018), altering intermediate rounding and breaking identities like Dekker's split or Knuth's `two_sum`; and CUDA calls `libdevice` whereas CPU calls `libm` or `elementary.hpp`. Accuracy and speed tables report CPU and GPU separately.
+Functions run in Kokkos parallel kernels on CPU via gcc with Serial and OpenMP, and on GPU via NVIDIA nvcc for CUDA. Backends can differ in the last bit for two reasons: nvcc contracts \f$a \cdot b + c\f$ into `fma` (Muller et al. 2018), altering intermediate rounding and breaking identities like Dekker's split or Knuth's `two_sum` (Knuth, 1997); and CUDA calls `libdevice` whereas CPU calls `libm` or `elementary.hpp`. Accuracy and speed tables report CPU and GPU separately.
 
 ## Error metrics and definitions
 
@@ -125,8 +125,9 @@ Tests also verify invalid or NaN inputs returning quiet NaNs, signed infinities,
 
 ## References
 
-- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/
-- D. Goldberg (1991), What every computer scientist should know about floating-point arithmetic, ACM Computing Surveys 23(1), 5-48
-- J.-M. Muller and others (2018), Handbook of Floating-Point Arithmetic, 2nd edition, Birkhäuser
-- N. J. Higham (2002), Accuracy and Stability of Numerical Algorithms, 2nd edition, SIAM
-- T. J. Dekker (1971), A floating-point technique for extending the available precision, Numerische Mathematik 18, 224-242
+- T. J. Dekker (1971), A floating-point technique for extending the available precision, Numerische Mathematik, 18(3), 224–242. https://doi.org/10.1007/bf01397083
+- D. Goldberg (1991), What every computer scientist should know about floating-point arithmetic, ACM Computing Surveys, 23(1), 5–48. https://doi.org/10.1145/103162.103163
+- N. J. Higham (2002), Accuracy and Stability of Numerical Algorithms. https://doi.org/10.1137/1.9780898718027
+- D. E. Knuth (1997), The Art of Computer Programming, Volume 2: Seminumerical Algorithms, 3rd edition, Addison-Wesley.
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- J. Muller and others (2018), Handbook of Floating-Point Arithmetic. https://doi.org/10.1007/978-3-319-76526-6

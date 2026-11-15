@@ -42,7 +42,7 @@ The structure \ref laplace::distrib::distrib_param_info "distrib_param_info" rec
 
 A \ref laplace::distrib::distrib_kinks "distrib_kinks" struct stores up to two coordinates in `point[2]` and their count in `count`, together with `continuous_order`, the highest derivative order that remains continuous across the kink. At observation \f$y\f$, `param_kinks(j, y)` returns non-smooth points in \f$\theta_j\f$, and `y_kinks()` returns non-smooth points in \f$y\f$ at the current parameters \f$\theta\f$.
 
-Smooth distributions such as \ref laplace::distrib::gaussian1_distrib "gaussian1_distrib" and \ref laplace::distrib::gamma1_distrib "gamma1_distrib" report `infinitely_smooth` for every parameter and for `y_regularity`. In \ref laplace::distrib::laplace1_distrib "laplace1_distrib", the location parameter \f$\mu\f$ has `regularity = 0`, `y_regularity = 0`, and `cdf_regularity = 1` at the kink \f$\mu = y\f$. Because the pointwise second derivative in \f$\mu\f$ vanishes almost everywhere and omits a point mass at the kink, the expected Fisher information is obtained from the score variance rather than \f$-\mathbb{E}[\partial^2 \log f / \partial\mu^2]\f$, while \f$\log F\f$ integrates the density and is one order smoother.
+Smooth distributions such as \ref laplace::distrib::gaussian1_distrib "gaussian1_distrib" and \ref laplace::distrib::gamma1_distrib "gamma1_distrib" report `infinitely_smooth` for every parameter and for `y_regularity`. In \ref laplace::distrib::laplace1_distrib "laplace1_distrib", the location parameter \f$\mu\f$ has `regularity = 0`, `y_regularity = 0`, and `cdf_regularity = 1` at the kink \f$\mu = y\f$. Because the pointwise second derivative in \f$\mu\f$ vanishes almost everywhere and omits a point mass at the kink, the expected Fisher information is obtained from the score variance (Lehmann and Casella, 1998) rather than \f$-\mathbb{E}[\partial^2 \log f / \partial\mu^2]\f$, while \f$\log F\f$ integrates the density and is one order smoother.
 
 ## Symmetric tensors and combinatorial helpers
 
@@ -64,7 +64,7 @@ The expected Fisher information matrix \f$I(\theta) = -\mathbb{E}\left[\frac{\pa
 
 ## Accuracy and tensor error scaling
 
-Scalar distribution functions are measured in units in the last place (ulp) against double-double reference values \f$(hi, lo)\f$, as described on \ref accuracy "How accuracy is measured". For a symmetric derivative tensor \f$v \in \mathbb{R}^M\f$ of order \f$K\f$, individual components frequently cross zero at different points across the parameter space, causing plain relative ulp error to diverge even when the absolute error is near machine epsilon.
+Scalar distribution functions are measured in units in the last place (ulp) against double-double reference values \f$(hi, lo)\f$ (Dekker, 1971), as described on \ref accuracy "How accuracy is measured". For a symmetric derivative tensor \f$v \in \mathbb{R}^M\f$ of order \f$K\f$, individual components frequently cross zero at different points across the parameter space, causing plain relative ulp error to diverge even when the absolute error is near machine epsilon.
 
 To prevent artificial error inflation at zeros of sub-dominant components, Laplace measures tensor accuracy on the conditioned scale \f$S\f$ (see \ref accuracy_conditioned) given by the largest reference component of that order at the evaluation point:
 \f[
@@ -107,4 +107,9 @@ void evaluate_gaussian_kernel(Kokkos::View<const double*> y,
 ## Module types and functions
 
 In `laplace::distrib`, the enumeration \ref laplace::distrib::distrib_kind "distrib_kind" distinguishes `continuous` and `discrete` distributions, \ref laplace::distrib::distrib_param_info "distrib_param_info" describes natural parameter properties, and \ref laplace::distrib::distrib_kinks "distrib_kinks" records non-smooth points and continuity orders. Packed derivative storage is provided by \ref laplace::distrib::sym_tensor "sym_tensor" and \ref laplace::distrib::expected_info_tensor "expected_info_tensor", using the constants \ref laplace::distrib::distrib_infinity "distrib_infinity" for infinite bounds and \ref laplace::distrib::infinitely_smooth "infinitely_smooth" for \f$C^\infty\f$ regularity. Tensor sizing and indexing are computed by \ref laplace::distrib::binomial_coef "binomial_coef()", \ref laplace::distrib::sym_tensor_size "sym_tensor_size()", and \ref laplace::distrib::sym_tensor_position "sym_tensor_position()".
+
+## References
+
+- T. J. Dekker (1971), A floating-point technique for extending the available precision, Numerische Mathematik, 18(3), 224–242. https://doi.org/10.1007/bf01397083
+- E. L. Lehmann and G. Casella (1998), Theory of Point Estimation, 2nd edition, Springer. https://doi.org/10.1007/b98854
 */

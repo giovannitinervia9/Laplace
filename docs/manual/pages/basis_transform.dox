@@ -20,7 +20,7 @@ The matrices passed to `make_basis_transform()` are host-readable rank-2 Kokkos 
 
 `make_basis_transform(K, C, G, S, r)` builds \f$T\f$ from up to three inputs, always applied in this order:
 
-1. Constraints \f$C\beta = 0\f$, with \f$C\f$ an \f$m_c \times K\f$ matrix. \f$T_1\f$ is an orthonormal basis of the null space of \f$C\f$ from the singular value decomposition (\ref dense "the dense module"), so that \f$C T_1 = 0\f$ and \f$T_1^\top T_1 = I\f$. An example is the zero-integral constraint \f$\int \beta^\top b(x)\,\mathrm{d}x = 0\f$, whose row the basis gives through `integral_column_total()`.
+1. Constraints \f$C\beta = 0\f$, with \f$C\f$ an \f$m_c \times K\f$ matrix. \f$T_1\f$ is an orthonormal basis of the null space of \f$C\f$ from the singular value decomposition (Golub and Van Loan, 2013; \ref dense "the dense module"), so that \f$C T_1 = 0\f$ and \f$T_1^\top T_1 = I\f$. An example is the zero-integral constraint \f$\int \beta^\top b(x)\,\mathrm{d}x = 0\f$, whose row the basis gives through `integral_column_total()`.
 2. Orthonormalization with respect to a symmetric positive definite Gram matrix \f$G\f$, such as \f$G_{00}\f$ or an empirical \f$X^\top X / n\f$. With the Cholesky factorization \f$T_1^\top G T_1 = L L^\top\f$, the step sets \f$T_2 = T_1 L^{-\top}\f$, so that \f$T_2^\top G T_2 = I\f$ and \f$C T_2 = 0\f$.
 3. Diagonalization of a symmetric positive semidefinite penalty \f$S\f$. With the symmetric eigendecomposition \f$T_2^\top S T_2 = W \operatorname{diag}(\lambda) W^\top\f$ and eigenvalues \f$\lambda_1 \le \dots \le \lambda_q\f$, the step sets \f$T = T_2 W\f$, so that \f$T^\top S T = \operatorname{diag}(\lambda)\f$ and \f$T^\top G T = I\f$. When \f$G\f$ is given, this is the Demmler-Reinsch basis (Demmler and Reinsch, 1975).
 
@@ -40,7 +40,7 @@ A singular \f$G\f$ is an error, so that no direction is dropped silently. It ari
 
 ## Accuracy
 
-The references are eigenvalues computed with mpmath at 200 bits from exact rational \f$G = G_{00}\f$, \f$S = G_{mm}\f$ and an exact null basis of the zero-integral constraint (see \ref accuracy "How accuracy is measured"). They cover cubic B-splines with uniform clamped knots on \f$[0, 1]\f$ (\ref basis_bspline "B-spline bases"), \f$K = 10\f$ and \f$40\f$, penalties \f$D^2\f$ and \f$D^3\f$, with and without the constraint. The table gives the worst error over these eight cases, in units of \f$\varepsilon\f$:
+The references are eigenvalues computed with mpmath (2023) at 200 bits from exact rational \f$G = G_{00}\f$, \f$S = G_{mm}\f$ and an exact null basis of the zero-integral constraint (see \ref accuracy "How accuracy is measured"). They cover cubic B-splines with uniform clamped knots on \f$[0, 1]\f$ (\ref basis_bspline "B-spline bases"), \f$K = 10\f$ and \f$40\f$, penalties \f$D^2\f$ and \f$D^3\f$, with and without the constraint. The table gives the worst error over these eight cases, in units of \f$\varepsilon\f$:
 
 | Quantity | gcc/OpenMP | CUDA (RTX 4070 SUPER) | Test bound |
 |---|---|---|---|
@@ -95,6 +95,7 @@ All types and functions are defined in namespace `laplace::basis`:
 
 ## References
 
-- A. Demmler and C. Reinsch (1975), Oscillation matrices with spline smoothing, Numerische Mathematik 24, 375-382.
-- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/.
+- A. Demmler and C. Reinsch (1975), Oscillation matrices with spline smoothing, Numerische Mathematik, 24(5), 375–382. https://doi.org/10.1007/bf01437406
+- G. H. Golub and C. F. Van Loan (2013), Matrix Computations, 4th edition, Johns Hopkins University Press. https://doi.org/10.56021/9781421407944
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 */

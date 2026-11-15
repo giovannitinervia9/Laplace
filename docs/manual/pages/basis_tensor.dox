@@ -56,7 +56,7 @@ For a constant-coefficient differential operator \f$L = \sum_a c_a \partial^{k^{
 \f[
 S_L = \sum_{a,b} c_a c_b\, G_{k^{(a)} k^{(b)}},
 \f]
-which represents \f$\int (L f)^2\f$ over the box in the coefficients of \f$f = \sum_c \beta_c B_c\f$. A sum of squares of several operators is accumulated by summing separate calls. For example, the two-dimensional thin plate penalty sums three calls with single terms \f$\partial^{(2,0)}\f$, \f$\sqrt{2}\,\partial^{(1,1)}\f$, and \f$\partial^{(0,2)}\f$ to obtain \f$G_{(2,0)(2,0)} + 2 G_{(1,1)(1,1)} + G_{(0,2)(0,2)}\f$. Passing all three terms in one call computes the penalty of their sum instead. The function throws `std::invalid_argument` if any `order` does not have \f$D\f$ entries, has an entry outside \f$\{0, \dots, 6\}\f$, or exceeds the degree of a polynomial margin (B-spline or Legendre), where the resulting matrix would not match \f$L\f$.
+which represents \f$\int (L f)^2\f$ over the box in the coefficients of \f$f = \sum_c \beta_c B_c\f$. A sum of squares of several operators is accumulated by summing separate calls. For example, the two-dimensional thin plate penalty (Duchon, 1977) sums three calls with single terms \f$\partial^{(2,0)}\f$, \f$\sqrt{2}\,\partial^{(1,1)}\f$, and \f$\partial^{(0,2)}\f$ to obtain \f$G_{(2,0)(2,0)} + 2 G_{(1,1)(1,1)} + G_{(0,2)(0,2)}\f$. Passing all three terms in one call computes the penalty of their sum instead. The function throws `std::invalid_argument` if any `order` does not have \f$D\f$ entries, has an entry outside \f$\{0, \dots, 6\}\f$, or exceeds the degree of a polynomial margin (B-spline or Legendre), where the resulting matrix would not match \f$L\f$.
 
 For a univariate \ref laplace::basis::differential_operator "differential_operator" `op` (see \ref basis_operator "the differential operators page") acting on one coordinate, \ref laplace::basis::marginal_operator_penalty "marginal_operator_penalty(basis, j, op, out)" writes
 \f[
@@ -72,7 +72,7 @@ Also on the host, \ref laplace::basis::compose_basis_transforms "compose_basis_t
 
 ## Accuracy
 
-See \ref accuracy "How accuracy is measured" for error definitions and reference conventions. Reference values are computed directly from the definitions of the margins without calling the tensor product code: B-spline and cyclic B-spline margins use exact rational arithmetic, Legendre margins use integer coefficients, Fourier margins use mpmath, and all products are formed at 400 bits.
+See \ref accuracy "How accuracy is measured" for error definitions and reference conventions. Reference values are computed directly from the definitions of the margins without calling the tensor product code: B-spline and cyclic B-spline margins use exact rational arithmetic, Legendre margins use integer coefficients, Fourier margins use mpmath (2023), and all products are formed at 400 bits.
 
 Four cases are tested: a cubic by quadratic B-spline product, a B-spline by cyclic B-spline product with \f$x_2\f$ spanning several periods, a Legendre by Fourier product, and a three-margin product of B-spline, cyclic B-spline, and Legendre bases. Evaluation points include knots and values one ulp on either side, and multi-indices include integrals. Errors are reported in units of \f$\epsilon = 2^{-52}\f$ times a scale: the largest reference value of the row for rows, \f$\sum_c \lvert\beta_c B_c\rvert\f$ for expansions, and the largest entry for Gram matrices and penalties. Both gcc/OpenMP and CUDA (RTX 4070 SUPER) give the same maxima except where noted, with the test bounds:
 
@@ -83,7 +83,7 @@ Four cases are tested: a cubic by quadratic B-spline product, a B-spline by cycl
 | Legendre by Fourier | 2.10 | 1.70 (CUDA 1.42) | 1.24 | 3.2, 2.6, 1.9 |
 | B-spline, cyclic B-spline, Legendre | 4.01 | 1.14 (CUDA 1.35) | 2.67 | 6.0, 2.1, 4.0 |
 
-In the first case, the thin plate penalty is within \f$0.88\epsilon\f$ of its largest entry (bound \f$1.3\f$). Rows of the cyclic case carry the cyclic margin's own error (\ref basis_cyclic_bspline "the cyclic B-spline page"). The tests also verify that every row equals the product of the marginal rows bit for bit (including outside the domain), that NaN coordinates and `outside_domain_rule::nan` make the row NaN, and that `expansion_partial()` matches the scattered row dot product. With `op` equal to \f$D^2\f$ on two margins, `marginal_operator_penalty()` equals `cross_gram()` with both multi-indices \f$(2, 0)\f$ bit for bit. Kronecker products of two Demmler-Reinsch transforms satisfy \f$T^\top G T - I\f$ within \f$7\epsilon\f$ and penalty off-diagonals within \f$2.2\epsilon\f$ of the largest entry. Composing with a zero-integral constraint keeps \f$\lvert C T\rvert\f$ within \f$7.1\epsilon\f$ of \f$\max\lvert C\rvert\f$. Finally, `fill_tensor_basis_rows()` on the device is verified against the host. See `docs/numerics.md`.
+In the first case, the thin plate penalty is within \f$0.88\epsilon\f$ of its largest entry (bound \f$1.3\f$). Rows of the cyclic case carry the cyclic margin's own error (\ref basis_cyclic_bspline "the cyclic B-spline page"). The tests also verify that every row equals the product of the marginal rows bit for bit (including outside the domain), that NaN coordinates and `outside_domain_rule::nan` make the row NaN, and that `expansion_partial()` matches the scattered row dot product. With `op` equal to \f$D^2\f$ on two margins, `marginal_operator_penalty()` equals `cross_gram()` with both multi-indices \f$(2, 0)\f$ bit for bit. Kronecker products of two Demmler-Reinsch transforms (Demmler and Reinsch, 1975) satisfy \f$T^\top G T - I\f$ within \f$7\epsilon\f$ and penalty off-diagonals within \f$2.2\epsilon\f$ of the largest entry. Composing with a zero-integral constraint keeps \f$\lvert C T\rvert\f$ within \f$7.1\epsilon\f$ of \f$\max\lvert C\rvert\f$. Finally, `fill_tensor_basis_rows()` on the device is verified against the host. See `docs/numerics.md`.
 
 ## Speed
 
@@ -133,5 +133,7 @@ All public types, concepts, and functions are defined in namespace `laplace::bas
 
 ## References
 
-- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/.
+- A. Demmler and C. Reinsch (1975), Oscillation matrices with spline smoothing, Numerische Mathematik, 24(5), 375–382. https://doi.org/10.1007/bf01437406
+- J. Duchon (1977), Splines minimizing rotation-invariant semi-norms in Sobolev spaces, in Constructive Theory of Functions of Several Variables, Lecture Notes in Mathematics 571, Springer, 85-100. https://doi.org/10.1007/BFb0086566
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 */

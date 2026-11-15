@@ -2,13 +2,13 @@
 \defgroup basis_bspline B-spline bases
 \brief Complete B-spline basis with analytical derivatives to order 6, integrals from the lower boundary, and cross Gram matrices.
 
-This module implements univariate B-spline bases of degree \f$d \le 10\f$ in `<laplace/basis/bspline.hpp>`. Users construct a \ref laplace::basis::bspline_basis_owner "bspline_basis_owner" on the host and call \ref laplace::basis::bspline_basis_owner::host "host()" or \ref laplace::basis::bspline_basis_owner::device "device()" to obtain a lightweight \ref laplace::basis::bspline_basis "bspline_basis" view. Evaluation members are marked `LAPLACE_HD` for host code and Kokkos device kernels; constructors, cross Gram matrices, Greville abscissae, and regularity points run on the host. Across 42 knot configurations, rows of orders 0 to 6 stay within 7 ulp for \f$d \le 5\f$ and 19 ulp for \f$d = 10\f$, integrals and column totals within 3 and 4.7 ulp, and cross Gram matrices within 6 ulp against exact rational references.
+This module implements univariate B-spline bases of degree \f$d \le 10\f$ in `<laplace/basis/bspline.hpp>`. Users construct a \ref laplace::basis::bspline_basis_owner "bspline_basis_owner" on the host and call \ref laplace::basis::bspline_basis_owner::host "host()" or \ref laplace::basis::bspline_basis_owner::device "device()" to obtain a lightweight \ref laplace::basis::bspline_basis "bspline_basis" view. Evaluation members are marked `LAPLACE_HD` for host code and Kokkos device kernels; constructors, cross Gram matrices, Greville abscissae (Greville, 1969), and regularity points run on the host. Across 42 knot configurations, rows of orders 0 to 6 stay within 7 ulp for \f$d \le 5\f$ and 19 ulp for \f$d = 10\f$, integrals and column totals within 3 and 4.7 ulp, and cross Gram matrices within 6 ulp against exact rational references.
 
 ## Mathematical definition
 
 A B-spline basis of degree \f$d\f$ (\f$0 \le d \le 10\f$, \ref laplace::basis::bspline_max_degree "bspline_max_degree") and dimension \f$K \ge d + 1\f$ is defined by a non-decreasing knot vector \f$t_0 \le t_1 \le \dots \le t_{K+d}\f$ of \f$K + d + 1\f$ real knots. The domain is \f$[t_d, t_K]\f$ (\ref laplace::basis::bspline_basis::lower "lower" and \ref laplace::basis::bspline_basis::upper "upper"), where the \f$K\f$ basis functions \f$B_0(x), \dots, B_{K-1}(x)\f$ satisfy \f$\sum_{j=0}^{K-1} B_j(x) = 1\f$.
 
-For \f$x \in [t_d, t_K]\f$, let \f$s \in [d, K - 1]\f$ be the interval with \f$t_s \le x < t_{s+1}\f$, assigning \f$x = t_K\f$ to \f$s = K - 1\f$. With \f$B_{i, 0}(x) = 1\f$ for \f$i = s\f$ and \f$0\f$ otherwise, the Cox-de Boor recursion for \f$p = 1, \dots, d\f$ is:
+For \f$x \in [t_d, t_K]\f$, let \f$s \in [d, K - 1]\f$ be the interval with \f$t_s \le x < t_{s+1}\f$, assigning \f$x = t_K\f$ to \f$s = K - 1\f$. With \f$B_{i, 0}(x) = 1\f$ for \f$i = s\f$ and \f$0\f$ otherwise, the Cox-de Boor recursion (de Boor, 1972) for \f$p = 1, \dots, d\f$ is:
 \f[
 B_{i, p}(x) = \frac{x - t_i}{t_{i+p} - t_i} B_{i, p-1}(x) + \frac{t_{i+p+1} - x}{t_{i+p+1} - t_{i+1}} B_{i+1, p-1}(x)
 \f]
@@ -36,11 +36,11 @@ The owner \ref laplace::basis::bspline_basis_owner "bspline_basis_owner" stores 
 
 Four static constructors build knot vectors:
 - \ref laplace::basis::bspline_basis_owner::uniform_clamped "uniform_clamped()" spaces interior knots by \f$h = (t_K - t_d)/(K - d)\f$ and repeats \f$t_d\f$ and \f$t_K\f$ each \f$d + 1\f$ times.
-- \ref laplace::basis::bspline_basis_owner::uniform_extended "uniform_extended()" places all knots at step \f$h = (t_K - t_d)/(K - d)\f$, extending \f$d\f$ steps past each end (\f$t_j = t_d + (j - d)h\f$ for \f$j < K\f$, \f$t_j = t_K + (j - K)h\f$ for \f$j \ge K\f$, Eilers and Marx) so every function translates one cardinal B-spline.
+- \ref laplace::basis::bspline_basis_owner::uniform_extended "uniform_extended()" places all knots at step \f$h = (t_K - t_d)/(K - d)\f$, extending \f$d\f$ steps past each end (\f$t_j = t_d + (j - d)h\f$ for \f$j < K\f$, \f$t_j = t_K + (j - K)h\f$ for \f$j \ge K\f$, Eilers and Marx, 1996) so every function translates one cardinal B-spline.
 - \ref laplace::basis::bspline_basis_owner::clamped "clamped()" takes non-decreasing interior knots in \f$(t_d, t_K)\f$ and repeats each endpoint \f$d + 1\f$ times.
 - \ref laplace::basis::bspline_basis_owner::from_knots "from_knots()" accepts a complete non-decreasing knot vector \f$t_0, \dots, t_{K+d}\f$.
 
-The host function \ref laplace::basis::quantile_knots "quantile_knots(x, m)" places \f$m\f$ strictly increasing interior knots at sample quantiles \f$j / (m + 1)\f$ (\f$j = 1, \dots, m\f$) via R's type-7 linear interpolation between sorted order statistics.
+The host function \ref laplace::basis::quantile_knots "quantile_knots(x, m)" places \f$m\f$ strictly increasing interior knots at sample quantiles \f$j / (m + 1)\f$ (\f$j = 1, \dots, m\f$) via R's type-7 linear interpolation between sorted order statistics (Hyndman and Fan, 1996).
 
 ### Interval search
 
@@ -48,7 +48,7 @@ For uniform knots (`step` \f$h > 0\f$), \ref laplace::basis::bspline_basis::inte
 
 ### Values and derivatives
 
-Active values \f$B_{s-d, d}(x), \dots, B_{s, d}(x)\f$ are computed by de Boor's BSPLVB recurrence from degree \f$0\f$ to \f$d\f$. Derivative orders \f$k \in \{1, \dots, 6\}\f$ run BSPLVB to degree \f$d - k\f$ followed by \f$k\f$ steps of:
+Active values \f$B_{s-d, d}(x), \dots, B_{s, d}(x)\f$ are computed by de Boor's BSPLVB recurrence (1978) from degree \f$0\f$ to \f$d\f$. Derivative orders \f$k \in \{1, \dots, 6\}\f$ run BSPLVB to degree \f$d - k\f$ followed by \f$k\f$ steps of:
 \f[
 \frac{\mathrm{d}}{\mathrm{d}x} B_{i, p}(x) = p \left( \frac{B_{i, p-1}(x)}{t_{i+p} - t_i} - \frac{B_{i+1, p-1}(x)}{t_{i+p+1} - t_{i+1}} \right)
 \f]
@@ -64,13 +64,13 @@ where the subtracted term is non-zero only when knots lie below \f$t_d\f$. Prece
 
 ### Cross Gram matrices, Greville abscissae, and regularity points
 
-The host member \ref laplace::basis::bspline_basis::cross_gram "cross_gram()" evaluates \f$(G_{kl})_{ij} = \int_{t_d}^{t_K} B_i^{(k)}(x) B_j^{(l)}(x) \, \mathrm{d}x\f$ in dense \f$K \times K\f$ column-major order (`out[i + j * K]`) with semi-bandwidth \f$d\f$ (`gram_bandwidth()`), returning zero if \f$k > d\f$ or \f$l > d\f$. It applies 16-node Gauss-Legendre quadrature (exact to degree 31, covering \f$2d \le 20\f$) on each interval \f$[t_s, t_{s+1}]\f$ in local coordinates \f$u = x - t_s\f$.
+The host member \ref laplace::basis::bspline_basis::cross_gram "cross_gram()" evaluates \f$(G_{kl})_{ij} = \int_{t_d}^{t_K} B_i^{(k)}(x) B_j^{(l)}(x) \, \mathrm{d}x\f$ in dense \f$K \times K\f$ column-major order (`out[i + j * K]`) with semi-bandwidth \f$d\f$ (`gram_bandwidth()`), returning zero if \f$k > d\f$ or \f$l > d\f$. It applies 16-node Gauss-Legendre quadrature (Davis and Rabinowitz, 1984; exact to degree 31, covering \f$2d \le 20\f$) on each interval \f$[t_s, t_{s+1}]\f$ in local coordinates \f$u = x - t_s\f$.
 
 The host member \ref laplace::basis::bspline_basis::greville "greville()" computes \f$\xi_j = \frac{1}{d} \sum_{i=1}^d t_{j+i}\f$ for \f$d \ge 1\f$ (satisfying \f$\sum_{j=0}^{K-1} \xi_j B_j(x) = x\f$) and \f$(t_j + t_{j+1})/2\f$ for \f$d = 0\f$. The host member \ref laplace::basis::bspline_basis::regularity_points "regularity_points()" returns distinct interior knots with continuity \f$c = d - \mu\f$, plus \f$t_d\f$ and \f$t_K\f$ with continuity \f$1\f$ when `outside` is `outside_domain_rule::linear` and \f$d \ge 2\f$.
 
 ## Accuracy
 
-See \ref accuracy "How accuracy is measured" for error definitions and reference generation. Rational references (`fractions.Fraction`, `tools/reference/basis_bspline.py`), confirmed with SymPy (`bspline_basis_set`), cover 42 configurations for \f$d \in \{0, 1, 2, 3, 5, 10\}\f$ (uniform clamped and extended, random knots, multiplicities \f$2, \dots, d + 1\f$, width \f$10^{-12}\f$, and \f$[1000, 1001]\f$) at random points, knots, and points one ulp away.
+See \ref accuracy "How accuracy is measured" for error definitions and reference generation. Rational references (`fractions.Fraction`, `tools/reference/basis_bspline.py`), confirmed with SymPy (Meurer and others, 2017; `bspline_basis_set`), cover 42 configurations for \f$d \in \{0, 1, 2, 3, 5, 10\}\f$ (uniform clamped and extended, random knots, multiplicities \f$2, \dots, d + 1\f$, width \f$10^{-12}\f$, and \f$[1000, 1001]\f$) at random points, knots, and points one ulp away.
 
 Row errors are measured in ulp of the row's largest value, integrals and totals in ulp of the largest total, and Gram entries in ulp of the largest entry. The same maxima and test bounds (`tests/basis/test_bspline.cpp`) hold on gcc/OpenMP and CUDA (RTX 4070 SUPER):
 
@@ -193,4 +193,14 @@ void eval_bspline(const Kokkos::View<const double*>& x,
 ### Standalone functions
 
 - \ref laplace::basis::quantile_knots "quantile_knots()" — Sample-quantile interior knots (R type 7)
+
+## References
+
+- C. d. Boor (1972), On calculating with B-splines, Journal of Approximation Theory, 6(1), 50–62. https://doi.org/10.1016/0021-9045(72)90080-9
+- C. d. Boor (1978), A Practical Guide to Splines, Applied Mathematical Sciences. https://doi.org/10.1007/978-1-4612-6333-3
+- P. J. Davis and P. Rabinowitz (1984), Methods of Numerical Integration, 2nd edition, Academic Press. https://doi.org/10.1016/C2013-0-10566-1
+- P. H. C. Eilers and B. D. Marx (1996), Flexible smoothing with B-splines and penalties, Statistical Science, 11(2), 89–121. https://doi.org/10.1214/ss/1038425655
+- T. N. E. Greville, editor (1969), Theory and Applications of Spline Functions, Academic Press.
+- R. J. Hyndman and Y. Fan (1996), Sample Quantiles in Statistical Packages, The American Statistician, 50(4), 361–365. https://doi.org/10.1080/00031305.1996.10473566
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
 */

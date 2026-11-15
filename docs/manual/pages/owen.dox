@@ -6,7 +6,7 @@ Header `<laplace/math/owen.hpp>` provides Owen's \f$T\f$ function, the logarithm
 
 ## Definitions
 
-For \f$h, a \in \mathbb{R}\f$, Owen's \f$T\f$ function is
+For \f$h, a \in \mathbb{R}\f$, Owen's \f$T\f$ function (1956) is
 \f[
 T(h, a) = \frac{1}{2\pi} \int_0^a \frac{e^{-h^2(1 + s^2)/2}}{1 + s^2}\,\mathrm{d}s,
 \f]
@@ -16,7 +16,7 @@ T(h, a) + T(ah, 1/a) = \frac{1}{2}(Q(h) + Q(ah)) - Q(h)Q(ah),
 \f]
 where \f$Q(h) = \Phi(-h) = \frac{1}{2}\operatorname{erfc}(h/\sqrt{2})\f$ and \f$\Phi\f$ is the standard normal CDF (\ref normal).
 
-For \f$z, \alpha \in \mathbb{R}\f$, the standard skew normal CDF is
+For \f$z, \alpha \in \mathbb{R}\f$, the standard skew normal CDF (Azzalini, 1985) is
 \f[
 F(z; \alpha) = 2\int_{-\infty}^z \phi(\tau)\Phi(\alpha\tau)\,\mathrm{d}\tau = \Phi(z) - 2T(z, \alpha),
 \f]
@@ -44,7 +44,7 @@ over \f$b \ge \alpha\f$. With \f$G_0 = G(h, 0) = \frac{\pi}{2}\operatorname{erfc
    \f[
    \bar{J}(h, a) = \frac{1}{h}\int_0^\infty e^{-\beta y - y^2/2}\,r(a + y/h)\,\mathrm{d}y, \qquad r(x) = \frac{1}{1 + x^2},
    \f]
-   over \f$y \ge 0\f$. Using pole distance \f$D = \sqrt{h^2 + \beta^2}\f$ of \f$y = -\beta \pm ih\f$, \f$\bar{J}\f$ uses 20-node Gauss-Laguerre in \f$t = \beta y + y^2/2\f$ (weight \f$e^{-t}\f$) for \f$D \ge 2\f$, \f$\beta \ge 4\f$; 28-node half-range Gauss-Hermite in \f$y\f$ (weight \f$e^{-y^2/2}\f$) for \f$D \ge 2\f$, \f$\beta < 4\f$; and 16-point Gauss-Legendre on graded subintervals for \f$D < 2\f$.
+   over \f$y \ge 0\f$. Using pole distance \f$D = \sqrt{h^2 + \beta^2}\f$ of \f$y = -\beta \pm ih\f$, \f$\bar{J}\f$ uses 20-node Gauss-Laguerre (Golub and Welsch, 1969) in \f$t = \beta y + y^2/2\f$ (weight \f$e^{-t}\f$) for \f$D \ge 2\f$, \f$\beta \ge 4\f$; 28-node half-range Gauss-Hermite in \f$y\f$ (weight \f$e^{-y^2/2}\f$) for \f$D \ge 2\f$, \f$\beta < 4\f$; and 16-point Gauss-Legendre on graded subintervals for \f$D < 2\f$.
 2. For small \f$|\beta|\f$, \f$G(h, \alpha) = G_0 - \tilde{T}(h, \alpha)\f$, integrating \f$\tilde{T}(h, \alpha) = \int_0^\alpha \frac{e^{-\eta s^2}}{1 + s^2}\,\mathrm{d}s\f$ by 16-point Gauss-Legendre.
 3. For \f$\alpha = -a < 0\f$ and larger \f$|\beta|\f$, \f$G(h, \alpha) = 2G_0 - e^{-\eta a^2}\bar{J}(h, a)\f$.
 
@@ -118,4 +118,10 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::log_sn_cdf_d3 "log_sn_cdf_d3()" — Third-order derivatives
 - \ref laplace::math::own::log_sn_cdf_d4 "log_sn_cdf_d4()" — Fourth-order derivatives
 - \ref laplace::math::own::log_sn_cdf_d5 "log_sn_cdf_d5()" — Fifth-order derivatives
+
+## References
+
+- A. Azzalini (1985), A class of distributions which includes the normal ones, Scandinavian Journal of Statistics, 12(2), 171-178.
+- G. H. Golub and J. H. Welsch (1969), Calculation of Gauss quadrature rules, Mathematics of Computation, 23(106), 221–230. https://doi.org/10.1090/s0025-5718-69-99647-1
+- D. B. Owen (1956), Tables for Computing Bivariate Normal Probabilities, The Annals of Mathematical Statistics, 27(4), 1075–1090. https://doi.org/10.1214/aoms/1177728074
 */

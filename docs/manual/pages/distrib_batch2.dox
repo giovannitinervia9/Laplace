@@ -20,7 +20,7 @@ For \f$y \le 0\f$, `logpdf` and `log_cdf` return `-distrib_infinity`, `cdf` retu
 
 With \f$u = y/\mu\f$, \f$\ell(\mu; y) = -\log\mu - u\f$. For \f$K = 1, \dots, 6\f$, \f$\ell^{(K)}(\mu; y) = (-1)^K (K-1)! \mu^{-K}(1 - K u)\f$, `logpdf_dy_dk<1, K>` is \f$-(-1)^K K! \mu^{-(K+1)}\f$, and `logpdf_dy_dk<J, K>` vanishes for \f$J \ge 2\f$. Expected information is \f$I(\mu) = \mu^{-2}\f$, with \f$I^{(K)}(\mu) = (-1)^K (K+1)! \mu^{-(K+2)}\f$ for \f$K = 1, \dots, 4\f$.
 
-Cumulative values are \f$F(y) = -\operatorname{expm1}(-u)\f$, \f$1 - F(y) = e^{-u}\f$, \f$\log F(y) = \log(-\operatorname{expm1}(-u))\f$, and \f$\log(1 - F(y)) = -u\f$, with \f$\partial_\mu^K \log(1 - F) = (-1)^{K+1} K! y \mu^{-(K+1)}\f$ and quantile \f$F^{-1}(p) = -\mu \operatorname{log1p}(-p)\f$. To avoid cancellation in \f$\partial_\mu^K \log F\f$, the implementation splits \f$G(u) = \log(1 - e^{-u})\f$ at \f$u = 1\f$ before applying \ref laplace::math::chain_rule_d1 "chain_rule_d1()" through `chain_rule_d6()`: for \f$u \ge 1\f$, \f$G^{(k)}(u) = (-1)^{k+1} q A_{k-1}(q) / (1 - q)^k\f$ with \f$q = e^{-u}\f$ and Eulerian polynomials \f$A_{k-1}\f$; for \f$0 < u < 1\f$, \f$G(u) = \log u + \log \operatorname{exprel}(-u)\f$ separates closed-form \f$(-1)^K (K-1)! \mu^{-K}\f$ from `chain_rule_dK` of \f$\log\f$ with \ref laplace::math::exprel "exprel()" and `exprel_d1()` through `exprel_d6()`.
+Cumulative values are \f$F(y) = -\operatorname{expm1}(-u)\f$, \f$1 - F(y) = e^{-u}\f$, \f$\log F(y) = \log(-\operatorname{expm1}(-u))\f$, and \f$\log(1 - F(y)) = -u\f$, with \f$\partial_\mu^K \log(1 - F) = (-1)^{K+1} K! y \mu^{-(K+1)}\f$ and quantile \f$F^{-1}(p) = -\mu \operatorname{log1p}(-p)\f$. To avoid cancellation in \f$\partial_\mu^K \log F\f$, the implementation splits \f$G(u) = \log(1 - e^{-u})\f$ at \f$u = 1\f$ before applying \ref laplace::math::chain_rule_d1 "chain_rule_d1()" through `chain_rule_d6()`: for \f$u \ge 1\f$, \f$G^{(k)}(u) = (-1)^{k+1} q A_{k-1}(q) / (1 - q)^k\f$ with \f$q = e^{-u}\f$ and Eulerian polynomials \f$A_{k-1}\f$ (DLMF §26.14); for \f$0 < u < 1\f$, \f$G(u) = \log u + \log \operatorname{exprel}(-u)\f$ separates closed-form \f$(-1)^K (K-1)! \mu^{-K}\f$ from `chain_rule_dK` of \f$\log\f$ with \ref laplace::math::exprel "exprel()" and `exprel_d1()` through `exprel_d6()`.
 
 ## Accuracy
 
@@ -49,7 +49,8 @@ Struct \ref laplace::distrib::exponential_distrib "exponential_distrib" implemen
 
 ## References
 
-- Fredrik Johansson et al., mpmath: arbitrary-precision floating-point Python library, used for reference test data.
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §26.14 Permutations: Order Notation, https://dlmf.nist.gov/26.14
 */
 
 /** \defgroup distrib_chisq Chi-square
@@ -78,7 +79,7 @@ With \f$a = \mu/2\f$, `logpdf` uses the saddle-point form shared with \ref distr
 \ell(\mu; y) = -a\,D\!\left(\frac{y}{\mu}\right) + \frac{1}{2}\log a - \delta(a) - \log y - \frac{1}{2}\log(2\pi),
 \f]
 
-where \f$D(u) = u - 1 - \log u\f$ and \f$\delta(a)\f$ is the Stirling error from \ref stirling. Derivatives use \ref laplace::math::digamma "digamma()" and \ref laplace::math::own::polygamma "polygamma()": \f$\ell'(\mu; y) = \frac{1}{2}(\log(y/2) - \psi(a))\f$ and \f$\ell^{(K)}(\mu; y) = -2^{-K}\psi^{(K-1)}(a)\f$ for \f$K \ge 2\f$. With \f$c_J = (-1)^{J-1}(J-1)! y^{-J}\f$, `logpdf_dy_dk<J, K>` gives \f$(a-1)/y - 1/2\f$ at \f$(1,0)\f$, \f$1/(2y)\f$ at \f$(1,1)\f$, \f$(a-1)c_J\f$ at \f$(J\ge 2, 0)\f$, \f$\frac{1}{2}c_J\f$ at \f$(J\ge 2, 1)\f$, and \f$0\f$ for \f$K \ge 2\f$. Expected information is \f$I(\mu) = \frac{1}{4}\psi'(a)\f$ via \ref laplace::math::trigamma "trigamma()", with \f$I^{(K)}(\mu) = 2^{-(K+2)}\psi^{(K+1)}(a)\f$.
+where \f$D(u) = u - 1 - \log u\f$ and \f$\delta(a)\f$ is the Stirling error from \ref stirling (DLMF §5.11). Derivatives use \ref laplace::math::digamma "digamma()" and \ref laplace::math::own::polygamma "polygamma()": \f$\ell'(\mu; y) = \frac{1}{2}(\log(y/2) - \psi(a))\f$ and \f$\ell^{(K)}(\mu; y) = -2^{-K}\psi^{(K-1)}(a)\f$ for \f$K \ge 2\f$. With \f$c_J = (-1)^{J-1}(J-1)! y^{-J}\f$, `logpdf_dy_dk<J, K>` gives \f$(a-1)/y - 1/2\f$ at \f$(1,0)\f$, \f$1/(2y)\f$ at \f$(1,1)\f$, \f$(a-1)c_J\f$ at \f$(J\ge 2, 0)\f$, \f$\frac{1}{2}c_J\f$ at \f$(J\ge 2, 1)\f$, and \f$0\f$ for \f$K \ge 2\f$. Expected information is \f$I(\mu) = \frac{1}{4}\psi'(a)\f$ via \ref laplace::math::trigamma "trigamma()", with \f$I^{(K)}(\mu) = 2^{-(K+2)}\psi^{(K+1)}(a)\f$.
 
 Cumulative values are \f$F(y) = P(a, y/2)\f$ and \f$1 - F(y) = Q(a, y/2)\f$ from \ref incomplete_gamma, with quantile \f$2\,P^{-1}(a, p)\f$. Because \f$y/2\f$ is free of \f$\mu\f$, `log_cdf_dk<K>` and `log_ccdf_dk<K>` simply rescale the pure-shape derivatives \f$\partial_a^K \log P(a, y/2)\f$ and \f$\partial_a^K \log Q(a, y/2)\f$ by \f$2^{-K}\f$.
 
@@ -97,7 +98,8 @@ Struct \ref laplace::distrib::chisq_distrib "chisq_distrib" implements \ref dist
 
 ## References
 
-- Fredrik Johansson et al., mpmath: arbitrary-precision floating-point Python library, used for reference test data.
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §5.11 Asymptotic Expansions (Gamma Function), https://dlmf.nist.gov/5.11
 */
 
 /** \defgroup distrib_gamma2 gamma2 (mean, variance)
@@ -122,15 +124,15 @@ For \f$y \le 0\f$, `logpdf` and `log_cdf` return `-distrib_infinity`, `cdf` retu
 
 ## Formulas and cumulative methods
 
-With \f$s = \mu^2/\sigma^2\f$ and \f$c = y/\mu\f$, `logpdf` uses the saddle-point form \f$\ell(\mu, \sigma^2; y) = -s D(c) + \frac{1}{2}\log s - \delta(s) - \log y - \frac{1}{2}\log(2\pi)\f$ shared with \ref distrib_gamma1, where \f$D(c) = c - 1 - \log c\f$ and \f$\delta(s)\f$ is from \ref stirling. `logpdf_dk` composes outer derivatives of \f$-s D(c) + \frac{1}{2}\log s - \delta(s)\f$ with \f$(s(\mu, \sigma^2), c(\mu))\f$ via \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()". Mixed `logpdf_dy_dk` differentiates \f$-s y/\mu + (s - 1)\log y\f$ in \f$(s, \mu)\f$ and composes via `chain_rule_pair_dk()`.
+With \f$s = \mu^2/\sigma^2\f$ and \f$c = y/\mu\f$, `logpdf` uses the saddle-point form \f$\ell(\mu, \sigma^2; y) = -s D(c) + \frac{1}{2}\log s - \delta(s) - \log y - \frac{1}{2}\log(2\pi)\f$ shared with \ref distrib_gamma1, where \f$D(c) = c - 1 - \log c\f$ and \f$\delta(s)\f$ is from \ref stirling (DLMF §5.11). `logpdf_dk` composes outer derivatives of \f$-s D(c) + \frac{1}{2}\log s - \delta(s)\f$ with \f$(s(\mu, \sigma^2), c(\mu))\f$ via \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()". Mixed `logpdf_dy_dk` differentiates \f$-s y/\mu + (s - 1)\log y\f$ in \f$(s, \mu)\f$ and composes via `chain_rule_pair_dk()`.
 
-Expected information transforms \ref distrib_gamma1 at \f$\phi = 1/s\f$ by \f$I_{\mathrm{new}} = J^\top I_{\mathrm{old}} J\f$: \f$I_{\mu\mu} = (s + 2 + 4s^2 \delta''(s))/\mu^2\f$, \f$I_{\mu\sigma^2} = -(s + 2s^3 \delta''(s))/\mu^3\f$, and \f$I_{\sigma^2\sigma^2} = (s^2/2 + s^4 \delta''(s))/\mu^4\f$, differentiated through order 4 by composing Leibniz expansions in \f$(\mu, s)\f$ with \f$s(\mu, \sigma^2)\f$.
+Expected information transforms \ref distrib_gamma1 at \f$\phi = 1/s\f$ by \f$I_{\mathrm{new}} = J^\top I_{\mathrm{old}} J\f$ (Lehmann and Casella, 1998): \f$I_{\mu\mu} = (s + 2 + 4s^2 \delta''(s))/\mu^2\f$, \f$I_{\mu\sigma^2} = -(s + 2s^3 \delta''(s))/\mu^3\f$, and \f$I_{\sigma^2\sigma^2} = (s^2/2 + s^4 \delta''(s))/\mu^4\f$, differentiated through order 4 by composing Leibniz expansions in \f$(\mu, s)\f$ with \f$s(\mu, \sigma^2)\f$.
 
 Cumulative values are \f$F(y) = P(s, sc)\f$ and \f$1 - F(y) = Q(s, sc)\f$ from \ref incomplete_gamma, with quantile \f$(\sigma^2/\mu) P^{-1}(s, p)\f$. Because \f$x = s c\f$ links both arguments to \f$s\f$, cumulative derivatives compose fixed-ratio partials of \f$\log P(a, ac)\f$ and \f$\log Q(a, ac)\f$ with \f$(s, c)\f$ via `chain_rule_pair_dk()`, avoiding cancellation between \f$\partial_a\f$ and \f$c \partial_x\f$.
 
 ## Accuracy
 
-Against 200- to 260-bit mpmath references on shapes \f$10^{-4}\f$ to \f$10^4\f$ and \f$c \in [0.01, 10]\f$ (see \ref accuracy and `docs/numerics.md`), SymPy 1.14.0 closed forms at orders 1 and 2 match within 5.41 scaled ulp (bound 8.2). Score variance and quadrature match `expected_info` to `1e-9` (order 1 quadrature `1e-8`), finite differences match to `1e-8` (`logpdf`, `logpdf_dy_dk`, `expected_info_dk`) and `1e-7` (`log_cdf_dk`, `log_ccdf_dk`), and quantile inverts `cdf` to `1e-10` at `(1e4, 1)` and `1e-9` at `(0.4, 0.16)`.
+Against 200- to 260-bit mpmath references on shapes \f$10^{-4}\f$ to \f$10^4\f$ and \f$c \in [0.01, 10]\f$ (see \ref accuracy and `docs/numerics.md`), SymPy 1.14.0 (Meurer and others, 2017) closed forms at orders 1 and 2 match within 5.41 scaled ulp (bound 8.2). Score variance and quadrature match `expected_info` to `1e-9` (order 1 quadrature `1e-8`), finite differences match to `1e-8` (`logpdf`, `logpdf_dy_dk`, `expected_info_dk`) and `1e-7` (`log_cdf_dk`, `log_ccdf_dk`), and quantile inverts `cdf` to `1e-10` at `(1e4, 1)` and `1e-9` at `(0.4, 0.16)`.
 
 | Family | Measured max (scaled ulp) | Test bound (scaled ulp) |
 | --- | --- | --- |
@@ -144,8 +146,10 @@ Struct \ref laplace::distrib::gamma2_distrib "gamma2_distrib" implements \ref di
 
 ## References
 
-- Fredrik Johansson et al., mpmath: arbitrary-precision floating-point Python library, used for reference test data.
-- Aaron Meurer et al. (2017), SymPy 1.14.0: symbolic computing in Python, used to verify direct first- and second-order parameter derivatives.
+- E. L. Lehmann and G. Casella (1998), Theory of Point Estimation, 2nd edition, Springer. https://doi.org/10.1007/b98854
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §5.11 Asymptotic Expansions (Gamma Function), https://dlmf.nist.gov/5.11
 */
 
 /** \defgroup distrib_invgauss Inverse Gaussian (mean, dispersion)
@@ -154,7 +158,7 @@ The inverse Gaussian (Wald) distribution models Brownian first-passage times wit
 
 ## Classic form and reparametrization
 
-The classic Wald density is \f$f(y; \mu, \lambda) = \sqrt{\frac{\lambda}{2\pi y^3}} \exp\!\left(-\frac{\lambda (y - \mu)^2}{2\mu^2 y}\right)\f$ for \f$y > 0\f$, mean \f$\mu > 0\f$, and shape \f$\lambda > 0\f$. Laplace substitutes \f$\lambda = 1/\phi\f$ so `mu` (\f$\mu > 0\f$) is the mean and `phi` (\f$\phi > 0\f$) is the GLM dispersion, with variance \f$\phi\mu^3\f$:
+The classic Wald density (Chhikara and Folks, 1989) is \f$f(y; \mu, \lambda) = \sqrt{\frac{\lambda}{2\pi y^3}} \exp\!\left(-\frac{\lambda (y - \mu)^2}{2\mu^2 y}\right)\f$ for \f$y > 0\f$, mean \f$\mu > 0\f$, and shape \f$\lambda > 0\f$. Laplace substitutes \f$\lambda = 1/\phi\f$ so `mu` (\f$\mu > 0\f$) is the mean and `phi` (\f$\phi > 0\f$) is the GLM dispersion, with variance \f$\phi\mu^3\f$:
 
 \f[
 f(y; \mu, \phi) = \frac{1}{\sqrt{2\pi\phi y^3}} \exp\!\left(-\frac{(y - \mu)^2}{2\phi\mu^2 y}\right), \qquad y > 0.
@@ -170,7 +174,7 @@ For \f$y \le 0\f$, `logpdf` and `log_cdf` return `-distrib_infinity`, `cdf` retu
 
 With \f$g(\mu, y) = \frac{(y - \mu)^2}{\mu^2 y}\f$, \f$\ell(\mu, \phi; y) = -\frac{1}{2}\log(2\pi\phi y^3) - \frac{g(\mu, y)}{2\phi}\f$. Separation of \f$\mu\f$ and \f$\phi\f$ gives closed-form parameter derivatives `logpdf_dk`, mixed derivatives `logpdf_dy_dk`, and expected information \f$I(\mu, \phi) = \operatorname{diag}((\phi\mu^3)^{-1}, (2\phi^2)^{-1})\f$ with derivatives through order 4.
 
-With \f$z_1 = \frac{y/\mu - 1}{\sqrt{\phi y}}\f$, \f$z_2 = \frac{y/\mu + 1}{\sqrt{\phi y}}\f$, and \f$H(z) = \log\Phi(-z) + \frac{1}{2}z^2 = \log(\operatorname{erfcx}(z/\sqrt{2})/2)\f$ via \ref laplace::math::own::erfcx "erfcx()", applying \f$\frac{2}{\phi\mu} + \log\Phi(-z_2) = H(z_2) - \frac{1}{2}z_1^2\f$ avoids overflow and cancellation before differentiation: \f$\log F(y) = \log\Phi(z_1) + \operatorname{log1p}(\exp(H(z_2) - \frac{1}{2}z_1^2 - \log\Phi(z_1)))\f$, and \f$\log(1 - F(y)) = \log\Phi(-z_1) + \log(1 - e^X)\f$ where \f$X = H(z_2) - H(z_1) < 0\f$. Cumulative derivatives compose \f$H\f$ with \f$z_1, z_2\f$ via \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()", using a depth-200 backward continued fraction for \f$H', H''\f$ when \f$z/\sqrt{2} \ge 1.25\f$ and a series in \f$d = \sqrt{2/(\phi y)}\f$ when \f$d(1 + |z_1|/\sqrt{2}) < 1\f$. Struct `invgauss_distrib` omits `quantile()`; use `distrib_quantile()` in \ref distrib_generic.
+With \f$z_1 = \frac{y/\mu - 1}{\sqrt{\phi y}}\f$, \f$z_2 = \frac{y/\mu + 1}{\sqrt{\phi y}}\f$, and \f$H(z) = \log\Phi(-z) + \frac{1}{2}z^2 = \log(\operatorname{erfcx}(z/\sqrt{2})/2)\f$ via \ref laplace::math::own::erfcx "erfcx()", applying \f$\frac{2}{\phi\mu} + \log\Phi(-z_2) = H(z_2) - \frac{1}{2}z_1^2\f$ avoids overflow and cancellation before differentiation: \f$\log F(y) = \log\Phi(z_1) + \operatorname{log1p}(\exp(H(z_2) - \frac{1}{2}z_1^2 - \log\Phi(z_1)))\f$, and \f$\log(1 - F(y)) = \log\Phi(-z_1) + \log(1 - e^X)\f$ where \f$X = H(z_2) - H(z_1) < 0\f$. Cumulative derivatives compose \f$H\f$ with \f$z_1, z_2\f$ via \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()", using a depth-200 backward continued fraction (Gautschi, 1967) for \f$H', H''\f$ when \f$z/\sqrt{2} \ge 1.25\f$ and a series in \f$d = \sqrt{2/(\phi y)}\f$ when \f$d(1 + |z_1|/\sqrt{2}) < 1\f$. Struct `invgauss_distrib` omits `quantile()`; use `distrib_quantile()` in \ref distrib_generic.
 
 ## Accuracy
 
@@ -188,7 +192,9 @@ Struct \ref laplace::distrib::invgauss_distrib "invgauss_distrib" implements \re
 
 ## References
 
-- Fredrik Johansson et al., mpmath: arbitrary-precision floating-point Python library, used for reference test data.
+- R. S. Chhikara and J. L. Folks (1989), The Inverse Gaussian Distribution: Theory, Methodology, and Applications, Marcel Dekker.
+- W. Gautschi (1967), Computational Aspects of Three-Term Recurrence Relations, SIAM Review, 9(1), 24–82. https://doi.org/10.1137/1009002
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 */
 
 /** \defgroup distrib_lognormal1 lognormal1 (mean and variance of log Y)
@@ -203,7 +209,7 @@ The classic form takes \f$X = \log Y \sim N(\mu, \sigma^2)\f$. Laplace parametri
 f(y; \mu, v) = \frac{1}{y\sqrt{2\pi v}} \exp\!\left(-\frac{(\log y - \mu)^2}{2v}\right), \qquad y > 0.
 \f]
 
-Parameters `mu` and `v` are moments of \f$\log Y\f$, not of \f$Y\f$ (\f$\mathbb{E}[Y] = e^{\mu + v/2}\f$, \f$\operatorname{Var}(Y) = (e^v - 1)e^{2\mu + v}\f$). `base()` returns `gaussian2_distrib{mu, v}`.
+Parameters `mu` and `v` are moments of \f$\log Y\f$, not of \f$Y\f$ (\f$\mathbb{E}[Y] = e^{\mu + v/2}\f$, \f$\operatorname{Var}(Y) = (e^v - 1)e^{2\mu + v}\f$; Aitchison and Brown, 1957). `base()` returns `gaussian2_distrib{mu, v}`.
 
 ## Parameters, domain, and regularity
 
@@ -213,7 +219,7 @@ For \f$y \le 0\f$, `cdf` returns `0.0`, `ccdf` returns `1.0`, `log_cdf` returns 
 
 ## Formulas and cumulative methods
 
-With \f$x = \log y\f$, \f$\ell(\mu, v; y) = \ell_{\mathrm{gaussian2}}(\mu, v; x) - x\f$. Because \f$-x\f$ does not depend on \f$(\mu, v)\f$, parameter derivatives `logpdf_dk`, expected information \f$\operatorname{diag}(1/v, 1/(2v^2))\f$ and its derivatives, `cdf`, `ccdf`, `log_cdf`, `log_ccdf`, `log_cdf_dk`, and `log_ccdf_dk` forward directly to `base()` at \f$x = \log y\f$, and `quantile(p)` returns \f$\exp(F_{\mathrm{gaussian2}}^{-1}(p)) = \exp(\mu + \sqrt{v}\Phi^{-1}(p))\f$. Mixed `logpdf_dy_dk<J, K>` maps \f$y\f$-derivatives of \f$g(\log y)\f$ via signed Stirling numbers of the first kind \f$s(J, k)\f$, adding \f$(-1)^J (J - 1)! y^{-J}\f$ from \f$-\log y\f$ when \f$K = 0\f$.
+With \f$x = \log y\f$, \f$\ell(\mu, v; y) = \ell_{\mathrm{gaussian2}}(\mu, v; x) - x\f$. Because \f$-x\f$ does not depend on \f$(\mu, v)\f$, parameter derivatives `logpdf_dk`, expected information \f$\operatorname{diag}(1/v, 1/(2v^2))\f$ and its derivatives, `cdf`, `ccdf`, `log_cdf`, `log_ccdf`, `log_cdf_dk`, and `log_ccdf_dk` forward directly to `base()` at \f$x = \log y\f$, and `quantile(p)` returns \f$\exp(F_{\mathrm{gaussian2}}^{-1}(p)) = \exp(\mu + \sqrt{v}\Phi^{-1}(p))\f$. Mixed `logpdf_dy_dk<J, K>` maps \f$y\f$-derivatives of \f$g(\log y)\f$ via signed Stirling numbers of the first kind \f$s(J, k)\f$ (DLMF §26.8), adding \f$(-1)^J (J - 1)! y^{-J}\f$ from \f$-\log y\f$ when \f$K = 0\f$.
 
 ## Accuracy
 
@@ -225,7 +231,9 @@ Struct \ref laplace::distrib::lognormal1_distrib "lognormal1_distrib" implements
 
 ## References
 
-- Fredrik Johansson et al., mpmath: arbitrary-precision floating-point Python library, used for reference test data.
+- J. Aitchison and J. A. C. Brown (1957), The Lognormal Distribution, Cambridge University Press.
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §26.8 Set Partitions: Stirling Numbers, https://dlmf.nist.gov/26.8
 */
 
 /** \defgroup distrib_lognormal2 lognormal2 (mean, variance)
@@ -234,7 +242,7 @@ The mean-variance log-normal distribution models positive right-skewed outcomes 
 
 ## Classic form and reparametrization
 
-Starting from \f$\log Y \sim N(\mu, \sigma^2)\f$, Laplace parametrizes by the mean `m` (\f$m \in (0, \infty)\f$, \f$\mathbb{E}[Y]\f$) and variance `v` (\f$v \in (0, \infty)\f$, \f$\operatorname{Var}(Y)\f$) of \f$Y\f$ via \f$s = \operatorname{log1p}(v/m^2)\f$ and \f$\mu = \log m - s/2\f$:
+Starting from \f$\log Y \sim N(\mu, \sigma^2)\f$, Laplace parametrizes by the mean `m` (\f$m \in (0, \infty)\f$, \f$\mathbb{E}[Y]\f$) and variance `v` (\f$v \in (0, \infty)\f$, \f$\operatorname{Var}(Y)\f$) of \f$Y\f$ via \f$s = \operatorname{log1p}(v/m^2)\f$ and \f$\mu = \log m - s/2\f$ (Aitchison and Brown, 1957):
 
 \f[
 f(y; m, v) = \frac{1}{y\sqrt{2\pi s}} \exp\!\left(-\frac{(\log y - \log m + s/2)^2}{2s}\right), \qquad y > 0, \qquad s = \log\!\left(1 + \frac{v}{m^2}\right).
@@ -252,7 +260,7 @@ For \f$y \le 0\f$, `cdf` returns `0.0`, `ccdf` returns `1.0`, `log_cdf` returns 
 
 To prevent cancellation near \f$y \approx m\f$ and small \f$v/m^2\f$, the residual \f$r = \log y - \mu\f$ is formed as \f$\operatorname{log1p}((y - m)/m) + s/2\f$ when \f$|y - m| < m/2\f$ and \f$\log y - \log m + s/2\f$ otherwise, with \f$s = \operatorname{log1p}(v/m^2)\f$. Parameter derivatives `logpdf_dk`, `log_cdf_dk`, `log_ccdf_dk`, and mixed `logpdf_dy_dk` evaluate outer derivatives in \f$(\mu, s)\f$ at \f$(0, s)\f$ and residual \f$r\f$, then compose with \f$(\mu(m, v), s(m, v))\f$ via \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()". Quantile is \f$\exp(\mu + \sqrt{s}\Phi^{-1}(p))\f$.
 
-Expected information transforms \ref distrib_lognormal1 \f$\operatorname{diag}(1/s, 1/(2s^2))\f$ as \f$I_{ab} = \sum_{c \in \{\mu, s\}} I_c(s) \partial_a \theta_c \partial_b \theta_c\f$ (with \f$I_{mv} \approx -3/(2mv)\f$ for small \f$v/m^2\f$) and differentiates through order 4 via `chain_rule_pair_dk()`.
+Expected information transforms \ref distrib_lognormal1 \f$\operatorname{diag}(1/s, 1/(2s^2))\f$ (Lehmann and Casella, 1998) as \f$I_{ab} = \sum_{c \in \{\mu, s\}} I_c(s) \partial_a \theta_c \partial_b \theta_c\f$ (with \f$I_{mv} \approx -3/(2mv)\f$ for small \f$v/m^2\f$) and differentiates through order 4 via `chain_rule_pair_dk()`.
 
 ## Accuracy
 
@@ -270,5 +278,7 @@ Struct \ref laplace::distrib::lognormal2_distrib "lognormal2_distrib" implements
 
 ## References
 
-- Fredrik Johansson et al., mpmath: arbitrary-precision floating-point Python library, used for reference test data.
+- J. Aitchison and J. A. C. Brown (1957), The Lognormal Distribution, Cambridge University Press.
+- E. L. Lehmann and G. Casella (1998), Theory of Point Estimation, 2nd edition, Springer. https://doi.org/10.1007/b98854
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 */

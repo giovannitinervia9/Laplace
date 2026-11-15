@@ -6,7 +6,7 @@ This module computes \f$\log K_\nu(x)\f$ and its first seven derivatives with re
 
 ## Mathematical definition
 
-For real order \f$\nu \in \mathbb{R}\f$ and positive argument \f$x \in (0, \infty)\f$, the modified Bessel function of the second kind is
+For real order \f$\nu \in \mathbb{R}\f$ and positive argument \f$x \in (0, \infty)\f$, the modified Bessel function of the second kind (DLMF §10.32) is
 \f[
 K_\nu(x) = \int_0^\infty e^{-x \cosh \tau} \cosh(\nu \tau) \, \mathrm{d}\tau,
 \f]
@@ -28,12 +28,12 @@ Every function is defined for \f$x > 0\f$ and \f$\nu \in \mathbb{R}\f$, and nega
 
 Evaluation of \f$\log K_\nu(x)\f$ switches at \f$\nu_{\mathrm{debye}} = 20.0\f$.
 
-1. **Uniform asymptotic expansion** (\f$\nu \ge 20.0\f$): Using the Debye form (DLMF 10.41.4),
+1. **Uniform asymptotic expansion** (\f$\nu \ge 20.0\f$): Using the Debye form (Debye, 1909; DLMF 10.41.4),
    \f[
    \log K_\nu(x) = \frac{1}{2}\log\left(\frac{\pi}{2\nu}\right) - \nu \eta - \frac{1}{4}\log(1 + z^2) + \log P(t),
    \f]
    where \f$z = x / \nu\f$, \f$t = (1 + z^2)^{-1/2} \in (0, 1)\f$, and \f$\eta = \sqrt{1 + z^2} + \log\left(\frac{z}{1 + \sqrt{1 + z^2}}\right)\f$. Here \f$P(t) = \sum_{k=0}^{16} (-1)^k u_k(t) \nu^{-k}\f$, with exact rational polynomials \f$u_k(t)\f$ rounded once; summation stops when a term reaches \f$\le 2^{-60}\f$.
-2. **Temme series and Steed continued fraction** (\f$\nu < 20.0\f$): Write \f$N = \mathrm{round}(\nu) \in \mathbb{Z}_{\ge 0}\f$ and \f$\mu = \nu - N \in [-1/2, 1/2]\f$. For \f$x \le 2.0\f$, \f$K_\mu(x)\f$ and \f$K_{\mu+1}(x)\f$ come from Temme's series (adapted from Boost.Math `boost/math/special_functions/detail/bessel_ik.hpp`); for \f$x > 2.0\f$, \f$\log K_\mu(x)\f$ and \f$r_0 = K_{\mu+1}(x)/K_\mu(x)\f$ come from Steed's continued fraction scaled by \f$e^x\f$. Forward recurrence on \f$r_k = K_{\mu+k+1}(x)/K_{\mu+k}(x)\f$,
+2. **Temme series and Steed continued fraction** (\f$\nu < 20.0\f$): Write \f$N = \mathrm{round}(\nu) \in \mathbb{Z}_{\ge 0}\f$ and \f$\mu = \nu - N \in [-1/2, 1/2]\f$. For \f$x \le 2.0\f$, \f$K_\mu(x)\f$ and \f$K_{\mu+1}(x)\f$ come from Temme's series (Temme, 1975; adapted from Boost.Math `boost/math/special_functions/detail/bessel_ik.hpp`); for \f$x > 2.0\f$, \f$\log K_\mu(x)\f$ and \f$r_0 = K_{\mu+1}(x)/K_\mu(x)\f$ come from Steed's continued fraction (Barnett and others, 1974) scaled by \f$e^x\f$. Forward recurrence (DLMF §10.29) on \f$r_k = K_{\mu+k+1}(x)/K_{\mu+k}(x)\f$,
    \f[
    r_{k+1} = \frac{2(\mu + k + 1)}{x} + \frac{1}{r_k},
    \f]
@@ -48,7 +48,7 @@ The derivatives in \f$x\f$ use three regimes.
    \f[
    K_\nu(x) \sim \sqrt{\frac{\pi}{2x}} e^{-x} S(x), \qquad S(x) = \sum_{k=0}^\infty a_k x^{-k}, \qquad a_k = \prod_{j=1}^k \frac{4\nu^2 - (2j - 1)^2}{8j},
    \f]
-   with \f$a_0 = 1\f$. Differentiating \f$S(x)\f$ term by term and applying Faà di Bruno's recursion yields the derivatives of \f$\log S(x)\f$ without cancellation.
+   with \f$a_0 = 1\f$. Differentiating \f$S(x)\f$ term by term and applying Faà di Bruno's recursion (Johnson, 2002) yields the derivatives of \f$\log S(x)\f$ without cancellation.
 3. **Riccati identity in double-double arithmetic** (\f$\nu < 20.0\f$ and \f$x < 200.0\f$): From \f$g = \frac{\nu}{x} - \frac{K_{\nu+1}(x)}{K_\nu(x)}\f$, Bessel's differential equation gives the Riccati identity
    \f[
    g' = 1 + \frac{\nu^2}{x^2} - \frac{g}{x} - g^2.
@@ -59,11 +59,11 @@ The derivatives in \f$x\f$ use three regimes.
              - \sum_{k=0}^{m} \binom{m}{k} (-1)^{m-k} (m-k)!\,\frac{g^{(k)}}{x^{m-k+1}}
              - \sum_{k=0}^{m} \binom{m}{k} g^{(k)} g^{(m-k)}.
    \f]
-   Evaluating this recurrence in double-double arithmetic avoids cancellation of roughly \f$\max(\nu, x)\f$ per derivative order. For \f$x \ge x_{\mathrm{cf}} = 1.0\f$, the starting ratio \f$K_{\mu+1}/K_\mu\f$ comes from Steed's continued fraction evaluated forwards by its convergents in double-double. For \f$x < 1.0\f$, it comes from Temme's series in double precision followed by forward recurrence in double-double, which damps error by about \f$\frac{x^2}{4(\mu+k)^2}\f$ per step.
+   Evaluating this recurrence in double-double arithmetic (Dekker, 1971) avoids cancellation of roughly \f$\max(\nu, x)\f$ per derivative order. For \f$x \ge x_{\mathrm{cf}} = 1.0\f$, the starting ratio \f$K_{\mu+1}/K_\mu\f$ comes from Steed's continued fraction evaluated forwards by its convergents in double-double. For \f$x < 1.0\f$, it comes from Temme's series in double precision followed by forward recurrence in double-double, which damps error by about \f$\frac{x^2}{4(\mu+k)^2}\f$ per step.
 
 ## Measured accuracy
 
-See \ref accuracy "How accuracy is measured" for error metrics and test bounds. Because `mpmath`'s `besselk` fails near \f$\nu = 10^6\f$, reference values on 2,607 points (with \f$\nu \le 2^{40}\f$ and \f$x \in [2^{-30}, 2^{30}]\f$) are computed from the integral representation. With weight \f$w(\tau) = e^{-x \cosh \tau} \cosh(\nu \tau)\f$, the derivatives satisfy \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x) = (-1)^n \kappa_n\f$, where \f$\kappa_n\f$ is the \f$n\f$-th cumulant of \f$\cosh T\f$ under the density proportional to \f$w\f$.
+See \ref accuracy "How accuracy is measured" for error metrics and test bounds. Because `mpmath`'s `besselk` fails near \f$\nu = 10^6\f$ (mpmath), reference values on 2,607 points (with \f$\nu \le 2^{40}\f$ and \f$x \in [2^{-30}, 2^{30}]\f$) are computed from the integral representation. With weight \f$w(\tau) = e^{-x \cosh \tau} \cosh(\nu \tau)\f$, the derivatives satisfy \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x) = (-1)^n \kappa_n\f$, where \f$\kappa_n\f$ is the \f$n\f$-th cumulant of \f$\cosh T\f$ under the density proportional to \f$w\f$.
 
 For \f$\log K_\nu(x)\f$, error is reported in \ref accuracy_conditioned "ulpC". A 1-ulp change in \f$x\f$ shifts \f$\log K_\nu(x)\f$ by about \f$|x g|\f$ ulps of 1 (about \f$1.2\nu\f$ near the turning point \f$x \approx 0.66\nu\f$), so the conditioning scale is
 \f[
@@ -133,4 +133,18 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::log_bessel_k_dx5 "log_bessel_k_dx5()" — \f$\frac{\mathrm{d}^5}{\mathrm{d}x^5}\log K_\nu(x)\f$
 - \ref laplace::math::own::log_bessel_k_dx6 "log_bessel_k_dx6()" — \f$\frac{\mathrm{d}^6}{\mathrm{d}x^6}\log K_\nu(x)\f$
 - \ref laplace::math::own::log_bessel_k_dx7 "log_bessel_k_dx7()" — \f$\frac{\mathrm{d}^7}{\mathrm{d}x^7}\log K_\nu(x)\f$
+
+## References
+
+- A. Barnett, D. Feng, J. Steed and L. Goldfarb (1974), Coulomb wave functions for all real η and ϱ, Computer Physics Communications, 8(5), 377–395. https://doi.org/10.1016/0010-4655(74)90013-7
+- Boost.Math, C++ library of special functions and numerical tools, https://www.boost.org/libs/math
+- P. Debye (1909), Näherungsformeln für die Zylinderfunktionen für große Werte des Arguments und unbeschränkt veränderliche Werte des Index, Mathematische Annalen, 67, 535-558. https://doi.org/10.1007/BF01450097
+- T. J. Dekker (1971), A floating-point technique for extending the available precision, Numerische Mathematik, 18(3), 224–242. https://doi.org/10.1007/bf01397083
+- W. P. Johnson (2002), The Curious History of Faa di Bruno's Formula, The American Mathematical Monthly, 109(3), 217. https://doi.org/10.2307/2695352
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §10.29 Recurrence Relations and Derivatives (Modified Bessel Functions), https://dlmf.nist.gov/10.29
+- NIST Digital Library of Mathematical Functions, §10.32 Integral Representations (Modified Bessel Functions), https://dlmf.nist.gov/10.32
+- NIST Digital Library of Mathematical Functions, §10.40 Asymptotic Expansions for Large Argument (Modified Bessel Functions), https://dlmf.nist.gov/10.40
+- NIST Digital Library of Mathematical Functions, §10.41 Asymptotic Expansions for Large Order (Modified Bessel Functions), https://dlmf.nist.gov/10.41
+- N. Temme (1975), On the numerical evaluation of the modified bessel function of the third kind, Journal of Computational Physics, 19(3), 324–337. https://doi.org/10.1016/0021-9991(75)90082-0
 */

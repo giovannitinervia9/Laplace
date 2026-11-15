@@ -42,7 +42,7 @@ t = \begin{cases}
 
 ### Rows and derivatives
 
-At derivative order \f$k = 0\f$, \ref laplace::basis::legendre_basis::row "row()" generates \f$P_m(t)\f$ by Bonnet's three-term recurrence,
+At derivative order \f$k = 0\f$, \ref laplace::basis::legendre_basis::row "row()" generates \f$P_m(t)\f$ by Bonnet's three-term recurrence (DLMF §18.9),
 \f[
 P_0(t) = 1, \quad P_1(t) = t, \quad (j + 1) P_{j+1}(t) = (2j + 1) t P_j(t) - j P_{j-1}(t) \quad (j \ge 1),
 \f]
@@ -76,11 +76,11 @@ For derivative orders \f$k, l \ge 0\f$, \ref laplace::basis::legendre_basis::cro
 \f[
 G_{kl} = \int_{lower}^{upper} b^{(k)}(x) (b^{(l)}(x))^\top \, \mathrm{d}x
 \f]
-in column-major order (`out[i + j * K]`), with \ref laplace::basis::legendre_basis::gram_bandwidth "gram_bandwidth()" equal to \f$n\f$. It writes the exact identity \f$I\f$ for \f$k = l = 0\f$, and all zeros when \f$k > n\f$ or \f$l > n\f$. Otherwise it transforms the integral to \f$t \in [-1, 1]\f$, where the integrand is a polynomial of degree \f$2n - k - l\f$. Because dividing into panels does not lower polynomial degree, a single Gauss-Legendre rule is used: the 64-node rule of \ref quadrature for \f$2n - k - l \le 127\f$, and \f$N = \lfloor(2n - k - l)/2\rfloor + 1\f$ nodes computed on the host by \ref laplace::basis::legendre_basis::gauss_legendre_nodes "gauss_legendre_nodes()" via Newton's method for higher degrees.
+in column-major order (`out[i + j * K]`), with \ref laplace::basis::legendre_basis::gram_bandwidth "gram_bandwidth()" equal to \f$n\f$. It writes the exact identity \f$I\f$ for \f$k = l = 0\f$, and all zeros when \f$k > n\f$ or \f$l > n\f$. Otherwise it transforms the integral to \f$t \in [-1, 1]\f$, where the integrand is a polynomial of degree \f$2n - k - l\f$. Because dividing into panels does not lower polynomial degree, a single Gauss-Legendre rule is used: the 64-node rule of \ref quadrature for \f$2n - k - l \le 127\f$, and \f$N = \lfloor(2n - k - l)/2\rfloor + 1\f$ nodes computed on the host by \ref laplace::basis::legendre_basis::gauss_legendre_nodes "gauss_legendre_nodes()" via Newton's method for higher degrees (DLMF §3.5).
 
 ## Measured accuracy
 
-See \ref accuracy "How accuracy is measured" for error metric definitions and test conventions. Reference values come from `tools/reference/basis_legendre.py` using exact integer polynomial coefficients and exact integration in mpmath at 400 bits across 28 configurations: intervals \f$[0, 1]\f$, \f$[-1, 1]\f$, \f$[-3, 7]\f$, and \f$[1000, 1001]\f$ for degrees \f$n \in \{0, 1, 2, 5, 10, 20, 50\}\f$, at random coordinates, exact boundaries, and points at distances \f$10^{-p}\f$ from each boundary.
+See \ref accuracy "How accuracy is measured" for error metric definitions and test conventions. Reference values come from `tools/reference/basis_legendre.py` using exact integer polynomial coefficients and exact integration in mpmath (2023) at 400 bits across 28 configurations: intervals \f$[0, 1]\f$, \f$[-1, 1]\f$, \f$[-3, 7]\f$, and \f$[1000, 1001]\f$ for degrees \f$n \in \{0, 1, 2, 5, 10, 20, 50\}\f$, at random coordinates, exact boundaries, and points at distances \f$10^{-p}\f$ from each boundary.
 
 Errors in `tests/basis/test_legendre.cpp` are measured in ulp of the largest entry magnitude in the row for rows and integrals, and in ulp of the largest matrix entry for Gram matrices. For \f$n \in \{0, 1, 2\}\f$, all quantities stay within 4 ulp. Cross Gram matrices run on the host only.
 
@@ -171,4 +171,10 @@ void eval_legendre(const Kokkos::View<const double*>& x,
 - \ref laplace::basis::legendre_basis::upper "upper" — Upper bound of the domain
 - \ref laplace::basis::legendre_basis::max_degree "max_degree" — Maximum polynomial degree \f$n \ge 0\f$
 - \ref laplace::basis::legendre_basis::outside "outside" — Rule for evaluating the basis outside its domain
+
+## References
+
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §3.5 Quadrature, https://dlmf.nist.gov/3.5
+- NIST Digital Library of Mathematical Functions, §18.9 Recurrence Relations and Derivatives (Classical Orthogonal Polynomials), https://dlmf.nist.gov/18.9
 */

@@ -1,6 +1,6 @@
 /**
 \defgroup distrib_gaussian2 gaussian2 (mean, variance)
-\brief Univariate normal distribution parametrized by mean and variance, with closed-form log-density derivatives and Mills-ratio cumulative tails.
+\brief Univariate normal distribution parametrized by mean and variance, with closed-form log-density derivatives and Mills-ratio cumulative tails (DLMF §7.12).
 
 Defined in `<laplace/distrib/gaussian2.hpp>` as \ref laplace::distrib::gaussian2_distrib "gaussian2_distrib", this module evaluates the real-line normal distribution parametrized by variance rather than standard deviation: log-density and mixed observation-parameter derivatives, expected Fisher information and its derivatives, cumulative and complementary probabilities with log-parameter derivatives, quantiles, and regularity metadata. Functions are marked `LAPLACE_HD` for host and Kokkos device execution; see \ref distrib_core for the shared interface, packed `sym_tensor<2, K>` storage, and Kokkos usage. Cumulative derivatives match 300-bit and 400-bit mpmath reference values within 483 scaled ulp (`log_cdf`) and 441 scaled ulp (`log_ccdf`).
 
@@ -31,13 +31,14 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against mpmath reference va
 
 ## References
 
-- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
-- A. Meurer and others (2017). SymPy: symbolic computing in Python. *PeerJ Computer Science*, 3:e103.
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §7.12 Asymptotic Expansions (Error Functions), https://dlmf.nist.gov/7.12
 */
 
 /**
 \defgroup distrib_gaussian3 gaussian3 (mean, precision)
-\brief Univariate normal distribution parametrized by mean and precision, with closed-form log-density derivatives and Mills-ratio cumulative tails.
+\brief Univariate normal distribution parametrized by mean and precision, with closed-form log-density derivatives and Mills-ratio cumulative tails (DLMF §7.12).
 
 Defined in `<laplace/distrib/gaussian3.hpp>` as \ref laplace::distrib::gaussian3_distrib "gaussian3_distrib", this module evaluates the real-line normal distribution parametrized by precision \f$\tau = 1/\sigma^2\f$: log-density and mixed observation-parameter derivatives, expected Fisher information and its derivatives, cumulative and complementary probabilities with log-parameter derivatives, quantiles, and regularity metadata. Functions are marked `LAPLACE_HD` for host and Kokkos device execution; see \ref distrib_core for the shared interface, `sym_tensor<2, K>` storage, and Kokkos usage. Cumulative derivatives match 300-bit and 400-bit mpmath references within 301 scaled ulp (`log_cdf`) and 156 scaled ulp (`log_ccdf`).
 
@@ -68,8 +69,9 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against mpmath reference va
 
 ## References
 
-- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
-- A. Meurer and others (2017). SymPy: symbolic computing in Python. *PeerJ Computer Science*, 3:e103.
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §7.12 Asymptotic Expansions (Error Functions), https://dlmf.nist.gov/7.12
 */
 
 /**
@@ -80,7 +82,7 @@ Defined in `<laplace/distrib/cauchy.hpp>` as \ref laplace::distrib::cauchy_distr
 
 ## Classic form and regularity
 
-The textbook Cauchy density uses median and mode \f$x_0 \in (-\infty, \infty)\f$ (mean and variance are undefined) and half-width at half-maximum \f$\gamma \in (0, \infty)\f$; Laplace writes \f$\mu = x_0\f$ (`mu`) and \f$\sigma = \gamma\f$ (`sigma`), so that the density is
+The textbook Cauchy density (Johnson and others, 1994) uses median and mode \f$x_0 \in (-\infty, \infty)\f$ (mean and variance are undefined) and half-width at half-maximum \f$\gamma \in (0, \infty)\f$; Laplace writes \f$\mu = x_0\f$ (`mu`) and \f$\sigma = \gamma\f$ (`sigma`), so that the density is
 \f[
 f(y; \mu, \sigma) = \frac{1}{\pi\sigma \left(1 + \left(\frac{y - \mu}{\sigma}\right)^2\right)}, \qquad y \in (-\infty, \infty).
 \f]
@@ -105,7 +107,8 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against 300-bit and 400-bit
 
 ## References
 
-- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
+- N. L. Johnson, S. Kotz and N. Balakrishnan (1994), Continuous Univariate Distributions, Volume 1, 2nd edition, Wiley.
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 */
 
 /**
@@ -116,7 +119,7 @@ Defined in `<laplace/distrib/logistic.hpp>` as \ref laplace::distrib::logistic_d
 
 ## Classic form and regularity
 
-The textbook logistic density on \f$y \in (-\infty, \infty)\f$ uses location \f$\mu \in (-\infty, \infty)\f$ and scale \f$s \in (0, \infty)\f$ (with mean \f$\mu\f$ and variance \f$\pi^2 s^2/3\f$); Laplace writes \f$\sigma = s\f$ (`sigma`) and `mu` for \f$\mu\f$, so that the density is
+The textbook logistic density (Johnson and others, 1995) on \f$y \in (-\infty, \infty)\f$ uses location \f$\mu \in (-\infty, \infty)\f$ and scale \f$s \in (0, \infty)\f$ (with mean \f$\mu\f$ and variance \f$\pi^2 s^2/3\f$); Laplace writes \f$\sigma = s\f$ (`sigma`) and `mu` for \f$\mu\f$, so that the density is
 \f[
 f(y; \mu, \sigma) = \frac{\exp\!\left(-\frac{y - \mu}{\sigma}\right)}{\sigma \left(1 + \exp\!\left(-\frac{y - \mu}{\sigma}\right)\right)^2}, \qquad y \in (-\infty, \infty).
 \f]
@@ -141,7 +144,8 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against 300-bit and 400-bit
 
 ## References
 
-- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
+- N. L. Johnson, S. Kotz and N. Balakrishnan (1995), Continuous Univariate Distributions, Volume 2, 2nd edition, Wiley.
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 */
 
 /**
@@ -152,7 +156,7 @@ Defined in `<laplace/distrib/gumbel.hpp>` as \ref laplace::distrib::gumbel_distr
 
 ## Classic form and regularity
 
-The textbook Gumbel density uses mode \f$\mu \in (-\infty, \infty)\f$ (not the mean \f$\mu + \gamma\beta\f$, with variance \f$\pi^2\beta^2/6\f$) and scale \f$\beta \in (0, \infty)\f$; Laplace writes \f$\sigma = \beta\f$ (`sigma`) and `mu` for \f$\mu\f$, so that, with \f$z = (y - \mu)/\sigma\f$, the density is
+The textbook Gumbel density (Gumbel, 1958) uses mode \f$\mu \in (-\infty, \infty)\f$ (not the mean \f$\mu + \gamma\beta\f$, with variance \f$\pi^2\beta^2/6\f$) and scale \f$\beta \in (0, \infty)\f$; Laplace writes \f$\sigma = \beta\f$ (`sigma`) and `mu` for \f$\mu\f$, so that, with \f$z = (y - \mu)/\sigma\f$, the density is
 \f[
 f(y; \mu, \sigma) = \frac{1}{\sigma} \exp\!\left(-\left(z + e^{-z}\right)\right), \qquad y \in (-\infty, \infty).
 \f]
@@ -160,11 +164,11 @@ Both parameters have `regularity = infinitely_smooth`, `cdf_regularity = infinit
 
 ## Log-density, Fisher information, and cumulative functions
 
-The log-density \f$\ell(\mu, \sigma; y) = -\log\sigma - z - e^{-z}\f$ separates into three closed-form parts for total order \f$K = a + b \in \{1, \dots, 6\}\f$: \f$-z\f$ contributes \f$-(-1)^b b!\, z\sigma^{-b}\f$ (\f$a = 0\f$), \f$(-1)^b b!\,\sigma^{-(b+1)}\f$ (\f$a = 1\f$), and \f$0\f$ (\f$a \ge 2\f$); \f$-e^{-z}\f$ contributes \f$-(-1)^b b!\,\sigma^{-K} e^{-z} L_b^{(a-1)}(z)\f$ via generalized Laguerre forward recurrence; and \f$-\log\sigma\f$ contributes \f$(-1)^b (b - 1)!\,\sigma^{-b}\f$ for \f$a = 0, b \ge 1\f$. Mixed derivatives `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$) use \f$\partial/\partial y = -\partial/\partial\mu\f$.
+The log-density \f$\ell(\mu, \sigma; y) = -\log\sigma - z - e^{-z}\f$ separates into three closed-form parts for total order \f$K = a + b \in \{1, \dots, 6\}\f$: \f$-z\f$ contributes \f$-(-1)^b b!\, z\sigma^{-b}\f$ (\f$a = 0\f$), \f$(-1)^b b!\,\sigma^{-(b+1)}\f$ (\f$a = 1\f$), and \f$0\f$ (\f$a \ge 2\f$); \f$-e^{-z}\f$ contributes \f$-(-1)^b b!\,\sigma^{-K} e^{-z} L_b^{(a-1)}(z)\f$ via generalized Laguerre forward recurrence (DLMF §18.9); and \f$-\log\sigma\f$ contributes \f$(-1)^b (b - 1)!\,\sigma^{-b}\f$ for \f$a = 0, b \ge 1\f$. Mixed derivatives `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$) use \f$\partial/\partial y = -\partial/\partial\mu\f$.
 
-The expected Fisher information \f$I(\mu, \sigma) = \frac{1}{\sigma^2}\begin{pmatrix} 1 & \gamma - 1 \\ \gamma - 1 & (1 - \gamma)^2 + \frac{\pi^2}{6}\end{pmatrix}\f$ (where \f$\gamma\f$ is the Euler–Mascheroni constant) is non-diagonal and stored in `sym_tensor<2, 2>` with `v[0] = 1.0 / (sigma * sigma)`, `v[1] = (gamma - 1.0) / (sigma * sigma)`, and \f$v_2 = \bigl((1 - \gamma)^2 + \pi^2/6\bigr)/\sigma^2\f$. Its \f$K\f$-th \f$\sigma\f$-derivative scales the constant matrix by \f$\frac{(-1)^K (K + 1)!}{\sigma^{K + 2}}\f$, while \f$\mu\f$-derivatives vanish.
+The expected Fisher information \f$I(\mu, \sigma) = \frac{1}{\sigma^2}\begin{pmatrix} 1 & \gamma - 1 \\ \gamma - 1 & (1 - \gamma)^2 + \frac{\pi^2}{6}\end{pmatrix}\f$ (where \f$\gamma\f$ is the Euler–Mascheroni constant) is non-diagonal (Gumbel, 1958) and stored in `sym_tensor<2, 2>` with `v[0] = 1.0 / (sigma * sigma)`, `v[1] = (gamma - 1.0) / (sigma * sigma)`, and \f$v_2 = \bigl((1 - \gamma)^2 + \pi^2/6\bigr)/\sigma^2\f$. Its \f$K\f$-th \f$\sigma\f$-derivative scales the constant matrix by \f$\frac{(-1)^K (K + 1)!}{\sigma^{K + 2}}\f$, while \f$\mu\f$-derivatives vanish.
 
-Cumulative functions are \f$F(y) = \exp(-e^{-z})\f$, \f$1 - F(y) = 1 - \exp(-e^{-z})\f$, \f$\log F(y) = -e^{-z}\f$ (whose derivatives equal the exponential term of \f$\ell\f$), and `quantile(p)` \f$= \mu - \sigma\log(-\log p)\f$ (using `log1p(p - 1.0)` for \f$p > 1/2\f$). For \f$\log(1 - F(y))\f$, when \f$z \ge 0\f$ the module evaluates \f$-z + H(e^{-z})\f$ with Bernoulli series \f$H(u) = \log((1 - e^{-u})/u) = \sum_{k=1}^\infty h_k u^k\f$ (\f$h_1 = -1/2\f$, \f$h_{2n} = \frac{B_{2n}}{2n(2n)!}\f$), and for \f$z < 0\f$, \f$\log(1 - F) = -\sum_{n=1}^\infty \frac{e^{-n e^{-z}}}{n}\f$ is differentiated in \f$z\f$ via polynomials \f$P_j(w)\f$ of \f$e^{-w}\f$ (\f$w = n e^{-z}\f$), then mapped to \f$(\mu, \sigma)\f$ by the location-scale chain rule.
+Cumulative functions are \f$F(y) = \exp(-e^{-z})\f$, \f$1 - F(y) = 1 - \exp(-e^{-z})\f$, \f$\log F(y) = -e^{-z}\f$ (whose derivatives equal the exponential term of \f$\ell\f$), and `quantile(p)` \f$= \mu - \sigma\log(-\log p)\f$ (using `log1p(p - 1.0)` for \f$p > 1/2\f$). For \f$\log(1 - F(y))\f$, when \f$z \ge 0\f$ the module evaluates \f$-z + H(e^{-z})\f$ with Bernoulli series \f$H(u) = \log((1 - e^{-u})/u) = \sum_{k=1}^\infty h_k u^k\f$ (\f$h_1 = -1/2\f$, \f$h_{2n} = \frac{B_{2n}}{2n(2n)!}\f$) (DLMF §24.2), and for \f$z < 0\f$, \f$\log(1 - F) = -\sum_{n=1}^\infty \frac{e^{-n e^{-z}}}{n}\f$ is differentiated in \f$z\f$ via polynomials \f$P_j(w)\f$ of \f$e^{-w}\f$ (\f$w = n e^{-z}\f$), then mapped to \f$(\mu, \sigma)\f$ by the location-scale chain rule.
 
 ## Accuracy
 
@@ -177,7 +181,10 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against 300-bit and 400-bit
 
 ## References
 
-- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
+- E. J. Gumbel (1958), Statistics of Extremes. https://doi.org/10.7312/gumb92958
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §18.9 Recurrence Relations and Derivatives (Classical Orthogonal Polynomials), https://dlmf.nist.gov/18.9
+- NIST Digital Library of Mathematical Functions, §24.2 Definitions and Generating Functions (Bernoulli and Euler Polynomials), https://dlmf.nist.gov/24.2
 */
 
 /**
@@ -188,7 +195,7 @@ Defined in `<laplace/distrib/laplace2.hpp>` as \ref laplace::distrib::laplace2_d
 
 ## Classic form and regularity
 
-The textbook Laplace density with location \f$\mu \in (-\infty, \infty)\f$ (`mu`) and scale \f$b \in (0, \infty)\f$ is \f$f(y; \mu, b) = \frac{1}{2b}\exp\bigl(-\frac{|y - \mu|}{b}\bigr)\f$. Substituting rate \f$\lambda = 1/b \in (0, \infty)\f$ (`lambda`) gives
+The textbook Laplace density (Kotz and others, 2001) with location \f$\mu \in (-\infty, \infty)\f$ (`mu`) and scale \f$b \in (0, \infty)\f$ is \f$f(y; \mu, b) = \frac{1}{2b}\exp\bigl(-\frac{|y - \mu|}{b}\bigr)\f$. Substituting rate \f$\lambda = 1/b \in (0, \infty)\f$ (`lambda`) gives
 \f[
 f(y; \mu, \lambda) = \frac{\lambda}{2} \exp\!\left(-\lambda |y - \mu|\right), \qquad y \in (-\infty, \infty).
 \f]
@@ -198,7 +205,7 @@ This is the same law as \ref distrib_laplace1 "laplace1_distrib" with \f$\sigma 
 
 With \f$r = y - \mu\f$ and \f$s = \operatorname{sgn}(r)\f$, the log-density is \f$\ell(\mu, \lambda; y) = \log\lambda - \log 2 - \lambda|r|\f$. Away from the kink (\f$r \ne 0\f$), partials of order \f$K = a + b \in \{1, \dots, 6\}\f$ are \f$1/\lambda - |r|\f$ (\f$a = 0, b = 1\f$), \f$(-1)^{b-1}(b - 1)!/\lambda^b\f$ (\f$a = 0, b \ge 2\f$), \f$\lambda s\f$ (\f$a = 1, b = 0\f$), \f$s\f$ (\f$a = 1, b = 1\f$), and \f$0\f$ for \f$a = 1, b \ge 2\f$ or \f$a \ge 2\f$, adopting the symmetric convention \f$\operatorname{sgn}(0) = 0\f$ at \f$r = 0\f$. Mixed derivatives `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$) satisfy \f$\partial/\partial y = -\partial/\partial\mu\f$.
 
-From the score variance, the expected Fisher information is \f$I(\mu, \lambda) = \operatorname{diag}(\lambda^2, \lambda^{-2})\f$ (`v[0] = lambda * lambda`, `v[1] = 0.0`, `v[2] = 1.0 / (lambda * lambda)`). Its \f$K\f$-th \f$\lambda\f$-derivative (\f$K \in \{1, \dots, 4\}\f$) is \f$\operatorname{diag}(2\lambda, -2/\lambda^3)\f$ for \f$K = 1\f$, \f$\operatorname{diag}(2, 6/\lambda^4)\f$ for \f$K = 2\f$, and \f$\operatorname{diag}\bigl(0, (-1)^K(K + 1)!/\lambda^{K + 2}\bigr)\f$ for \f$K \ge 3\f$, while \f$\mu\f$-derivatives vanish.
+From the score variance (Lehmann and Casella, 1998), the expected Fisher information is \f$I(\mu, \lambda) = \operatorname{diag}(\lambda^2, \lambda^{-2})\f$ (`v[0] = lambda * lambda`, `v[1] = 0.0`, `v[2] = 1.0 / (lambda * lambda)`). Its \f$K\f$-th \f$\lambda\f$-derivative (\f$K \in \{1, \dots, 4\}\f$) is \f$\operatorname{diag}(2\lambda, -2/\lambda^3)\f$ for \f$K = 1\f$, \f$\operatorname{diag}(2, 6/\lambda^4)\f$ for \f$K = 2\f$, and \f$\operatorname{diag}\bigl(0, (-1)^K(K + 1)!/\lambda^{K + 2}\bigr)\f$ for \f$K \ge 3\f$, while \f$\mu\f$-derivatives vanish.
 
 With \f$z = \lambda(y - \mu)\f$, cumulative values are piecewise exponentials and `quantile(p)` returns \f$\mu + \frac{1}{\lambda}\log(2p)\f$ for \f$p < 1/2\f$ and \f$\mu - \frac{1}{\lambda}\log(2 - 2p)\f$ for \f$p \ge 1/2\f$. For cumulative derivatives where the log-probability tends to zero (\f$z \ge 1/4\f$ for \f$\log F\f$, \f$z \le -1/4\f$ for \f$\log(1 - F)\f$, with \f$q = |y - \mu|\f$ and \f$u = n\lambda q\f$), the module expands \f$\log\bigl(1 - \frac{1}{2}e^{-\lambda q}\bigr) = -\sum_{n=1}^\infty \frac{2^{-n}}{n}e^{-n\lambda q}\f$ and transforms negative-order Laguerre polynomials via DLMF 18.5.12, \f$b!\, L_b^{(a-b)}(u) = (-u)^{b-a} a!\, L_a^{(b-a)}(u)\f$, so all coefficients remain non-negative. On \f$z < 1/4\f$ (\f$\log F\f$) and \f$z > -1/4\f$ (\f$\log(1 - F)\f$), \f$z\f$-derivatives from \ref distrib_laplace1 "laplace1" map to \f$(\mu, \lambda)\f$ via the power-scale chain rule with \f$w = \lambda\f$ and \f$k = -1\f$.
 
@@ -213,6 +220,8 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against 300-bit and 400-bit
 
 ## References
 
-- F. Johansson and others. mpmath: a Python library for arbitrary-precision floating-point arithmetic.
-- NIST Digital Library of Mathematical Functions, eq. 18.5.12 (https://dlmf.nist.gov/18.5#E12).
+- S. Kotz, T. J. Kozubowski and K. Podgórski (2001), The Laplace Distribution and Generalizations. https://doi.org/10.1007/978-1-4612-0173-1
+- E. L. Lehmann and G. Casella (1998), Theory of Point Estimation, 2nd edition, Springer. https://doi.org/10.1007/b98854
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §18.5 Explicit Representations (Classical Orthogonal Polynomials), https://dlmf.nist.gov/18.5
 */

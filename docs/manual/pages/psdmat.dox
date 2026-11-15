@@ -115,11 +115,11 @@ These structural zeros are set, never computed: a zero computed in floating poin
 \f]
 with \f$\log\det H\f$ from Cholesky.
 
-The matrix \f$B_j = H^{-1} G_j\f$ is similar to \f$\lambda_j M^+ S_j\f$ on the range of \f$M\f$, where \f$M^+\f$ is the pseudo-inverse. Hence \f$\partial\log\lvert M\rvert_+/\partial\theta_j = \operatorname{tr} B_j\f$ and \f$\partial B_j/\partial\theta_k = \delta_{jk}B_j - B_k B_j\f$. Along a sorted tuple of \f$K\f$ positions, the derivative is a sum over the set partitions \f$\pi\f$ of the positions whose blocks each repeat one index. Each partition contributes \f$(-1)^{\lvert\pi\rvert - 1}\f$ times the sum over the \f$(\lvert\pi\rvert - 1)!\f$ cyclic block orders of \f$\operatorname{tr}(B_{j_1}\cdots B_{j_{\lvert\pi\rvert}})\f$, where \f$j_b\f$ is the index of block \f$b\f$. In exact arithmetic \f$\sum_{j=1}^m \operatorname{tr} B_j = r\f$, which `rank_identity()` returns as a check. The default `split_tolerance`, \f$\epsilon^{0.05} \approx 0.165\f$, was the best measured: a level holds the components within a factor of about 6 of the largest. The default `zero_tolerance` is \f$8p\epsilon\f$.
+The matrix \f$B_j = H^{-1} G_j\f$ is similar to \f$\lambda_j M^+ S_j\f$ on the range of \f$M\f$, where \f$M^+\f$ is the pseudo-inverse. Hence \f$\partial\log\lvert M\rvert_+/\partial\theta_j = \operatorname{tr} B_j\f$ and \f$\partial B_j/\partial\theta_k = \delta_{jk}B_j - B_k B_j\f$. Along a sorted tuple of \f$K\f$ positions, the derivative is a sum over the set partitions \f$\pi\f$ of the positions whose blocks each repeat one index (Comtet, 1974). Each partition contributes \f$(-1)^{\lvert\pi\rvert - 1}\f$ times the sum over the \f$(\lvert\pi\rvert - 1)!\f$ cyclic block orders of \f$\operatorname{tr}(B_{j_1}\cdots B_{j_{\lvert\pi\rvert}})\f$, where \f$j_b\f$ is the index of block \f$b\f$. In exact arithmetic \f$\sum_{j=1}^m \operatorname{tr} B_j = r\f$, which `rank_identity()` returns as a check. The default `split_tolerance`, \f$\epsilon^{0.05} \approx 0.165\f$, was the best measured: a level holds the components within a factor of about 6 of the largest. The default `zero_tolerance` is \f$8p\epsilon\f$.
 
 ### Accuracy
 
-Errors are in ulp of \f$\max(\lvert\mathrm{ref}\rvert, 1)\f$, as on \ref accuracy "How accuracy is measured". The references come from mpmath at 256 bits on an exact rational basis of the range from SymPy, with spreads of the \f$\lambda_j\f$ up to \f$10^{20}\f$. The table gives the worst gcc errors and test bounds on two tensor-product cases, of sizes 30 and 36. The CUDA build gives the same errors.
+Errors are in ulp of \f$\max(\lvert\mathrm{ref}\rvert, 1)\f$, as on \ref accuracy "How accuracy is measured". The references come from mpmath (2023) at 256 bits on an exact rational basis of the range from SymPy (Meurer and others, 2017), with spreads of the \f$\lambda_j\f$ up to \f$10^{20}\f$. The table gives the worst gcc errors and test bounds on two tensor-product cases, of sizes 30 and 36. The CUDA build gives the same errors.
 
 | Order | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|---|
@@ -167,8 +167,9 @@ void eval_weighted_sum() {  // inside a Kokkos::ScopeGuard
 
 ## References
 
-- F. Johansson and others, mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org/
-- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science 3:e103 (SymPy 1.14.0).
-- S. N. Wood (2011), Fast stable restricted maximum likelihood and marginal likelihood estimation of semiparametric generalized linear models, Journal of the Royal Statistical Society B 73(1), 3–36 (appendix B).
+- L. Comtet (1974), Advanced Combinatorics: The Art of Finite and Infinite Expansions, Reidel. https://doi.org/10.1007/978-94-010-2196-8
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- S. N. Wood (2011), Fast Stable Restricted Maximum Likelihood and Marginal Likelihood Estimation of Semiparametric Generalized Linear Models, Journal of the Royal Statistical Society Series B: Statistical Methodology, 73(1), 3–36. https://doi.org/10.1111/j.1467-9868.2010.00749.x
 
 */

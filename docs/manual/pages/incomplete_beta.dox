@@ -13,7 +13,7 @@
  * ## Definitions
  *
  * For positive shape parameters \f$a, b > 0\f$ and argument \f$x \in [0, 1]\f$, the
- * regularized incomplete beta function is
+ * regularized incomplete beta function (DLMF §8.17) is
  *
  * \f[
  * I_x(a, b) = \frac{1}{B(a, b)} \int_0^x t^{a-1} (1 - t)^{b-1} \, \mathrm{d}t,
@@ -43,7 +43,7 @@
  * \f]
  *
  * For the complement, `log_ibetac_dK()` differentiates \f$\log(1 - I_x(a, b))\f$ directly via
- * Faà di Bruno's rule when \f$I_x(a, b) \le 1/2\f$, and reflects to \f$I_{1-x}(b, a)\f$ when
+ * Faà di Bruno's rule (Johnson, 2002) when \f$I_x(a, b) \le 1/2\f$, and reflects to \f$I_{1-x}(b, a)\f$ when
  * \f$I_x(a, b) > 1/2\f$.
  *
  * The inverse functions `ibeta_inv()` and `ibetac_inv()` solve \f$I_x(a, b) = p\f$ and
@@ -84,10 +84,10 @@
  * with \f$b \le 1\f$ or \f$b x \le 0.7\f$ (extending to \f$x \le 0.8\f$ when \f$b \le 1\f$); an upward
  * integer-step recurrence combined with \ref laplace::math::own::gamma_inc "gamma_inc()" when
  * \f$a, b > 1\f$ and \f$b < 40\f$ outside the continued-fraction domain; a finite difference
- * recurrence when \f$a < 500\f$; a continued fraction otherwise; and a uniform asymptotic
- * expansion when \f$\min(a, b) > 100\f$ and \f$\lambda \le 0.03\min(a, b)\f$. Every power
+ * recurrence when \f$a < 500\f$; a continued fraction (DLMF §8.17) otherwise; and a uniform asymptotic
+ * expansion (DLMF §8.17) when \f$\min(a, b) > 100\f$ and \f$\lambda \le 0.03\min(a, b)\f$. Every power
  * prefactor \f$x^a (1 - x)^b / B(a, b)\f$, series sum, and logarithmic split propagates
- * double-double precision before exponentiation so linear and logarithmic outputs remain free of
+ * double-double precision (Dekker, 1971) before exponentiation so linear and logarithmic outputs remain free of
  * prefactor cancellation.
  *
  * ### Shape derivatives
@@ -99,7 +99,7 @@
  * extending to \f$x \le 0.8\f$ when \f$b \le 1\f$), series coefficients are differentiated
  * term by term. Elsewhere the integrand is normalized at \f$t = x\f$ and integrated by a
  * Takahasi–Mori (1974) double-exponential rule along rays on the device and host, switching to
- * Gauss–Laguerre quadrature on the host when \f$x = 1\f$ and splitting at the interior mode when
+ * Gauss–Laguerre quadrature (Golub and Welsch, 1969) on the host when \f$x = 1\f$ and splitting at the interior mode when
  * needed.
  *
  * ### Inverses
@@ -109,7 +109,7 @@
  * \f$a, b > 0\f$. All four inverse entry points share one solver that evaluates the log objective
  * and closed-form derivatives up to order three in \f$v\f$ from the beta density and
  * double-double log residuals. From explicit domain and power-law brackets and an asymptotic seed
- * (beta-to-gamma, normal, Wilson–Hilferty, or mode-centered power law), safeguarded Halley steps
+ * (beta-to-gamma, normal, Wilson–Hilferty (1931), or mode-centered power law), safeguarded Halley steps (Gander, 1985)
  * converge inside the bracket until the relative step falls below \f$\varepsilon_{\mathrm{mach}} / 16\f$,
  * within \f$0.5\,\mathrm{ulp}(x)\f$ or \f$4\varepsilon_{\mathrm{mach}}\f$ on \f$1 - x\f$, and
  * the residual is below \f$10^{-6}\f$ within at most \f$64\f$ steps.
@@ -120,7 +120,7 @@
  * \ref accuracy_ulpL "ulpL", \ref accuracy_mixed "ulpN", and \ref accuracy_inverse "ulpC"). Across
  * general grids, mean plain-ULP errors are \f$9.8\f$ for `ibeta()`, \f$8.2\f$ for `ibetac()`,
  * \f$5.4\f$ for `log_ibeta()`, and \f$3.9\f$ for `log_ibetac()`, whereas Boost.Math errs by up
- * to \f$7.5 \times 10^{15}\f$ ulp on edge cases where Laplace matches MPFR.
+ * to \f$7.5 \times 10^{15}\f$ ulp on edge cases where Laplace matches MPFR (Fousse and others, 2007).
  *
  * | Function | Suite | gcc max | CUDA max | Test bound |
  * | :--- | :--- | :--- | :--- | :--- |
@@ -213,6 +213,13 @@
  *
  * ## References
  *
- * - A. R. DiDonato and A. H. Morris, Jr., *Algorithm 708: Significant digit computation of the incomplete beta function ratios*, ACM Trans. Math. Softw. 18 (1992), 360–373.
- * - H. Takahasi and M. Mori, *Double exponential formulas for numerical integration*, Publ. RIMS, Kyoto Univ. 9 (1974), 721–741.
+ * - T. J. Dekker (1971), A floating-point technique for extending the available precision, Numerische Mathematik, 18(3), 224–242. https://doi.org/10.1007/bf01397083
+ * - A. R. Didonato and A. H. Morris (1992), Algorithm 708: Significant digit computation of the incomplete beta function ratios, ACM Transactions on Mathematical Software, 18(3), 360–373. https://doi.org/10.1145/131766.131776
+ * - L. Fousse, G. Hanrot, V. Lefèvre, P. Pélissier and P. Zimmermann (2007), MPFR: a multiple-precision binary floating-point library with correct rounding, ACM Transactions on Mathematical Software, 33(2), 13. https://doi.org/10.1145/1236463.1236468
+ * - W. Gander (1985), On Halley's Iteration Method, The American Mathematical Monthly, 92(2), 131–134. https://doi.org/10.1080/00029890.1985.11971554
+ * - G. H. Golub and J. H. Welsch (1969), Calculation of Gauss quadrature rules, Mathematics of Computation, 23(106), 221–230. https://doi.org/10.1090/s0025-5718-69-99647-1
+ * - W. P. Johnson (2002), The Curious History of Faa di Bruno's Formula, The American Mathematical Monthly, 109(3), 217. https://doi.org/10.2307/2695352
+ * - NIST Digital Library of Mathematical Functions, §8.17 Incomplete Beta Functions, https://dlmf.nist.gov/8.17
+ * - H. Takahasi and M. Mori (1974), Double Exponential Formulas for Numerical Integration, Publications of the Research Institute for Mathematical Sciences, 9(3), 721–741. https://doi.org/10.2977/prims/1195192451
+ * - E. B. Wilson and M. M. Hilferty (1931), The Distribution of Chi-Square, Proceedings of the National Academy of Sciences, 17(12), 684–688. https://doi.org/10.1073/pnas.17.12.684
  */

@@ -8,16 +8,16 @@ Include `<laplace/math/faa_di_bruno.hpp>` and call functions in this module as `
 
 The module evaluates partial Bell polynomials and univariate composite derivatives.
 
-For integers \f$1 \le k \le n \le 7\f$, the partial Bell polynomial \f$B_{n,k}(g_1, \dots, g_{n-k+1})\f$ of degree \f$n\f$ and order \f$k\f$ is defined by
+For integers \f$1 \le k \le n \le 7\f$, the partial Bell polynomial (Bell, 1934) \f$B_{n,k}(g_1, \dots, g_{n-k+1})\f$ of degree \f$n\f$ and order \f$k\f$ is defined by
 \f[
 B_{n,k}(g_1, \dots, g_{n-k+1}) = \sum \frac{n!}{j_1! j_2! \cdots j_{n-k+1}!} \prod_{m=1}^{n-k+1} \left( \frac{g_m}{m!} \right)^{j_m},
 \f]
-where the sum runs over all non-negative integer partition indices \f$j_m \in \mathbb{Z}_{\ge 0}\f$ satisfying \f$\sum_{m=1}^{n-k+1} j_m = k\f$ and \f$\sum_{m=1}^{n-k+1} m j_m = n\f$. Here \f$g_m \in \mathbb{R}\f$ is the argument of order \f$m \in \{1, \dots, n - k + 1\}\f$, representing \f$g^{(m)}(x)\f$. Outside \f$1 \le k \le n \le 7\f$, the polynomial is \f$0\f$. Special evaluations yield the Stirling numbers of the second kind \f$S(n, k)\f$ and a binomial identity:
+where the sum runs over all non-negative integer partition indices \f$j_m \in \mathbb{Z}_{\ge 0}\f$ satisfying \f$\sum_{m=1}^{n-k+1} j_m = k\f$ and \f$\sum_{m=1}^{n-k+1} m j_m = n\f$. Here \f$g_m \in \mathbb{R}\f$ is the argument of order \f$m \in \{1, \dots, n - k + 1\}\f$, representing \f$g^{(m)}(x)\f$. Outside \f$1 \le k \le n \le 7\f$, the polynomial is \f$0\f$. Special evaluations yield the Stirling numbers of the second kind \f$S(n, k)\f$ (DLMF §26.8) and a binomial identity:
 \f[
 B_{n,k}(1, 1, \dots, 1) = S(n, k), \qquad B_{n,k}(1, 2, \dots, n - k + 1) = \binom{n}{k} k^{n-k}.
 \f]
 
-For sufficiently differentiable functions \f$f\f$ and \f$g\f$, Faà di Bruno's formula gives the \f$N\f$-th derivative of \f$f(g(x))\f$ at \f$x \in \mathbb{R}\f$ for \f$N \in \{1, \dots, 7\}\f$:
+For sufficiently differentiable functions \f$f\f$ and \f$g\f$, Faà di Bruno's formula (Johnson, 2002) gives the \f$N\f$-th derivative of \f$f(g(x))\f$ at \f$x \in \mathbb{R}\f$ for \f$N \in \{1, \dots, 7\}\f$:
 \f[
 \frac{\mathrm{d}^N}{\mathrm{d}x^N} f(g(x)) = \sum_{k=1}^N f_k \, B_{N,k}(g_1, \dots, g_{N-k+1}).
 \f]
@@ -33,7 +33,7 @@ If any required input in `f` or `g` is NaN, the called function returns quiet Na
 
 ## Numerical methods
 
-The module evaluates explicit monomial expressions instead of searching partitions at runtime. The 28 partial Bell polynomials \f$B_{n,k}\f$ for \f$1 \le k \le n \le 7\f$ are written out as sums of monomials with positive integer coefficients using SymPy's `bell(n, k, ...)` in SymPy 1.14.0 (Meurer et al. 2017).
+The module evaluates explicit monomial expressions instead of searching partitions at runtime. The 28 partial Bell polynomials \f$B_{n,k}\f$ for \f$1 \le k \le n \le 7\f$ are written out as sums of monomials with positive integer coefficients using SymPy's `bell(n, k, ...)` in SymPy 1.14.0 (Meurer and others, 2017).
 
 For \f$N = 1\f$, \ref laplace::math::chain_rule_d1 "chain_rule_d1()" evaluates \f$f_1 g_1\f$ directly. For \f$N \ge 2\f$, \ref laplace::math::chain_rule_d2 "chain_rule_d2()" through \ref laplace::math::chain_rule_d7 "chain_rule_d7()" sum \f$f_k B_{N,k}\f$ from \f$k = N\f$ down to \f$k = 1\f$.
 
@@ -102,5 +102,8 @@ Functions in this module are called as `laplace::math::NAME`.
 
 ## References
 
-- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science 3:e103
+- E. T. Bell (1934), Exponential Polynomials, The Annals of Mathematics, 35(2), 258. https://doi.org/10.2307/1968431
+- W. P. Johnson (2002), The Curious History of Faà di Bruno's Formula, The American Mathematical Monthly, 109(3), 217–234. https://doi.org/10.2307/2695352
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- NIST Digital Library of Mathematical Functions, §26.8 Set Partitions: Stirling Numbers, https://dlmf.nist.gov/26.8
 */

@@ -10,12 +10,12 @@ The standard normal density and cumulative distribution function are
 \f[
 \phi(x) = \frac{1}{\sqrt{2\pi}} e^{-x^2/2}, \qquad \Phi(x) = \int_{-\infty}^x \phi(u) \, \mathrm{d}u = \frac{1}{2} \operatorname{erfc}\left(-\frac{x}{\sqrt{2}}\right),
 \f]
-where \f$x \in \mathbb{R}\f$ is the argument and \f$u\f$ is the integration variable. The complementary error functions are
+where \f$x \in \mathbb{R}\f$ is the argument and \f$u\f$ is the integration variable. The complementary error functions (DLMF §7.2) are
 \f[
 \operatorname{erfc}(x) = \frac{2}{\sqrt{\pi}} \int_x^\infty e^{-u^2} \, \mathrm{d}u, \qquad \operatorname{erfcx}(x) = e^{x^2} \operatorname{erfc}(x).
 \f]
 
-The derivatives of \f$\log \Phi\f$ of order \f$k \in \{1, 2, 3, 4, 5, 6\}\f$ in \f$t \in \mathbb{R}\f$ are \f$g_k(t) = \frac{\mathrm{d}^k}{\mathrm{d}t^k} \log \Phi(t)\f$; the first is the inverse Mills ratio \f$g_1(t) = R(t) = \phi(t)/\Phi(t) \in (0, \infty)\f$. The quantile \f$\Phi^{-1}(p)\f$ and log-probability quantile \f$\Phi^{-1}(e^l)\f$ satisfy \f$\Phi(\Phi^{-1}(p)) = p\f$ for \f$p \in (0, 1)\f$ and \f$\log \Phi(\Phi^{-1}(e^l)) = l\f$ for \f$l = \log p \in (-\infty, 0]\f$.
+The derivatives of \f$\log \Phi\f$ of order \f$k \in \{1, 2, 3, 4, 5, 6\}\f$ in \f$t \in \mathbb{R}\f$ are \f$g_k(t) = \frac{\mathrm{d}^k}{\mathrm{d}t^k} \log \Phi(t)\f$; the first is the inverse Mills ratio \f$g_1(t) = R(t) = \phi(t)/\Phi(t) \in (0, \infty)\f$ (Mills, 1926). The quantile \f$\Phi^{-1}(p)\f$ and log-probability quantile \f$\Phi^{-1}(e^l)\f$ satisfy \f$\Phi(\Phi^{-1}(p)) = p\f$ for \f$p \in (0, 1)\f$ and \f$\log \Phi(\Phi^{-1}(e^l)) = l\f$ for \f$l = \log p \in (-\infty, 0]\f$.
 
 ## Domain and special values
 
@@ -29,11 +29,11 @@ For \f$\Phi^{-1}(p)\f$, \f$p = 0.5\f$ gives \f$0.0\f$, \f$p = 0.0\f$ gives \f$-\
 
 ### Scaled complementary error function
 
-For \f$x \ge 0\f$, \f$\operatorname{erfcx}(x)\f$ evaluates Boost.Math rational approximations (`boost/math/special_functions/erf.hpp`, `erf_imp` for 53 bits) without \f$e^{-x^2}\f$ on \f$[0, 0.5)\f$, \f$[0.5, 1.5)\f$, \f$[1.5, 2.5)\f$, \f$[2.5, 4.5)\f$, and \f$[4.5, 28.0)\f$, and for \f$x \ge 28.0\f$ the nine-term asymptotic series
+For \f$x \ge 0\f$, \f$\operatorname{erfcx}(x)\f$ evaluates Boost.Math rational approximations (`boost/math/special_functions/erf.hpp`, `erf_imp` for 53 bits) without \f$e^{-x^2}\f$ on \f$[0, 0.5)\f$, \f$[0.5, 1.5)\f$, \f$[1.5, 2.5)\f$, \f$[2.5, 4.5)\f$, and \f$[4.5, 28.0)\f$, and for \f$x \ge 28.0\f$ the nine-term asymptotic series (DLMF §7.12)
 \f[
 \operatorname{erfcx}(x) \sim \frac{1}{x \sqrt{\pi}} \sum_{m=0}^8 \frac{(-1)^m (2m - 1)!!}{(2 x^2)^m}.
 \f]
-For \f$x < 0\f$, it evaluates \f$2 e^{x^2} - \operatorname{erfcx}(-x)\f$, using an exact square (Dekker split on host, FMA on device) for \f$|x| \ge 0.5\f$.
+For \f$x < 0\f$, it evaluates \f$2 e^{x^2} - \operatorname{erfcx}(-x)\f$, using an exact square (Dekker split on host, FMA on device; Dekker, 1971) for \f$|x| \ge 0.5\f$.
 
 ### Complementary error function, distribution function, and logarithm
 
@@ -47,7 +47,7 @@ while for \f$x \ge 0\f$, \f$\Phi(x) = 1 - \Phi(-x)\f$ and \f$\log \Phi(x) = \ope
 
 Three regimes cover \f$t \in \mathbb{R}\f$ for \f$g_k(t)\f$, \f$k \in \{1, \dots, 6\}\f$.
 
-On \f$t \in [-1, 4)\f$, each order uses its own piecewise Chebyshev expansion evaluated by Clenshaw's recurrence, with half-width pieces above \f$t = 1\f$. On a piece containing a zero \f$z\f$ of \f$g_k\f$, the expansion stores \f$g_k(t)/(t - z)\f$ and restores \f$t - z\f$ from a double-double representation of \f$z\f$.
+On \f$t \in [-1, 4)\f$, each order uses its own piecewise Chebyshev expansion evaluated by Clenshaw's recurrence (1955), with half-width pieces above \f$t = 1\f$. On a piece containing a zero \f$z\f$ of \f$g_k\f$, the expansion stores \f$g_k(t)/(t - z)\f$ and restores \f$t - z\f$ from a double-double representation of \f$z\f$.
 
 For \f$t < -1\f$, let \f$y = -t > 1\f$. Then \f$\log \Phi(t) = -y^2/2 - \frac{1}{2}\log(2\pi) + \log M_0(y)\f$ with \f$M_j(y) = \int_0^\infty s^j \exp(-y s - s^2/2)\,\mathrm{d}s\f$, so the cumulants \f$\kappa_n\f$ of the density proportional to \f$\exp(-y s - s^2/2)\f$ on \f$s > 0\f$ give \f$g_1 = y + \kappa_1\f$, \f$g_2 = -1 + \kappa_2\f$, and \f$g_k = \kappa_k\f$ for \f$k \ge 3\f$. Scaled moment ratios \f$\rho_j = y M_j / M_{j-1}\f$ satisfy \f$\rho_j = j / (1 + w \rho_{j+1})\f$ with \f$w = 1/y^2\f$, iterated downward from the asymptotic root; raw moments \f$\mu_j = \mu_{j-1}\rho_j / y\f$ (\f$\mu_0 = 1\f$) yield \f$\kappa_n = \mu_n - \sum_{i=1}^{n-1} \binom{n-1}{i-1}\kappa_i\mu_{n-i}\f$.
 
@@ -142,4 +142,13 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::log_Phi_d6 "log_Phi_d6()" — Sixth derivative of \f$\log \Phi\f$
 - \ref laplace::math::own::Phi_inv "Phi_inv()" — Quantile from probability
 - \ref laplace::math::own::Phi_inv_logp "Phi_inv_logp()" — Quantile from log-probability
+
+## References
+
+- Boost.Math, C++ library of special functions and numerical tools, https://www.boost.org/libs/math
+- C. W. Clenshaw (1955), A note on the summation of Chebyshev series, Mathematics of Computation, 9(51), 118–120. https://doi.org/10.1090/s0025-5718-1955-0071856-0
+- T. J. Dekker (1971), A floating-point technique for extending the available precision, Numerische Mathematik, 18(3), 224–242. https://doi.org/10.1007/bf01397083
+- J. P. Mills (1926), Table of the Ratio: Area to Bounding Ordinate, for Any Portion of Normal Curve, Biometrika, 18(3/4), 395. https://doi.org/10.2307/2331957
+- NIST Digital Library of Mathematical Functions, §7.2 Definitions (Error Functions), https://dlmf.nist.gov/7.2
+- NIST Digital Library of Mathematical Functions, §7.12 Asymptotic Expansions (Error Functions), https://dlmf.nist.gov/7.12
 */

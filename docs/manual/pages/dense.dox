@@ -9,15 +9,15 @@ This section defines the seven operations of `laplace::dense` and its status and
 
 ### Cholesky decomposition and triangular solve
 
-For an \f$n \times n\f$ symmetric positive definite matrix \f$A\f$, \ref laplace::dense::cholesky_decomposition "cholesky_decomposition(A, L)" computes the lower-triangular factor \f$L\f$ satisfying \f$A = L L^\top\f$, setting the strictly upper triangle of \f$L\f$ to zero.
+For an \f$n \times n\f$ symmetric positive definite matrix \f$A\f$, \ref laplace::dense::cholesky_decomposition "cholesky_decomposition(A, L)" computes the lower-triangular factor \f$L\f$ satisfying \f$A = L L^\top\f$ (Golub and Van Loan, 2013), setting the strictly upper triangle of \f$L\f$ to zero.
 
 For an \f$n \times n\f$ triangular matrix \f$T\f$ and an \f$n \times k\f$ matrix \f$B\f$ with \f$k\f$ right-hand sides, \ref laplace::dense::triangular_solve "triangular_solve(T, B, triangle, operation)" solves \f$\operatorname{op}(T) X = B\f$ in place on \f$B\f$. Here `triangle` selects the lower or upper triangle of \f$T\f$, and `operation` selects \f$\operatorname{op}(T) = T\f$ (`dense_operation::identity`) or \f$T^\top\f$ (`dense_operation::transpose`).
 
 ### Pivoted QR and singular value decompositions
 
-For an \f$m \times n\f$ matrix \f$A\f$ with \f$p = \min(m, n)\f$, \ref laplace::dense::pivoted_qr_decomposition "pivoted_qr_decomposition(A, Q, R, perm, relative_tolerance)" computes \f$A P = Q R\f$, where \f$Q\f$ has orthonormal columns, \f$R\f$ is upper triangular, and \f$P\f$ is the permutation in `perm` such that column \f$j\f$ of \f$Q R\f$ equals column \f$\operatorname{perm}[j]\f$ of \f$A\f$.
+For an \f$m \times n\f$ matrix \f$A\f$ with \f$p = \min(m, n)\f$, \ref laplace::dense::pivoted_qr_decomposition "pivoted_qr_decomposition(A, Q, R, perm, relative_tolerance)" computes \f$A P = Q R\f$ (Businger and Golub, 1965), where \f$Q\f$ has orthonormal columns, \f$R\f$ is upper triangular, and \f$P\f$ is the permutation in `perm` such that column \f$j\f$ of \f$Q R\f$ equals column \f$\operatorname{perm}[j]\f$ of \f$A\f$.
 
-Under the same dimensions, \ref laplace::dense::svd_decomposition "svd_decomposition(A, U, s, V, relative_tolerance)" computes \f$A = U \operatorname{diag}(s) V^\top\f$, where \f$U\f$ and \f$V\f$ have orthonormal columns and \f$s\f$ holds the \f$p\f$ singular values in decreasing order \f$s_1 \ge s_2 \ge \dots \ge s_p \ge 0\f$. Both functions return the numerical rank of \f$A\f$ in `rank`.
+Under the same dimensions, \ref laplace::dense::svd_decomposition "svd_decomposition(A, U, s, V, relative_tolerance)" computes \f$A = U \operatorname{diag}(s) V^\top\f$ (Golub and Van Loan, 2013), where \f$U\f$ and \f$V\f$ have orthonormal columns and \f$s\f$ holds the \f$p\f$ singular values in decreasing order \f$s_1 \ge s_2 \ge \dots \ge s_p \ge 0\f$. Both functions return the numerical rank of \f$A\f$ in `rank`.
 
 ### Symmetric and generalized eigendecompositions
 
@@ -55,7 +55,7 @@ Invalid dimensions or incompatible View shapes throw `std::invalid_argument`.
 
 ### Rank determination and output shapes
 
-Numerical rank \f$r\f$ counts singular values \f$s_i > \text{tol} \cdot s_1\f$ in `svd_decomposition()` and `null_space_basis()`, or diagonal entries \f$|R_{kk}| > \text{tol} \cdot |R_{11}|\f$ in `pivoted_qr_decomposition()`. When `relative_tolerance < 0` (default `-1.0`), \f$\text{tol} = \max(m, n)\,\varepsilon\f$ with \f$\varepsilon = 2^{-52}\f$, matching NumPy's `matrix_rank` and MATLAB's `rank`; non-negative values override \f$\text{tol}\f$.
+Numerical rank \f$r\f$ counts singular values \f$s_i > \text{tol} \cdot s_1\f$ in `svd_decomposition()` and `null_space_basis()`, or diagonal entries \f$|R_{kk}| > \text{tol} \cdot |R_{11}|\f$ in `pivoted_qr_decomposition()`. When `relative_tolerance < 0` (default `-1.0`), \f$\text{tol} = \max(m, n)\,\varepsilon\f$ with \f$\varepsilon = 2^{-52}\f$, matching NumPy's `matrix_rank` (Harris and others, 2020) and MATLAB's `rank`; non-negative values override \f$\text{tol}\f$.
 
 With \f$p = \min(m, n)\f$, output shapes choose thin or full factors. In `pivoted_qr_decomposition()`, \f$Q\f$ is \f$m \times p\f$ or \f$m \times m\f$, and \f$R\f$ is \f$p \times n\f$ or \f$m \times n\f$ to match. In `svd_decomposition()`, \f$U\f$ is \f$m \times p\f$ or \f$m \times m\f$ and \f$V\f$ is \f$n \times p\f$ or \f$n \times n\f$ independently, while \f$s\f$ has length \f$p\f$. In `null_space_basis()`, \f$T\f$ must be managed and is reallocated to \f$n \times (n - r)\f$; when \f$m = 0\f$, \f$r = 0\f$ and \f$T\f$ becomes the \f$n \times n\f$ identity.
 
@@ -63,7 +63,7 @@ Each call runs on one thread, so callers schedule parallel decompositions.
 
 ## Method
 
-All routines call Eigen 3.4 on the host, with dedicated reductions for the generalized eigenproblem and null-space basis.
+All routines call Eigen 3.4 (Guennebaud and others, 2010) on the host, with dedicated reductions for the generalized eigenproblem and null-space basis.
 
 For \f$A V = B V \operatorname{diag}(w)\f$ with \f$V^\top B V = I\f$, `generalized_symmetric_eigen_decomposition()` reduces the pair using the Cholesky factor \f$L\f$ of \f$B\f$:
 1. Factorize \f$B = L L^\top\f$.
@@ -71,11 +71,11 @@ For \f$A V = B V \operatorname{diag}(w)\f$ with \f$V^\top B V = I\f$, `generaliz
 3. Solve \f$\tilde{A} Y = Y \operatorname{diag}(w)\f$.
 4. Recover \f$V = L^{-\top} Y\f$, giving \f$V^\top B V = Y^\top L^{-1} B L^{-\top} Y = Y^\top Y = I\f$.
 
-This Cholesky reduction is not backward stable when \f$B\f$ is ill-conditioned: eigenvalues near zero incur error of order \f$\varepsilon \|A\| \|B^{-1}\|\f$. For `null_space_basis()`, \f$T\f$ comes from the right singular vectors of \f$C\f$ via Jacobi SVD.
+This Cholesky reduction is not backward stable when \f$B\f$ is ill-conditioned: eigenvalues near zero incur error of order \f$\varepsilon \|A\| \|B^{-1}\|\f$ (Golub and Van Loan, 2013). For `null_space_basis()`, \f$T\f$ comes from the right singular vectors of \f$C\f$ via Jacobi SVD (Golub and Van Loan, 2013).
 
 ## Accuracy
 
-See \ref accuracy "How accuracy is measured" for reference conventions, backend comparisons, and test bounds. Reference values were generated by `tools/reference/dense.py` with mpmath at 200 bits on 17 rounded double-precision cases: 6 symmetric (\f$n \in \{5, \dots, 60\}\f$), 3 generalized (\f$n \in \{5, 20, 40\}\f$ with condition numbers of \f$B\f$ equal to \f$10^2\f$, \f$10^6\f$, and \f$10^3\f$), and 8 rectangular (\f$1 \times 20\f$ to \f$40 \times 25\f$).
+See \ref accuracy "How accuracy is measured" for reference conventions, backend comparisons, and test bounds. Reference values were generated by `tools/reference/dense.py` with mpmath (2023) at 200 bits on 17 rounded double-precision cases: 6 symmetric (\f$n \in \{5, \dots, 60\}\f$), 3 generalized (\f$n \in \{5, 20, 40\}\f$ with condition numbers of \f$B\f$ equal to \f$10^2\f$, \f$10^6\f$, and \f$10^3\f$), and 8 rectangular (\f$1 \times 20\f$ to \f$40 \times 25\f$).
 
 All metrics use \f$\varepsilon = 2^{-52}\f$. Symmetric eigenvalues and singular values \f$v\f$ use \f$\max_i |v_i - v_{i,\text{ref}}| / (\varepsilon \max_i |v_{i,\text{ref}}|)\f$. Generalized eigenvalues \f$w_i\f$ with \f$B\f$-normalized \f$v_i\f$ use \f$|w_i - w_{i,\text{ref}}| / (\varepsilon \kappa_i)\f$ where \f$\kappa_i = (\|A\|_F + |w_i| \|B\|_F) \|v_i\|_2^2\f$. Residuals and orthonormality errors use the Frobenius norm \f$\|\cdot\|_F\f$:
 - Cholesky and triangular solve: \f$\|L L^\top - A\|_F / (\|A\|_F \varepsilon)\f$ and \f$\|\operatorname{op}(T) X - B\|_F / (\|T\|_F \|X\|_F \varepsilon)\f$.
@@ -158,7 +158,10 @@ All public functions and types live in `<laplace/dense/dense.hpp>` and `<laplace
 
 ## References
 
-- Eigen: a C++ template library for linear algebra, version 3.4, https://eigen.tuxfamily.org, Mozilla Public License 2.0 (MPL2).
-- mpmath: cited under \ref accuracy "How accuracy is measured".
+- P. Businger and G. H. Golub (1965), Linear least squares solutions by householder transformations, Numerische Mathematik, 7(3), 269–276. https://doi.org/10.1007/bf01436084
+- G. H. Golub and C. F. Van Loan (2013), Matrix Computations, 4th edition, Johns Hopkins University Press. https://doi.org/10.56021/9781421407944
+- G. Guennebaud, B. Jacob and others (2010), Eigen v3, C++ template library for linear algebra, version 3.4, https://eigen.tuxfamily.org
+- C. R. Harris and others (2020), Array programming with NumPy, Nature, 585(7825), 357–362. https://doi.org/10.1038/s41586-020-2649-2
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 
 */

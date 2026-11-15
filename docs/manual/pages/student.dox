@@ -6,7 +6,7 @@ The header `<laplace/math/student.hpp>` evaluates \f$\log T_\nu(z)\f$ and its mi
 
 ## Definitions
 
-For a real argument \f$z \in \mathbb{R}\f$ and real degrees of freedom \f$\nu \in (0, \infty)\f$, the distribution function of the standard Student \f$t\f$ distrib is
+For a real argument \f$z \in \mathbb{R}\f$ and real degrees of freedom \f$\nu \in (0, \infty)\f$, the distribution function of the standard Student \f$t\f$ distrib (Student, 1908) is
 \f[
 T_\nu(z) = \int_{-\infty}^z t_\nu(s) \, \mathrm{d}s,
 \f]
@@ -33,7 +33,7 @@ The derivative functions return quiet NaN when \f$\nu \le 0\f$, \f$\nu = +\infty
 
 ### Function value
 
-The value \f$\log T_\nu(z)\f$ uses the regularized incomplete beta function via \ref laplace::math::own::beta_inc "beta_inc()". For \f$z < 0\f$, setting \f$x = \nu / (\nu + z^2) \in (0, 1]\f$ gives \f$T_\nu(z) = \frac{1}{2} I_x(\nu/2, 1/2)\f$. This is evaluated as \f$\log I_x(\nu/2, 1/2) - \log 2\f$ when \f$x \le 1/2\f$, and as \f$\log(1 - I_{1-x}(1/2, \nu/2)) - \log 2\f$ when \f$x > 1/2\f$.
+The value \f$\log T_\nu(z)\f$ uses the regularized incomplete beta function (DLMF §8.17) via \ref laplace::math::own::beta_inc "beta_inc()". For \f$z < 0\f$, setting \f$x = \nu / (\nu + z^2) \in (0, 1]\f$ gives \f$T_\nu(z) = \frac{1}{2} I_x(\nu/2, 1/2)\f$. This is evaluated as \f$\log I_x(\nu/2, 1/2) - \log 2\f$ when \f$x \le 1/2\f$, and as \f$\log(1 - I_{1-x}(1/2, \nu/2)) - \log 2\f$ when \f$x > 1/2\f$.
 
 For \f$z > 0\f$, evaluation complements the lower tail \f$S = T_\nu(-z) = \exp(l_S + l_o)\f$ as \f$\log(1 - S)\f$, where \f$l_S\f$ is the leading log probability and \f$l_o\f$ is the low-order correction from \ref laplace::math::own::beta_inc "beta_inc()". Retaining \f$l_o\f$ prevents losing \f$|l_S|/2\f$ ulps in the far upper tail.
 
@@ -43,12 +43,12 @@ Derivatives of order \f$K \in \{1, \dots, 5\}\f$ use a three-region numerical qu
 
 Comparing the lower-tail probability \f$T_\nu(-|z|)\f$ from \ref laplace::math::own::beta_inc "beta_inc()" against \f$0.2\f$ selects between the centre and tail regimes. Outside the centre, \f$|z|^2 < 4\nu\f$ selects the Gaussian tail and \f$|z|^2 \ge 4\nu\f$ selects the power tail. For \f$z > 0\f$ outside the centre, evaluation computes the lower tail at \f$-z\f$, substitutes \f$\mathrm{d}z \to -\mathrm{d}z\f$, and composes through \f$\log(1 - S)\f$.
 
-1. **Centre region** (\f$T_\nu(-|z|) > 0.2\f$). Splitting \f$T_\nu(z) = \frac{1}{2} + G(z)\f$ with \f$G(z) = \int_0^z t_\nu(s) \, \mathrm{d}s\f$ gives the \f$z\f$-derivatives of \f$G\f$ in closed form from \f$t_\nu(z)\f$ and its \f$\nu\f$-derivatives as \f$\int_0^z \frac{\partial^j}{\partial \nu^j} t_\nu(s) \, \mathrm{d}s\f$ for \f$j \in \{1, \dots, K\}\f$. Substituting \f$s = \sqrt{\nu}\sinh\tau\f$ turns \f$t_\nu(s) \, \mathrm{d}s\f$ into \f$e^{c(\nu)} \sqrt{\nu} (\cosh\tau)^{-\nu} \, \mathrm{d}\tau\f$. This integral is evaluated by 16-point Gauss–Legendre quadrature across geometrically growing intervals \f$[0, 1], [1, 3], [3, 9], \dots\f$, followed by the polynomial logarithm.
+1. **Centre region** (\f$T_\nu(-|z|) > 0.2\f$). Splitting \f$T_\nu(z) = \frac{1}{2} + G(z)\f$ with \f$G(z) = \int_0^z t_\nu(s) \, \mathrm{d}s\f$ gives the \f$z\f$-derivatives of \f$G\f$ in closed form from \f$t_\nu(z)\f$ and its \f$\nu\f$-derivatives as \f$\int_0^z \frac{\partial^j}{\partial \nu^j} t_\nu(s) \, \mathrm{d}s\f$ for \f$j \in \{1, \dots, K\}\f$. Substituting \f$s = \sqrt{\nu}\sinh\tau\f$ turns \f$t_\nu(s) \, \mathrm{d}s\f$ into \f$e^{c(\nu)} \sqrt{\nu} (\cosh\tau)^{-\nu} \, \mathrm{d}\tau\f$. This integral is evaluated by 16-point Gauss–Legendre quadrature (Golub and Welsch, 1969) across geometrically growing intervals \f$[0, 1], [1, 3], [3, 9], \dots\f$, followed by the polynomial logarithm.
 2. **Gaussian tail** (\f$T_\nu(-|z|) \le 0.2\f$ and \f$|z|^2 < 4\nu\f$). Shifting \f$s = z - u\f$ with \f$u \ge 0\f$ yields
    \f[
    \log T_\nu(z) = c(\nu) + k(z, \nu) + \log \int_0^\infty \exp(\Delta k(u)) \, \mathrm{d}u,
    \f]
-   where \f$\Delta k(u) = k(z - u + \mathrm{d}z, \nu + \mathrm{d}\nu) - k(z + \mathrm{d}z, \nu + \mathrm{d}\nu)\f$. With \f$A = \nu + z^2\f$ and \f$A_u = \nu + (z - u)^2\f$, coefficients of \f$\Delta k\f$ are formed as exact differences in \f$\delta = A_u - A = u(u + 2|z|)\f$. The integral in \f$\zeta = \log(A_u / A)\f$ uses a tabulated Takahasi–Mori double-exponential map (Takahasi and Mori 1974).
+   where \f$\Delta k(u) = k(z - u + \mathrm{d}z, \nu + \mathrm{d}\nu) - k(z + \mathrm{d}z, \nu + \mathrm{d}\nu)\f$. With \f$A = \nu + z^2\f$ and \f$A_u = \nu + (z - u)^2\f$, coefficients of \f$\Delta k\f$ are formed as exact differences in \f$\delta = A_u - A = u(u + 2|z|)\f$. The integral in \f$\zeta = \log(A_u / A)\f$ uses a tabulated Takahasi–Mori double-exponential map (Takahasi and Mori, 1974).
 3. **Power tail** (\f$T_\nu(-|z|) \le 0.2\f$ and \f$|z|^2 \ge 4\nu\f$). Scaling \f$s = z e^v\f$ with \f$v \ge 0\f$ yields
    \f[
    \log T_\nu(z) = c(\nu) + h(z, \nu) + \log \int_0^\infty \exp(\Delta k(v) + v) \, \mathrm{d}v,
@@ -57,7 +57,7 @@ Comparing the lower-tail probability \f$T_\nu(-|z|)\f$ from \ref laplace::math::
 
 ### Normalizing constant
 
-With \f$b = \nu / 2\f$, the normalizing constant is \f$c(\nu) = f(b) - \frac{1}{2}\log(2\pi)\f$, where \f$f(b) = \log\Gamma\left(b + \frac{1}{2}\right) - \log\Gamma(b) - \frac{1}{2}\log b\f$. When \f$b \ge 15.0\f$, evaluation uses the asymptotic expansion in even Bernoulli numbers \f$B_{2k}\f$ with coefficients \f$c_k = 2(1 - 4^{-k}) B_{2k} / (2k)!\f$. When \f$b < 15.0\f$, the recurrence \f$f(b) = f(b + 1) + \frac{1}{2}\log(1 - 1/(2b + 1)^2)\f$ shifts \f$b\f$ to at least \f$15.0\f$, computing derivatives as cancellation-free polynomials in \f$1/(2b + 1)^2\f$.
+With \f$b = \nu / 2\f$, the normalizing constant is \f$c(\nu) = f(b) - \frac{1}{2}\log(2\pi)\f$, where \f$f(b) = \log\Gamma\left(b + \frac{1}{2}\right) - \log\Gamma(b) - \frac{1}{2}\log b\f$. When \f$b \ge 15.0\f$, evaluation uses the asymptotic expansion in even Bernoulli numbers \f$B_{2k}\f$ (Tricomi and Erdélyi, 1951) with coefficients \f$c_k = 2(1 - 4^{-k}) B_{2k} / (2k)!\f$. When \f$b < 15.0\f$, the recurrence \f$f(b) = f(b + 1) + \frac{1}{2}\log(1 - 1/(2b + 1)^2)\f$ shifts \f$b\f$ to at least \f$15.0\f$, computing derivatives as cancellation-free polynomials in \f$1/(2b + 1)^2\f$.
 
 ## Accuracy
 
@@ -123,5 +123,9 @@ Functions in this module are called as `laplace::math::NAME`.
 
 ## References
 
-- H. Takahasi and M. Mori (1974), Double exponential formulas for numerical integration, Publications of the Research Institute for Mathematical Sciences, 9(3), 721–741.
+- G. H. Golub and J. H. Welsch (1969), Calculation of Gauss quadrature rules, Mathematics of Computation, 23(106), 221–230. https://doi.org/10.1090/s0025-5718-69-99647-1
+- NIST Digital Library of Mathematical Functions, §8.17 Incomplete Beta Functions, https://dlmf.nist.gov/8.17
+- Student (1908), The probable error of a mean, Biometrika, 6(1), 1-25. https://doi.org/10.2307/2331554
+- H. Takahasi and M. Mori (1974), Double Exponential Formulas for Numerical Integration, Publications of the Research Institute for Mathematical Sciences, 9(3), 721–741. https://doi.org/10.2977/prims/1195192451
+- F. Tricomi and A. Erdélyi (1951), The asymptotic expansion of a ratio of gamma functions, Pacific Journal of Mathematics, 1(1), 133–142. https://doi.org/10.2140/pjm.1951.1.133
 */

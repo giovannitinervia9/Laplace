@@ -54,7 +54,7 @@
  * \f[
  * \log\Phi(t) = -\frac{t^2}{2} - \log x - \frac{1}{2}\log(2\pi) - w + S_2(t), \qquad S_2(t) = \log(x M_0(x)) + w,
  * \f]
- * with Mills ratio \f$M_0(x) = \int_0^\infty \exp(-x s - s^2/2)\,\mathrm{d}s\f$, separates the exact
+ * with Mills ratio \f$M_0(x) = \int_0^\infty \exp(-x s - s^2/2)\,\mathrm{d}s\f$ (DLMF §7.12), separates the exact
  * closed-form leading terms from \f$S_2(t) = O(x^{-4})\f$ and avoids subtracting \f$\log\Phi(t)\f$
  * against \f$-t^2/2\f$ when differentiating up to order \f$6\f$ via `log_normal_cdf_d1()` ..
  * `log_normal_cdf_d6()`.
@@ -77,7 +77,8 @@
  *
  * ## References
  *
- * - F. Johansson and others, *mpmath: a Python library for arbitrary-precision floating-point arithmetic*, http://mpmath.org/.
+ * - The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+ * - NIST Digital Library of Mathematical Functions, §7.12 Asymptotic Expansions (Error Functions), https://dlmf.nist.gov/7.12
  */
 
 /**
@@ -93,7 +94,7 @@
  *
  * ## Classic form and regularity
  *
- * The classic Laplace density in location \f$\mu \in \mathbb{R}\f$ and scale \f$b > 0\f$ is
+ * The classic Laplace density (Kotz and others, 2001) in location \f$\mu \in \mathbb{R}\f$ and scale \f$b > 0\f$ is
  * \f[
  * f(y; \mu, b) = \frac{1}{2b} \exp\!\left(-\frac{|y - \mu|}{b}\right), \qquad y \in (-\infty, \infty).
  * \f]
@@ -114,7 +115,7 @@
  * \f$(-1)^K (K - 1)! / \sigma^K + (-1)^{K + 1} K! \, |z| / \sigma^K\f$ when \f$a = 0\f$. Mixed
  * partials `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$) apply \f$\partial/\partial y = -\partial/\partial\mu\f$.
  *
- * Although \f$\ell\f$ is non-differentiable at \f$y = \mu\f$, the score variance defines the regular
+ * Although \f$\ell\f$ is non-differentiable at \f$y = \mu\f$, the score variance (Lehmann and Casella, 1998) defines the regular
  * Fisher information \f$I(\mu, \sigma) = \operatorname{diag}(1/\sigma^2, 1/\sigma^2)\f$, stored in
  * `sym_tensor<2, 2>` with `v[0] = v[2] = 1 / (sigma * sigma)` and `v[1] = 0`. For \f$K \in \{1, \dots, 4\}\f$,
  * only pure \f$\sigma\f$-derivatives are nonzero, equal to \f$(-1)^K (K + 1)! / \sigma^{K + 2} I_2\f$.
@@ -131,12 +132,12 @@
  * - For \f$0 \le |z| < 0.25\f$, writing \f$q = 1/(2e^{|z|} - 1)\f$, polynomial derivatives
  *   \f$\mathrm{d}^j \log(1 - \frac{1}{2}e^{-|z|}) / \mathrm{d}|z|^j = (-1)^{j - 1} P_j(q)\f$ with
  *   \f$P_1(q) = q\f$ and \f$P_{j+1}(q) = -q(1 + q) P_j'(q)\f$ combine with \f$\partial^k (-|z|) / \partial\theta^k\f$
- *   via Faà di Bruno composition.
+ *   via Faà di Bruno composition (Johnson, 2002).
  * - For \f$|z| \ge 0.25\f$, the Mercator series \f$-\sum_{n = 1}^{\infty} (2^{-n}/n) \exp(c_n/\sigma)\f$
  *   with \f$c_n = n s (y - \mu)\f$ (\f$s = -1\f$ for `log_cdf`, \f$s = 1\f$ for `log_ccdf`) has
  *   mixed partials evaluated cleanly through associated Laguerre polynomials \f$L_b^{(a - 1)}(n |z|)\f$
- *   computed by the recurrence \f$(k + 1) L_{k + 1}^{(\alpha)}(u) = (2k + 1 + \alpha - u) L_k^{(\alpha)}(u) - (k + \alpha) L_{k - 1}^{(\alpha)}(u)\f$,
- *   verified symbolically with SymPy 1.14.0.
+ *   computed by the recurrence \f$(k + 1) L_{k + 1}^{(\alpha)}(u) = (2k + 1 + \alpha - u) L_k^{(\alpha)}(u) - (k + \alpha) L_{k - 1}^{(\alpha)}(u)\f$ (DLMF §18.9),
+ *   verified symbolically with SymPy 1.14.0 (Meurer and others, 2017).
  *
  * ## Accuracy
  *
@@ -155,8 +156,12 @@
  *
  * ## References
  *
- * - F. Johansson and others, *mpmath: a Python library for arbitrary-precision floating-point arithmetic*, http://mpmath.org/.
- * - A. Meurer and others, *SymPy: symbolic computing in Python*, PeerJ Computer Science 3 (2017), e103.
+ * - W. P. Johnson (2002), The Curious History of Faa di Bruno's Formula, The American Mathematical Monthly, 109(3), 217. https://doi.org/10.2307/2695352
+ * - S. Kotz, T. J. Kozubowski and K. Podgórski (2001), The Laplace Distribution and Generalizations. https://doi.org/10.1007/978-1-4612-0173-1
+ * - E. L. Lehmann and G. Casella (1998), Theory of Point Estimation, 2nd edition, Springer. https://doi.org/10.1007/b98854
+ * - A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+ * - The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+ * - NIST Digital Library of Mathematical Functions, §18.9 Recurrence Relations and Derivatives (Classical Orthogonal Polynomials), https://dlmf.nist.gov/18.9
  */
 
 /**
@@ -172,7 +177,7 @@
  *
  * ## Classic form and regularity
  *
- * The classic Poisson probability mass function with rate \f$\lambda > 0\f$ is
+ * The classic Poisson probability mass function (Johnson and others, 2005) with rate \f$\lambda > 0\f$ is
  * \f[
  * p(y; \lambda) = \frac{\lambda^y e^{-\lambda}}{y!}, \qquad y \in \{0, 1, 2, \dots\}.
  * \f]
@@ -189,7 +194,7 @@
  * \f[
  * \ell(\mu; y) = -\mu D(y/\mu) - \frac{1}{2}\log(2\pi y) - \delta(y), \qquad D(z) = z \log z - z + 1,
  * \f]
- * where \f$\delta(y)\f$ is the Stirling error. Writing \f$w = (y - \mu)/\mu\f$, when \f$|w| < 0.25\f$
+ * where \f$\delta(y)\f$ is the Stirling error (DLMF §5.11). Writing \f$w = (y - \mu)/\mu\f$, when \f$|w| < 0.25\f$
  * the deviance is evaluated as \f$y - \mu + \mu w \sum_{n = 2}^{\infty} (-1)^n w^n / (n(n - 1))\f$
  * in \f$\mu\f$-space and summed as \f$\mu w^2 \sum \dots\f$, avoiding catastrophic cancellation when
  * \f$y \approx \mu\f$ is large. Parameter derivatives of order \f$K \in \{1, \dots, 6\}\f$ are exact:
@@ -224,7 +229,9 @@
  *
  * ## References
  *
- * - F. Johansson and others, *mpmath: a Python library for arbitrary-precision floating-point arithmetic*, http://mpmath.org/.
+ * - N. L. Johnson, A. W. Kemp and S. Kotz (2005), Univariate Discrete Distributions, Wiley Series in Probability and Statistics. https://doi.org/10.1002/0471715816
+ * - The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+ * - NIST Digital Library of Mathematical Functions, §5.11 Asymptotic Expansions (Gamma Function), https://dlmf.nist.gov/5.11
  */
 
 /**
@@ -240,7 +247,7 @@
  *
  * ## Classic form and regularity
  *
- * In shape \f$s > 0\f$ and scale \f$\theta > 0\f$, the classic gamma density on \f$y \in (0, \infty)\f$ is
+ * In shape \f$s > 0\f$ and scale \f$\theta > 0\f$, the classic gamma density (Johnson and others, 1994) on \f$y \in (0, \infty)\f$ is
  * \f[
  * f(y; s, \theta) = \frac{1}{\Gamma(s)\,\theta^s} y^{s - 1} e^{-y/\theta}.
  * \f]
@@ -263,11 +270,11 @@
  * \ell(\mu, \phi; y) = s G(\mu) + H(\phi) - \log y - \frac{1}{2}\log(2\pi), \qquad
  * G(\mu) = -D\!\left(\frac{y}{\mu}\right), \qquad H(\phi) = \frac{1}{2}\log s - \delta(s),
  * \f]
- * where \f$\delta(s)\f$ is the Stirling error and \f$D(z) = z - 1 - \log z\f$. Setting \f$w = (y - \mu)/\mu\f$,
+ * where \f$\delta(s)\f$ is the Stirling error (DLMF §5.11) and \f$D(z) = z - 1 - \log z\f$. Setting \f$w = (y - \mu)/\mu\f$,
  * \f$D(y/\mu)\f$ uses the series \f$\sum_{n = 2}^{\infty} (-1)^n w^n / n\f$ for \f$|w| < 0.25\f$,
  * \f$w - \log(y/\mu)\f$ for \f$w < -0.5\f$, and \f$w - \log(1 + w)\f$ otherwise, preventing cancellation
  * when \f$\phi\f$ is small and \f$y \approx \mu\f$. Parameter derivatives combine closed-form
- * \f$\partial^a G/\partial\mu^a\f$, \f$s^{(b)} = (-1)^b b! / \phi^{b + 1}\f$, and Faà di Bruno composition
+ * \f$\partial^a G/\partial\mu^a\f$, \f$s^{(b)} = (-1)^b b! / \phi^{b + 1}\f$, and Faà di Bruno composition (Johnson, 2002)
  * of \f$\delta^{(m)}(s)\f$ with \f$s^{(b)}\f$. Mixed partials `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$)
  * differentiate only \f$-s y/\mu + (s - 1)\log y\f$.
  *
@@ -276,7 +283,7 @@
  * I(\mu, \phi) = \operatorname{diag}\!\left(\frac{s}{\mu^2},\; \frac{s^2}{2} + s^4 \delta''(s)\right),
  * \f]
  * stored in `sym_tensor<2, 2>` with `v[1] = 0` and `v[2] = s * s * (0.5 + s * s * stirling_error_d2(s))`,
- * canceling the leading \f$s^2\f$ cancellation in \f$\psi'(s) - 1/s\f$. Its derivatives of order
+ * canceling the leading \f$s^2\f$ cancellation in \f$\psi'(s) - 1/s\f$ (DLMF §5.15). Its derivatives of order
  * \f$K \in \{1, \dots, 4\}\f$ propagate \f$s^{(b)}\f$ on \f$I_{\mu\mu}\f$ and apply Faà di Bruno plus
  * Leibniz differentiation on \f$I_{\phi\phi}\f$.
  *
@@ -288,7 +295,7 @@
  * \ref laplace::math::own::log_gamma_p_ratio_mixed_d1 "log_gamma_p_ratio_mixed_d1()" .. `_d6()` and
  * \ref laplace::math::own::log_gamma_q_ratio_mixed_d1 "log_gamma_q_ratio_mixed_d1()" .. `_d6()`, then
  * compose with \f$s = 1/\phi\f$ and \f$r = y/\mu\f$ through `bell_partial` in \ref faa_di_bruno
- * (generated with SymPy 1.14.0).
+ * (generated with SymPy 1.14.0; Meurer and others, 2017).
  *
  * ## Accuracy
  *
@@ -301,12 +308,18 @@
  * | `log_ccdf` | `distrib_log_cdf.csv` | \f$356\f$ | \f$540\f$ |
  *
  * Finite differences agree within relative tolerance \f$10^{-8}\f$ for `logpdf_dk` and
- * `expected_info_dk` and \f$10^{-7}\f$ for `logpdf_dy_dk`; tanh-sinh and exp-sinh score-variance
+ * `expected_info_dk` and \f$10^{-7}\f$ for `logpdf_dy_dk`; tanh-sinh (Takahasi and Mori, 1974) and exp-sinh (Mori and Sugihara, 2001) score-variance
  * quadrature split at \f$y = \mu\f$ agrees with `expected_info()` within \f$10^{-12}\f$ for \f$I_{\mu\mu}\f$
  * and \f$10^{-10}\f$ for \f$I_{\phi\phi}\f$.
  *
  * ## References
  *
- * - F. Johansson and others, *mpmath: a Python library for arbitrary-precision floating-point arithmetic*, http://mpmath.org/.
- * - A. Meurer and others, *SymPy: symbolic computing in Python*, PeerJ Computer Science 3 (2017), e103.
+ * - N. L. Johnson, S. Kotz and N. Balakrishnan (1994), Continuous Univariate Distributions, Volume 1, 2nd edition, Wiley.
+ * - W. P. Johnson (2002), The Curious History of Faa di Bruno's Formula, The American Mathematical Monthly, 109(3), 217. https://doi.org/10.2307/2695352
+ * - A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+ * - M. Mori and M. Sugihara (2001), The double-exponential transformation in numerical analysis, Journal of Computational and Applied Mathematics, 127(1-2), 287–296. https://doi.org/10.1016/s0377-0427(00)00501-x
+ * - The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+ * - NIST Digital Library of Mathematical Functions, §5.11 Asymptotic Expansions (Gamma Function), https://dlmf.nist.gov/5.11
+ * - NIST Digital Library of Mathematical Functions, §5.15 Polygamma Functions, https://dlmf.nist.gov/5.15
+ * - H. Takahasi and M. Mori (1974), Double Exponential Formulas for Numerical Integration, Publications of the Research Institute for Mathematical Sciences, 9(3), 721–741. https://doi.org/10.2977/prims/1195192451
  */

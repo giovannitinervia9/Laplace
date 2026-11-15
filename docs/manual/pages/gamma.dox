@@ -10,7 +10,7 @@ The module defines the log-gamma function and polygamma derivatives on the posit
 \f[
 \operatorname{lgamma}(x) = \log \Gamma(x).
 \f]
-For integer order \f$n \in \{0, \dots, 6\}\f$ and argument \f$x \in (0, \infty)\f$, the polygamma function is
+For integer order \f$n \in \{0, \dots, 6\}\f$ and argument \f$x \in (0, \infty)\f$, the polygamma function (DLMF §5.2) is
 \f[
 \psi^{(n)}(x) = \frac{\mathrm{d}^n}{\mathrm{d}x^n} \psi(x) = \frac{\mathrm{d}^{n+1}}{\mathrm{d}x^{n+1}} \log \Gamma(x).
 \f]
@@ -24,7 +24,7 @@ For \f$n < 0\f$, \f$n > 6\f$, or NaN inputs, \ref laplace::math::polygamma "poly
 
 ## Numerical methods
 
-The wrappers in `<laplace/math/special.hpp>` combine Boost.Math for orders up to 1 with Laplace's own routine for higher orders. Specifically, \ref laplace::math::lgamma "lgamma()", \ref laplace::math::digamma "digamma()", and \ref laplace::math::trigamma "trigamma()" forward to Boost.Math under a policy that disables exceptions and `double` to `long double` promotion, compiling on host and CUDA (`BOOST_MATH_GPU_ENABLED`). The dispatch function \ref laplace::math::polygamma "polygamma()" forwards \f$n = 0\f$ to `digamma()`, \f$n = 1\f$ to `trigamma()`, and \f$n \in \{2, \dots, 6\}\f$ to \ref laplace::math::own::polygamma "own::polygamma()", as Boost.Math provides no GPU implementation for \f$n \ge 2\f$.
+The wrappers in `<laplace/math/special.hpp>` combine Boost.Math for orders up to 1 with Laplace's own routine for higher orders. Specifically, \ref laplace::math::lgamma "lgamma()", \ref laplace::math::digamma "digamma()", and \ref laplace::math::trigamma "trigamma()" forward to Boost.Math under a policy that disables exceptions and `double` to `long double` promotion (Boost.Math), compiling on host and CUDA (`BOOST_MATH_GPU_ENABLED`). The dispatch function \ref laplace::math::polygamma "polygamma()" forwards \f$n = 0\f$ to `digamma()`, \f$n = 1\f$ to `trigamma()`, and \f$n \in \{2, \dots, 6\}\f$ to \ref laplace::math::own::polygamma "own::polygamma()", as Boost.Math provides no GPU implementation for \f$n \ge 2\f$.
 
 The routine `own::polygamma()` evaluates in two stages:
 
@@ -43,7 +43,7 @@ For \f$n \ge 1\f$, every term shares the sign of the result, so accumulation run
 
 ## Accuracy
 
-Accuracy is measured against 200-bit `mpmath` references over approximately 20000 positive arguments per function, with dense sampling near \f$x = 1.0\f$, \f$x = 2.0\f$, and \f$x_0\f$. See \ref accuracy "How accuracy is measured" for the definitions of \ref accuracy_ulp "ulp", \ref accuracy_ulp1 "ulp1", correctly rounded share, and \ref accuracy_bounds "test bounds".
+Accuracy is measured against 200-bit `mpmath` (2023) references over approximately 20000 positive arguments per function, with dense sampling near \f$x = 1.0\f$, \f$x = 2.0\f$, and \f$x_0\f$. See \ref accuracy "How accuracy is measured" for the definitions of \ref accuracy_ulp "ulp", \ref accuracy_ulp1 "ulp1", correctly rounded share, and \ref accuracy_bounds "test bounds".
 
 | Function | Backend | Max ulp | Max ulp1 | Correctly rounded share | Test bound |
 |---|---|---|---|---|---|
@@ -101,4 +101,10 @@ Functions in `<laplace/math/special.hpp>` are called in `laplace::math`, and Lap
 - \ref laplace::math::own::polygamma "own::polygamma()" — \f$\psi^{(n)}(x)\f$ for \f$n \in \{0, \dots, 6\}\f$ via recurrence and asymptotic expansion
 - \ref laplace::math::own::digamma "own::digamma()" — \f$\psi(x)\f$ via `own::polygamma(0, x)`
 - \ref laplace::math::own::trigamma "own::trigamma()" — \f$\psi'(x)\f$ via `own::polygamma(1, x)`
+
+## References
+
+- Boost.Math, C++ library of special functions and numerical tools, https://www.boost.org/libs/math
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- NIST Digital Library of Mathematical Functions, §5.2 Definitions (Gamma Function), https://dlmf.nist.gov/5.2
 */
