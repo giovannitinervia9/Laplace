@@ -217,6 +217,12 @@ int main(int argc, char** argv) {
         one<0>(p, d, 0, 1, false, xs);
         one<6>(p, d, 0, 1, true, xs);
       }
+    // log det at d = p (the traces on M) for a larger p
+    one<0>(8, 8, 0, 1, false, xs);
+    for (bool mixed : {false, true}) {
+      one<3>(8, 8, 0, 1, mixed, xs);
+      one<6>(8, 8, 0, 1, mixed, xs);
+    }
   }
   Kokkos::finalize();
 }

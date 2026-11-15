@@ -24,7 +24,10 @@
 //     Leibniz sum over the loadings of lambda_r lambda_r^T; with
 //     X[S] = -X[0] sum_(T nonempty subset of S) C[T] X[S \ T] (X = C^-1),
 //     d^F log det C = sum_(T subset of F \ f) tr(X[T] C[f + (F \ f \ T)]),
-//     f the first position; about 3^K d^3;
+//     f the first position; about 3^K d^3. At d = p, where these terms cancel
+//     (every row is explained by the factors), the same sum of traces on M:
+//     d^F log det M = sum_(T subset of F \ f) tr(G[T] M[f + (F \ f \ T)]),
+//     with the G[T] of the recursion below;
 //   M^-1: not by Woodbury, whose derivatives cancel (Psi^-1 against
 //     B C^-1 B^T) when psi_i is small against the loadings of row i, up to
 //     7e7 ulpN (note/pdmat_structures.md section 9, Giovanni 2026-11-14), but
@@ -255,13 +258,18 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
    * \ingroup pdmat
    * \brief Partial derivative of \f$\log \det M(\theta)\f$ of order \f$K\f$.
    *
-   * Evaluates derivatives via Woodbury's identity, with \f$C = I_d + \Lambda^\top\Psi^{-1}\Lambda\f$, \f$X = C^{-1}\f$,
+   * For \f$d < p\f$, evaluates derivatives via Woodbury's identity, with \f$C = I_d + \Lambda^\top\Psi^{-1}\Lambda\f$, \f$X = C^{-1}\f$,
    * \f$C[T]\f$ and \f$X[T]\f$ their derivatives along the positions of the tuple \f$F\f$ in the subset \f$T\f$, \f$f\f$ the
    * first position of \f$F\f$, and \f$X[S] = -X[\emptyset]\sum_{\emptyset \ne T \subseteq S} C[T]\,X[S \setminus T]\f$:
    * \f[
    * \partial^F \log\det C = \sum_{T \subseteq F \setminus \{f\}} \operatorname{tr}\bigl(X[T]\,C[\{f\} \cup (F \setminus \{f\} \setminus T)]\bigr)
    * \f]
-   * plus 2 for a single parameter \f$t_i\f$ at order 1. For \f$d = 0\f$, returns 2 for a single \f$t_i\f$ at \f$K = 1\f$ and \f$0.0\f$ otherwise.
+   * plus 2 for a single parameter \f$t_i\f$ at order 1. For \f$d = p\f$, evaluates the same sum of traces directly on \f$M\f$,
+   * \f[
+   * \partial^F \log\det M = \sum_{T \subseteq F \setminus \{f\}} \operatorname{tr}\bigl(G[T]\,M[\{f\} \cup (F \setminus \{f\} \setminus T)]\bigr),
+   * \f]
+   * with \f$G = M^{-1}\f$ and its derivatives \f$G[T]\f$ from the recursion on \f$M\f$ (forming only masks within \f$F \setminus \{f\}\f$).
+   * For \f$d = 0\f$, returns 2 for a single \f$t_i\f$ at \f$K = 1\f$ and \f$0.0\f$ otherwise.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$q\f$ parameters.
@@ -269,15 +277,18 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return Value of the derivative, or \f$0.0\f$ if identically zero.
    *
-   * Accuracy over orders 1–6: for \f$d < p\f$, up to 795 ulp on gcc and 926 ulp on CUDA (test bounds 5 to 1390 ulp); for \f$d = p\f$, up to 7.3e5 ulp on gcc and 1.0e6 ulp on CUDA (test bounds 161 to 1507089 ulp).
+   * Accuracy over orders 1–6: for \f$d < p\f$, up to 795 ulp on gcc and 926 ulp on CUDA (test bounds 5 to 1390 ulp); for \f$d = p\f$, up to 820 ulp on gcc and 840 ulp on CUDA (test bounds 2 to 1260 ulp).
    *
-   * \see log_det(), pdmat_orders::log_det_d1()
+   * \see log_det(), inverse_dk(), pdmat_orders::log_det_d1()
    */
   template <int K>
   LAPLACE_HD double log_det_dk(const double* theta, const int (&idx)[K], double* w) const {
     const int nl = n_loadings(), d = n_factors;
     const double psi_part = (K == 1 && idx[0] >= nl) ? 2.0 : 0.0;
     if (d == 0) return psi_part;
+    // at d = p Woodbury's terms cancel (every row is explained by the factors):
+    // the traces on M instead (docs/numerics.md)
+    if (d == dim) return log_det_dk_on_m<K>(theta, idx, w);
     constexpr int NM = 1 << K;
     const work s = carve(w);
     bool cnz[NM], xnz[NM];
@@ -309,7 +320,7 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
    * \param w Caller scratch buffer of at least \c scratch_size() doubles.
    * \return \c true if computed; \c false and buffer left untouched if structurally zero.
    *
-   * Accuracy over orders 1–6: up to 2.4e5 ulpN on gcc and 3.6e5 ulpN on CUDA (test bounds 275 to 545993 ulpN); the peak occurs at the (3, 1) spread point where condition reaches \f$1.6 \times 10^4\f$ ulpN per ulp of \f$\theta_k\f$, and errors elsewhere remain within \f$2.5 \times 10^4\f$ ulpN.
+   * Accuracy over orders 1–6: up to \f$2.4 \times 10^5\f$ ulpN on gcc and \f$3.6 \times 10^5\f$ ulpN on CUDA (test bounds 275 to 545993 ulpN); the peak occurs at the (3, 1) spread point near an inflection along \f$t_2\f$, where the even derivatives nearly vanish and condition reaches \f$1.6 \times 10^4\f$ ulpN per ulp of \f$\theta_k\f$, while errors elsewhere remain within \f$2.5 \times 10^4\f$ ulpN.
    *
    * \see inverse(), pdmat_orders::inverse_d1()
    */
@@ -325,11 +336,31 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
       return true;
     }
     constexpr int NM = 1 << K;
+    const int pp = p * p;
+    double* X = w + woodbury_size() + detail_pdmat::generic_masks * packed_size(p);
+    bool mz[NM], xz[NM];
+    recursion_on_m<K>(theta, idx, NM - 1, w, mz, xz);
+    if (!xz[NM - 1]) return false;
+    const double* XF = X + (NM - 1) * pp;
+    for (int i = 0; i < p; ++i)
+      for (int j = 0; j <= i; ++j) out[packed_index(i, j)] = XF[i * p + j];
+    return true;
+  }
+
+ private:
+  // The recursion on M along idx: M[T] for every mask T (packed, after
+  // Woodbury's part of w), G[0] = M^-1 from a Cholesky factorization of M and
+  // G[Q] = -G[0] sum_T M[T] G[Q \ T] (full p x p) for the masks Q within lim;
+  // mz, xz: nonzero by structure
+  template <int K>
+  LAPLACE_HD void recursion_on_m(const double* theta, const int (&idx)[K], int lim, double* w, bool* mz,
+                                 bool* xz) const {
+    const int p = dim;
+    constexpr int NM = 1 << K;
     const int np = packed_size(p), pp = p * p, nm = detail_pdmat::generic_masks;
     double* Md = w + woodbury_size();  // M[T], packed
     double* X = Md + nm * np;          // X[T], full p x p
     double* acc = X + nm * pp;
-    bool mz[NM], xz[NM];  // nonzero by structure
     for (int T = 1; T < NM; ++T) {
       int sub[K], k = 0;
       for (int q = 0; q < K; ++q)
@@ -354,6 +385,7 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
     xz[0] = true;
     for (int Q = 1; Q < NM; ++Q) {
       xz[Q] = false;
+      if (Q & ~lim) continue;
       for (int e = 0; e < pp; ++e) acc[e] = 0.0;
       for (int T = Q; T != 0; T = (T - 1) & Q) {
         if (!mz[T] || !xz[Q ^ T]) continue;
@@ -376,14 +408,34 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
           XQ[i * p + j] = -r;
         }
     }
-    if (!xz[NM - 1]) return false;
-    const double* XF = X + (NM - 1) * pp;
-    for (int i = 0; i < p; ++i)
-      for (int j = 0; j <= i; ++j) out[packed_index(i, j)] = XF[i * p + j];
-    return true;
   }
 
- private:
+  // d^F log det M = sum_(T subset of F \ f) tr(G[T] M[f + (F \ f \ T)]), with
+  // the G[T] of the recursion on M
+  template <int K>
+  LAPLACE_HD double log_det_dk_on_m(const double* theta, const int (&idx)[K], double* w) const {
+    const int p = dim;
+    constexpr int NM = 1 << K;
+    const int np = packed_size(p), pp = p * p;
+    const double* Md = w + woodbury_size();
+    const double* X = Md + detail_pdmat::generic_masks * np;
+    bool mz[NM], xz[NM];
+    const int rest = (NM - 1) ^ 1;
+    recursion_on_m<K>(theta, idx, rest, w, mz, xz);
+    double ld = 0.0;
+    for (int T = rest;; T = (T - 1) & rest) {
+      const int U = 1 | (rest ^ T);
+      if (xz[T] && mz[U]) {
+        const double* XT = X + T * pp;
+        const double* MU = Md + U * np;
+        for (int i = 0; i < p; ++i)
+          for (int j = 0; j < p; ++j) ld += XT[i * p + j] * MU[i >= j ? packed_index(i, j) : packed_index(j, i)];
+      }
+      if (T == 0) break;
+    }
+    return ld;
+  }
+
   struct work {
     double *lam, *em2t, *tmp, *R, *C, *X, *u, *v;
   };

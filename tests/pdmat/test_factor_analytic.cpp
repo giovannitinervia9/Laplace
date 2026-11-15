@@ -198,7 +198,7 @@ void pdmat_factor_analytic_mpmath_case() {
       for (double h : G.hi) s = std::fmax(s, std::fabs(h));
       value_scale[{G.d, G.quantity, G.ukey}] = s;
     }
-  // [quantity][order]; row 3: log det at d = p (Woodbury, kept there by decision)
+  // [quantity][order]; row 3: log det at d = p (the traces on M)
   double worst[4][7] = {};
   int worst_g[4][7] = {};
   std::map<std::tuple<int, int, std::string>, std::array<double, 3>> by_point;  // over the orders
@@ -227,8 +227,7 @@ void pdmat_factor_analytic_mpmath_case() {
       double lscale = 0.0;
       for (int k = 0; k < n; ++k) lscale = std::fmax(lscale, std::fabs(hlo(g, k)));
       for (int k = 0; k < n; ++k) {
-        // looser at d = p for log det, whose order K - 1 carries up to 7e5 ulp
-        const double tol = row == 3 ? 1e-5 : 1e-6;
+        const double tol = 1e-6;
         const double dd = std::fabs(hfd(g, k) - hy(g, k)) / (tol * (scale + lscale));
         worst_fd = std::fmax(worst_fd, dd);
         if (!(dd <= 1.0))
@@ -242,11 +241,12 @@ void pdmat_factor_analytic_mpmath_case() {
   // on 2026-11-14 on gcc/OpenMP and CUDA, times 1.5, rounded up
   // The orders 2, 4, 6 of M^-1 come from the spread point at (p, d) = (3, 1),
   // where a change of one ulp in one theta_k moves the exact derivative by
-  // 1.6e4 ulpN; log det at d = p loses to Woodbury's cancellation.
+  // 1.6e4 ulpN (an inflection along t_2: the even orders are near a zero);
+  // log det at d = p, by the traces on M (2026-11-15), in a row of its own.
   const double bound[4][7] = {{2, 1, 1, 1, 1, 1, 1},
                               {136, 275, 543626, 13123, 545236, 23109, 545993},
                               {4, 5, 6, 21, 110, 539, 1390},
-                              {5, 161, 4970, 284872, 314404, 1507089, 983602}};
+                              {5, 2, 5, 44, 53, 359, 1260}};
   const bool print = std::getenv("LAPLACE_PRINT_ERRORS") != nullptr;
   for (int q = 0; q < 4; ++q)
     for (int K = 0; K <= 6; ++K) {

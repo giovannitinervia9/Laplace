@@ -4820,7 +4820,10 @@ unless T lies in one row of M, X[S] = -X[0] sum_T C[T] X[S \ T] with
 X = C^-1, and d^F log det C = sum_(T subset of F \ f) tr(X[T] C[f + (F \ f \ T)]),
 f the first position. The derivatives of M^-1 by the recursion on M itself,
 G[S] = -G[0] sum_T M[T] G[S \ T], G = M^-1, with G[0] from a Cholesky
-factorization of M and the M[T] that are zero by structure skipped.
+factorization of M and the M[T] that are zero by structure skipped. At d = p
+the derivatives of log det M come from the same sum of traces on M,
+d^F log det M = sum_(T subset of F \ f) tr(G[T] M[f + (F \ f \ T)]), with the
+G[T] of that recursion (only the masks within F \ f are formed).
 
 Three routes to the derivatives of M^-1 were measured in double (a
 transcription in Python with NumPy) against the references below (worst ulpN over orders 1-6; "spread" is the point with
@@ -4857,27 +4860,46 @@ and M^-1 in ulpN, log det in ulp:
 
 | (p, d), point | M | M^-1 | log det |
 |---|---|---|---|
-| (1, 1) random / spread | 0.43 / 0.42 | 27 / 58 | 39 / 784 |
+| (1, 1) random / spread | 0.43 / 0.42 | 27 / 58 | 13 / 19 |
 | (2, 1) random / spread | 0.76 / 0.40 | 83 / 233 | 120 / 764 |
 | (3, 1) random / spread | 0.43 / 0.40 | 117 / 2.4e5 | 11 / 41 |
 | (3, 2) random / spread | 0.41 / 0.40 | 46 / 310 | 16 / 766 |
-| (3, 3) random / spread | 0.49 / 0.40 | 1903 / 360 | 77 / 7.3e5 |
+| (3, 3) random / spread | 0.49 / 0.40 | 1903 / 360 | 38 / 820 |
 | (5, 2) random / spread | 0.64 / 0.40 | 112 / 2.5e4 | 361 / 795 |
 
 By order, gcc / CUDA (RTX 4070 SUPER), K = 0..6:
 M^-1 56 / 90, 183 / 156, 2.3e5 / 3.6e5, 7076 / 8748, 2.4e5 / 3.6e5,
 1.5e4 / 1.1e4, 2.3e5 / 3.6e5; log det for d < p 2.0 / 2.0, 1.7 / 2.7,
 3.7 / 4.0, 14 / 12, 66 / 73, 129 / 359, 795 / 926; log det at d = p 3.2 / 3.2,
-107 / 86, 1860 / 3313, 3.6e4 / 1.9e5, 2.1e5 / 1.5e5, 7.3e5 / 1.0e6,
-2.6e5 / 6.6e5; M within 0.76 ulpN on both.
+1.1 / 1.3, 3.0 / 3.3, 13 / 29, 35 / 31, 101 / 239, 820 / 840; M within
+0.76 ulpN on both.
 
 **What it says.** The 2.4e5 of M^-1 at the (3, 1) spread point (orders 2, 4,
-6, along t_2) is the conditioning of that derivative: a relative change of
-one ulp in one theta_k moves the exact derivative by 1.6e4 ulpN (mpmath), and
-the three routes above all lose 3e4 to 2.4e5 there. Elsewhere M^-1 is within
-2.5e4 ulpN. log det keeps Woodbury's cancellation at d = p, where every row
-is explained by the factors (up to 1.0e6 ulp on CUDA at order 5); at d < p it
-stays within 926 ulp.
+6, along t_2) is the conditioning of that derivative. With A = M - psi_2 e_2 e_2^T,
+u = A^-1 e_2 and a_22 = (A^-1)_22, M^-1 = A^-1 - u u^T / (e^(-2 t_2) + a_22),
+and at that point e^(-2 t_2) = 54.598 is within 2.5e-4 (relative) of
+a_22 = 54.584: an inflection of 1/(e^(-2 t_2) + a_22), where the even
+derivatives nearly vanish. Their largest entries are 0.0069, 0.055 and 0.93
+against 27, 55 and 437 at orders 1, 3 and 5, so 2.4e5 ulpN of order 2 are
+about 60 ulp of the scale of its neighbours. mpmath: a relative change of one
+ulp in one theta_k moves the exact derivative by up to 1.6e4 ulpN (4.3e4 summed
+over k), and one ulp on every entry of M by 1.9e6 ulpN, the floor of every
+route that forms M; the three routes above all lose 3e4 to 2.4e5 there. Only a
+route for tuples along one t_i that computes a_22 without forming M could go
+lower, by at most 5 to 15 times, at points where the derivative is near a zero;
+it was not written. Elsewhere M^-1 is within 2.5e4 ulpN.
+
+log det is well conditioned at every reference point: a relative change of
+one ulp in every theta_k moves the exact derivative by at most 96 ulp in total
+(mpmath; 14.5 at the (3, 3) spread point). Woodbury's derivatives cancel at
+d = p, where every row is explained by the factors: C is close to
+Lambda^T Psi^-1 Lambda, the traces along t_r are of order 2^K and the exact
+derivative of order psi_r (7.3e5 ulp at the (3, 3) spread point on gcc,
+1.0e6 on CUDA). The traces on M do not cancel there (820 ulp at order 6, along
+one repeated diagonal loading, the class of d < p), but at d < p they lose
+2.1e6 and 8.4e5 ulp at the (3, 1) and (5, 2) spread points, where Woodbury
+loses 41 and 795, because they carry the error of the derivatives of M^-1.
+The choice is structural, d = p. At d < p log det stays within 926 ulp.
 
 ns per call (`benchmarks/pdmat_factor_analytic.cpp`, gcc, theta_k =
 0.1 x + 0.05 sin k, x uniform in [-3, 3]), one thread / OpenMP; order 6
@@ -4896,14 +4918,25 @@ Woodbury makes the values 1.4 to 3.2 times faster than a Cholesky
 factorization of M at these sizes, and log det at order 6 costs 2.7 to
 32 times less than M^-1 at order 6 (one thread).
 
-**Chosen.** Woodbury for the values and for log det with its derivatives;
-the recursion on M, started from a Cholesky factorization, for the
-derivatives of M^-1 (Giovanni, 2026-11-14). Tested in
+log det at d = p, Woodbury against the traces on M (2026-11-15, same bench,
+the whole machine idle otherwise), one thread / OpenMP on 8 threads:
+
+| (p, d), K | Woodbury | traces on M |
+|---|---|---|
+| (4, 4), 6 mixed | 9423 / 1953 | 4794 / 848 |
+| (8, 8), 3 mixed | 4666 / 1092 | 2995 / 493 |
+| (8, 8), 6 mixed | 36878 / 8591 | 13388 / 3258 |
+| (8, 8), 6 along one parameter | 117457 / 27571 | 24043 / 5585 |
+
+**Chosen.** Woodbury for the values and, at d < p, for the derivatives of
+log det; the recursion on M, started from a Cholesky factorization, for the
+derivatives of M^-1 (Giovanni, 2026-11-14) and, through the traces on M, for
+those of log det at d = p (Giovanni, 2026-11-15). Tested in
 `tests/pdmat/test_factor_analytic.cpp` on gcc and CUDA, bounds 1.5 times the
 larger measured error, log det at d = p in a row of its own; twins: d = 0 is
 `diagonal_pdmat` bit for bit, at d = p M - Psi is `log_cholesky`'s M.
 
-**Test bounds.** The bounds of `tests/pdmat/test_factor_analytic.cpp` are 1.5 times the larger of the measured errors on gcc/OpenMP and CUDA, rounded up, for orders 0 to 6: for M, 2, 1, 1, 1, 1, 1, 1 ulpN; for M^-1, 136, 275, 543626, 13123, 545236, 23109, 545993 ulpN; for log det M with d < p, 4, 5, 6, 21, 110, 539, 1390 ulp; for log det M at d = p, 5, 161, 4970, 284872, 314404, 1507089, 983602 ulp. The difference check against the derivative of order K - 1 uses tolerance 1e-6 (1e-5 for log det M at d = p) relative to the sum of the scales of orders K and K - 1.
+**Test bounds.** The bounds of `tests/pdmat/test_factor_analytic.cpp` are 1.5 times the larger of the measured errors on gcc/OpenMP and CUDA, rounded up, for orders 0 to 6: for M, 2, 1, 1, 1, 1, 1, 1 ulpN; for M^-1, 136, 275, 543626, 13123, 545236, 23109, 545993 ulpN; for log det M with d < p, 4, 5, 6, 21, 110, 539, 1390 ulp; for log det M at d = p, 5, 2, 5, 44, 53, 359, 1260 ulp. The difference check against the derivative of order K - 1 uses tolerance 1e-6 relative to the sum of the scales of orders K and K - 1.
 
 ## Reduced-rank matrices: reduced_rank_psdmat
 
