@@ -8567,6 +8567,56 @@ ulp1N on gcc with an uncommitted change of another session to the generic route 
 M^-1 in `pdmat/core.hpp` (sums over classes of equal indices); its bound (8) is left
 until that change is final.
 
+### Against frozen statmodels7 results (2026-11-16)
+
+statmodels7's results for the multivariate part are frozen into the tests, so that
+they survive its retirement. The script `tools/reference/statmodels7_multivariate.R`
+(statmodels7 used as an oracle only: it calls distributions7 0.94.2, penalties7 0.34.0
+and parameters7 0.27.0 and writes what they return) writes two files of hex doubles:
+
+- `tests/data/reference/mvgaussian_s7.csv`, in the format of `mvgaussian.csv`:
+  mvgaussian1 and mvgaussian2 over `unstructured_pdmat<log_cholesky_bijector>`, every
+  block of the log-density with A <= 2 derivatives in mu and A + K <= 4 (the orders
+  statmodels7 has, from its log-density, gradient, Hessian and third and fourth
+  derivatives), and the expected information in theta at order 0; d = 2, 3, 4 at
+  random points and d = 3 at a near-singular one (log L33 = -8); 8546 values.
+- `tests/data/reference/penalty_s7.csv`: statmodels7's `structured_penalty` (precision
+  log-Cholesky M(theta), at the same four points) and `additive_penalty`
+  (sum_k lambda_k P_k: a full-rank pair at q = 4, a 3 x 3 tensor of second
+  differences of rank 8 at two lambda, one with lambda_2 / lambda_1 = 1e6): the value,
+  log pdet, the gradient in beta, the gradient and Hessian in theta and the mixed
+  block in (beta, theta), on the parameter scale; 317 values. Laplace has no penalty
+  code yet, so these are data only, with no test. Checked against an independent
+  numpy evaluation (the value from the definition, the theta gradient by
+  differences, the additive gradient on the fixed range of the sum): agreement to
+  1e-12 relative.
+
+The two libraries agree on the log-Cholesky factor (L_ii = exp(t_ii), L_ij = t_ij,
+M = L L') and differ in the order of t: Laplace packs the lower triangle by rows
+(t_ij at i (i + 1)/2 + j), statmodels7 puts the p log-diagonal entries first and then
+the strict lower triangle by columns. The files are written in Laplace's order; the
+map is in the script's header.
+
+The test (`mvgaussian_s7_case` in `tests/distrib/test_mvgaussian.cpp`) evaluates
+every block in a Kokkos kernel and measures the error in ulp1N as the mpmath case
+does. Worst over orders, gcc / CUDA:
+
+| | regular points | near-singular point |
+|---|---|---|
+| mvgaussian1, blocks | 4.75 / 2.72 | 0.94 / 0.86 |
+| mvgaussian1, information | 1.99 / 1.99 | 2.18e7 / 2.18e7 |
+| mvgaussian2, blocks | 1.61 / 1.61 | 2.01 / 2.01 |
+| mvgaussian2, information | 3.98 / 2.98 | 1.97e7 / 1.97e7 |
+
+What this says: the two libraries agree to a few ulp on every block, at every point.
+At the near-singular point the information differs by 2e7 ulp1N (5e-9 normwise, on
+entries up to 1.1e7); mpmath at 60 digits puts the whole difference on statmodels7's
+side (2.18e7 and 1.97e7 ulp1N from mpmath), while Laplace is within 3 ulp1N of it
+there (the mpmath case). The bounds are 1.5 times the larger of the two builds,
+rounded up. Those two cells are excluded from the test: the error is on
+statmodels7's side, as mpmath shows, and Laplace at that point is covered by the
+mpmath case. They stay in the CSV, which records what statmodels7 gives.
+
 ## Polygamma functions to order 13 in double-double
 
 What: `include/laplace/math/polygamma_dd.hpp` (2026-11-16), in `laplace::math`:

@@ -589,8 +589,71 @@ void mvgaussian_draws_case() {
                          "mvgaussian2 factor_analytic d=3", false);
 }
 
+// Against the frozen statmodels7 results (tools/reference/statmodels7_multivariate.R):
+// log_cholesky, d = 2, 3, 4 and a near-singular point (log L33 = -8), blocks
+// with A + K <= 4 and the information at order 0. The values are statmodels7's
+// doubles, so the error is the sum of both libraries' errors; ulp1N as above.
+void mvgaussian_s7_case() {
+  const auto cases = read_cases(std::string(LAPLACE_REFERENCE_DIR) + "/mvgaussian_s7.csv");
+  const int n = int(cases.size());
+  REQUIRE(n > 0);
+  const DeviceCases dc = upload(cases);
+  Kokkos::View<double* [max_out]> val("val", n), fd("fd", n);
+  evaluate(dc, val, fd, 1.0, false);
+  auto hv = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), val);
+  std::map<std::string, double> tensor_scale;
+  for (const Case& c : cases) {
+    double& t = tensor_scale[c.point + "," + std::to_string(c.A) + "," + std::to_string(c.K)];
+    for (double h : c.hi) t = std::fmax(t, std::fabs(h));
+  }
+  // worst ulp1N by [param - 1][near singular][A + 1][K]
+  double worst[2][2][4][5] = {};
+  const double eps = std::ldexp(1.0, -52);
+  for (int g = 0; g < n; ++g) {
+    const Case& c = cases[g];
+    const double scale = std::fmax(1.0, tensor_scale[c.point + "," + std::to_string(c.A) + "," + std::to_string(c.K)]);
+    double err = 0.0;
+    for (std::size_t r = 0; r < c.pos.size(); ++r) {
+      const double e = std::fabs(hv(g, c.pos[r]) - c.hi[r]);
+      err = std::fmax(err, std::isfinite(e) ? e : INFINITY);
+    }
+    const bool near_singular = c.theta.back() < -4.0;
+    // The information (A = -1) at the near-singular point is left out: statmodels7
+    // is 2.2e7 (mvgaussian1) and 2.0e7 (mvgaussian2) ulp1N from mpmath there, and
+    // Laplace's own error at that point is covered by the mpmath case.
+    if (near_singular && c.A == -1) continue;
+    double& w = worst[c.param - 1][near_singular][c.A + 1][c.K];
+    w = std::fmax(w, err / (scale * eps));
+  }
+  // bounds: the larger of the errors measured on gcc/OpenMP and CUDA on
+  // 2026-11-16, times 1.5, rounded up (at least 1); [param - 1][near
+  // singular][A + 1][K]; the near-singular information is not compared (above).
+  const double bound[2][2][4][5] = {
+      {{{3, 0, 0, 0, 0}, {2, 6, 5, 4, 8}, {3, 4, 4, 4, 0}, {2, 3, 3, 0, 0}},  // mvgaussian1, regular
+       {{0, 0, 0, 0, 0}, {1, 1, 1, 1, 1}, {2, 2, 2, 2, 0}, {2, 2, 2, 0, 0}}},  // near singular
+      {{{6, 0, 0, 0, 0}, {2, 2, 2, 3, 3}, {2, 2, 2, 2, 0}, {2, 1, 1, 0, 0}},  // mvgaussian2, regular
+       {{0, 0, 0, 0, 0}, {1, 1, 1, 2, 4}, {1, 1, 1, 1, 0}, {1, 1, 1, 0, 0}}}};  // near singular
+  const bool print = std::getenv("LAPLACE_PRINT_ERRORS") != nullptr;
+  for (int p = 0; p < 2; ++p)
+    for (int s = 0; s < 2; ++s)
+      for (int a = 0; a < 4; ++a) {
+        if (print) {
+          std::printf("s7 mvgaussian%d %-13s A=%2d", p + 1, s ? "near-singular" : "regular", a - 1);
+          for (int K = 0; K <= 4; ++K) std::printf(" %9.3g", worst[p][s][a][K]);
+          std::printf("\n");
+        }
+        for (int K = 0; K <= 4; ++K)
+          CHECK_MESSAGE(worst[p][s][a][K] <= bound[p][s][a][K], "s7 mvgaussian" << p + 1 << (s ? " near-singular" : "")
+                                                                                << " A " << a - 1 << " K " << K << ": "
+                                                                                << worst[p][s][a][K] << " ulp1N");
+      }
+}
+
 }  // namespace mvgaussian_test
 
+TEST_CASE("mvgaussian1, mvgaussian2: log_cholesky blocks against frozen statmodels7 results") {
+  mvgaussian_test::mvgaussian_s7_case();
+}
 TEST_CASE("mvgaussian1, mvgaussian2: blocks and expected information against mpmath and differences") {
   mvgaussian_test::mvgaussian_mpmath_case();
 }
