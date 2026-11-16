@@ -110,6 +110,10 @@ target_link_libraries(pdmat_factor_analytic PRIVATE Laplace::laplace)
 
 add_executable(pdmat_reduced_rank pdmat_reduced_rank.cpp)
 target_link_libraries(pdmat_reduced_rank PRIVATE Laplace::laplace)
+laplace_kokkos_sources(pdmat_reduced_rank_dd.cpp)
+add_executable(pdmat_reduced_rank_dd pdmat_reduced_rank_dd.cpp)
+target_link_libraries(pdmat_reduced_rank_dd PRIVATE Laplace::laplace)
+target_compile_definitions(pdmat_reduced_rank_dd PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
 
 add_executable(basis_bspline basis_bspline.cpp)
 target_link_libraries(basis_bspline PRIVATE Laplace::laplace)

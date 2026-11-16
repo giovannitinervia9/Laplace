@@ -236,13 +236,13 @@ void pdmat_reduced_rank_mpmath_case() {
   }
 
   // bounds on ulpN / ulp, [quantity][order]: the larger of the errors measured
-  // on 2026-11-14 on gcc/OpenMP and CUDA, times 1.5, rounded up. log|M|_+ at
-  // orders 4-6 peaks at the spread point of (p, d) = (5, 4) along a repeated
-  // diagonal loading, where the reference moves by 1-2 ulp per ulp of theta:
-  // a loss of the recursion on Lambda^T Lambda, not of conditioning.
+  // on 2026-11-16 on gcc/OpenMP and CUDA, times 1.5, rounded up. log|M|_+ for
+  // d < p runs in double-double from Lambda^T Lambda onward; in double the
+  // recursion lost up to 3850 ulp at orders 5-6 (terms of 1e4 cancelling to
+  // 1e-2 at the spread point of (p, d) = (5, 4)).
   const double bound[3][7] = {{1, 1, 1, 1, 1, 1, 1},
                               {1, 1, 1, 1, 1, 1, 1},
-                              {3, 31, 220, 1113, 2161, 5776, 5524}};
+                              {3, 1, 2, 10, 5, 4, 19}};
   const bool print = std::getenv("LAPLACE_PRINT_ERRORS") != nullptr;
   for (int q = 0; q < 3; ++q)
     for (int K = 0; K <= 6; ++K) {

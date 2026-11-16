@@ -2,7 +2,7 @@
 \defgroup psdmat Positive semidefinite structures
 \brief Structured symmetric positive semidefinite matrices with fixed rank, log pseudo-determinants, and derivatives to order 6.
 
-This module describes positive semidefinite matrices of fixed rank and two structures of this kind in namespace `laplace::pdmat`. The functions of \ref laplace::pdmat::reduced_rank_psdmat "reduced_rank_psdmat" (header `<laplace/pdmat/reduced_rank.hpp>`) are marked `LAPLACE_HD` and run on the host and inside Kokkos kernels. Those of \ref laplace::pdmat::weighted_sum_psdmat "weighted_sum_psdmat" (header `<laplace/pdmat/weighted_sum.hpp>`, linked with `Laplace::dense`) run on the host only, as does `params_from_matrix()` for every structure. Over orders 0 to 6, `reduced_rank_psdmat` keeps its matrix and factor within 0.63 ulpN and its log pseudo-determinant within 3850 ulp on gcc/OpenMP and 2946 ulp on CUDA. `weighted_sum_psdmat` keeps its log pseudo-determinant within \f$2.19 \times 10^4\f$ ulp over the same orders.
+This module describes positive semidefinite matrices of fixed rank and two structures of this kind in namespace `laplace::pdmat`. The functions of \ref laplace::pdmat::reduced_rank_psdmat "reduced_rank_psdmat" (header `<laplace/pdmat/reduced_rank.hpp>`) are marked `LAPLACE_HD` and run on the host and inside Kokkos kernels. Those of \ref laplace::pdmat::weighted_sum_psdmat "weighted_sum_psdmat" (header `<laplace/pdmat/weighted_sum.hpp>`, linked with `Laplace::dense`) run on the host only, as does `params_from_matrix()` for every structure. Over orders 0 to 6, `reduced_rank_psdmat` keeps its matrix and factor within 0.63 ulpN and its log pseudo-determinant within 12.6 ulp on both gcc/OpenMP and CUDA. `weighted_sum_psdmat` keeps its log pseudo-determinant within \f$2.19 \times 10^4\f$ ulp over the same orders.
 
 ## Concept and interface
 
@@ -40,6 +40,8 @@ and, with \f$f\f$ the first index of \f$F\f$,
 \f]
 Here \f$C[T]\f$ is zero unless every index of \f$T\f$ is a loading of one row \f$r\f$ of \f$\Lambda\f$; then it is the Leibniz sum, over the indices of \f$T\f$, of the derivatives of \f$\lambda_r\lambda_r^\top\f$, where \f$\lambda_r\f$ is row \f$r\f$ of \f$\Lambda\f$ written as a column.
 
+For \f$d < p\f$ and orders 1 to 6, \f$\Lambda\f$ is formed in `double`, while every stage from \f$C = \Lambda^\top\Lambda\f$ onward runs in double-double arithmetic (pairs of `double` values carrying about 106 bits). Specifically, \f$C\f$, its mixed derivatives \f$C[T]\f$, the Cholesky factor of \f$C\f$ and \f$C^{-1}\f$, the derivatives \f$X[T]\f$, and the trace sums are all evaluated in double-double, and the final result is rounded to `double`. At \f$d = p\f$ and in `log_pdet()` (order 0), the computation stays in `double`.
+
 ## Accuracy
 
 Error metrics are defined on \ref accuracy "How accuracy is measured": errors of \f$M\f$ and \f$\Lambda\f$ are measured in normwise `ulpN`, and errors of \f$\log\lvert M\rvert_+\f$ in relative `ulp` of \f$\max(\lvert\mathrm{ref}\rvert, 1)\f$. References were generated in mpmath at 640 bits, computing \f$\log\lvert M\rvert_+\f$ from the \f$d\f$ largest eigenvalues of \f$M\f$ independently of \f$\Lambda^\top\Lambda\f$, with derivatives by mixed central differences.
@@ -48,11 +50,11 @@ Over orders 0 to 6, \f$M\f$ stays within 0.63 ulpN on gcc/OpenMP and 0.55 ulpN o
 
 | Order | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|---|
-| gcc (ulp) | 0.97 | 9.6 | 131 | 742 | 161 | 3850 | 3682 |
-| CUDA (ulp) | 1.6 | 21 | 146 | 219 | 1440 | 2502 | 2946 |
-| Bound (ulp) | 3 | 31 | 220 | 1113 | 2161 | 5776 | 5524 |
+| gcc (ulp) | 1.27 | 0.63 | 0.85 | 6.2 | 3.19 | 2.34 | 12.6 |
+| CUDA (ulp) | 1.61 | 0.63 | 0.85 | 6.2 | 3.19 | 2.34 | 12.6 |
+| Bound (ulp) | 3 | 1 | 2 | 10 | 5 | 4 | 19 |
 
-The peaks at orders 4 to 6 come from the spread point of \f$(p, d) = (5, 4)\f$ along one repeated diagonal loading. There one ulp of \f$\theta\f$ moves the exact order-5 derivative by 1.1 ulp and the order-6 derivative by 2.2 ulp, so the loss is the recursion's, not the problem's: the Leibniz sums of a repeated \f$e^\theta\f$ grow like \f$2^K\f$ and cancel in the traces. For details, see `docs/numerics.md`.
+In `double` precision, the derivative route reached 3850 ulp on gcc/OpenMP and 2946 ulp on CUDA. At the spread point of \f$(p, d) = (5, 4)\f$ along one repeated diagonal loading, the trace terms at order 6 summed to \f$1.2 \times 10^4\f$ in absolute value against a result of 0.006. Every stage after \f$\Lambda\f$ (\f$C\f$, \f$C[T]\f$, the recursion, and the traces) lost digits on its own. Yet the reference is well conditioned there: one ulp of \f$\theta\f$ moves the order-5 derivative by 1.1 ulp and the order-6 derivative by 2.2 ulp. Evaluating all stages from \f$C\f$ onward in double-double arithmetic removes this loss. \f$C^{-1}\f$ must be in double-double too: with \f$C^{-1}\f$ kept in `double` and the rest in double-double, worst errors at orders 5 and 6 were 134 to 297 ulp on gcc/OpenMP and 339 to 698 ulp on CUDA. For details, see `docs/numerics.md`.
 
 ## Speed
 
@@ -60,8 +62,11 @@ The times below were measured with gcc, per call, on one thread and with OpenMP 
 
 | \f$(p, d)\f$ | `log_pdet()` | `log_pdet_d6()` |
 |---|---|---|
-| \f$(4, 1)\f$ | 127 ns, 23 ns | 1910 ns, 317 ns |
-| \f$(16, 4)\f$ | 2223 ns, 299 ns | 9686 ns, 2171 ns |
+| \f$(4, 1)\f$ | 119 ns, 24 ns | 1944 ns, 326 ns |
+| \f$(8, 2)\f$ | 480 ns, 66 ns | 5361 ns, 747 ns |
+| \f$(16, 4)\f$ | 1856 ns, 274 ns | 29242 ns, 3960 ns |
+
+On one gcc thread, double-double costs 1.0 to 1.7 times the `double` route at \f$(p, d) = (4, 1)\f$ and \f$(8, 2)\f$, and 2 to 3.4 times at \f$(16, 4)\f$, where the order-6 call takes about 29 microseconds.
 
 ## Parallel evaluation in Kokkos
 

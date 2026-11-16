@@ -11,9 +11,12 @@
 // from a Cholesky factorization of C and the derivatives by the recursion on
 // C of factor_analytic_pdmat, with C[T] zero unless every index of T is a
 // loading of one row r, and then the Leibniz sum over those loadings of
-// lambda_r lambda_r^T. M and Lambda have closed sparse derivatives.
+// lambda_r lambda_r^T. The derivatives run in double-double from C onward
+// (C, C[T], C^-1, X[T], the traces), Lambda in double. M and Lambda have
+// closed sparse derivatives.
 #pragma once
 
+#include <laplace/math/detail/double_double.hpp>
 #include <laplace/pdmat/core.hpp>
 #include <laplace/pdmat/detail/from_matrix.hpp>
 #include <laplace/pdmat/detail/loadings.hpp>
@@ -73,15 +76,15 @@ struct reduced_rank_psdmat : psdmat_orders<reduced_rank_psdmat> {
    * \ingroup psdmat
    * \brief Doubles of caller scratch buffer required by functions of this structure.
    *
-   * Returns \f$pd + p + 130d^2 + 2d\f$ doubles.
+   * Returns \f$pd + 265d^2 + 2d\f$ doubles.
    *
    * \return Required scratch size in doubles.
    */
-  // Lambda (p d), the row weights (p, all 1), R and a temporary (d^2 each),
-  // C[T] and X[T] (64 d^2 each) and two d-vectors
+  // Lambda (p d), R (d^2), two d-vectors, then in double-double (two doubles
+  // each) C[T] and X[T] (64 d^2 each) and four d x d matrices
   LAPLACE_HD int scratch_size() const {
     const int p = dim, d = n_factors, nm = detail_pdmat::generic_masks;
-    return p * d + p + 2 * d * d + 2 * nm * d * d + 2 * d;
+    return p * d + d * d + 2 * d + 2 * (2 * nm + 4) * d * d;
   }
 
   /**
@@ -168,7 +171,7 @@ struct reduced_rank_psdmat : psdmat_orders<reduced_rank_psdmat> {
    * \param w Caller scratch buffer of at least `scratch_size()` doubles.
    * \return Sum of logarithms of the \f$d\f$ nonzero eigenvalues of \f$M(\theta)\f$.
    *
-   * Accuracy: up to 0.97 ulp on gcc/OpenMP and 1.6 ulp on CUDA (test bound 3 ulp); within 0.42 ulp at \f$d = p\f$.
+   * Accuracy: up to 1.27 ulp on gcc/OpenMP and 1.61 ulp on CUDA (test bound 3 ulp); within 0.42 ulp at \f$d = p\f$.
    *
    * \see matrix(), log_pdet_dk()
    */
@@ -285,7 +288,8 @@ struct reduced_rank_psdmat : psdmat_orders<reduced_rank_psdmat> {
    *
    * Returns `2.0` at order 1 for a diagonal loading and `0.0` otherwise when \f$d = p\f$.
    * For \f$d < p\f$, evaluates the sub-tuple recursion on \f$C = \Lambda^\top\Lambda\f$ described on
-   * \ref psdmat "the positive semidefinite structures page".
+   * \ref psdmat "the positive semidefinite structures page", computing in double-double arithmetic
+   * from \f$C\f$ onward (with \f$\Lambda\f$ in `double` and the final result rounded to `double`).
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$q\f$ loading parameters by rows.
@@ -293,7 +297,7 @@ struct reduced_rank_psdmat : psdmat_orders<reduced_rank_psdmat> {
    * \param w Caller scratch buffer of at least `scratch_size()` doubles.
    * \return Derivative value, or \f$0.0\f$ if identically zero.
    *
-   * Accuracy over orders 1 to 6: up to 3850 ulp on gcc/OpenMP and 2946 ulp on CUDA (test bounds 31 to 5776 ulp); within 0.42 ulp at \f$d = p\f$.
+   * Accuracy over orders 1 to 6: up to 12.6 ulp on gcc/OpenMP and CUDA (test bounds 1 to 19 ulp); within 0.42 ulp at \f$d = p\f$.
    *
    * \see log_pdet(), psdmat_orders::log_pdet_d1()
    */
@@ -308,38 +312,135 @@ struct reduced_rank_psdmat : psdmat_orders<reduced_rank_psdmat> {
       z.loading_position(idx[0], r, c);
       return r == c ? 2.0 : 0.0;
     }
+    // The recursion on C in double-double: at the (5, 4) spread point the
+    // traces of order 6 add terms of 1.2e4 to a result of 0.006, and every
+    // stage after Lambda (C, C[T], C^-1, X[T], the traces) loses digits on its
+    // own; Lambda and its derivatives are exact in double
+    // (docs/numerics.md, "Reduced-rank matrices").
     constexpr int NM = 1 << K;
+    const int dd2 = d * d;
     const work s = carve(w);
     bool cnz[NM], xnz[NM];
     z.load_lambda(theta, s.lam);
-    for (int i = 0; i < dim; ++i) s.wt[i] = 1.0;
-    detail_pdmat::loadings_gram_masks<K>(
-        z, theta, idx, s.lam, s.wt, false,
-        [&](int v) {
-          int r, c;
-          z.loading_position(v, r, c);
-          return r;
-        },
-        s.C, cnz, s.u, s.v);
-    detail_pdmat::log_det_masks_inverse<K>(d, s.C, cnz, s.R, s.tmp, s.X, xnz);
-    return detail_pdmat::log_det_masks_sum<K>(d, s.C, cnz, s.X, xnz);
+    for (int a = 0; a < d; ++a)
+      for (int b = 0; b < d; ++b) {
+        dd_t t(0.0);
+        for (int i = 0; i < dim; ++i) t = t + math::detail::ddm::two_prod(s.lam[i * d + a], s.lam[i * d + b]);
+        s.C[a * d + b] = t;
+      }
+    // C[T]: zero unless every index of T is a loading of one row r, then the
+    // Leibniz sum over those loadings of lambda_r lambda_r^T
+    cnz[0] = true;
+    for (int T = 1; T < NM; ++T) {
+      int r = -1, n = 0, sl[K];
+      bool one_row = true;
+      for (int q = 0; q < K; ++q)
+        if (T & (1 << q)) {
+          int rq, cq;
+          z.loading_position(idx[q], rq, cq);
+          if (r < 0) r = rq;
+          one_row = one_row && rq == r;
+          sl[n++] = idx[q];
+        }
+      cnz[T] = false;
+      if (!one_row) continue;
+      dd_t* ct = s.C + T * dd2;
+      for (int e = 0; e < dd2; ++e) ct[e] = dd_t(0.0);
+      for (int A = 0; A < (1 << n); ++A) {
+        int sa[K], sb[K], na = 0, nb = 0;
+        for (int k = 0; k < n; ++k) (A & (1 << k) ? sa[na++] : sb[nb++]) = sl[k];
+        if (!z.lambda_row_d(theta, s.lam, r, sa, na, s.u) || !z.lambda_row_d(theta, s.lam, r, sb, nb, s.v)) continue;
+        cnz[T] = true;
+        for (int a = 0; a < d; ++a)
+          for (int b = 0; b < d; ++b) ct[a * d + b] = ct[a * d + b] + math::detail::ddm::two_prod(s.u[a], s.v[b]);
+      }
+    }
+    // X[0] = C^-1 = Y^T Y, Y = R^-1, C = R R^T
+    for (int j = 0; j < d; ++j) {
+      dd_t t = s.C[j * d + j];
+      for (int k = 0; k < j; ++k) t = t - s.Rd[j * d + k] * s.Rd[j * d + k];
+      s.Rd[j * d + j] = math::detail::ddm::sqrt(t);
+      for (int i = j + 1; i < d; ++i) {
+        dd_t u = s.C[i * d + j];
+        for (int k = 0; k < j; ++k) u = u - s.Rd[i * d + k] * s.Rd[j * d + k];
+        s.Rd[i * d + j] = u / s.Rd[j * d + j];
+      }
+    }
+    for (int j = 0; j < d; ++j) {
+      for (int i = 0; i < j; ++i) s.Yd[i * d + j] = dd_t(0.0);
+      s.Yd[j * d + j] = dd_t(1.0) / s.Rd[j * d + j];
+      for (int i = j + 1; i < d; ++i) {
+        dd_t t(0.0);
+        for (int k = j; k < i; ++k) t = t + s.Rd[i * d + k] * s.Yd[k * d + j];
+        s.Yd[i * d + j] = -t / s.Rd[i * d + i];
+      }
+    }
+    for (int a = 0; a < d; ++a)
+      for (int b = 0; b < d; ++b) {
+        dd_t t(0.0);
+        for (int k = a > b ? a : b; k < d; ++k) t = t + s.Yd[k * d + a] * s.Yd[k * d + b];
+        s.X[a * d + b] = t;
+      }
+    // X[Q] = -X[0] sum_T C[T] X[Q \ T], for the masks without the first index
+    xnz[0] = true;
+    for (int Q = 2; Q < NM; Q += 2) {
+      xnz[Q] = false;
+      for (int e = 0; e < dd2; ++e) s.acc[e] = dd_t(0.0);
+      for (int T = Q; T != 0; T = (T - 1) & Q) {
+        if (!cnz[T] || !xnz[Q ^ T]) continue;
+        xnz[Q] = true;
+        const dd_t* ct = s.C + T * dd2;
+        const dd_t* xr = s.X + (Q ^ T) * dd2;
+        for (int a = 0; a < d; ++a)
+          for (int k = 0; k < d; ++k) {
+            const dd_t c = ct[a * d + k];
+            for (int b = 0; b < d; ++b) s.acc[a * d + b] = s.acc[a * d + b] + c * xr[k * d + b];
+          }
+      }
+      if (!xnz[Q]) continue;
+      dd_t* xq = s.X + Q * dd2;
+      for (int a = 0; a < d; ++a)
+        for (int b = 0; b < d; ++b) {
+          dd_t t(0.0);
+          for (int k = 0; k < d; ++k) t = t + s.X[a * d + k] * s.acc[k * d + b];
+          xq[a * d + b] = -t;
+        }
+    }
+    // d^F log det C = sum_(T subset of F \ f) tr(X[T] C[f + (F \ f \ T)])
+    const int rest = (NM - 1) ^ 1;
+    dd_t r(0.0);
+    for (int T = rest;; T = (T - 1) & rest) {
+      const int U = 1 | (rest ^ T);
+      if (xnz[T] && cnz[U]) {
+        const dd_t* x = s.X + T * dd2;
+        const dd_t* c = s.C + U * dd2;
+        for (int a = 0; a < d; ++a)
+          for (int b = 0; b < d; ++b) r = r + x[a * d + b] * c[b * d + a];
+      }
+      if (T == 0) break;
+    }
+    return r.hi + r.lo;
   }
 
  private:
+  using dd_t = math::detail::ddm::dd;
+  // the double-double part of the scratch buffer is used only as dd_t
   struct work {
-    double *lam, *wt, *R, *tmp, *C, *X, *u, *v;
+    double *lam, *R, *u, *v;
+    dd_t *C, *X, *acc, *Rd, *Yd;
   };
   LAPLACE_HD work carve(double* w) const {
     const int p = dim, d = n_factors, nm = detail_pdmat::generic_masks;
     work s;
     s.lam = w;
-    s.wt = s.lam + p * d;
-    s.R = s.wt + p;
-    s.tmp = s.R + d * d;
-    s.C = s.tmp + d * d;
-    s.X = s.C + nm * d * d;
-    s.u = s.X + nm * d * d;
+    s.R = s.lam + p * d;
+    s.u = s.R + d * d;
     s.v = s.u + d;
+    s.C = reinterpret_cast<dd_t*>(s.v + d);
+    s.X = s.C + nm * d * d;
+    s.acc = s.X + nm * d * d;
+    s.Rd = s.acc + d * d;
+    s.Yd = s.Rd + d * d;
     return s;
   }
   LAPLACE_HD detail_pdmat::trapezoid_loadings tz() const { return {dim, n_factors}; }
