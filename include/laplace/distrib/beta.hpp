@@ -50,10 +50,14 @@
 // Accuracy. The derivative components are assembled from the polygamma functions as written above, with
 // no rearrangement. Two corners lose digits in the components that are small compared with their terms:
 //   * large phi: the leading monomials of psi_m(alpha), psi_m(beta) and psi_m(phi) cancel exactly in the
-//     pure phi components (and nearly so in the mixed ones), which then lose about log10(phi) digits;
+//     pure phi components and nearly so in the mixed ones;
 //   * small alpha or beta: the pole terms (-1)^(m+1) m!/alpha^(m+1) cancel in the mixed components.
-// Nothing is rearranged in this file to avoid either loss: that would need the polygamma functions written
-// as their leading term plus a remainder, so that the leading terms cancel algebraically.
+// The pure phi components are the one case rearranged here: they are assembled from the polygamma
+// remainders psi_n - mu_n (math::polygamma_monomial_remainder, detail_beta::pure_phi_combination), so that
+// the three leading monomials cancel algebraically and nothing of the result is formed by subtraction.
+// That took their error from about eps phi relative, 1.6e8 to 3.9e8 ulp of themselves at phi = 1e8, to at
+// most 13.4 ulp at every phi measured. The mixed components and the small-shape corner are not rearranged:
+// they would need the same treatment of the pole terms, which no family has asked for yet.
 #pragma once
 
 #include <laplace/core/config.hpp>
@@ -102,10 +106,29 @@ LAPLACE_HD_FORCEINLINE double shape_deriv(int i, int j, double m, double phi, co
   return s;
 }
 
+// The pure phi combination mu^(n+1) psi_n(alpha) + nu^(n+1) psi_n(beta) - psi_n(phi) for n >= 1, built
+// from the remainders psi_n - mu_n instead of the polygamma functions themselves, with mu_0(x) = log x
+// and mu_n(x) = (-1)^(n+1) (n - 1)! x^-n.
+//
+// The three leading monomials cancel exactly: mu^(n+1) mu_n(mu phi) = (-1)^(n+1) (n - 1)! mu phi^-n and
+// the same with nu, so their sum is mu_n(phi) (mu + nu) = mu_n(phi), which is the third term. Subtracted
+// in floating point they leave the combination, of size phi^-(n+1), as the difference of terms of size
+// phi^-n, and so with about log10(phi) digits gone; dropped algebraically they cost nothing. The identity
+// used is mu + nu = 1 with nu the stored 1 - mu, which also defines alpha and beta, so no new
+// approximation enters here.
+LAPLACE_HD_FORCEINLINE double pure_phi_combination(int n, double mu, double nu, double phi) {
+  const double ra = math::polygamma_monomial_remainder(n, mu * phi);
+  const double rb = math::polygamma_monomial_remainder(n, nu * phi);
+  const double rp = math::polygamma_monomial_remainder(n, phi);
+  return ipow(mu, n + 1) * ra + ipow(nu, n + 1) * rb - rp;
+}
+
 // the y-free part of d_mu^i d_phi^j l (i + j >= 1) from the tables fa[k] = -psi_(k-1)(alpha) and
 // fb[k] = -psi_(k-1)(beta), and psi_phi = psi_(i+j-1)(phi), added when i = 0
 LAPLACE_HD_FORCEINLINE double free_component(int i, int j, double mu, double nu, double phi, const double* fa,
                                              const double* fb, double psi_phi) {
+  // the pure phi component, where the three terms cancel to one order of phi, from the remainders
+  if (i == 0 && j >= 2 && j <= 7) return -pure_phi_combination(j - 1, mu, nu, phi);
   const double sign = (i % 2 == 0) ? 1.0 : -1.0;
   double v = shape_deriv(i, j, mu, phi, fa) + sign * shape_deriv(i, j, nu, phi, fb);
   if (i == 0) v += psi_phi;
@@ -283,7 +306,7 @@ struct beta_distrib {
    * \return Packed symmetric tensor `sym_tensor<2, K>` of derivatives.
    * \par Accuracy
    * Order \f$1\f$ within \f$1.38\,\varepsilon\f$ of terms and orders \f$2\f$ to \f$6\f$ within
-   * \f$12.2\f$ ulp of the order's scale on `gcc`; pure-\f$\phi\f$ entries lose about \f$\log_{10}\phi\f$ digits.
+   * \f$12.2\f$ ulp of the order's scale on `gcc`; pure-\f$\phi\f$ entries stay within \f$13.4\f$ ulp of themselves.
    * \see distrib_beta, logpdf(), logpdf_dy_dk()
    */
   // The derivatives of order K (1 <= K <= 6) of log f in (mu, phi): component b has b derivatives in phi.
@@ -407,7 +430,7 @@ struct beta_distrib {
    * \tparam K Derivative order (\f$1 \le K \le 4\f$).
    * \return Container `expected_info_tensor<2, K>` with `pair[0]` for \f$(\mu, \mu)\f$, `pair[1]` for \f$(\mu, \phi)\f$, and `pair[2]` for \f$(\phi, \phi)\f$.
    * \par Accuracy
-   * Max error \f$5.66\,\varepsilon\f$ of the order's scale on `gcc`; pure-\f$\phi\f$ entries lose about \f$\log_{10}\phi\f$ digits.
+   * Max error \f$5.66\,\varepsilon\f$ of the order's scale on `gcc`; pure-\f$\phi\f$ entries stay within \f$7.68\,\varepsilon\f$ of themselves.
    * \see distrib_beta, expected_info()
    */
   // Derivatives of order K (1 <= K <= 4) of the expected information: pair[p][b], p = 0 (mu, mu),

@@ -311,6 +311,11 @@ LAPLACE_HD double vonmises_kappa_from_s_dk(double s) {
  * Agrees bit for bit with vonmises_kappa_from_s() and vonmises_kappa_from_s_dk() (maximum errors
  * \f$5.32\f$ to \f$25.7\f$ ulp, test bounds \f$8\f$ to \f$50\f$ ulp on \f$s \in [10^{-8}, 4.5]\f$).
  *
+ * \par Scope
+ * This joint form is an addition to the one function per derivative order, never a replacement for
+ * them: it exists here because the saving was measured on this map, and a map elsewhere gets one only
+ * when the same measurement is made for it.
+ *
  * \see distrib_vonmises, vonmises_kappa_from_s(), vonmises_kappa_from_s_dk()
  */
 template <int N>

@@ -39,7 +39,7 @@ On the reference grid \f$s \in [10^{-8}, 4.5]\f$ (`tests/distrib/test_vonmises_s
 | Measured max (ulp) | \f$5.32\f$ | \f$6.12\f$ | \f$9.55\f$ | \f$6.79\f$ | \f$20.4\f$ | \f$25.7\f$ | \f$25.3\f$ |
 | Test bound (ulp) | \f$8\f$ | \f$10\f$ | \f$15\f$ | \f$20\f$ | \f$32\f$ | \f$40\f$ | \f$50\f$ |
 
-Above \f$s = 4.5\f$, \f$\mathrm{d}\kappa/\kappa = -s^2\,\mathrm{d}s/s\f$, so a relative perturbation of \f$s\f$ of one unit in the last place moves \f$\kappa\f$ by \f$s^2\f$ units whatever computes it, setting the accuracy limit there. The joint routine \ref laplace::distrib::vonmises_kappa_from_s_upto "vonmises_kappa_from_s_upto()" returns \f$\kappa\f$ and derivatives \f$1\f$ to \f$N\f$ together, agrees with the per-order functions bit for bit, and at order \f$6\f$ on `gcc` takes \f$1302\f$ ns on one thread and \f$99\f$ ns on \f$16\f$ OpenMP threads against \f$4854\f$ ns and \f$367\f$ ns for six separate calls.
+Above \f$s = 4.5\f$, \f$\mathrm{d}\kappa/\kappa = -s^2\,\mathrm{d}s/s\f$, so a relative perturbation of \f$s\f$ of one unit in the last place moves \f$\kappa\f$ by \f$s^2\f$ units whatever computes it, setting the accuracy limit there. The joint routine \ref laplace::distrib::vonmises_kappa_from_s_upto "vonmises_kappa_from_s_upto()" returns \f$\kappa\f$ and derivatives \f$1\f$ to \f$N\f$ together, agrees with the per-order functions bit for bit, and at order \f$6\f$ on `gcc` takes \f$1302\f$ ns on one thread and \f$99\f$ ns on \f$16\f$ OpenMP threads against \f$4854\f$ ns and \f$367\f$ ns for six separate calls. It is an addition to the per-order functions and not a replacement for them: the saving is measured on this map, and a map elsewhere gets a joint form only once the same measurement is made for it.
 
 ## Derivatives and expected information
 

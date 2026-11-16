@@ -14,8 +14,8 @@
 // doubles with correctly rounded polygamma inputs (plus inputs perturbed by 3 ulp) and not from a run of this
 // file; the first run on the CPU and on the CUDA build replaces them by one and a half times the measured
 // worst error. The two corners where the straightforward assembly loses digits are tested with their own
-// bounds and named as such: the pure phi components at large phi (relative error about 1.3 phi ulp) and,
-// scaled by the order's largest component, everything else.
+// bounds and named as such: the pure phi components, which carry no factor of phi since they are built
+// from the polygamma remainders, and, scaled by the order's largest component, everything else.
 #include <doctest/doctest.h>
 
 #include <laplace/distrib/beta.hpp>
@@ -488,8 +488,8 @@ TEST_CASE("distrib beta: the log-density and its derivatives against mpmath, phi
   //     digamma functions, the logarithms), eps times the sum of their magnitudes, 8 eps at most;
   //   K >= 2: the error in ulp of the largest component of the same (mu, phi, y, K); 40 ulp;
   //   the pure phi components of order 2 and more, relative to themselves: the leading monomials of the
-  //     polygamma functions cancel in them, so the error grows with phi, about 1.3 phi ulp measured on the
-  //     emulation; bound 6 phi + 100 ulp.
+  //     polygamma functions cancel in them algebraically, through detail_beta::pure_phi_combination, so
+  //     the error carries no factor of phi; measured 13.4 ulp at most, bound 24 ulp.
   const auto rows = read_rows("beta_logpdf.csv", 7);
   CHECK(rows.size() > 10000);
   using key = std::tuple<double, double, double, int>;
@@ -533,7 +533,7 @@ TEST_CASE("distrib beta: the log-density and its derivatives against mpmath, phi
       if (b == K && hi != 0.0) {
         const double own = err / ulp_at(hi);
         worst_pure_phi[K] = std::fmax(worst_pure_phi[K], own);
-        CHECK(own <= 6.0 * phi + 100.0);
+        CHECK(own <= 24.0);
       }
     }
   }
@@ -550,8 +550,8 @@ TEST_CASE("distrib beta: the expected information and its derivatives against mp
   // squared score (K = 0); kind 1: SymPy's derivatives of the closed form (K = 0..4), b the number of
   // derivatives in phi, pair 0 = (mu, mu), 1 = (mu, phi), 2 = (phi, phi).
   // Bounds (provisional): the error in units of eps times the largest component of the same (kind, K, mu,
-  // phi), 64; the pure phi components (pair 2, b = K) relative to themselves, where the three terms of
-  // I_phi,phi cancel to one order of phi, 40 eps (phi + 1) + 40 eps.
+  // phi), 64; the pure phi components (pair 2, b = K) relative to themselves, where the three terms cancel
+  // algebraically through detail_beta::pure_phi_combination and so carry no factor of phi, 16 eps (measured 7.68).
   const auto rows = read_rows("beta_info.csv", 8);
   CHECK(rows.size() > 5000);
   using key = std::tuple<int, int, double, double>;
@@ -561,6 +561,8 @@ TEST_CASE("distrib beta: the expected information and its derivatives against mp
     v = std::fmax(v, std::fabs(num(s[6])));
   }
   double worst_scaled = 0.0, worst_pure = 0.0;
+  int wk = -1, wkind = -1;
+  double wmu = 0.0, wphi = 0.0;
   for (const auto& s : rows) {
     const int kind = integer(s[0]), K = integer(s[1]), pair = integer(s[2]), b = integer(s[3]);
     const double mu = num(s[4]), phi = num(s[5]), hi = num(s[6]), lo = num(s[7]);
@@ -573,13 +575,21 @@ TEST_CASE("distrib beta: the expected information and its derivatives against mp
     worst_scaled = std::fmax(worst_scaled, err / (eps * sc));
     CHECK(err <= 64.0 * eps * sc);
     if (pair == 2 && b == K && hi != 0.0) {
-      worst_pure = std::fmax(worst_pure, err / (eps * std::fabs(hi)) / (phi + 1.0));
-      CHECK(err <= (40.0 * eps * (phi + 1.0) + 40.0 * eps) * std::fabs(hi));
+      const double rp = err / (eps * std::fabs(hi));
+      if (rp > worst_pure) {
+        worst_pure = rp;
+        wk = K;
+        wkind = kind;
+        wmu = mu;
+        wphi = phi;
+      }
+      CHECK(err <= 16.0 * eps * std::fabs(hi));
     }
   }
   if (std::getenv("LAPLACE_PRINT_ERRORS"))
-    std::printf("beta info: worst %.3g eps of the largest component; pure phi %.3g eps (phi + 1) of itself\n",
-                worst_scaled, worst_pure);
+    std::printf("beta info: worst %.3g eps of the largest component; pure phi %.3g eps of itself"
+                " (kind %d K %d mu %g phi %g)\n",
+                worst_scaled, worst_pure, wkind, wk, wmu, wphi);
 }
 
 TEST_CASE("distrib beta: the cdf family against mpmath") {

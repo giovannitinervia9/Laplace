@@ -8744,12 +8744,9 @@ predicts. The CUDA build passes the same bounds. The references subtract at a
 precision where the subtraction costs nothing, while the library never performs
 it at all, so the two routes share no arithmetic.
 
-Open (point 4a of `note/piano_distrib_restanti.md`): the layer exists and no
-family calls it yet. Wiring the beta onto it means having
-`detail_beta::free_component` carry the monomial and the remainder separately so
-that the exact cancellation can be used, and then measuring. Decided with
-Giovanni on 2026-11-17: the function lands now, the wiring is a separate piece of
-work.
+Closed (point 4a of `note/piano_distrib_restanti.md`), the same day: the beta is
+wired onto it, which is the section "The beta's pure phi components from the
+remainders" below.
 
 ## weibull, beta and vonmises: the three remaining continuous families (2026-11-17)
 
@@ -8810,11 +8807,11 @@ statmodels7's beta1, with alpha = mu phi and beta = (1 - mu) phi. Accuracy, gcc:
   1.3e-12, 2.8e-11, 1.8e-10. The two tails are of one size, which they were not
   before the side-selecting derivatives of the incomplete beta landed.
 
-The pure phi component is the exception and is the subject of point 4a above:
-1.6e8 to 3.9e8 ulp of itself at phi = 1e8, falling to between 63 and 230 at
-phi <= 1e2, exactly the eps phi of the cancellation. It is a corner of the
-parametrization and not a bound of the test, which measures each order against
-its largest component.
+The pure phi components were the exception until point 4a was closed: they are
+now built from the polygamma remainders and stay within 13.4 ulp of themselves,
+and the pure phi block of the information within 7.68 eps of itself, at every phi
+measured. The figures of the direct assembly and the new ones are in the section
+"The beta's pure phi components from the remainders" below.
 
 Speed at (mu, phi) = (0.3, 6), ns per call Serial / OpenMP: log f 241 / 109,
 order six 221 / 131, the information 13 / 74 and its order four 343 / 151, log F
@@ -8911,3 +8908,61 @@ the gap it fell through: the family's own test never evaluated log F at a point
 where 1 - F is within an ulp of one. A test grid that stops at moderate
 quantiles cannot see this class of defect, and every family on the half line has
 the same two-form structure in its tails.
+
+## The beta's pure phi components from the remainders (2026-11-17)
+
+Point 4a of `note/piano_distrib_restanti.md`, closed the day the remainder
+landed: `polygamma_monomial_remainder` existed, measured, and no family called
+it. The beta is the family that motivated it, so the beta is what was wired onto
+it.
+
+**What.** The pure phi component of order n + 1 of the log-density, and with it
+the pure phi block of the expected information, is
+
+    mu^(n+1) psi_n(alpha) + nu^(n+1) psi_n(beta) - psi_n(phi),   alpha = mu phi,
+                                                                 beta = nu phi.
+
+The three leading monomials cancel exactly: mu^(n+1) mu_n(mu phi) is
+(-1)^(n+1) (n - 1)! mu phi^-n, the nu term is the same with nu, and their sum is
+mu_n(phi) (mu + nu) = mu_n(phi), which is the third term. The remainder of the
+combination is of size phi^-(n+1), so computing it from the polygamma functions
+themselves forms a result of that size as a difference of terms of size phi^-n,
+and about log10(phi) digits go. Built from the remainders r_n = psi_n - mu_n
+instead (`detail_beta::pure_phi_combination`), nothing is formed by subtraction
+and the monomials cost nothing, because they are dropped algebraically rather
+than cancelled in floating point. The identity used is mu + nu = 1 with nu the
+stored 1 - mu, the same value that defines alpha and beta, so no new
+approximation enters.
+
+**How much.** Pure phi components of `logpdf_dk`, relative to themselves, orders
+two to six, gcc and CUDA identical:
+
+| K | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|
+| from the remainders, ulp | 11 | 13.4 | 8.2 | 11 | 10.3 |
+
+The direct assembly gave 1.6e8 to 3.9e8 ulp over the same orders at phi = 1e8,
+and 63 to 230 at phi <= 1e2, which is the eps phi the cancellation predicts.
+
+The pure phi block of the expected information, relative to itself: 4.89 eps of
+(phi + 1), that is 4.9e8 eps at phi = 1e8, before; 7.68 eps flat after, the worst
+row now at K = 0, mu = 0.5, phi = 3. The scaled errors of the other components
+are unchanged within the noise of the measurement (orders two to six 2.18, 5.09,
+4.06, 12.2, 9.61 ulp of the order's largest component against 2.14, 4.37, 5.72,
+12.2, 9.61 before; the information 5.66 eps of the largest component, the same).
+
+**What it says.** The loss was never in the polygamma functions and never in the
+references: it was in the subtraction, and it is gone once the quantity is never
+subtracted. The normalization of the test's bound is the measurement that proves
+it. The bound used to be 40 eps (phi + 1) + 40 eps of the value, and under it the
+worst row sat at phi = 1e8; it is now 16 eps flat, and the worst row sits at
+phi = 3, where the old divisor (phi + 1) was 4 and hid nothing. A bound that
+carries a factor of the parameter is a bound that has given up on a corner, so
+dropping the factor is part of the repair and not a cosmetic change. Bounds:
+24 ulp for the pure phi components of the log-density (measured 13.4) and 16 eps
+for the information's block (measured 7.68), both passed by gcc and CUDA.
+
+**What is not done.** The mixed components still lose the pole terms
+(-1)^(m+1) m!/alpha^(m+1) when alpha or beta is small, and the mixed components at
+large phi still cancel nearly, not exactly. Neither is rearranged: that needs the
+same treatment of the pole terms, and no family has asked for it yet.
