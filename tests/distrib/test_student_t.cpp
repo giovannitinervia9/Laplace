@@ -211,8 +211,10 @@ const double BOUND_LOGPDF[2][7] = {{0, 6.0, 4.0, 6.0, 8.0, 31.0, 161.0}, {0, 9.0
 // The log F bounds grew on 2026-11-16, when the references gained 20 (point, side) pairs at nu >= 1e4
 // that mpmath.diff had never agreed on (tools/reference/distrib_student_t.py, log_cdf_def). They are the
 // first look at that region beyond |z| <= 4, and what they show is the cdf route's own accuracy there:
-// at z = 30, nu = 1e4 the orders one to five read 1.2e3, 962, 786, 1.23e3 and 977 ulp of the order's
-// scale for t1, and 903, 725, 580, 925 and 733 for t2. Nothing moved at the points that were already
+// over that region the orders one to six read 1.2e3, 962, 786, 1.23e3, 977 and 582 ulp of the order's
+// scale for t1 (the order six of log F stays at 6450, from nu = 3.5) and 903, 725, 580, 925, 733 and 582
+// for t2; every one of them is at z = 30, nu = 1e4 but the order three of t1, which is at nu = 1e8 at the
+// same z and stays below that figure at nu = 1e4. Nothing moved at the points that were already
 // covered: run against the previous file every bucket is the same number as before (nu = 1e4 read 66 for
 // t1 and 101 for t2 because only |z| <= 4 was there), so the figures below are measured, not inherited.
 const double BOUND_LOGCDF[2][2][7] = {{{0, 1800.0, 1450.0, 1180.0, 1850.0, 1470.0, 9700.0}, {0, 1800.0, 1450.0, 1180.0, 1850.0, 1470.0, 1210.0}},
