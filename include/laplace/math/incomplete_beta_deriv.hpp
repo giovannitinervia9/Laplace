@@ -529,7 +529,7 @@ struct quad_par {
   bool gauss_device = false;  // Gauss-Laguerre also on the device (on CUDA it was 10 per cent slower:
                               // divergence between the two rules; host only, decided 2026-11-09)
   double series_below = 1e300;  // the series only where min(a, b) is below this
-  double x_wide = 0.8;    // the series on a side computed directly, for b <= 1, up to x = x_wide (0.95 and 0.8 give the same errors)
+  double x_wide = 0.95;   // the series on a side computed directly, for b <= 1, up to x = x_wide
   bool pure_check = true;   // the series stops on its pure components only (the same errors as all 21)
   bool store = true;      // orders 3-5: store the nodes and centre the moments in a second pass
   int* count = nullptr;   // measurement only (host): incremented once per node evaluated
@@ -1482,8 +1482,14 @@ LAPLACE_HD void derivs(double a, double b, double x, bool upper, int method, con
       done = logS <= lp_direct;
     }
   }
+  // The series on the requested side is taken in its wide form, up to x_wide when the frame's
+  // other shape is at most one, and not only up to 1/2: that side's own quadrature loses digits
+  // in exactly that corner, measured at (a, b, x) = (1, 9, 0.1) asking for log(1 - I_x), whose
+  // frame is (9, 1, 0.9). There the quadrature gives 2.5e-7 at order one and 3.2e-7 at order six
+  // relative, while the series and the complement of the other side agree with each other to
+  // 2e-15; two routes against one, and the series is the one the frame admits.
   if (!done && method == 1 && Kokkos::fmin(a, b) < qp.series_below) {
-    if (series_ok(fr)) {
+    if (series_ok(fr, true, qp.x_wide)) {
       logS = side<K>(fr, true, false, qp, l, lt);
       done = true;
     } else if (series_ok(fo)) {

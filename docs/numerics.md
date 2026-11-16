@@ -8015,3 +8015,61 @@ was losing seven digits at order one now keeps them all.
 the conditioning of the two routes. A criterion would compare the two directly,
 which costs what it saves, so the thresholds stay until a cheap estimate of the
 complement's conditioning is worth writing.
+
+## The incomplete beta where a frame's other shape is one
+
+**What.** Each side of the distribution is computed in a frame in which "a" is
+the side's own shape, the exponent of t, and "b" the other one: the upper side
+of (a, b, x) is the lower side of the frame (b, a, y). When the other shape of
+the frame is exactly one, the integrand t^(a-1) (1 - t)^(b-1) loses its factor
+in (1 - t) altogether, and the quadrature's anchor and scale, which read the
+structure of both factors, have only one of them left to read. The side's own
+computation then loses digits, and the loss reaches the shape derivatives of
+`log_ibetac_dK` at a = 1, whose frame is (b, 1, y).
+
+**Measured.** Six frames, asking for log(1 - I_x(a, b)), against mpmath at 60
+digits; the pairs are the orders one and six, and the times are per call on one
+gcc thread for the whole table to order six.
+
+| (a, b, x) | the side's own quadrature | the series | the complement | us: quad / series / complement |
+|---|---|---|---|---|
+| (1, 9, 0.1) | 2.7e-7, 1.7e-7 | 2.3e-15, 1.8e-15 | 2.8e-17, 3.8e-15 | 2.25 / 9.81 / 8.57 |
+| (1, 9, 0.15) | 9.9e-9, 1.2e-8 | 8.7e-16, 7.1e-16 | 1.7e-15, 5.9e-15 | 2.04 / 6.81 / 8.78 |
+| (1, 9, 0.06) | 2.4e-7, 8.2e-8 | 2.4e-15, 5.9e-15 | 3.0e-16, 2.0e-15 | 6.45 / 15.71 / 4.24 |
+| (1, 4, 0.2) | 4.4e-7, 1.6e-7 | 1.1e-15, 3.8e-18 | 1.7e-16, 1.2e-15 | 2.15 / 5.28 / 8.51 |
+| (0.5, 20, 0.1) | 2.8e-17, 2.4e-17 | 1.2e-16, 1.4e-16 | 1.8e-14, 1.6e-13 | 3.70 / 10.34 / 9.65 |
+| (0.8, 9, 0.1) | 2.6e-17, 3.9e-16 | 2.9e-16, 1.0e-15 | 3.3e-16, 7.8e-15 | 3.99 / 10.21 / 8.89 |
+
+The first four rows have the frame's other shape at exactly one and lose seven
+to nine digits; the last two have it at 0.5 and 0.8 and keep them all. Both of
+the other routes are accurate in that corner, at three to five times the
+quadrature's cost, and no cheaper accurate route was found.
+
+**Chosen.** The series on the requested side is taken in its wide form, up to
+`x_wide`, when the frame's other shape is at most one, instead of only up to
+x = 1/2, and `x_wide` goes from 0.8 to 0.95. The condition is the corner
+itself, since `series_ok` tests the frame's other shape against one, and the
+series is the route already wired for it; the complement measures the same and
+costs the same, so there is nothing to choose between them on the numbers.
+
+The module's whole reference grid measures identically to the digit before and
+after the change, so no bound of
+`tests/math/test_beta_deriv.cpp` moves: the corner is not in that grid, which
+is why nothing caught it from inside the module. Above the cut, at a frame x
+from 0.95 to 0.98, the quadrature measures 1e-15 at the orders one and six, so
+the corner is closed on both sides of `x_wide` and not moved.
+
+**What it says.** A frame with its other shape at one is the degenerate point
+of the family, where I_x(1, b) = 1 - (1 - x)^b in closed form, and a quadrature
+whose machinery reads the structure of two factors should be expected to lose
+something where one of them is constant. The defect was reported from outside,
+by a family composing `log_ibetac_dK` with two linear shape maps, and it was
+found by the same evidence pattern as the route defect above: mpmath and the
+quadrature of the generic cdf, which reads only `logpdf` and `logpdf_dk` and
+nothing of the incomplete beta, agreed with each other against the closed
+route.
+
+**Open.** The quadrature's own weakness in the corner is not repaired, only
+avoided: if a configuration ever needs the quadrature there, with the other
+shape at one and x above `x_wide`, the anchor and the scale have to read the
+single factor that is left.
