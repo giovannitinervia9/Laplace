@@ -5184,6 +5184,41 @@ transform. statmodels7's route takes a Schur complement at each level and
 builds the next level's correction from the dominant reductions; this route
 subtracts nothing, because H is formed directly from the scaled G_j.
 
+**Double-double in the derivatives.** Along a tuple of orders 2 to 6 the
+partition sum has alternating signs, so it loses digits that grow with the
+order (1.7e4 ulp at order 6 on te2 with the B_j in double), and the entries of
+a B_j in double are already wrong by eps. Measured by steps on the 3045
+references (twin `benchmarks/pdmat_ws_dd.cpp`; worst error at order 6 in ulps of
+max(|ref|, 1); gcc and the host code of the CUDA build agree to the digits shown):
+
+| route | te2 | te3 | ridge | single | lowrank |
+|---|---|---|---|---|---|
+| B_j in double, as before | 1.73e4 | 1.03e4 | 2070 | 2050 | 1280 |
+| (a) traces and weighted sum in double-double | 601 | 616 | 711 | 1.5 | 115 |
+| (b) (a) and the products of the words in double-double | 6.4 | 4 | 4.5 | 1.5 | 9.2 |
+| (c) (b) and B_j = H^-1 G_j in double-double | 1.5 | 2.5 | 0.6 | 2e-15 | 10.9 |
+
+lowrank_ill stays at 2.2e4 in every route (conditioning). Step (a) removes the
+loss from the signs but not the rounding of the products, (b) leaves one eps
+per entry of B_j, and (c) removes it. What is left on lowrank, about 10 ulp,
+is the rounding of G_j in the transform, which is still in double. Chosen
+(Giovanni, 2026-11-17): (c). `log_pdet_state` and `log_pdet_dk` build B_j from
+the G_j of the transform (H = sum_j G_j, its Cholesky factor and two triangular
+solves, all in double-double); the products of the words, their traces and the
+weighted sum are in double-double too. `log_pdet` (order 0) and `rank_identity`
+do not build them. The double-double matrices sit in the scratch buffer after
+the double ones, which adds 2 (m + 4) r^2 doubles to `scratch_size()`.
+
+The words are visited in lexicographic order, and the product of the first k
+matrices of a word is kept for the next word when it shares that prefix (the
+last factor only enters the trace): the results are bit for bit those without
+the sharing, and the derivatives from the state at order 6 take 2.7 to 2.9
+times less (te3 20.6 ms to 7.0 ms, te2 4.7 ms to 1.7 ms, B_j already built).
+A memo of the traces across tuples was measured and not adopted: on te3 the 83
+tuples of orders 1 to 6 hold 671 words and 225 distinct ones, but the memo
+saves only another 1.15 times (77 ms against 88 ms) and would make the state
+an object with a map.
+
 **References** (`tools/reference/pdmat_weighted_sum.py`). Every S_j is exact
 in double (integers, or integers times powers of two), so its null space is
 exact. SymPy gives an exact rational basis Z of the range. Then
@@ -5208,89 +5243,103 @@ The points are theta_0 = s ln 10, theta_1 = 0, theta_2 = (s/2) ln 10, with
 s in -20, -12, -6, 0, 3, 6, 9, 12, 15, 20, plus one random point. Every
 sorted tuple of orders 0 to 6 is used: 3045 values in all.
 
-**The split threshold, measured** (benchmarks/pdmat_weighted_sum.cpp, gcc).
-The columns give the worst error over the cases in ulps of max(|ref|, 1)
-over orders 0 to 6, the same on the two tensor cases, and the worst
-|sum_j tr B_j - r|:
+**The split threshold, measured** (benchmarks/pdmat_weighted_sum.cpp, gcc, with
+the B_j in double-double). The columns give the worst error over the cases in
+ulps of max(|ref|, 1) over orders 0 to 6, the same on the two tensor cases,
+and the worst |sum_j tr B_j - r|:
 
 | split_tolerance | worst | worst on te2, te3 | rank identity |
 |---|---|---|---|
-| eps^0 (one component per level, ties grouped) | 3.1e4 | 1.7e4 | 1.5e-12 |
-| eps^0.05 (chosen) | 2.2e4 | 1.7e4 | 6.1e-14 |
-| eps^0.10 to eps^0.15 | 6.9e4 | 1.7e4 | 1.8e-13 |
-| eps^0.20 to eps^0.25 | 2.9e5 | 1.5e4 | 1.2e-11 |
-| eps^0.30 to eps^0.35 | 4.3e5 | 1.5e4 | 4.2e-11 |
-| eps^0.40 | 3.4e9 | 1.2e6 | 1.2e-8 |
-| eps^0.50 | 3.4e9 | 1.2e6 | 4.2e-8 |
+| eps^0 (one component per level, ties grouped) | 3.0e4 | 1.4 | 1.5e-12 |
+| eps^0.05 (chosen) | 2.2e4 | 2.5 | 6.1e-14 |
+| eps^0.10 to eps^0.15 | 6.9e4 | 27 | 1.8e-13 |
+| eps^0.20 to eps^0.25 | 2.9e5 | 141 | 1.2e-11 |
+| eps^0.30 to eps^0.35 | 4.3e5 | 141 | 4.2e-11 |
+| eps^0.40 | 3.4e9 | 1.1e6 | 1.2e-8 |
+| eps^0.50 | 3.4e9 | 1.1e6 | 4.2e-8 |
 | naive (eigenvalues of the sum) | NaN; 1e15 to 4e21 | NaN; 1e15 to 1e18 | not computed |
 
 The best threshold is the reverse of statmodels7's (eps^0.35 there, and
 eps^0.3 in mgcv's gam.reparam). A level that holds a spread leaves that
 spread unscaled in H, while a deeper recursion costs nothing here, because
-nothing is subtracted. Giovanni chose eps^0.05, about 0.165: a level holds
-the components within a factor of about 6 of the largest. The zero test gives
+nothing is subtracted. With the B_j in double (measured on 2026-11-14) eps^0.05
+was the best on the worst column; with the B_j in double-double eps^0 is better
+on the tensor cases (1.4 against 2.5 ulp) and on lowrank (5 against 11), and
+worse on lowrank_ill (3.0e4 against 2.2e4, conditioning) and on the rank
+identity (1.5e-12 against 6.1e-14). Decided (Giovanni, 2026-11-17): eps^0.05,
+about 0.165, is kept, because eps^0 gains at most about 6 ulp (on lowrank)
+while it loses on lowrank_ill and on the rank identity. A level holds the
+components within a factor of about 6 of the largest. The zero test gives
 identical results from 1 to 1024 p eps; 8 p eps is kept.
 
-**Accuracy by order** at eps^0.05 (ulps of max(|ref|, 1); gcc and the CUDA
-build, whose host code MSVC compiles, agree to the digits shown):
+**Accuracy by order** at eps^0.05, with the B_j in double-double (ulps of
+max(|ref|, 1); gcc and the CUDA build, whose host code MSVC compiles, agree to
+the digits shown):
 
 | case | K=0 | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|---|
-| te2 | 1.96 | 0.89 | 48.5 | 92 | 176 | 1860 | 1.73e4 |
-| te3 | 1.13 | 0.75 | 37 | 72 | 253 | 2100 | 1.03e4 |
-| lowrank | 0.71 | 4.5 | 8 | 16 | 32 | 128 | 1280 |
-| lowrank_ill | 1.31e4 | 1.09e4 | 2.18e4 | 2.18e4 | 2.19e4 | 2.19e4 | 2.18e4 |
-| ridge | 5.95 | 1 | 11.5 | 36 | 293 | 995 | 2070 |
-| single | 16.2 | 0 | 4 | 8 | 32 | 256 | 2050 |
+| te2 | 1.96 | 0 | 0.55 | 0.5 | 1 | 0.5 | 1.5 |
+| te3 | 1.13 | 0 | 2 | 0.88 | 2 | 0.75 | 2.5 |
+| lowrank | 0.71 | 4.5 | 10.9 | 9.2 | 10.9 | 9.2 | 10.9 |
+| lowrank_ill | 1.31e4 | 1.09e4 | 2.18e4 | 2.18e4 | 2.18e4 | 2.18e4 | 2.18e4 |
+| ridge | 5.95 | 0 | 0.004 | 0.004 | 0.31 | 0.25 | 0.63 |
+| single | 16.2 | 0 | 2e-15 | 2e-15 | 2e-15 | 2e-15 | 2e-15 |
 
-The loss that grows with the order comes from the alternating signs of the
-partition sum. In single, the derivatives of orders 2 to 6 are exactly 0, and
-the sum of the words in tr B^k = r cancels to 2050 ulps of 1 at order 6.
+In single the derivatives of orders 2 to 6 are exactly 0 and the double-double
+sum returns it to 2e-15. The order-0 errors of single (16.2) and ridge (5.95)
+come from log det H by a Cholesky factor in double, which was not changed.
 lowrank_ill loses about 1e4 at every order and every threshold, also at a
 spread of 1, where the naive route loses as much (3.9e4): the loss comes
 from the conditioning of the components themselves, not from the route.
-By spread, on te2 (worst over orders 0 to 6, graded / naive): 1.0e4 / NaN at
-1e-20, 3.6e3 / 6.7e12 at 1e-12, 1.6e3 / 3.0e3 at 1, 1.5e4 / 4.3e5 at 1e6,
-2.2e3 / 1.2e11 at 1e12, 1.0e4 / NaN at 1e20. The test bounds are these worst
-errors times about 4. Central differences of the order below agree within
-1e-6 at three points per case for every tuple.
+By spread, on te2 (worst over orders 0 to 6, graded / naive): 1.8e-15 / NaN at
+1e-20, 0.77 / 6.7e12 at 1e-12, 1.96 / 3.0e3 at 1, 0.77 / 4.3e5 at 1e6,
+0.84 / 1.2e11 at 1e12, 1.05 / NaN at 1e20. The test bounds are these worst
+errors times 1.5, with at least 1 ulp. Central differences of the order below
+agree within 1e-6 at three points per case for every tuple.
 
-Speed (gcc, microseconds per call, one thread, theta = (9.2, 0, 4.6)):
+Speed (gcc, microseconds per call, one thread, theta = (9.2, 0, 4.6); the
+orders 1 to 6 include the construction of the B_j in double-double and the
+derivative with the prefix sharing):
 
 | case | p | r | m | value | K=1 | K=2 | K=6 |
 |---|---|---|---|---|---|---|---|
-| lowrank | 8 | 7 | 3 | 8.2 | 10.3 | 9.8 | 55.9 |
-| ridge | 10 | 10 | 2 | 9.4 | 11.1 | 11.2 | 59.5 |
-| single | 8 | 6 | 1 | 4.5 | 5.0 | 5.1 | 112.5 |
-| te2 | 30 | 26 | 2 | 104 | 112 | 111 | 250 |
-| te3 | 36 | 28 | 3 | 218 | 233 | 235 | 718 |
+| lowrank | 8 | 7 | 3 | 9.7 | 25.9 | 26.5 | 145 |
+| ridge | 10 | 10 | 2 | 8.8 | 38.1 | 39.8 | 170 |
+| single | 8 | 6 | 1 | 4.0 | 9.0 | 9.4 | 118 |
+| te2 | 30 | 26 | 2 | 97 | 460 | 451 | 2014 |
+| te3 | 36 | 28 | 3 | 213 | 936 | 869 | 6856 |
 
-Every `log_pdet_dk` call repeats the transform: one restriction and one
-eigendecomposition per level, then Q^T S_j Q, the Cholesky factor and the B_j.
+With the B_j in double the same calls took, on te3, 233, 235 and 718, and on
+te2 112, 111 and 250. The construction of the B_j in double-double costs 0.65
+ms on te3 and 0.35 ms on te2 per theta. Every `log_pdet_dk` call repeats the
+transform, one restriction and one eigendecomposition per level, then
+Q^T S_j Q, the Cholesky factor and the B_j, and builds the B_j in
+double-double.
 
 **One evaluated state per theta** (benchmarks/pdmat_ws_state.cpp, gcc, one
-thread). `log_pdet_state(t, w)` runs the transform once and leaves G_j, B_j and
-the Cholesky factor in the caller's scratch `w`; `log_pdet_dk_at<K>(idx, w)`
-then reads any derivative from it without changing it. No new memory (the
-scratch of `scratch_size()` doubles is the state) and the per-call functions
-are unchanged. The values equal the per-call ones bit for bit (tested on every
+thread). `log_pdet_state(t, w)` runs the transform and the construction of the
+B_j in double-double once and leaves them in the caller's scratch `w`;
+`log_pdet_dk_at<K>(idx, w)` then reads any derivative from it without changing
+it. No new memory beyond `scratch_size()` and the per-call functions are
+unchanged. The values equal the per-call ones bit for bit (tested on every
 reference point). Tables of all sorted tuples of orders 0 to K, microseconds,
 for m penalties that split the second-difference penalty of p columns by rows:
 
 | m, p | tuples (K<=6) | table K<=2, per call | from state | table K<=6, per call | from state |
 |---|---|---|---|---|---|
-| 2, 10 | 28 | 57 | 10 (x5.4) | 827 | 583 (x1.4) |
-| 2, 50 | 28 | 3167 | 530 (x6.0) | 18251 | 4040 (x4.5) |
-| 3, 20 | 84 | 529 | 55 (x9.6) | 7716 | 3258 (x2.4) |
-| 3, 50 | 84 | 6053 | 649 (x9.3) | 76720 | 24142 (x3.2) |
-| 4, 20 | 210 | 988 | 66 (x15) | 25086 | 11029 (x2.3) |
-| 4, 50 | 210 | 11131 | 772 (x14) | 261853 | 99748 (x2.6) |
+| 2, 10 | 28 | 142 | 30 (x4.7) | 1692 | 991 (x1.7) |
+| 2, 50 | 28 | 12804 | 2475 (x5.2) | 136359 | 71322 (x1.9) |
+| 3, 20 | 84 | 2281 | 242 (x9.4) | 43531 | 23917 (x1.8) |
+| 3, 50 | 84 | 30944 | 3343 (x9.3) | 708003 | 428503 (x1.7) |
+| 4, 20 | 210 | 4563 | 324 (x14) | 163937 | 103436 (x1.6) |
+| 4, 50 | 210 | 66547 | 4586 (x15) | 2815504 | 1842146 (x1.5) |
 
-Up to order 2 the transform is the whole cost, so a table costs one
-transform: the gain is the number of tuples, 5 to 15. Up to order 6 the
-partition sum over the traces of the words dominates (33 to 82 per cent of the
-per-call table is the repeated transform), and the gain is 1.4 to 4.5. Open:
-the partition sums themselves, shared between tuples of one order.
+Up to order 2 the transform and the B_j are the whole cost, so a table costs
+one state: the gain is the number of tuples, 5 to 15. Up to order 6 the
+products of the words dominate, and the gain is 1.5 to 2. A full table of the
+83 tuples of orders 1 to 6 on te3 costs 0.85 ms for the state and 88 ms for
+the derivatives. Open: the rounding of G_j in the transform (about 10 ulp on
+lowrank) and log det H by a Cholesky factor in double (16 ulp on single).
 
 ## Basis transforms: constraints, orthonormalization, Demmler-Reinsch
 

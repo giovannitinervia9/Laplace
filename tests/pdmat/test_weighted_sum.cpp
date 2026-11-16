@@ -134,15 +134,16 @@ double log_pdet_at_any(const lp::weighted_sum_psdmat& s, const std::vector<int>&
 }
 
 // bounds in ulps of max(|ref|, 1), per case and order 0..6: the measured
-// worst (gcc, 2026-11-14) times about 4
+// worst (gcc and the MSVC host build, 2026-11-17, matrices B_j in double-double) times 1.5,
+// at least 1 ulp
 double ulp_bound(const std::string& name, int order) {
   static const std::map<std::string, std::vector<double>> b = {
-      {"lowrank", {4, 20, 40, 64, 128, 512, 5e3}},
-      {"lowrank_ill", {5.5e4, 4.4e4, 9e4, 9e4, 9e4, 9e4, 9e4}},
-      {"ridge", {24, 8, 48, 144, 1.2e3, 4e3, 8.5e3}},
-      {"single", {64, 4, 16, 32, 128, 1e3, 8.5e3}},
-      {"te2", {8, 4, 200, 400, 720, 7.5e3, 7e4}},
-      {"te3", {8, 4, 150, 300, 1e3, 8.5e3, 4.2e4}}};
+      {"lowrank", {1.1, 6.8, 16.4, 13.8, 16.4, 13.8, 16.4}},
+      {"lowrank_ill", {2e4, 1.64e4, 3.28e4, 3.28e4, 3.29e4, 3.29e4, 3.28e4}},
+      {"ridge", {9, 1, 1, 1, 1, 1, 1}},
+      {"single", {24.4, 1, 1, 1, 1, 1, 1}},
+      {"te2", {3, 1, 1, 1, 1.5, 1, 2.3}},
+      {"te3", {1.7, 1, 3, 1.4, 3, 1.2, 3.8}}};
   return b.at(name).at(order);
 }
 

@@ -156,3 +156,8 @@ target_compile_definitions(optimizers_fit_distrib PRIVATE LAPLACE_REFERENCE_DIR=
 laplace_kokkos_sources(distrib_mvgaussian.cpp)
 add_executable(distrib_mvgaussian distrib_mvgaussian.cpp)
 target_link_libraries(distrib_mvgaussian PRIVATE Laplace::laplace)
+
+laplace_kokkos_sources(pdmat_ws_dd.cpp)
+add_executable(pdmat_ws_dd pdmat_ws_dd.cpp)
+target_link_libraries(pdmat_ws_dd PRIVATE Laplace::laplace Laplace::dense)
+target_compile_definitions(pdmat_ws_dd PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")

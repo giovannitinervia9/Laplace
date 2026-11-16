@@ -42,9 +42,24 @@
 // sum_j tr B_j = r is an exact identity (the tests check it). If the levels
 // do not find r columns, or H is not positive definite, the log_pdet
 // functions return NaN.
+//
+// The derivatives are not computed from the B_j in double: the alternating
+// signs of the partition sum lose digits that grow with the order (1.7e4 ulp
+// at order 6 on te2), and the entries of a double B_j are already wrong by eps.
+// log_pdet_state and log_pdet_dk rebuild B_j = H^-1 G_j in double-double from
+// the G_j of the transform (H = sum_j G_j, its Cholesky factor and two
+// triangular solves), and the products of the words, the traces and their
+// weighted sum run in double-double too, which brings order 6 to 1.5 ulp on
+// te2 and 2.5 on te3 (docs/numerics.md). The words come in lexicographic
+// order, so the product of the first k matrices of a word is kept for the
+// next word when it shares that prefix; the last factor only enters the trace.
+// The double-double matrices live in the scratch buffer after the double ones
+// (dd_region), hence the extra 2 (m + 4) r^2 doubles of scratch_size().
+// log_pdet (order 0) and rank_identity do not build them.
 #pragma once
 
 #include <laplace/dense/dense.hpp>
+#include <laplace/math/detail/double_double.hpp>
 #include <laplace/pdmat/core.hpp>
 #include <laplace/pdmat/detail/from_matrix.hpp>
 
@@ -129,7 +144,7 @@ inline std::vector<int> least_rotation(const std::vector<int>& w) {
 // permutations of all blocks but the first; each word of indices is reduced
 // to its least rotation, and its trace computed once.
 template <int K>
-double log_det_derivative(const int (&idx)[K], int r, const double* const* B, double* P, double* P2) {
+std::map<std::vector<int>, double> partition_words(const int (&idx)[K]) {
   std::map<std::vector<int>, double> coef;
   int a[K];  // the block of each position
   for (int q = 0; q < K; ++q) a[q] = 0;
@@ -165,10 +180,66 @@ double log_det_derivative(const int (&idx)[K], int r, const double* const* B, do
     }
     if (q == 0) break;
   }
+  return coef;
+}
+
+template <int K>
+double log_det_derivative(const int (&idx)[K], int r, const double* const* B, double* P, double* P2) {
   double total = 0.0;
-  for (const auto& [word, c] : coef)
+  for (const auto& [word, c] : partition_words<K>(idx))
     if (c != 0.0) total += c * trace_of_word(word, r, B, P, P2);
   return total;
+}
+
+using dd = laplace::math::detail::ddm::dd;
+
+// C (r x r) = A B, double-double entries, column-major
+inline void mul_dd(int r, const dd* A, const dd* B, dd* C) {
+  for (int j = 0; j < r; ++j)
+    for (int i = 0; i < r; ++i) {
+      dd s(0.0);
+      for (int l = 0; l < r; ++l) s = s + A[i + l * r] * B[l + j * r];
+      C[i + j * r] = s;
+    }
+}
+
+// d^K log det along the sorted tuple idx as log_det_derivative, with the matrices B_j, their
+// products, the traces and the weighted sum of the words in double-double (B_j: m matrices of
+// r x r double-double entries, one after the other). S holds four r x r buffers for the
+// products: stack k (k = 1 to 4) is the product of the first k + 1 matrices of the word. The
+// words come in lexicographic order, so the products of the first matrices of the previous
+// word that are also a prefix of the next one are kept; the last factor only enters the trace.
+template <int K>
+double log_det_derivative_dd(const int (&idx)[K], int r, const dd* B, dd* S) {
+  const size_t rr = static_cast<size_t>(r) * r;
+  std::vector<int> prev;
+  int have = 0;  // stack 1 to have are valid for the prefix of prev
+  dd total(0.0);
+  for (const auto& [word, c] : partition_words<K>(idx)) {
+    if (c == 0.0) continue;
+    const int n = static_cast<int>(word.size());
+    const dd* left = B + word[0] * rr;
+    dd tr(0.0);
+    if (n == 1) {
+      for (int a = 0; a < r; ++a) tr = tr + left[a + a * r];
+    } else {
+      if (n > 2) {
+        int cp = 0;
+        while (cp < n && cp < static_cast<int>(prev.size()) && prev[cp] == word[cp]) ++cp;
+        have = std::max(0, std::min(have, cp - 1));
+        for (int k = have + 1; k <= n - 2; ++k)
+          mul_dd(r, k == 1 ? B + word[0] * rr : S + (k - 2) * rr, B + word[k] * rr, S + (k - 1) * rr);
+        have = n - 2;
+        prev = word;
+        left = S + (n - 3) * rr;
+      }
+      const dd* last = B + word[n - 1] * rr;
+      for (int a = 0; a < r; ++a)
+        for (int b = 0; b < r; ++b) tr = tr + left[a + b * r] * last[b + a * r];
+    }
+    total = total + tr * c;
+  }
+  return total.hi + total.lo;
 }
 
 }  // namespace detail_weighted_sum
@@ -310,14 +381,19 @@ class weighted_sum_psdmat {
    * \ingroup psdmat
    * \brief Doubles of caller scratch buffer required by functions of this structure.
    *
-   * Returns \f$(2m + 10)p^2 + 4p + 2m\f$ doubles.
+   * Returns \f$(2m + 10)p^2 + 4p + 2m + 2(m + 4)r^2\f$ doubles, where \f$p\f$ is `dim`,
+   * \f$m\f$ is `n_params()`, and \f$r\f$ is `rank()`. The \f$2(m + 4)r^2\f$ tail holds the
+   * \f$m\f$ double-double matrices \f$B_j\f$ and four \f$r \times r\f$ double-double product
+   * buffers after the `double` workspace.
    *
    * \return Required scratch size in doubles.
    */
-  // the levels, the matrices G_j, B_j and H, and the products of the traces
+  // the levels, the matrices G_j, B_j and H, and the products of the traces,
+  // then m + 4 double-double matrices r x r (B_j, four products; the first
+  // product buffer holds the Cholesky factor of H while B_j is built)
   int scratch_size() const {
-    const int p = dim, m = n_params();
-    return (2 * m + 10) * p * p + 4 * p + 2 * m;
+    const int p = dim, m = n_params(), r = rank_;
+    return (2 * m + 10) * p * p + 4 * p + 2 * m + 2 * (m + 4) * r * r;
   }
 
   /**
@@ -419,17 +495,19 @@ class weighted_sum_psdmat {
    * \ingroup psdmat
    * \brief Evaluates the log pseudo-determinant \f$\log\lvert M(\theta)\rvert_+\f$.
    *
-   * Uses the graded similarity transform described on \ref psdmat "the positive semidefinite structures page".
-   * Returns quiet \c NaN if the transform fails to find \f$r\f$ columns or the Cholesky
-   * factorization of the scaled sum fails.
+   * Uses the graded similarity transform in `double` described on
+   * \ref psdmat "the positive semidefinite structures page"; does not build the double-double
+   * matrices \f$B_j\f$. Returns quiet \c NaN if the transform fails to find \f$r\f$ columns or
+   * the Cholesky factorization of the scaled sum fails.
    *
    * \param t Array of \f$m\f$ parameters \f$\theta\f$.
    * \param w Caller host scratch buffer of at least `scratch_size()` doubles.
    * \return Sum of logarithms of the \f$r\f$ nonzero eigenvalues of \f$M(\theta)\f$, or quiet \c NaN on failure.
    *
-   * Accuracy: up to 1.96 ulp on the tensor-product cases (test bound 8 ulp), 16.2 ulp on the
-   * single-penalty case (bound 64 ulp), and \f$1.31 \times 10^4\f$ ulp on the ill-conditioned
-   * low-rank case (bound \f$5.5 \times 10^4\f$ ulp) on gcc; the CUDA build gives the same errors.
+   * Accuracy: up to 1.96 ulp on the tensor-product cases (test bounds 1.7 and 3 ulp), 0.71 ulp on
+   * the well-conditioned low-rank case (bound 1.1 ulp), 5.95 ulp on the ridge case (bound 9 ulp),
+   * 16.2 ulp on the single-penalty case (bound 24.4 ulp), and \f$1.31 \times 10^4\f$ ulp on the
+   * ill-conditioned low-rank case (bound \f$2 \times 10^4\f$ ulp) on gcc and the CUDA build.
    *
    * \see matrix(), log_pdet_dk(), rank_identity(), psdmat
    */
@@ -443,9 +521,12 @@ class weighted_sum_psdmat {
    * \ingroup psdmat
    * \brief Partial derivative of \f$\log\lvert M(\theta)\rvert_+\f$ of order \f$K\f$.
    *
-   * Evaluates the partition trace sum over \f$B_j = H^{-1} G_j\f$ described on
-   * \ref psdmat "the positive semidefinite structures page". Returns quiet \c NaN if the graded
-   * transform or Cholesky factorization fails.
+   * Runs the graded similarity transform in `double`, rebuilds \f$B_j = H^{-1} G_j\f$ in
+   * double-double from \f$G_j\f$ (forming \f$H = \sum_j G_j\f$, its Cholesky factor, and two
+   * triangular solves in double-double), and evaluates the partition trace sum (word products in
+   * lexicographic order with prefix sharing, traces, and weighted sum) in double-double before
+   * rounding to `double`. Returns quiet \c NaN if the graded transform or either the `double` or
+   * double-double Cholesky factorization of \f$H\f$ fails.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param t Array of \f$m\f$ parameters \f$\theta\f$.
@@ -453,16 +534,18 @@ class weighted_sum_psdmat {
    * \param w Caller host scratch buffer of at least `scratch_size()` doubles.
    * \return Partial derivative value, or quiet \c NaN on failure.
    *
-   * Accuracy: over orders 1 to 6, up to \f$1.73 \times 10^4\f$ ulp on the tensor-product cases
-   * (test bounds 4 to 70000 ulp) and \f$2.19 \times 10^4\f$ ulp on the ill-conditioned low-rank
-   * case (test bounds \f$4.4 \times 10^4\f$ to \f$9 \times 10^4\f$ ulp) on gcc; the CUDA build gives the same errors.
+   * Accuracy: over orders 1 to 6 on gcc and the CUDA build, up to 2.5 ulp on the tensor-product
+   * cases (test bounds 1 to 3.8 ulp), up to 10.9 ulp on the well-conditioned low-rank case
+   * (bounds 6.8 to 16.4 ulp), up to 0.63 ulp on the ridge case and \f$2 \times 10^{-15}\f$ ulp on
+   * the single-penalty case (bound 1 ulp), and \f$1.09 \times 10^4\f$ to \f$2.18 \times 10^4\f$
+   * ulp on the ill-conditioned low-rank case (bounds \f$1.64 \times 10^4\f$ to \f$3.29 \times 10^4\f$ ulp).
    *
    * \see log_pdet(), log_pdet_d1(), rank_identity(), psdmat
    */
   template <int K>
   double log_pdet_dk(const double* t, const int (&idx)[K], double* w) const {
     double logdet;
-    if (!transform(t, w, logdet, true)) return std::numeric_limits<double>::quiet_NaN();
+    if (!transform(t, w, logdet, true) || !build_b_dd(w)) return std::numeric_limits<double>::quiet_NaN();
     return derivative(idx, w);
   }
 
@@ -470,13 +553,15 @@ class weighted_sum_psdmat {
    * \ingroup psdmat
    * \brief Evaluates \f$\log\lvert M(\theta)\rvert_+\f$ and stores the shared state at \f$\theta\f$ in `w`.
    *
-   * Host only. Runs the graded similarity transform, the Cholesky factor of \f$H\f$, and the
-   * matrices \f$B_j = H^{-1} G_j\f$ once (see \ref psdmat "the positive semidefinite structures page")
-   * and leaves them in `w`. The state is the scratch buffer itself, using no new memory. Any
-   * derivative at the same \f$\theta\f$ can then be read via `log_pdet_dk_at()`, while `log_pdet()`,
-   * `log_pdet_dk()`, and `log_pdet_d1()` to `log_pdet_d6()` remain unchanged and recompute the
-   * transform. Do not modify `w` or reuse it for another \f$\theta\f$ while reading the state.
-   * Returns quiet \c NaN if the transform fails to find \f$r\f$ columns or the Cholesky
+   * Host only. Runs the graded similarity transform in `double`, builds \f$B_j = H^{-1} G_j\f$ in
+   * double-double from \f$G_j\f$ (via \f$H = \sum_j G_j\f$, its Cholesky factor, and two
+   * triangular solves in double-double; see \ref psdmat "the positive semidefinite structures page"),
+   * and stores the double-double \f$B_j\f$ matrices in `w`. The state lives in the scratch buffer
+   * itself, using no new memory. Any derivative at the same \f$\theta\f$ can then be read via
+   * `log_pdet_dk_at()`, while `log_pdet()`, `log_pdet_dk()`, and `log_pdet_d1()` to
+   * `log_pdet_d6()` do not use the state and recompute the transform on each call. Do not modify
+   * `w` or reuse it for another \f$\theta\f$ while reading the state. Returns quiet \c NaN if the
+   * transform fails to find \f$r\f$ columns or either the `double` or double-double Cholesky
    * factorization of \f$H\f$ fails; the state is then invalid.
    *
    * \param t Array of \f$m\f$ parameters \f$\theta\f$.
@@ -489,7 +574,7 @@ class weighted_sum_psdmat {
    */
   double log_pdet_state(const double* t, double* w) const {
     double logdet;
-    if (!transform(t, w, logdet, true)) return std::numeric_limits<double>::quiet_NaN();
+    if (!transform(t, w, logdet, true) || !build_b_dd(w)) return std::numeric_limits<double>::quiet_NaN();
     return logdet;
   }
 
@@ -499,18 +584,20 @@ class weighted_sum_psdmat {
    *
    * Host only. Computes the partial derivative
    * \f$\partial^K\log\lvert M(\theta)\rvert_+/(\partial\theta_{i_1}\cdots\partial\theta_{i_K})\f$
-   * along the sorted tuple `idx` \f$= (i_1, \dots, i_K)\f$ from the partition trace sum over the
-   * matrices \f$B_j\f$ left in `w` by `log_pdet_state()`. Reading does not modify the stored state,
-   * so any number of tuples can be read while `w` is not modified or reused for another \f$\theta\f$.
-   * If `log_pdet_state()` failed and returned quiet \c NaN, the state in `w` is invalid and
-   * `log_pdet_dk_at()` must not be called on it.
+   * along the sorted tuple `idx` \f$= (i_1, \dots, i_K)\f$ from the double-double matrices
+   * \f$B_j\f$ stored in `w` by `log_pdet_state()`. Evaluates the word products (in lexicographic
+   * order with prefix sharing), traces, and weighted partition sum in double-double, then rounds
+   * to `double`. Reading does not modify the stored \f$B_j\f$ matrices, so any number of tuples
+   * can be read while `w` is not modified or reused for another \f$\theta\f$. If `log_pdet_state()`
+   * failed and returned quiet \c NaN, the state in `w` is invalid and `log_pdet_dk_at()` must not
+   * be called on it.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param idx Sorted tuple of \f$K\f$ 0-based parameter indices in \f$\{0, \dots, m - 1\}\f$.
    * \param w Caller host scratch buffer of at least `scratch_size()` doubles from a successful `log_pdet_state()`.
    * \return Partial derivative value along `idx`.
    *
-   * Accuracy: equals `log_pdet_dk()` bit for bit on every reference point.
+   * Accuracy: equals `log_pdet_dk()` bit for bit on every reference point, with the same accuracy and test bounds.
    *
    * \see log_pdet_state(), log_pdet_dk(), log_pdet_d1(), psdmat
    */
@@ -727,11 +814,66 @@ class weighted_sum_psdmat {
     detail_weighted_sum::mul_tn(u, u, p, U, p, T, p, R, u);
   }
 
+  // the double-double region of w, after the double one: B_j (m matrices), then four product
+  // buffers (the first one holds the Cholesky factor of H while B_j is built), each r x r with
+  // double-double entries
+  using dd = detail_weighted_sum::dd;
+  dd* dd_region(double* w) const {
+    const size_t used = static_cast<size_t>(2 * n_params() + 10) * dim * dim + 4 * dim + 2 * n_params();
+    return reinterpret_cast<dd*>(w + used);
+  }
+
+  // B_j = H^-1 G_j in double-double from the G_j that transform left in w (the B_j in double
+  // are not read): H = sum_j G_j, its Cholesky factor, two triangular solves. False if H is not
+  // positive definite in double-double.
+  bool build_b_dd(double* w) const {
+    namespace ddm = laplace::math::detail::ddm;
+    const int m = n_params(), r = rank_;
+    const size_t rr = static_cast<size_t>(r) * r;
+    dd* Bd = dd_region(w);
+    dd* L = Bd + m * rr;  // the first product buffer, free until the derivatives are read
+    for (size_t i = 0; i < rr; ++i) {
+      dd h(0.0);
+      for (int j = 0; j < m; ++j) h = h + G(w, j)[i];
+      L[i] = h;
+    }
+    for (int j = 0; j < r; ++j) {
+      dd d = L[j + j * r];
+      for (int k = 0; k < j; ++k) d = d - L[j + k * r] * L[j + k * r];
+      if (!(d.hi > 0.0)) return false;
+      d = ddm::sqrt(d);
+      L[j + j * r] = d;
+      for (int i = j + 1; i < r; ++i) {
+        dd s = L[i + j * r];
+        for (int k = 0; k < j; ++k) s = s - L[i + k * r] * L[j + k * r];
+        L[i + j * r] = s / d;
+      }
+    }
+    for (int jm = 0; jm < m; ++jm) {
+      dd* X = Bd + jm * rr;
+      const double* g = G(w, jm);
+      for (size_t i = 0; i < rr; ++i) X[i] = dd(g[i]);
+      for (int c = 0; c < r; ++c) {
+        for (int i = 0; i < r; ++i) {
+          dd s = X[i + c * r];
+          for (int k = 0; k < i; ++k) s = s - L[i + k * r] * X[k + c * r];
+          X[i + c * r] = s / L[i + i * r];
+        }
+        for (int i = r - 1; i >= 0; --i) {
+          dd s = X[i + c * r];
+          for (int k = i + 1; k < r; ++k) s = s - L[k + i * r] * X[k + c * r];
+          X[i + c * r] = s / L[i + i * r];
+        }
+      }
+    }
+    return true;
+  }
+
   template <int K>
   double derivative(const int (&idx)[K], double* w) const {
-    std::vector<const double*> b(n_params());
-    for (int j = 0; j < n_params(); ++j) b[j] = B(w, j);
-    return detail_weighted_sum::log_det_derivative<K>(idx, rank_, b.data(), tail(w, 8), tail(w, 9));
+    const size_t rr = static_cast<size_t>(rank_) * rank_;
+    dd* Bd = dd_region(w);
+    return detail_weighted_sum::log_det_derivative_dd<K>(idx, rank_, Bd, Bd + n_params() * rr);
   }
 };
 
