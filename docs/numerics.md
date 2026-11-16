@@ -8796,7 +8796,13 @@ to gcc within a hundredth of an ulp, so one set of bounds holds for both builds.
 
 The cdf is measured from a fixed -pi (Giovanni's choice of 2026-11-17: the
 alternative, measuring from the mode, would make F depend on mu through its own
-lower limit). It is computed as the mass of the arc from -pi to y, by a series in
+lower limit). What that convention costs is rotation invariance: F(y; mu) is
+not F(y - c; mu - c), and the difference measures 4.0e-5 at mu = 0 and 1.5e-4 at
+mu = 1 for a rotation of c = 0.4 (mpmath at 200 bits). It is not a defect of the
+implementation but a property of measuring the arc from a fixed point, so a user
+who rotates the data rotates the censoring bounds with them. The test of the
+identity bounds the non-invariance from below at 1e-5, a threshold set from these
+measurements (it had been 1e-3, a conjecture that the measured 2.25e-4 failed). It is computed as the mass of the arc from -pi to y, by a series in
 Bessel ratios where that converges and by panelled quadrature otherwise, and the
 worst error over its own tolerance is 0.24 for the series and 0.18 for the
 integral.
