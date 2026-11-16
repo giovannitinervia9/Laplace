@@ -9259,7 +9259,12 @@ n = 20..40, every order) but costs more than the Debye route it would replace:
 order 7 at 3796 against 1241 ns on gcc and 188 against 42 ns on CUDA, order 1 at
 1726 against 158 ns and 33 against 9.6 ns. Debye there reaches 76.66 ulp at order 7
 (nu = 20.5, x = 21.7) and at most 10.6 at the lower orders. Whether to extend
-the cap to trade that cost for that accuracy is open.
+the cap to trade that cost for that accuracy was put to Giovanni.
+
+Chosen: n_max stays at 19 (Giovanni, 2026-11-16). For n = 20 to 40 the Debye
+route reaches up to 76.7 ulp at order 7, which the closed form would bring down
+to 2.24, but raising the cap would cost about 3 times as much on gcc (3796
+against 1241 ns at order 7) and 4.5 times on CUDA (188 against 42 ns).
 
 No device table was added (`.nv.constant3` unchanged at 46520 bytes).
 
