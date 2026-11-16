@@ -14,7 +14,7 @@ The class \ref laplace::basis::basis_transform "basis_transform" supplies \f$\be
 
 ## Inputs and errors
 
-The matrices passed to `make_basis_transform()` are host-readable rank-2 Kokkos Views of `double` with `Kokkos::LayoutLeft`. \f$G\f$ and \f$S\f$ are read whole and must be symmetric. Wrong arguments throw `std::invalid_argument`: \f$K < 1\f$, a constraint matrix \f$C\f$ without \f$K\f$ columns, \f$G\f$ or \f$S\f$ not \f$K \times K\f$, or, when \f$S\f$ is given, \f$r\f$ outside \f$[0, q]\f$. Wrong extents in `expand_coefficients()` and `reduce_gradient()` throw the same exception. `congruence()` reads a column-major \f$K \times K\f$ array, as `cross_gram()` and `operator_penalty()` write it, and writes a column-major \f$q \times q\f$ array.
+The matrices passed to `make_basis_transform()` are host-readable rank-2 Kokkos Views of `double` with `Kokkos::LayoutLeft`. \f$G\f$ and \f$S\f$ are read whole and must be symmetric. Wrong arguments throw `std::invalid_argument`: \f$K < 1\f$, a constraint matrix \f$C\f$ without \f$K\f$ columns, \f$G\f$ or \f$S\f$ not \f$K \times K\f$, or, when \f$S\f$ is given, \f$r\f$ outside \f$[0, q]\f$. Wrong extents in `expand_coefficients()` and `reduce_gradient()` throw the same exception. `congruence()` reads a column-major \f$K \times K\f$ array, as `cross_gram()` and `operator_penalty_matrix()` write it, and writes a column-major \f$q \times q\f$ array.
 
 ## Method
 

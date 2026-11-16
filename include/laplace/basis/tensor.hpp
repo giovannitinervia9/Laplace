@@ -166,7 +166,7 @@ concept multivariate_basis = requires(const B& b, const double* x, const int* k,
  * owners (`owner.device()` for device kernels, `owner.host()` for host functions).
  *
  * \tparam B Univariate basis types modeling `univariate_basis` (at least two).
- * \see \ref basis_tensor, multivariate_basis, tensor_operator_penalty(), marginal_operator_penalty()
+ * \see \ref basis_tensor, multivariate_basis, tensor_operator_penalty_matrix(), marginal_operator_penalty_matrix()
  */
 // The tensor product of D >= 2 univariate bases, a small struct copied by
 // value into kernels; it holds copies of the margins' structs, whose memory
@@ -413,7 +413,7 @@ struct tensor_product_basis {
    * \param l Second multi-index array of length \f$D\f$ with entries in \f$\{0, \dots, 6\}\f$.
    * \param out Caller output buffer of \f$K^2\f$ doubles.
    * \throw std::invalid_argument If any entry of `k` or `l` is outside \f$\{0, \dots, 6\}\f$.
-   * \see \ref basis_tensor, kronecker_product(), tensor_operator_penalty()
+   * \see \ref basis_tensor, kronecker_product(), tensor_operator_penalty_matrix()
    */
   // G_kl = kron_j G_j(k_j, l_j), the Gram matrix of d^k B and d^l B over the
   // box, dense K x K column-major; k_j, l_j in 0..6 (P6)
@@ -586,7 +586,7 @@ void tensor_product_basis<B...>::cross_gram(const int* k, const int* l, double* 
 /**
  * \ingroup basis_tensor
  * \brief One term \f$c_a\, \partial^{k^{(a)}}\f$ of a constant-coefficient tensor differential operator.
- * \see \ref basis_tensor, tensor_operator_penalty()
+ * \see \ref basis_tensor, tensor_operator_penalty_matrix()
  */
 // One term c d^k of a differential operator with constant coefficients on the
 // product, k a multi-index with one order (0..6) per margin.
@@ -622,7 +622,7 @@ struct tensor_operator_term {
  * \param out Caller buffer of \f$K^2\f$ doubles receiving \f$S_L\f$ in column-major order.
  * \throw std::invalid_argument If any `order` length differs from \f$D\f$, any order is outside
  *        \f$\{0, \dots, 6\}\f$, or an order exceeds the degree of a polynomial margin (B-spline or Legendre).
- * \see \ref basis_tensor, tensor_operator_term, marginal_operator_penalty()
+ * \see \ref basis_tensor, tensor_operator_term, marginal_operator_penalty_matrix()
  */
 // S_L = int over the box of (L f)^2 as a quadratic form in the coefficients,
 // L = sum_a c_a d^(k^(a)): S_L = sum_{a,b} c_a c_b G_{k^(a) k^(b)}, dense
@@ -630,17 +630,17 @@ struct tensor_operator_term {
 // is a sum of calls. For a polynomial margin (B-spline, Legendre) an order must
 // not exceed its degree, or the penalty would not be the one of L.
 template <univariate_basis... B>
-void tensor_operator_penalty(const tensor_product_basis<B...>& basis, const std::vector<tensor_operator_term>& terms,
+void tensor_operator_penalty_matrix(const tensor_product_basis<B...>& basis, const std::vector<tensor_operator_term>& terms,
                              double* out) {
   constexpr int D = sizeof...(B);
   for (const auto& t : terms) {
     if (static_cast<int>(t.order.size()) != D)
-      throw std::invalid_argument("tensor_operator_penalty: each order needs one entry per margin");
+      throw std::invalid_argument("tensor_operator_penalty_matrix: each order needs one entry per margin");
     detail_tensor::host_each(basis, [&](auto I, const auto& m) {
       const int k = t.order[I], deg = detail_operator::polynomial_degree(m);
-      if (k < 0 || k > 6) throw std::invalid_argument("tensor_operator_penalty: orders must be in 0..6");
+      if (k < 0 || k > 6) throw std::invalid_argument("tensor_operator_penalty_matrix: orders must be in 0..6");
       if (deg >= 0 && k > deg)
-        throw std::invalid_argument("tensor_operator_penalty: an order (" + std::to_string(k) +
+        throw std::invalid_argument("tensor_operator_penalty_matrix: an order (" + std::to_string(k) +
                                     ") exceeds the degree of its margin (" + std::to_string(deg) + ")");
     });
   }
@@ -665,7 +665,7 @@ void tensor_operator_penalty(const tensor_product_basis<B...>& basis, const std:
  * G^{(1)}_{00} \otimes \dots \otimes S_j \otimes \dots \otimes G^{(D)}_{00},
  * \f]
  * where `j` counts from 0 (selecting margin \f$j + 1\f$ in 1-based numbering), \f$S_j\f$ is
- * `operator_penalty()` of `op` on that margin, and every other margin \f$m\f$ contributes \f$G^{(m)}_{00}\f$.
+ * `operator_penalty_matrix()` of `op` on that margin, and every other margin \f$m\f$ contributes \f$G^{(m)}_{00}\f$.
  * With `op` equal to \f$D^2\f$ on two margins, the result matches `cross_gram()` with both multi-indices \f$(2, 0)\f$ bit for bit.
  *
  * \tparam B Univariate basis margin types.
@@ -673,24 +673,24 @@ void tensor_operator_penalty(const tensor_product_basis<B...>& basis, const std:
  * \param j Zero-based margin index (\f$0 \le j < D\f$, selecting margin \f$j + 1\f$).
  * \param op Univariate differential operator acting on \f$x_{j+1}\f$.
  * \param out Caller buffer of \f$K^2\f$ doubles receiving the column-major penalty matrix.
- * \throw std::invalid_argument If `j` is outside \f$\{0, \dots, D - 1\}\f$ or if `operator_penalty()`
+ * \throw std::invalid_argument If `j` is outside \f$\{0, \dots, D - 1\}\f$ or if `operator_penalty_matrix()`
  *        rejects `op` on that margin.
- * \see \ref basis_tensor, \ref basis_operator, tensor_operator_penalty(), operator_penalty()
+ * \see \ref basis_tensor, \ref basis_operator, tensor_operator_penalty_matrix(), operator_penalty_matrix()
  */
 // G_0 kron ... kron S_j kron ... kron G_0 = int over the box of (L_j f)^2, L_j
 // the univariate operator op acting on x_j (j 0-based), S_j its
-// operator_penalty on margin j and G_0 the Gram matrices of the others (P7).
+// operator_penalty_matrix on margin j and G_0 the Gram matrices of the others (P7).
 template <univariate_basis... B>
-void marginal_operator_penalty(const tensor_product_basis<B...>& basis, int j, const differential_operator& op,
+void marginal_operator_penalty_matrix(const tensor_product_basis<B...>& basis, int j, const differential_operator& op,
                                double* out) {
   constexpr int D = sizeof...(B);
-  if (j < 0 || j >= D) throw std::invalid_argument("marginal_operator_penalty: no such margin");
+  if (j < 0 || j >= D) throw std::invalid_argument("marginal_operator_penalty_matrix: no such margin");
   std::vector<std::vector<double>> g(D);
   std::vector<kronecker_factor> f;
   detail_tensor::host_each(basis, [&](auto I, const auto& m) {
     const int K = m.dimension();
     g[I].resize(static_cast<std::size_t>(K) * K);
-    if (static_cast<int>(I) == j) operator_penalty(m, op, g[I].data());
+    if (static_cast<int>(I) == j) operator_penalty_matrix(m, op, g[I].data());
     else m.cross_gram(0, 0, g[I].data());
     f.push_back({g[I].data(), K, K});
   });

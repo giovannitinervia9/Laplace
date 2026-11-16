@@ -252,6 +252,9 @@ parent here, in tree order; the module pages define their groups without
 /** \addtogroup distrib_mvgaussian2
 \ingroup distrib_mvgaussian */
 
+/** \defgroup penalty Penalties
+\brief Penalty concept, compile-time descriptors, and adapters from multivariate distributions. */
+
 /** \defgroup optimizers Optimizers
 \brief Objectives, stopping rules, line searches and the dense curvature solver for unconstrained minimization on the host. */
 /** \defgroup optimizers_quasi_newton Quasi-Newton methods

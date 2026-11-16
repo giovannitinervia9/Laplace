@@ -13,7 +13,7 @@
 // entries in ulps of the largest entry.
 // Then: the wrap (derivatives 0..d - mu continuous at lower), Gram matrix
 // positive definite (with the wrap, the span is the periodic spline space),
-// expansions, the arithmetic interval, operator_penalty, constructors.
+// expansions, the arithmetic interval, operator_penalty_matrix, constructors.
 // Set LAPLACE_PRINT_ERRORS=1 to print the table.
 #include <doctest/doctest.h>
 
@@ -346,7 +346,7 @@ TEST_CASE("cyclic_bspline: rows, integrals, totals and Gram matrices against exa
   for (const auto& c : cs) check_case(c);
 }
 
-TEST_CASE("cyclic_bspline: far points, non-finite x, operator_penalty, constructors") {
+TEST_CASE("cyclic_bspline: far points, non-finite x, operator_penalty_matrix, constructors") {
   using owner = lb::cyclic_bspline_basis_owner;
   const auto o = owner::uniform(0.0, 365.25, 12, 3);
   const auto b = o.host();
@@ -375,12 +375,12 @@ TEST_CASE("cyclic_bspline: far points, non-finite x, operator_penalty, construct
     CHECK(std::isnan(b.integral_expansion(x, beta.data())));
   }
 
-  // operator_penalty of D^2 is G_22; above the degree it throws
+  // operator_penalty_matrix of D^2 is G_22; above the degree it throws
   std::vector<double> s(144), g(144);
-  lb::operator_penalty(b, lb::derivative_operator(2), s.data());
+  lb::operator_penalty_matrix(b, lb::derivative_operator(2), s.data());
   b.cross_gram(2, 2, g.data());
   for (int i = 0; i < 144; ++i) CHECK(s[i] == g[i]);
-  CHECK_THROWS_AS(lb::operator_penalty(b, lb::derivative_operator(4), s.data()), std::invalid_argument);
+  CHECK_THROWS_AS(lb::operator_penalty_matrix(b, lb::derivative_operator(4), s.data()), std::invalid_argument);
 
   // regularity points: the knots, lower included, with C^(d - mu)
   const auto po = owner::from_knots({0.0, 0.0, 0.3, 0.6}, 1.0, 3);

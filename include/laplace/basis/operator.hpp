@@ -23,7 +23,7 @@
 //
 // The penalty int (L f)^2 dx of f = sum_j beta_j b_j is beta' S beta with
 //   S = sum_{k,l} c_k c_l G_kl,   G_kl = int b^(k) b^(l)' dx
-// (the cross Gram matrices of the basis, exact): operator_penalty.
+// (the cross Gram matrices of the basis, exact): operator_penalty_matrix.
 //
 // Everything here runs on the host.
 #pragma once
@@ -68,7 +68,7 @@ struct differential_operator_root {
  * defined by the roots of its characteristic polynomial \f$P(r) = \sum_{k=0}^m c_k r^k\f$ with \f$c_m = 1\f$.
  * Stored internally by its roots with multiplicities.
  *
- * \see derivative_operator(), oscillator_operator(), harmonic_operator(), operator_penalty(), basis_operator
+ * \see derivative_operator(), oscillator_operator(), harmonic_operator(), operator_penalty_matrix(), basis_operator
  */
 class differential_operator {
  public:
@@ -469,12 +469,12 @@ int polynomial_degree(const B& b) {
 // at most its degree (above it D^m b = 0 and the penalty would not be the one
 // of L).
 template <class B>
-void operator_penalty(const B& basis, const differential_operator& op, double* out) {
+void operator_penalty_matrix(const B& basis, const differential_operator& op, double* out) {
   const int m = op.order(), K = basis.dimension();
-  if (m > 6) throw std::invalid_argument("operator_penalty: the order of the operator must be at most 6");
+  if (m > 6) throw std::invalid_argument("operator_penalty_matrix: the order of the operator must be at most 6");
   const int deg = detail_operator::polynomial_degree(basis);
   if (deg >= 0 && m > deg)
-    throw std::invalid_argument("operator_penalty: the order of the operator (" + std::to_string(m) +
+    throw std::invalid_argument("operator_penalty_matrix: the order of the operator (" + std::to_string(m) +
                                 ") exceeds the degree of the basis (" + std::to_string(deg) + ")");
   const auto c = op.coefficients();
   const size_t KK = static_cast<size_t>(K) * K;

@@ -70,6 +70,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_atom_mixture.cpp
   distrib/test_mvgaussian.cpp
   distrib/test_mvgaussian_rank_deficient.cpp
+  penalty/test_distrib_penalty.cpp
   math/test_chain_pair.cpp
   pdmat/test_pilot.cpp
   pdmat/test_unstructured.cpp

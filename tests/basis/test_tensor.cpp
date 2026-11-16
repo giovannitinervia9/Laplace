@@ -14,7 +14,7 @@
 // Then: rows equal the products of the margins' own rows (also outside the
 // domain), NaN propagation, the Kronecker transforms (T'G T = I and both
 // penalty components diagonal with Demmler-Reinsch margins), their
-// composition, marginal_operator_penalty, fill_tensor_basis_rows.
+// composition, marginal_operator_penalty_matrix, fill_tensor_basis_rows.
 // Set LAPLACE_PRINT_ERRORS=1 to print the table.
 #include <doctest/doctest.h>
 
@@ -312,7 +312,7 @@ TEST_CASE("tensor product bases: rows, expansions and Gram matrices against refe
     const int K = host.dimension();
     std::vector<double> s(static_cast<size_t>(K) * K, 0.0), t(s.size());
     for (auto& term : std::vector<lb::tensor_operator_term>{{1.0, {2, 0}}, {std::sqrt(2.0), {1, 1}}, {1.0, {0, 2}}}) {
-      lb::tensor_operator_penalty(host, {term}, t.data());
+      lb::tensor_operator_penalty_matrix(host, {term}, t.data());
       for (size_t i = 0; i < s.size(); ++i) s[i] += t[i];
     }
     double scale = 0, err = 0;
@@ -409,7 +409,7 @@ TEST_CASE("tensor product bases: Kronecker transforms and penalties") {
   auto margin_transform = [&](const auto& mb, int Kj) {
     HM G("G", Kj, Kj), S("S", Kj, Kj);
     mb.cross_gram(0, 0, G.data());
-    lb::operator_penalty(mb, lb::derivative_operator(2), S.data());
+    lb::operator_penalty_matrix(mb, lb::derivative_operator(2), S.data());
     return lb::make_basis_transform(Kj, none, G, S, 2);
   };
   const auto t0 = margin_transform(b.margin<0>(), K0), t1 = margin_transform(b.margin<1>(), K1);
@@ -421,9 +421,9 @@ TEST_CASE("tensor product bases: Kronecker transforms and penalties") {
   std::vector<double> g(static_cast<size_t>(K) * K), s0(g.size()), s1(g.size()), c(g.size());
   const int zero[2] = {0, 0};
   b.cross_gram(zero, zero, g.data());
-  lb::marginal_operator_penalty(b, 0, lb::derivative_operator(2), s0.data());
-  lb::marginal_operator_penalty(b, 1, lb::derivative_operator(2), s1.data());
-  // marginal_operator_penalty with D^2 is the Gram of the multi-indices (2, 0)
+  lb::marginal_operator_penalty_matrix(b, 0, lb::derivative_operator(2), s0.data());
+  lb::marginal_operator_penalty_matrix(b, 1, lb::derivative_operator(2), s1.data());
+  // marginal_operator_penalty_matrix with D^2 is the Gram of the multi-indices (2, 0)
   // and (0, 2)
   std::vector<double> g20(g.size()), g02(g.size());
   const int k20[2] = {2, 0}, k02[2] = {0, 2};
@@ -480,7 +480,7 @@ TEST_CASE("tensor product bases: Kronecker transforms and penalties") {
   CHECK_THROWS(lb::compose_basis_transforms(tp, t));
   const int bad[2] = {7, 0};
   CHECK_THROWS(b.cross_gram(bad, zero, g.data()));
-  CHECK_THROWS(lb::tensor_operator_penalty(b, {{1.0, {0, 3}}}, g.data()));  // margin 1 has degree 2
+  CHECK_THROWS(lb::tensor_operator_penalty_matrix(b, {{1.0, {0, 3}}}, g.data()));  // margin 1 has degree 2
 }
 
 namespace basis_tensor_test {

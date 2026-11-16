@@ -1,0 +1,111 @@
+/**
+\addtogroup penalty
+
+Include `<laplace/penalty/core.hpp>` for the \ref laplace::penalty::penalty "penalty" concept and its descriptor enumerations, and `<laplace/penalty/distrib_penalty.hpp>` for \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>". Everything in this module lives in namespace `laplace::penalty`. A penalty is a function \f$\mathrm{pen}(\beta; \theta)\f$ of a coefficient vector \f$\beta \in \mathbb{R}^d\f$ and hyperparameters \f$\theta \in \mathbb{R}^q\f$. A *proper* penalty is minus the logarithm of a prior density with its normalizing constant included; for a proper penalty the same object is that prior. Members of `distrib_penalty<M>` are marked `LAPLACE_HD` and run on the device when `M` does, staying on the host when `M` is host-only. In tests over \ref distrib_mvgaussian2 "mvgaussian2", `distrib_penalty<M>` matches \f$-\log p_M\f$ to the bit, its derivative blocks agree with central differences within \f$10^{-6}\f$, and \f$\exp(-\mathrm{pen})\f$ integrates to \f$1\f$ within \f$10^{-9}\f$.
+
+## Normalization classes
+
+The enumeration \ref laplace::penalty::penalty_normalization "penalty_normalization" classifies a penalty by the integrability of \f$\exp(-\mathrm{pen}(\beta; \theta))\f$ in \f$\beta\f$:
+
+- `proper`: \f$\int_{\mathbb{R}^d} \exp(-\mathrm{pen}(\beta; \theta))\,\mathrm{d}\beta\f$ is finite, and the normalizing constant is part of the value.
+- `intrinsic`: a singular quadratic form with a constant null space in \f$\theta\f$. For a precision matrix \f$Q(\theta) \in \mathbb{R}^{d \times d}\f$ of constant rank \f$\rho\f$ and a fixed location \f$\mu_0 \in \mathbb{R}^d\f$, the log-normalizing constant on the range space counts only the \f$\rho\f$ nonzero dimensions, \f$-\frac{\rho}{2}\log 2\pi + \frac{1}{2}\log\lvert Q\rvert_+\f$, where \f$\lvert Q\rvert_+\f$ is the pseudo-determinant, the product of the \f$\rho\f$ nonzero eigenvalues. The penalty value is
+\f[
+\mathrm{pen}(\beta; \theta) = \frac{\rho}{2}\log 2\pi - \frac{1}{2}\log\lvert Q\rvert_+ + \frac{1}{2}(\beta - \mu_0)^\top Q(\beta - \mu_0),
+\f]
+which is flat along the null space of \f$Q\f$.
+- `unnormalizable`: the integral \f$\int_{\mathbb{R}^d} \exp(-\mathrm{pen}(\beta; \theta))\,\mathrm{d}\beta\f$ is infinite for every \f$\theta\f$.
+
+## Properties and the penalty concept
+
+A type modeling \ref laplace::penalty::penalty "penalty" declares eight compile-time static descriptors, the dimension queries `dim()` returning \f$d\f$ and `n_params()` returning \f$q\f$, and `weak_convexity(theta)`.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `normalization` | `penalty_normalization` | `proper`, `intrinsic`, or `unnormalizable` |
+| `beta_regularity` | `int` | Continuity order \f$r\f$ of \f$C^r\f$ in \f$\beta\f$, or \ref laplace::distrib::infinitely_smooth "infinitely_smooth" for \f$C^\infty\f$ |
+| `kinks` | `penalty_kink_geometry` | Non-smooth geometry in \f$\beta\f$: `none` (smooth), `per_coordinate` (\f$\beta_j = c\f$), `radial` (\f$\lVert \beta_g \rVert = 0\f$), or `linear_map` (\f$D\beta = 0\f$) |
+| `prox` | `penalty_prox_kind` | Proximal operator availability: `none`, `closed_form`, or `iterative` |
+| `structure` | `penalty_structure` | Coordinate coupling: `separable` (sum over coordinates), `grouped` (sum over independent blocks), or `coupled` (interaction through a matrix or map) |
+| `theta_regularity` | `int` | Continuity order \f$r\f$ of \f$C^r\f$ in \f$\theta\f$, or `infinitely_smooth` for \f$C^\infty\f$ |
+| `q_linear_in_theta` | `bool` | `true` when the precision of a quadratic penalty has the form \f$Q = \sum_k \lambda_k S_k\f$ |
+| `scale_mixture` | `penalty_scale_mixture` | Variance law of \f$\tau\f$ in a scale mixture \f$\beta \mid \tau \sim \mathcal{N}(0, \tau)\f$: `none`, `inverse_gamma_variance`, or `exponential_variance` |
+| `weak_convexity(theta)` | `double` | Weak-convexity constant \f$\sup(-\mathrm{pen}'')\f$ at `theta`: \f$0\f$ for a convex penalty, \f$+\infty\f$ when \f$\mathrm{pen}''\f$ is unbounded below |
+
+## Distribution penalties
+
+The adapter \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>" wraps a type `M` satisfying \ref laplace::distrib::multivariate_distrib "multivariate_distrib" (see \ref distrib_multivariate "Multivariate") into the penalty
+\f[
+\mathrm{pen}(\beta; \theta) = -\log p_M(\beta \mid \mu_0, \theta).
+\f]
+Here \f$\beta\f$ plays the role of the observation \f$y\f$, `mu0` is a fixed non-owning prior location \f$\mu_0 \in \mathbb{R}^d\f$ of length `dim()` where `nullptr` denotes zero, and \f$\theta\f$ holds the structure parameters of `M`. Calling `value(st, beta, w)` returns `-distribution.logpdf(st, beta, loc)`, and calling `value_dbeta_dk<J, K>(st, beta, idx, out, w)` returns `-distribution.logpdf_dy_dk<J, K>(st, beta, loc, idx, out, w)` in the multivariate output layouts. Specifically, `out` is a scalar when \f$J = 0\f$, a \f$d\f$-vector when \f$J = 1\f$, and a packed lower-triangular symmetric \f$d \times d\f$ matrix when \f$J = 2\f$, while `idx` holds \f$K\f$ sorted parameter indices and is unused when `K == 0`. When a block vanishes identically by structure or \f$J \ge 3\f$, `value_dbeta_dk<J, K>()` returns `false` and leaves `out` untouched.
+
+The normalization class comes from `M::normalization`: `distrib_normalization::proper` maps to `penalty_normalization::proper`, and `distrib_normalization::improper` maps to `penalty_normalization::intrinsic`. A `distrib_normalization::degenerate` distribution is refused at compile time because its \f$-\log p_M\f$ is \f$+\infty\f$ off a subspace, which defines a constraint rather than a penalty.
+
+The remaining descriptors and `weak_convexity(theta)` come from \ref laplace::penalty::distrib_penalty_traits "distrib_penalty_traits\<M\>". Its primary template is undefined so unsupported distributions do not compile. Currently it is specialized for \ref laplace::distrib::mvgaussian2_distrib "distrib::mvgaussian2_distrib\<S\>" (see \ref distrib_mvgaussian2 "mvgaussian2"), describing a convex, \f$C^\infty\f$ penalty in both \f$\beta\f$ and \f$\theta\f$. Its descriptors are `kinks = penalty_kink_geometry::none`, `prox = penalty_prox_kind::none`, `structure = penalty_structure::coupled`, `scale_mixture = penalty_scale_mixture::none`, and `weak_convexity(theta)` returning `0.0`. The flag `q_linear_in_theta` is `true` when `S` is \ref laplace::pdmat::weighted_sum_psdmat "pdmat::weighted_sum_psdmat" and `false` otherwise.
+
+## Workspace and execution
+
+`state_size()` equals `distribution.state_size()`, and `scratch_size()` equals `distribution.scratch_size() + dim()`, adding `dim()` doubles to hold a zero location vector when `mu0` is `nullptr`. Calling `theta_state(theta, w)` forwards to `distribution.theta_state(theta, w)` using a caller buffer `w` of at least `state_size() + scratch_size()` doubles. The first `state_size()` doubles back the returned `state_type`, and the remaining `scratch_size()` doubles serve as the scratch argument `w` passed to `value()` and `value_dbeta_dk()`. Both `w` and `theta`, as well as `mu0` when non-null, must remain alive while the state is in use.
+
+## Accuracy
+
+See \ref accuracy "How accuracy is measured" for test conventions. Automated tests in `tests/penalty/test_distrib_penalty.cpp` verify `distrib_penalty<M>` over `mvgaussian2_distrib` with `unstructured_pdmat<log_cholesky_bijector>` (`proper`, \f$d = 3\f$ and \f$d = 2\f$) and `weighted_sum_psdmat` (`intrinsic`, \f$d = 5\f$ and rank \f$2\f$ in \f$\mathbb{R}^3\f$), both without and with `mu0`. The proper case runs both inside a Kokkos kernel and on the host, while the intrinsic case runs on the host because `weighted_sum_psdmat` is host-only.
+
+| Check | Scope | Criterion or tolerance |
+|---|---|---|
+| Twin identity | Value against `-distribution.logpdf()` | Exact equality (`0.0` difference) |
+| Derivative blocks | Blocks \f$(J, K)\f$ with \f$J \le 2\f$, \f$J + K \le 3\f$ | Normwise error below \f$10^{-6}\f$ against central differences (\f$h = 10^{-5}\max(1, \lvert x\rvert)\f$) |
+| Kernel and host match | Proper case (\f$d = 3\f$) | Finite-difference errors agree within \f$10^{-9}\f$ |
+| Integral of \f$\exp(-\mathrm{pen})\f$ | Proper (\f$d = 2\f$, with `mu0`) and intrinsic range space (rank \f$2\f$ in \f$\mathbb{R}^3\f$) | Trapezoid rule (step \f$0.03\f$ on \f$[-9, 9]^2\f$) within \f$10^{-9}\f$ of \f$1\f$ |
+| Null-space flatness | Intrinsic rank \f$2\f$ in \f$\mathbb{R}^3\f$ | Shift by \f$2.5\f$ times all-ones vector changes `value()` by less than \f$10^{-12}\f$ |
+
+## Example
+
+The following host example, run after `Kokkos::initialize()`, builds a penalty matrix with \ref laplace::basis::operator_penalty_matrix "operator_penalty_matrix()" (see \ref basis_operator "Differential operators and penalties"), wraps it in `weighted_sum_psdmat` and `mvgaussian2_distrib`, and evaluates the penalty value and its gradient in \f$\beta\f$:
+
+\code{.cpp}
+#include <laplace/basis/fourier.hpp>
+#include <laplace/basis/operator.hpp>
+#include <laplace/distrib/mvgaussian2.hpp>
+#include <laplace/pdmat/weighted_sum.hpp>
+#include <laplace/penalty/distrib_penalty.hpp>
+
+#include <vector>
+
+double penalty_example(double (&grad)[5]) {
+  constexpr int d = 5;
+  const auto basis = laplace::basis::make_fourier_basis(0.0, 1.0, 2);
+  const auto op = laplace::basis::derivative_operator(2);
+
+  laplace::pdmat::weighted_sum_psdmat::host_matrix S("S", d, d);
+  laplace::basis::operator_penalty_matrix(basis, op, S.data());
+
+  const laplace::pdmat::weighted_sum_psdmat struct_q(
+      std::vector<laplace::pdmat::weighted_sum_psdmat::host_matrix>{S});
+  const laplace::distrib::mvgaussian2_distrib<laplace::pdmat::weighted_sum_psdmat> dist(struct_q);
+  const laplace::penalty::distrib_penalty<laplace::distrib::mvgaussian2_distrib<laplace::pdmat::weighted_sum_psdmat>>
+      pen(dist);
+
+  std::vector<double> w(pen.state_size() + pen.scratch_size());
+  const double theta[1] = {0.0};
+  const double beta[d] = {0.1, -0.2, 0.3, -0.1, 0.05};
+
+  const auto st = pen.theta_state(theta, w.data());
+  double* ws = w.data() + pen.state_size();
+  const double val = pen.value(st, beta, ws);
+  pen.value_dbeta_dk<1, 0>(st, beta, nullptr, grad, ws);
+  return val;
+}
+\endcode
+
+## Module types
+
+- \ref laplace::penalty::penalty "penalty" — concept satisfied by penalty types
+- \ref laplace::penalty::penalty_normalization "penalty_normalization" — normalization class (`proper`, `intrinsic`, `unnormalizable`)
+- \ref laplace::penalty::penalty_kink_geometry "penalty_kink_geometry" — geometry of non-smooth points in \f$\beta\f$
+- \ref laplace::penalty::penalty_prox_kind "penalty_prox_kind" — availability of a proximal operator
+- \ref laplace::penalty::penalty_structure "penalty_structure" — coordinate coupling structure
+- \ref laplace::penalty::penalty_scale_mixture "penalty_scale_mixture" — variance law of a scale-mixture representation
+- \ref laplace::penalty::distrib_penalty_traits "distrib_penalty_traits\<M\>" — descriptor traits of a distribution penalty
+- \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>" — adapter from a multivariate distribution to a penalty
+*/

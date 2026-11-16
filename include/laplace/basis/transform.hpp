@@ -329,14 +329,14 @@ class basis_transform {
    * \brief Computes the host congruence transform \f$T^\top A T\f$ of a \f$K \times K\f$ matrix.
    *
    * Reads the column-major \f$K \times K\f$ array `a` on the host and writes the column-major \f$q \times q\f$ result \f$T^\top A T\f$ into `out`.
-   * \param a Pointer to the input column-major \f$K \times K\f$ matrix (for example from `cross_gram()` or `operator_penalty()`).
+   * \param a Pointer to the input column-major \f$K \times K\f$ matrix (for example from `cross_gram()` or `operator_penalty_matrix()`).
    * \param out Pointer to the output column-major \f$q \times q\f$ matrix.
    * \par Measured accuracy
    * In tests, \f$T^\top G T\f$ matches \f$I_q\f$ within \f$68\varepsilon\f$ and \f$T^\top S T\f$ matches \f$\operatorname{diag}(\lambda)\f$ within \f$64\varepsilon\lambda_{\max}\f$.
    * \see \ref basis_transform, make_basis_transform()
    */
   // out = T' A T on the host: A is K x K (a Gram matrix G_kl, a penalty S),
-  // out is q x q, column-major (as cross_gram and operator_penalty write).
+  // out is q x q, column-major (as cross_gram and operator_penalty_matrix write).
   void congruence(const double* a, double* out) const {
     const int K = rows(), q = columns();
     Kokkos::View<const double**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> av(a, K, K);

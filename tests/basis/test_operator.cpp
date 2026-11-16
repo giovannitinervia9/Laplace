@@ -1,6 +1,6 @@
 // Linear differential operators and their penalties
 // (include/laplace/basis/operator.hpp): coefficients from the roots, products
-// with merged multiplicities, the null space, and operator_penalty on the
+// with merged multiplicities, the null space, and operator_penalty_matrix on the
 // three bases. The penalties are checked against the cross Gram matrices
 // (D^m gives G_mm exactly), against the closed form on a full Fourier period
 // (the block of harmonic j is |P(i j nu)|^2 omega/2 times the identity), and
@@ -139,17 +139,17 @@ TEST_CASE("operator: D^m gives the Gram matrix G_mm") {
   const int K = b.dimension();
   std::vector<double> S(K * K), G(K * K);
   for (int m = 1; m <= 3; ++m) {
-    lb::operator_penalty(b, lb::derivative_operator(m), S.data());
+    lb::operator_penalty_matrix(b, lb::derivative_operator(m), S.data());
     b.cross_gram(m, m, G.data());
     for (int i = 0; i < K * K; ++i) CHECK(S[i] == G[i]);
   }
-  CHECK_THROWS_AS(lb::operator_penalty(b, lb::derivative_operator(4), S.data()), std::invalid_argument);
+  CHECK_THROWS_AS(lb::operator_penalty_matrix(b, lb::derivative_operator(4), S.data()), std::invalid_argument);
   const auto leg = lb::make_legendre_basis(0.0, 1.0, 3);
   std::vector<double> L(16);
-  CHECK_THROWS_AS(lb::operator_penalty(leg, lb::derivative_operator(4), L.data()), std::invalid_argument);
+  CHECK_THROWS_AS(lb::operator_penalty_matrix(leg, lb::derivative_operator(4), L.data()), std::invalid_argument);
   const auto fb = lb::make_fourier_basis(0.0, 1.0, 3);
   std::vector<double> F(49);
-  CHECK_THROWS_AS(lb::operator_penalty(fb, lb::derivative_operator(7), F.data()), std::invalid_argument);
+  CHECK_THROWS_AS(lb::operator_penalty_matrix(fb, lb::derivative_operator(7), F.data()), std::invalid_argument);
 }
 
 TEST_CASE("operator: Fourier on a full period, closed form and null space") {
@@ -159,7 +159,7 @@ TEST_CASE("operator: Fourier on a full period, closed form and null space") {
     const int K = fb.dimension();
     const auto op = lb::harmonic_operator(T, harmonics);  // P(r) = r prod_h (r^2 + (h nu)^2)
     std::vector<double> S(K * K);
-    lb::operator_penalty(fb, op, S.data());
+    lb::operator_penalty_matrix(fb, op, S.data());
     const double smax = max_abs(S);
     for (int i = 0; i < K; ++i)
       for (int j = 0; j < K; ++j) {
@@ -180,7 +180,7 @@ TEST_CASE("operator: null-space functions of a basis have zero penalty") {
   // Legendre, D^2: the polynomials of degree < 2 (columns 0 and 1)
   const auto leg = lb::make_legendre_basis(-1.0, 3.0, 8);
   std::vector<double> S(81);
-  lb::operator_penalty(leg, lb::derivative_operator(2), S.data());
+  lb::operator_penalty_matrix(leg, lb::derivative_operator(2), S.data());
   const double smax = max_abs(S);
   for (int i = 0; i < 2; ++i)
     for (int j = 0; j < 9; ++j) CHECK(std::fabs(S[i + j * 9]) <= 1e-13 * smax);
@@ -192,7 +192,7 @@ TEST_CASE("operator: null-space functions of a basis have zero penalty") {
   const int K = b.dimension();
   const auto& t = owner.knots();
   std::vector<double> Sb(K * K), one(K, 1.0), lin(K), quad(K), rnd(K);
-  lb::operator_penalty(b, lb::derivative_operator(3), Sb.data());
+  lb::operator_penalty_matrix(b, lb::derivative_operator(3), Sb.data());
   b.greville(lin.data());
   for (int j = 0; j < K; ++j) {
     quad[j] = (t[j + 1] * t[j + 2] + t[j + 1] * t[j + 3] + t[j + 2] * t[j + 3]) / 3.0;

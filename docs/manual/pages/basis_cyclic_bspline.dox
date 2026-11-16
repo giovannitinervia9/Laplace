@@ -53,7 +53,7 @@ The member \ref laplace::basis::cyclic_bspline_basis::integral_row "integral_row
 
 On the host, \ref laplace::basis::cyclic_bspline_basis::cross_gram "cross_gram()" writes \f$(G_{kl})_{ij} = \int_{x_{\mathrm{lo}}}^{x_{\mathrm{hi}}} b_i^{(k)}(x)\,b_j^{(l)}(x)\,\mathrm{d}x\f$ dense \f$K \times K\f$ and column-major (`out[i + j * K]`), as on \ref basis. It folds the extended basis's cross Gram matrix (\ref basis_bspline) by adding entry \f$(e, e')\f$ to \f$(c(e), c(e'))\f$, with \f$c(e) = (e - d) \bmod K\f$. For \f$K > 2d + 1\f$, the matrix is banded with semi-bandwidth \f$d\f$ plus wrapped corners, so `gram_bandwidth()` returns \f$K - 1\f$; equally spaced knots make it circulant.
 
-The function `operator_penalty()` of \ref basis_operator applies unchanged for operator orders \f$m \le d\f$. On periodic splines, the null space of \f$D^m\f$ is the constants.
+The function `operator_penalty_matrix()` of \ref basis_operator applies unchanged for operator orders \f$m \le d\f$. On periodic splines, the null space of \f$D^m\f$ is the constants.
 
 Host \ref laplace::basis::cyclic_bspline_basis::greville "greville()" writes \f$K\f$ abscissae \f$\xi_j = (t_{j+1} + \dots + t_{j+d}) / d\f$ for \f$d \ge 1\f$ and \f$(t_j + t_{j+1}) / 2\f$ for \f$d = 0\f$, reduced to \f$[x_{\mathrm{lo}}, x_{\mathrm{hi}})\f$. Host \ref laplace::basis::cyclic_bspline_basis::regularity_points "regularity_points()" returns every distinct knot of one period, including \f$x_{\mathrm{lo}}\f$, with continuity \f$d - \mu\f$ as a vector of \ref laplace::basis::bspline_regularity_point "bspline_regularity_point".
 
@@ -70,7 +70,7 @@ As on \ref basis_bspline, errors are in ulp of the row's largest value for rows,
 | Column totals | 3 ulp | 3 ulp | 9 ulp | 9 ulp |
 | Cross Gram matrices | 8 ulp | 9 ulp | 12 ulp | 14 ulp |
 
-The tests also verify continuity of orders \f$0, \dots, d - \mu\f$ across \f$x_{\mathrm{lo}}\f$, positive definiteness of \f$G_{00}\f$, and expansions against rows. They further check that `integral_row()` and `integral_column()` agree bit for bit, that adding one period to \f$x\f$ adds \f$c_j\f$ to every column, and that `operator_penalty()` of \f$D^2\f$ equals \f$G_{22}\f$ while \f$D^4\f$ on a cubic basis throws. See `docs/numerics.md`.
+The tests also verify continuity of orders \f$0, \dots, d - \mu\f$ across \f$x_{\mathrm{lo}}\f$, positive definiteness of \f$G_{00}\f$, and expansions against rows. They further check that `integral_row()` and `integral_column()` agree bit for bit, that adding one period to \f$x\f$ adds \f$c_j\f$ to every column, and that `operator_penalty_matrix()` of \f$D^2\f$ equals \f$G_{22}\f$ while \f$D^4\f$ on a cubic basis throws. See `docs/numerics.md`.
 
 ## Speed
 

@@ -29,13 +29,13 @@ For a univariate basis of dimension \f$K\f$ with basis functions \f$\psi(x) = (\
 \f[
 \int_{\mathrm{lower}}^{\mathrm{upper}} (L f(x))^2 \, \mathrm{d}x = \beta^\top S \beta, \quad S = \sum_{k=0}^m \sum_{l=0}^m c_k c_l G_{kl},
 \f]
-where \f$G_{kl} = \int_{\mathrm{lower}}^{\mathrm{upper}} \psi^{(k)}(x) (\psi^{(l)}(x))^\top \, \mathrm{d}x\f$ is the cross Gram matrix of derivative orders \f$k\f$ and \f$l\f$ (`basis.cross_gram(k, l, out)`). The function \ref laplace::basis::operator_penalty "operator_penalty()" writes the symmetric positive semidefinite \f$K \times K\f$ matrix \f$S\f$ into `out` in column-major order (`out[i + j * K]`).
+where \f$G_{kl} = \int_{\mathrm{lower}}^{\mathrm{upper}} \psi^{(k)}(x) (\psi^{(l)}(x))^\top \, \mathrm{d}x\f$ is the cross Gram matrix of derivative orders \f$k\f$ and \f$l\f$ (`basis.cross_gram(k, l, out)`). The function \ref laplace::basis::operator_penalty_matrix "operator_penalty_matrix()" writes the symmetric positive semidefinite \f$K \times K\f$ matrix \f$S\f$ into `out` in column-major order (`out[i + j * K]`).
 
 ## Domain and operating limits
 
 Every operator must have order \f$m \ge 1\f$ and finite roots with `im >= 0.0` and `multiplicity >= 1`. Constructors throw `std::invalid_argument` when these conditions fail, when `period <= 0.0` or `period` is non-finite, when `harmonics < 1`, or when the weight vector `w` is empty or has non-finite entries. If all weights in `w` are zero, \ref laplace::basis::differential_operator_from_weights "differential_operator_from_weights()" returns \f$D^m\f$.
 
-The function \ref laplace::basis::operator_penalty "operator_penalty()" requires \f$m \le 6\f$, because cross Gram matrices in Laplace are implemented up to order 6. For polynomial bases (\ref basis_bspline "B-spline" and \ref basis_legendre "Legendre"), \f$m\f$ cannot exceed the polynomial degree \f$d\f$ of the basis, because \f$D^m \psi(x) = 0\f$ for \f$m > d\f$. Violating either limit throws `std::invalid_argument`.
+The function \ref laplace::basis::operator_penalty_matrix "operator_penalty_matrix()" requires \f$m \le 6\f$, because cross Gram matrices in Laplace are implemented up to order 6. For polynomial bases (\ref basis_bspline "B-spline" and \ref basis_legendre "Legendre"), \f$m\f$ cannot exceed the polynomial degree \f$d\f$ of the basis, because \f$D^m \psi(x) = 0\f$ for \f$m > d\f$. Violating either limit throws `std::invalid_argument`.
 
 ## Constructors and penalty evaluation
 
@@ -48,7 +48,7 @@ Four constructors build operators from exact root specifications:
 
 A fifth constructor, \ref laplace::basis::differential_operator_from_weights "differential_operator_from_weights(w)", constructs \f$L = D^m + w_{m-1} D^{m-1} + \dots + w_0\f$ from \f$w = (w_0, \dots, w_{m-1})\f$. Every root of \f$P(r)\f$ lies within Fujiwara's bound (1916) \f$s = 2 \max_{j=0, \dots, m-1} |w_j|^{1/(m - j)}\f$. For nonzero weights, Aberth-Ehrlich iteration (Aberth, 1973) finds the \f$m\f$ roots simultaneously in complex arithmetic. Approximations closer than \f$10^{-4} s\f$ are grouped into a single root of that multiplicity at their arithmetic mean, and real or imaginary parts of a grouped root with magnitude at most \f$10^{-4} s\f$ are zeroed. Reconstructed coefficients are verified against `w`, throwing `std::invalid_argument` if conjugate pairing fails or coefficients deviate. Because this grouping merges distinct roots closer than \f$10^{-4} s\f$, operators with nearly coincident distinct roots must be constructed with \ref laplace::basis::differential_operator_from_roots "differential_operator_from_roots()".
 
-To form \f$S\f$, \ref laplace::basis::operator_penalty "operator_penalty()" sums \f$c_k c_l G_{kl}\f$ via `basis.cross_gram(k, l, ...)` for every pair with \f$c_k c_l \ne 0\f$. Because \ref basis_bspline "B-spline", \ref basis_fourier "Fourier", and \ref basis_legendre "Legendre" bases compute cross Gram matrices by exact quadrature or closed-form integration to floating-point precision, `operator_penalty()` accumulates those cross Gram values directly.
+To form \f$S\f$, \ref laplace::basis::operator_penalty_matrix "operator_penalty_matrix()" sums \f$c_k c_l G_{kl}\f$ via `basis.cross_gram(k, l, ...)` for every pair with \f$c_k c_l \ne 0\f$. Because \ref basis_bspline "B-spline", \ref basis_fourier "Fourier", and \ref basis_legendre "Legendre" bases compute cross Gram matrices by exact quadrature or closed-form integration to floating-point precision, `operator_penalty_matrix()` accumulates those cross Gram values directly.
 
 ## Accuracy
 
@@ -81,7 +81,7 @@ const auto op = laplace::basis::harmonic_operator(period, 1);
 // Dense K x K penalty matrix in column-major order
 constexpr int max_dim = 13;
 double S[max_dim * max_dim];
-laplace::basis::operator_penalty(basis, op, S);
+laplace::basis::operator_penalty_matrix(basis, op, S);
 \endcode
 
 ## Function reference
@@ -103,7 +103,7 @@ All classes, types, and functions are defined in namespace `laplace::basis`:
 - \ref laplace::basis::harmonic_operator "harmonic_operator()" — Harmonic operator \f$D \prod_{h=1}^H (D^2 + (h \nu)^2)\f$
 - \ref laplace::basis::differential_operator_from_roots "differential_operator_from_roots()" — Constructs an operator from root descriptors
 - \ref laplace::basis::differential_operator_from_weights "differential_operator_from_weights()" — Constructs an operator from polynomial weights via Aberth-Ehrlich root finding
-- \ref laplace::basis::operator_penalty "operator_penalty()" — Evaluates the \f$K \times K\f$ column-major penalty matrix \f$S\f$ on a univariate basis
+- \ref laplace::basis::operator_penalty_matrix "operator_penalty_matrix()" — Evaluates the \f$K \times K\f$ column-major penalty matrix \f$S\f$ on a univariate basis
 
 ## References
 

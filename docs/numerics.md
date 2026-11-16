@@ -4554,7 +4554,7 @@ t near the ends; CUDA differs from gcc through the contraction into FMA.
 L = D^m + c_(m-1) D^(m-1) + ... + c_0 stored by the roots of its
 characteristic polynomial with their multiplicities (merged exactly in
 products), the coefficients by multiplying the factors, the null space
-x'^i e^(a x') cos/sin(b x'), and `operator_penalty`,
+x'^i e^(a x') cos/sin(b x'), and `operator_penalty_matrix`,
 S = sum_(k,l) c_k c_l G_kl from the basis's cross Gram matrices, so that the
 penalty int (L f)^2 is exact on every basis. `differential_operator_from_weights`
 finds the roots of a polynomial given by its coefficients by the
@@ -4576,7 +4576,7 @@ roots.
 
 **Chosen.** As written.
 
-**Details of the root finding and of the tests.** The Aberth-Ehrlich iteration finds the m roots simultaneously in complex arithmetic, initialized on a circle of radius s and updated by simultaneous Newton steps with a repulsion between the approximations, dz_k = (P(z_k)/P'(z_k)) / (1 - (P(z_k)/P'(z_k)) sum_(j != k) 1/(z_k - z_j)). It stops when the maximum step satisfies max_k |dz_k| <= 4 eps s (eps = 2.22e-16) or after 500 sweeps. A multiple root of multiplicity mu is conditioned to eps^(1/mu) s only (about 6e-6 s for mu = 3), which requires a grouping tolerance such as 1e-4 s to recover the true multiplicity. The coefficients c_j reconstructed from the grouped roots are checked against w_j: `differential_operator_from_weights` throws `std::invalid_argument` if the order does not match m (conjugate roots could not be paired) or if, for any j in {0, ..., m - 1}, |c_j - w_j| > 1e-6 max(max_k |w_k|, s^(m-j)). In the tests, D^m with m in {1, 2, 3} on a uniform clamped cubic B-spline basis gives `operator_penalty` equal bit for bit to `basis.cross_gram(m, m, ...)` (S[i] == G[i]). On a full Fourier period [0, omega] with omega = 366.0, nu = 2 pi/omega and 6 harmonics (K = 13), the penalty matrix of the harmonic operator L = D prod_(h=1..H) (D^2 + (h nu)^2), H in {1, 2}, is diagonal; for a column i > 0 of harmonic j = floor((i + 1)/2) the entry is |P(i j nu)|^2 omega/2 = (j nu)^2 prod_(h=1..H) ((h nu)^2 - (j nu)^2)^2 omega/2, and the computed matrix agrees with it within 64 eps max_(a,b) |S_ab|. On a Legendre basis of degree 8, D^2 applied to the polynomials of degree < 2 (columns 0 and 1) gives entries bounded by |S_ij| <= 1e-13 max |S|. On a clamped cubic B-spline basis, D^3 applied to the quadratics written by Marsden's identity gives quadratic penalties below 1e-13 of a random vector's penalty for the constant and linear functions, and below 1e-12 for the quadratic functions. For the root finding from weights: a D + D^2 with a = log(2)/3 has root 0 exact, root -a within 1e-14 and coefficients reproduced within 1e-12 max(|w|, 1); D^2 (D^2 + nu^2) = D^4 + nu^2 D^2 has the double root 0 exact and the complex pair +-i nu with real part zero and imaginary part within relative error 1e-10; (D + 1)^3 has the triple root -1 grouped with real part within relative error 1e-5; (D + 0.5)^2 + 4 = D^2 + D + 4.25 has the complex pair -0.5 +- 2i within relative error 1e-13.
+**Details of the root finding and of the tests.** The Aberth-Ehrlich iteration finds the m roots simultaneously in complex arithmetic, initialized on a circle of radius s and updated by simultaneous Newton steps with a repulsion between the approximations, dz_k = (P(z_k)/P'(z_k)) / (1 - (P(z_k)/P'(z_k)) sum_(j != k) 1/(z_k - z_j)). It stops when the maximum step satisfies max_k |dz_k| <= 4 eps s (eps = 2.22e-16) or after 500 sweeps. A multiple root of multiplicity mu is conditioned to eps^(1/mu) s only (about 6e-6 s for mu = 3), which requires a grouping tolerance such as 1e-4 s to recover the true multiplicity. The coefficients c_j reconstructed from the grouped roots are checked against w_j: `differential_operator_from_weights` throws `std::invalid_argument` if the order does not match m (conjugate roots could not be paired) or if, for any j in {0, ..., m - 1}, |c_j - w_j| > 1e-6 max(max_k |w_k|, s^(m-j)). In the tests, D^m with m in {1, 2, 3} on a uniform clamped cubic B-spline basis gives `operator_penalty_matrix` equal bit for bit to `basis.cross_gram(m, m, ...)` (S[i] == G[i]). On a full Fourier period [0, omega] with omega = 366.0, nu = 2 pi/omega and 6 harmonics (K = 13), the penalty matrix of the harmonic operator L = D prod_(h=1..H) (D^2 + (h nu)^2), H in {1, 2}, is diagonal; for a column i > 0 of harmonic j = floor((i + 1)/2) the entry is |P(i j nu)|^2 omega/2 = (j nu)^2 prod_(h=1..H) ((h nu)^2 - (j nu)^2)^2 omega/2, and the computed matrix agrees with it within 64 eps max_(a,b) |S_ab|. On a Legendre basis of degree 8, D^2 applied to the polynomials of degree < 2 (columns 0 and 1) gives entries bounded by |S_ij| <= 1e-13 max |S|. On a clamped cubic B-spline basis, D^3 applied to the quadratics written by Marsden's identity gives quadratic penalties below 1e-13 of a random vector's penalty for the constant and linear functions, and below 1e-12 for the quadratic functions. For the root finding from weights: a D + D^2 with a = log(2)/3 has root 0 exact, root -a within 1e-14 and coefficients reproduced within 1e-12 max(|w|, 1); D^2 (D^2 + nu^2) = D^4 + nu^2 D^2 has the double root 0 exact and the complex pair +-i nu with real part zero and imaginary part within relative error 1e-10; (D + 1)^3 has the triple root -1 grouped with real part within relative error 1e-5; (D + 0.5)^2 + 4 = D^2 + D + 4.25 has the complex pair -0.5 +- 2i within relative error 1e-13.
 
 ## Dense linear algebra: laplace::dense
 
@@ -5474,7 +5474,7 @@ largest entry); worst over gcc/OpenMP and CUDA (RTX 4070 SUPER):
 The test also checks: derivatives 0..d - mu continuous across lower, G_00
 positive definite, `integral_row` bit for bit equal to `integral_column`,
 expansions against the rows, adding one period adds the totals, NaN and Inf
-give NaN, `operator_penalty` of D^2 equals G_22 and D^4 on a cubic throws.
+give NaN, `operator_penalty_matrix` of D^2 equals G_22 and D^4 on a cubic throws.
 Defect found and repaired in `bspline.hpp`: the integral anchor at lower ran
 BSPLVB on interval d, empty when lower is a multiple knot with knots below
 it (0/0, NaN integrals, reachable through bspline `from_knots` too); it now
@@ -5523,12 +5523,12 @@ after; of a cyclic margin, its column integrals; of Fourier and Legendre,
 margin applies its own rule; a NaN x_j or a margin with the nan rule outside
 its domain makes the whole row NaN. Host functions: `cross_gram(k, l)` =
 kron_j G_j(k_j, l_j), dense K x K column-major; `kronecker_product` of dense
-column-major factors; `tensor_operator_penalty(basis, terms)`, the penalty
+column-major factors; `tensor_operator_penalty_matrix(basis, terms)`, the penalty
 int over the box of (L f)^2 for L = sum_a c_a d^(k^(a)), equal to
 sum_(a,b) c_a c_b G_(k^(a) k^(b)) (a sum of squares of several operators,
 such as thin plate, is a sum of calls; an order above a polynomial margin's
-degree throws); `marginal_operator_penalty(basis, j, op)` =
-G_0 kron ... kron S_j kron ... kron G_0, S_j the `operator_penalty` of op on
+degree throws); `marginal_operator_penalty_matrix(basis, j, op)` =
+G_0 kron ... kron S_j kron ... kron G_0, S_j the `operator_penalty_matrix` of op on
 margin j; `kronecker_transform(T_1, ..., T_D)` (constraints, T' G_0 T = I and
 Demmler-Reinsch carry over factor by factor, the result declares no
 property; T is dense K x q); `compose_basis_transforms(a, b)` = T_a T_b;
@@ -5564,7 +5564,7 @@ carry the cyclic margin's own error. Bounds are 1.5 times the worst of the two
 builds. The test also checks: each row equal bit for bit to the product of
 the margins' rows, also outside the domain; NaN propagation and the nan rule;
 `expansion_partial` against the dot product with the scattered row (8 eps);
-`marginal_operator_penalty` with D^2 equal to G_(2,0)(2,0) and G_(0,2)(0,2) bit
+`marginal_operator_penalty_matrix` with D^2 equal to G_(2,0)(2,0) and G_(0,2)(0,2) bit
 for bit; the Kronecker product of two Demmler-Reinsch transforms
 (T' G T - I 7 eps, bound 256; off-diagonals of T' S_j T 2.2 eps of the
 largest, bound 64); a zero-integral constraint on the product composed after
