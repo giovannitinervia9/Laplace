@@ -7830,10 +7830,10 @@ point, worst of the gcc and the CUDA build; references by mpmath in
 |---|---|---|---|---|---|---|
 | t1 log f | 3.68 | 2.35 | 3.66 | 5.1 | 20.1 | 107 |
 | t2 log f | 5.81 | 6.87 | 9.65 | 103 | 9.1 | 31.2 |
-| t1 log F | 131 | 243 | 151 | 336 | 328 | 6450 |
-| t1 log(1 - F) | 131 | 243 | 151 | 336 | 328 | 805 |
-| t2 log F, nu >= 2.5 | 8.5 | 9.2 | 11.7 | 18.4 | 101 | 262 |
-| t2 log(1 - F), nu >= 2.5 | 8.5 | 9.2 | 38.8 | 24.4 | 101 | 262 |
+| t1 log F | 1.2e3 | 962 | 786 | 1.23e3 | 977 | 6450 |
+| t1 log(1 - F) | 1.2e3 | 962 | 786 | 1.23e3 | 977 | 805 |
+| t2 log F, nu >= 2.5 | 903 | 725 | 580 | 925 | 733 | 582 |
+| t2 log(1 - F), nu >= 2.5 | 903 | 725 | 580 | 925 | 733 | 582 |
 | t2 log F and log(1 - F), nu = 2 + 1e-6 | 17.9 | 1.5e5 | 5.9e6 | 1.6e7 | 4.6e7 | 1.3e8 |
 
 The two rows of the density are what the closed form of the far tail bought.
@@ -7846,9 +7846,13 @@ chain mixes components whose last bits the closed form has moved. One component
 1.9 times worse against orders five and six 20 times better is the trade that
 was taken. The worst points of the density are now the components with at least
 one nu-derivative, which the closed form does not touch: 107 ulp at order six
-at z = 1e8, nu = 2. The worst argument of t1's log F at order
-six, z = 31.6 with nu = 3.5; of t1's log F and log(1 - F) at the orders two,
-four and five, |z| = 1e8 with nu = 0.01. The density of t2 at nu = 2 + 1e-6
+at z = 1e8, nu = 2. The worst arguments of the cumulative
+functions are |z| = 30 with nu = 1e4 at the orders one, two, four and five for
+both families, and nu = 1e8 at the order three of t1; the order six of t1's
+log F at z = 31.6 with nu = 3.5, and of its log(1 - F) at |z| = 4 with nu = 2,
+while t2 stays at |z| = 30, nu = 1e4 at every order. That point, which carries
+five of the six orders of both families, is the one the conditioning
+measurement below is made at. The density of t2 at nu = 2 + 1e-6
 stays within 39 ulp, so the chain through r(nu) holds there; its log F keeps
 about eight digits at order six. The information and its orders one to four
 measure 161, 56, 51, 35 and 17 ulp for t1 and 321, 115, 100, 54 and 35 for t2,
@@ -7897,6 +7901,19 @@ there has to be settled before either is written to the file. The z = 0 points
 therefore still have no reference, 48 (point, side) pairs in all, of which the
 far ones (|z| of 1e8 with nu = 100, and the like) can never have one, their
 log(1 - F) being of the order of 1e-2000 and below the smallest normal double.
+
+Those new pairs are the first measurement of log F at nu >= 1e4 beyond
+|z| <= 4, and what they show is the conditioning of the point, not a loss of
+the route. At z = 30, nu = 1e4, where the library reads 580 to 1230 ulp of the
+order's scale, the components themselves move by that much when the inputs
+move by one ulp of a double: recomputed in mpmath at 280 bits with one ulp
+added to sigma, the orders one to six shift by 1.51e3, 1.21e3, 970, 1.54e3,
+1.23e3 and 968 ulp of their own order's scale, and with one ulp added to y by
+809, 649, 519, 828, 657 and 520; one ulp of mu or of nu moves them by 16 to 28.
+The library's error is therefore of the size of the uncertainty the arguments
+already carry, so no route in double can do better there and the bound is the
+problem's. The same measurement is the reason the bound was raised rather than
+recorded as an open choice.
 
 **Chosen.** As above, with the bounds of `tests/distrib/test_student_t.cpp`
 (18 cases, 78391 assertions) at 1.5 times the worst of the two builds. The

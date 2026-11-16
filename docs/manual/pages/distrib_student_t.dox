@@ -48,6 +48,40 @@
  * shape derivatives in \f$(z, \nu)\f$ with the \f$c(\nu)\f$ terms through the shared
  * location-scale derivative assembly, and `logpdf_dy_dk` uses \f$\partial/\partial y = -\partial/\partial\mu\f$.
  *
+ * For the \f$(\mu, \sigma)\f$ components of `logpdf_dk` that carry no \f$\nu\f$-derivative, the
+ * \f$z\f$-polynomials of the location-scale assembly grow like \f$z^{K-1}\f$ in the far tail
+ * while the component they build is \f$O(1)\f$ or smaller; at \f$|z| = 10^8\f$, order \f$6\f$
+ * loses three digits of the tensor's largest component when formed from the \f$(z, \nu)\f$ table.
+ * When \f$|u| \ge w\f$ (equivalently \f$|z| \ge \sqrt{\nu}\f$), with \f$u = y - \mu\f$ and
+ * \f$w = \sigma\sqrt{\nu}\f$, writing \f$\log(1 + z^2/\nu) = \log(u^2 + w^2) - \log(\nu\sigma^2)\f$
+ * and \f$\log(u^2 + w^2) = 2\operatorname{Re}\log(u + i w)\f$ rewrites the log-density as
+ * \f[
+ * \ell(\mu, \sigma, \nu; y) = c(\nu) + \frac{\nu + 1}{2}\log\nu + \nu\log\sigma - (\nu + 1)\operatorname{Re}\log(u + i w).
+ * \f]
+ * Since \f$\partial/\partial\mu = -\partial/\partial u\f$,
+ * \f$\partial/\partial\sigma = \sqrt{\nu}\,\partial/\partial w\f$, and
+ * \f$\partial^{a+b}/(\partial u^a\,\partial w^b)\log(u + i w) = i^b (-1)^{K-1} (K - 1)!\,(u + i w)^{-K}\f$
+ * for \f$K = a + b \ge 1\f$, the components of the block are
+ * \f[
+ * \frac{\partial^K \ell}{\partial\mu^a\,\partial\sigma^b}
+ * = -(\nu + 1)(-1)^a \nu^{b/2} (-1)^{K-1} (K - 1)!\,\operatorname{Re}\!\left[i^b (u + i w)^{-K}\right]
+ *   + [a = 0]\,\nu(-1)^{b-1}(b - 1)!\,\sigma^{-b},
+ * \f]
+ * where \f$[a = 0]\f$ equals \f$1\f$ for \f$a = 0\f$ and \f$0\f$ otherwise, and the last term is
+ * all that \f$\nu\log\sigma\f$ contributes. One complex power per order is taken from the
+ * reciprocal of \f$u + i w\f$ by repeated multiplication and scaled by \f$\max(|u|, w)\f$ so
+ * that neither \f$u^2 + w^2\f$ nor the power overflows; no quantity on the right is a
+ * difference of larger ones.
+ *
+ * The split is on \f$|u| \ge w\f$ rather than on \f$|z|\f$ alone or on \f$\nu\f$: below it,
+ * \f$\operatorname{Re}[i^b (u + i w)^{-K}]\f$ is a small difference and \f$\nu\log\sigma\f$ is a
+ * large term against a small result, reaching \f$10^{12}\f$ ulp at \f$\nu = 10^{12}\f$. Across
+ * the reference grid, for \f$|z|/\sqrt{\nu} < 1\f$ the table route stays at most \f$33\f$ ulp
+ * at order \f$6\f$ while the closed form reaches \f$1.5 \times 10^{12}\f$; for
+ * \f$|z|/\sqrt{\nu} \ge 1\f$ the table route reaches \f$2.4 \times 10^3\f$ ulp while the closed
+ * form stays at or below \f$4.6\f$ ulp. Script `tools/reference/distrib_student_t.py` checks the
+ * rewrite and the closed component against SymPy (Meurer and others, 2017) at two points.
+ *
  * The expected Fisher information matrix in \f$(\mu, \sigma, \nu)\f$ is block-diagonal with
  * entries \f$I_{\mu\mu} = (\nu + 1)/((\nu + 3)\sigma^2)\f$,
  * \f$I_{\sigma\sigma} = 2\nu/((\nu + 3)\sigma^2)\f$,
@@ -72,14 +106,26 @@
  *
  * | Method | Worst scaled ulp (orders \f$1\f$..\f$6\f$ or \f$0\f$..\f$4\f$) | Test bound |
  * | --- | --- | --- |
- * | `logpdf_dk` | \f$13.5, 31.7, 100, 260, 940, 2400\f$ | \f$20, 48, 150, 390, 1410, 3600\f$ |
- * | `log_cdf_dk` | \f$131, 243, 151, 336, 328, 6450\f$ | \f$197, 365, 227, 504, 492, 9700\f$ |
- * | `log_ccdf_dk` | \f$131, 243, 151, 336, 328, 805\f$ | \f$197, 365, 227, 504, 492, 1210\f$ |
+ * | `logpdf_dk` | \f$3.68, 2.35, 3.66, 5.1, 20.1, 107\f$ | \f$6, 4, 6, 8, 31, 161\f$ |
+ * | `log_cdf_dk` | \f$1.2 \times 10^3, 962, 786, 1.23 \times 10^3, 977, 6450\f$ | \f$1800, 1450, 1180, 1850, 1470, 9700\f$ |
+ * | `log_ccdf_dk` | \f$1.2 \times 10^3, 962, 786, 1.23 \times 10^3, 977, 805\f$ | \f$1800, 1450, 1180, 1850, 1470, 1210\f$ |
  * | `expected_info_dk` | \f$161, 56, 51, 35, 17\f$ | \f$240, 85, 76, 53, 26\f$ |
  *
  * Here Fisher information errors are measured in ulp of each component, peaking at \f$I_{\nu\nu}\f$
- * for \f$\nu = 17.9\f$; density errors peak at \f$z = 10^8\f$, and `log_cdf_dk` order \f$6\f$
- * peaks at \f$z = 31.6\f$, \f$\nu = 3.5\f$. At \f$\nu = 1\f$ the family matches `cauchy_distrib`
+ * for \f$\nu = 17.9\f$. The worst density errors sit on the components with at least one
+ * \f$\nu\f$-derivative, which the far-tail closed form does not cover, and peak at \f$107\f$ ulp
+ * at order \f$6\f$ at \f$z = 10^8\f$, \f$\nu = 2\f$. For
+ * `log_cdf_dk` and `log_ccdf_dk`, orders \f$1\f$, \f$2\f$, \f$4\f$ and \f$5\f$ peak at
+ * \f$|z| = 30\f$, \f$\nu = 10^4\f$ and order \f$3\f$ at \f$|z| = 30\f$, \f$\nu = 10^8\f$, while
+ * order \f$6\f$ peaks at \f$|z| = 31.6\f$, \f$\nu = 3.5\f$ for `log_cdf_dk` (\f$6450\f$ ulp) and
+ * at \f$|z| = 4\f$, \f$\nu = 2\f$ for `log_ccdf_dk` (\f$805\f$ ulp). At \f$z = 30\f$,
+ * \f$\nu = 10^4\f$, the error is the size
+ * of the uncertainty the arguments carry: recomputed in `mpmath` at \f$280\f$ bits with one ulp of
+ * a `double` added to one argument at a time, adding one ulp to \f$\sigma\f$ shifts orders
+ * \f$1\f$ to \f$6\f$ by \f$1.51 \times 10^3, 1.21 \times 10^3, 970, 1.54 \times 10^3, 1.23 \times 10^3\f$,
+ * and \f$968\f$ ulp of each order's scale, adding one ulp to \f$y\f$ shifts them by
+ * \f$809, 649, 519, 828, 657\f$, and \f$520\f$, and adding one ulp to \f$\mu\f$ or \f$\nu\f$
+ * moves them by \f$16\f$ to \f$28\f$. At \f$\nu = 1\f$ the family matches `cauchy_distrib`
  * within \f$9 \times 10^{-14}\f$ on density and \f$3.2 \times 10^{-12}\f$ on `log_cdf` for
  * \f$|z| < 20\f$, while at \f$\nu = 10^8\f$ and \f$10^{12}\f$ the differences from
  * `gaussian1_distrib` are \f$0.5\f$, \f$0.25\f$ and \f$0.25\f$ of the \f$O(1/\nu)\f$ scale of the
@@ -127,8 +173,12 @@
  *
  * Value methods (`logpdf()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`) delegate to
  * `as_t1()`, the equivalent `student_t1_distrib` at \f$(\mu, s, \nu)\f$. Derivative tensors up
- * to order \f$6\f$ (`logpdf_dk()` and `log_cdf_tail_dk()`) share a pushforward from
- * \f$(\mu, s, \nu)\f$ to \f$(\mu, \sigma, \nu)\f$. Writing \f$r(\nu) = \sqrt{1 - 2/\nu}\f$ so
+ * to order \f$6\f$ (`logpdf_dk()` and `log_cdf_tail_dk()`) compose the tensors of
+ * `student_t1_distrib` through \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()"
+ * (\ref chain_pair "chain_pair") from \f$(\mu, s, \nu)\f$ to \f$(\mu, \sigma, \nu)\f$;
+ * `student_t2_distrib` does not implement the far-tail \f$(\mu, \sigma)\f$ closed form itself,
+ * and instead inherits it from `student_t1_distrib` (see \ref distrib_student_t1 "student_t1").
+ * Writing \f$r(\nu) = \sqrt{1 - 2/\nu}\f$ so
  * \f$s = \sigma r(\nu)\f$, linearity in \f$\sigma\f$ reduces the chain rule to one-dimensional
  * derivatives \f$r^{(q)}\f$ computed recursively from \f$r^2 = 1 - 2/\nu\f$:
  * \f[
@@ -161,13 +211,21 @@
  *
  * | Method | Worst scaled ulp (orders \f$1\f$..\f$6\f$ or \f$0\f$..\f$4\f$) | Test bound |
  * | --- | --- | --- |
- * | `logpdf_dk` | \f$5.8, 9.3, 12.8, 55, 178, 632\f$ | \f$9, 14, 20, 83, 267, 950\f$ |
- * | `log_cdf_dk` (\f$\nu \ge 2.001\f$) | \f$8.5, 9.2, 11.7, 18.4, 101, 262\f$ | \f$13, 14, 18, 28, 152, 393\f$ |
- * | `log_ccdf_dk` (\f$\nu \ge 2.001\f$) | \f$8.5, 9.2, 38.8, 24.4, 101, 262\f$ | \f$13, 14, 59, 37, 152, 393\f$ |
+ * | `logpdf_dk` | \f$5.81, 6.87, 9.65, 103, 9.1, 31.2\f$ | \f$9, 11, 15, 155, 14, 47\f$ |
+ * | `log_cdf_dk` (\f$\nu \ge 2.001\f$) | \f$903, 725, 580, 925, 733, 582\f$ | \f$1360, 1090, 870, 1390, 1100, 880\f$ |
+ * | `log_ccdf_dk` (\f$\nu \ge 2.001\f$) | \f$903, 725, 580, 925, 733, 582\f$ | \f$1360, 1090, 870, 1390, 1100, 880\f$ |
  * | `log_cdf_dk` (\f$\nu = 2 + 10^{-6}\f$) | \f$17.9, 1.5 \times 10^5, 5.9 \times 10^6, 1.6 \times 10^7, 4.6 \times 10^7, 1.3 \times 10^8\f$ | \f$27, 2.2 \times 10^5, 8.8 \times 10^6, 2.4 \times 10^7, 6.9 \times 10^7, 1.95 \times 10^8\f$ |
  * | `expected_info_dk` | \f$321, 115, 100, 54, 35\f$ | \f$480, 173, 150, 82, 52\f$ |
  *
- * When \f$\nu \to 2^+\f$ (\f$\nu < 2.001\f$), the derivatives \f$r^{(q)}\f$ grow rapidly and
+ * The \f$103\f$ ulp of `logpdf_dk` at order \f$4\f$ sit on a component with four
+ * \f$\nu\f$-derivatives at \f$z = 4\f$, \f$\nu = 10\f$, where
+ * \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()" combines the tensors of
+ * `student_t1_distrib` with the derivatives of \f$r(\nu)\f$; that component is the least accurate
+ * of the family's density tensors.
+ * For `log_cdf_dk` and `log_ccdf_dk` with
+ * \f$\nu \ge 2.001\f$, orders \f$1\f$ to \f$5\f$ peak at \f$z = 30\f$, \f$\nu = 10^4\f$, where the
+ * error is the size of the uncertainty the arguments carry (see \ref distrib_student_t1
+ * "student_t1"). When \f$\nu \to 2^+\f$ (\f$\nu < 2.001\f$), the derivatives \f$r^{(q)}\f$ grow rapidly and
  * \f$z = (y - \mu)/s\f$ becomes huge for \f$y \ne \mu\f$; at \f$\nu = 2 + 10^{-6}\f$, `logpdf_dk`
  * stays within \f$39\f$ ulp while order-\f$6\f$ `log_cdf_dk` retains about \f$8\f$ decimal digits
  * due to the intrinsic conditioning of the map \f$\nu \mapsto s\f$. Fisher information errors
