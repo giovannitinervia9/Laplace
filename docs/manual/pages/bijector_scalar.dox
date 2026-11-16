@@ -1,63 +1,63 @@
 /**
 \defgroup bijector_scalar Scalar bijectors
 
-The scalar bijector module (`#include <laplace/bijector/scalar.hpp>`) provides twenty one-dimensional invertible maps (twelve parameter-free and eight with parameters) together with their inverses, log-Jacobians, derivatives in the argument up to order 6, parameter partial derivatives up to total order 6, non-smooth points, and distances to domain bounds. A parameter-free map is constructed as `scalar_bijector{scalar_bijector_map::NAME}`, a parameterized map is constructed through static factories such as `scalar_bijector::affine(location, scale)`, and every member function carries `LAPLACE_HD` for host and CUDA device execution. Over orders 0 to 6 on both gcc and CUDA, all quantities are accurate within 11 ulpC across parameter-free maps and within 50 ulpC across parameterized maps (and within 8 ulpC outside higher-order Box-Cox, Yeo-Johnson, and softplus peaks).
+The scalar bijector module (`#include <laplace/bijector/scalar.hpp>`) provides twenty monotone one-dimensional maps with inverses, log-Jacobians, derivatives and parameter partials to order 6, non-smooth points, and bound distances. Parameter-free maps use `scalar_bijector{scalar_bijector_map::NAME}`, parameterized maps use static factories on `scalar_bijector`, and every member carries `LAPLACE_HD` for host and CUDA execution. Over orders 0 to 6 on gcc and CUDA, parameter-free maps stay within 11 ulpC and parameterized maps within 50 ulpC.
 
 ## Definitions
 
 ### Mathematical convention and inversion
 
-A bijector defines a strictly monotone map \f$g : V \to U\f$ (the forward map) and its inverse \f$h = g^{-1} : U \to V\f$, together with the forward log-Jacobian \f$\log|g'(v)|\f$ and inverse log-Jacobian \f$\log|h'(u)|\f$. Constructing `scalar_bijector{map, true}` (or inverting a factory-constructed instance with `inverted = true`) swaps the forward and inverse roles: `forward` and its derivatives and log-Jacobians evaluate \f$h\f$, `inverse` evaluates \f$g\f$, the domain of `forward` becomes \f$U\f$, and `is_decreasing()` is unchanged.
+A bijector defines a strictly monotone forward map \f$g : V \to U\f$, inverse \f$h = g^{-1} : U \to V\f$, and log-Jacobians \f$\log|g'(v)|\f$ and \f$\log|h'(u)|\f$. Passing `true` (`scalar_bijector{map, true}` or factory `inverted = true`) swaps forward and inverse: `forward` evaluates \f$h\f$, `inverse` evaluates \f$g\f$, the forward domain becomes \f$U\f$, and `is_decreasing()` is unchanged.
 
 ### Parameter-free maps
 
-Here \f$\Phi\f$ denotes the standard normal cumulative distribution function and \f$\phi(z) = \frac{1}{\sqrt{2\pi}} e^{-z^2/2}\f$ its density.
+Here \f$\Phi\f$ is the standard normal cumulative distribution function and \f$\phi(z) = \frac{1}{\sqrt{2\pi}} e^{-z^2/2}\f$ its density. All twelve parameter-free maps are strictly increasing except `inverse` and `inverse_sq`, which are strictly decreasing.
 
-| Name in `scalar_bijector_map` | Forward map \f$g(v)\f$ | Inverse map \f$h(u)\f$ | Domain \f$V\f$ | Image \f$U\f$ | Monotonicity |
-|---|---|---|---|---|---|
-| `identity` | \f$v\f$ | \f$u\f$ | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
-| `log` | \f$\log v\f$ | \f$e^u\f$ | \f$(0, \infty)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
-| `logit` | \f$\log(v / (1 - v))\f$ | \f$1 / (1 + e^{-u})\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
-| `probit` | \f$\Phi^{-1}(v)\f$ | \f$\Phi(u)\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
-| `cauchit` | \f$\tan(\pi(v - 1/2))\f$ | \f$\frac{1}{\pi}\mathrm{atan2}(1, -u)\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
-| `cloglog` | \f$\log(-\log(1 - v))\f$ | \f$1 - \exp(-e^u)\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
-| `loglog` | \f$-\log(-\log v)\f$ | \f$\exp(-e^{-u})\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
-| `inverse` | \f$1 / v\f$ | \f$1 / u\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ | Decreasing |
-| `inverse_sq` | \f$1 / v^2\f$ | \f$1 / \sqrt{u}\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ | Decreasing |
-| `sqrt` | \f$\sqrt{v}\f$ | \f$u^2\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ | Increasing |
-| `atanh` | \f$\frac{1}{2}\log((1 + v)/(1 - v))\f$ | \f$\tanh u\f$ | \f$(-1, 1)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
-| `asinh` | \f$\mathrm{asinh}(v)\f$ | \f$\sinh u\f$ | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ | Increasing |
+| Map | \f$g(v)\f$ | \f$h(u)\f$ | \f$V\f$ | \f$U\f$ |
+|---|---|---|---|---|
+| `identity` | \f$v\f$ | \f$u\f$ | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ |
+| `log` | \f$\log v\f$ | \f$e^u\f$ | \f$(0, \infty)\f$ | \f$(-\infty, \infty)\f$ |
+| `logit` | \f$\log(v / (1 - v))\f$ | \f$1 / (1 + e^{-u})\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ |
+| `probit` | \f$\Phi^{-1}(v)\f$ | \f$\Phi(u)\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ |
+| `cauchit` | \f$\tan(\pi(v - 1/2))\f$ | \f$\frac{1}{\pi}\mathrm{atan2}(1, -u)\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ |
+| `cloglog` | \f$\log(-\log(1 - v))\f$ | \f$1 - \exp(-e^u)\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ |
+| `loglog` | \f$-\log(-\log v)\f$ | \f$\exp(-e^{-u})\f$ | \f$(0, 1)\f$ | \f$(-\infty, \infty)\f$ |
+| `inverse` | \f$1 / v\f$ | \f$1 / u\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ |
+| `inverse_sq` | \f$1 / v^2\f$ | \f$1 / \sqrt{u}\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ |
+| `sqrt` | \f$\sqrt{v}\f$ | \f$u^2\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ |
+| `atanh` | \f$\frac{1}{2}\log((1 + v)/(1 - v))\f$ | \f$\tanh u\f$ | \f$(-1, 1)\f$ | \f$(-\infty, \infty)\f$ |
+| `asinh` | \f$\mathrm{asinh}(v)\f$ | \f$\sinh u\f$ | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ |
 
 The `atanh` map is also known as Fisher's \f$z\f$ transformation (1915).
 
 ### Maps with parameters
 
-The eight parameterized maps are constructed using static factory functions on `scalar_bijector` (`affine`, `power`, `softplus`, `bounded`, `lower_bounded`, `upper_bounded`, `box_cox`, `yeo_johnson`).
+Eight parameterized maps are constructed via static factories on `scalar_bijector`. All are strictly increasing except `affine` with \f$\sigma < 0\f$ and `power` with \f$\lambda < 0\f$, which are strictly decreasing.
 
-| Name in `scalar_bijector_map` | Forward map \f$g(v)\f$ | Inverse map \f$h(u)\f$ | Domain \f$V\f$ | Image \f$U\f$ | Parameters | Monotonicity |
-|---|---|---|---|---|---|---|
-| `affine` | \f$(v - \mu) / \sigma\f$ | \f$\mu + \sigma u\f$ | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ | location \f$\mu \in (-\infty, \infty)\f$, scale \f$\sigma \ne 0\f$ | Increasing (\f$\sigma > 0\f$), Decreasing (\f$\sigma < 0\f$) |
-| `power` | \f$v^\lambda\f$ | \f$u^{1/\lambda}\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ | exponent \f$\lambda \ne 0\f$ | Increasing (\f$\lambda > 0\f$), Decreasing (\f$\lambda < 0\f$) |
-| `softplus` | \f$\frac{1}{a}\log(e^{a v} - 1)\f$ | \f$\frac{1}{a}\log(1 + e^{a u})\f$ | \f$(0, \infty)\f$ | \f$(-\infty, \infty)\f$ | sharpness \f$a > 0\f$ | Increasing |
-| `bounded` | \f$\log(v - a) - \log(b - v)\f$ | \f$a + (b - a)/(1 + e^{-u})\f$ | \f$(a, b)\f$ | \f$(-\infty, \infty)\f$ | lower \f$a\f$, upper \f$b\f$ (\f$a < b\f$) | Increasing |
-| `lower_bounded` | \f$\log(v - a)\f$ | \f$a + e^u\f$ | \f$(a, \infty)\f$ | \f$(-\infty, \infty)\f$ | lower \f$a\f$ | Increasing |
-| `upper_bounded` | \f$-\log(b - v)\f$ | \f$b - e^{-u}\f$ | \f$(-\infty, b)\f$ | \f$(-\infty, \infty)\f$ | upper \f$b\f$ | Increasing |
-| `box_cox` | \f$(v^\lambda - 1)/\lambda\f$ (\f$\log v\f$ at \f$\lambda = 0\f$) | \f$(1 + \lambda u)^{1/\lambda}\f$ (\f$e^u\f$ at \f$\lambda = 0\f$) | \f$(0, \infty)\f$ | \f$(-1/\lambda, \infty)\f$ (\f$\lambda > 0\f$), \f$(-\infty, -1/\lambda)\f$ (\f$\lambda < 0\f$), \f$(-\infty, \infty)\f$ (\f$\lambda = 0\f$) | exponent \f$\lambda \in (-\infty, \infty)\f$ | Increasing |
-| `yeo_johnson` | \f$((1 + v)^\lambda - 1)/\lambda\f$ (\f$v \ge 0\f$), \f$-((1 - v)^{2 - \lambda} - 1)/(2 - \lambda)\f$ (\f$v < 0\f$) | \f$(1 + \lambda u)^{1/\lambda} - 1\f$ (\f$u \ge 0\f$), \f$1 - (1 - (2 - \lambda) u)^{1/(2 - \lambda)}\f$ (\f$u < 0\f$) | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ (\f$0 \le \lambda \le 2\f$), \f$(-\infty, -1/\lambda)\f$ (\f$\lambda < 0\f$), \f$(1/(2 - \lambda), \infty)\f$ (\f$\lambda > 2\f$) | exponent \f$\lambda \in (-\infty, \infty)\f$ | Increasing |
+| Map | \f$g(v)\f$ | \f$h(u)\f$ | \f$V\f$ | \f$U\f$ | Parameters |
+|---|---|---|---|---|---|
+| `affine` | \f$(v - \mu) / \sigma\f$ | \f$\mu + \sigma u\f$ | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ | location \f$\mu \in (-\infty, \infty)\f$, scale \f$\sigma \ne 0\f$ |
+| `power` | \f$v^\lambda\f$ | \f$u^{1/\lambda}\f$ | \f$(0, \infty)\f$ | \f$(0, \infty)\f$ | exponent \f$\lambda \ne 0\f$ |
+| `softplus` | \f$\frac{1}{a}\log(e^{a v} - 1)\f$ | \f$\frac{1}{a}\log(1 + e^{a u})\f$ | \f$(0, \infty)\f$ | \f$(-\infty, \infty)\f$ | sharpness \f$a > 0\f$ |
+| `bounded` | \f$\log(v - a) - \log(b - v)\f$ | \f$a + (b - a)/(1 + e^{-u})\f$ | \f$(a, b)\f$ | \f$(-\infty, \infty)\f$ | lower \f$a\f$, upper \f$b\f$ (\f$a < b\f$) |
+| `lower_bounded` | \f$\log(v - a)\f$ | \f$a + e^u\f$ | \f$(a, \infty)\f$ | \f$(-\infty, \infty)\f$ | lower \f$a\f$ |
+| `upper_bounded` | \f$-\log(b - v)\f$ | \f$b - e^{-u}\f$ | \f$(-\infty, b)\f$ | \f$(-\infty, \infty)\f$ | upper \f$b\f$ |
+| `box_cox` | \f$(v^\lambda - 1)/\lambda\f$ (\f$\log v\f$ at \f$\lambda = 0\f$) | \f$(1 + \lambda u)^{1/\lambda}\f$ (\f$e^u\f$ at \f$\lambda = 0\f$) | \f$(0, \infty)\f$ | \f$(-1/\lambda, \infty)\f$ (\f$\lambda > 0\f$), \f$(-\infty, -1/\lambda)\f$ (\f$\lambda < 0\f$), \f$(-\infty, \infty)\f$ (\f$\lambda = 0\f$) | exponent \f$\lambda \in (-\infty, \infty)\f$ |
+| `yeo_johnson` | \f$((1 + v)^\lambda - 1)/\lambda\f$ (\f$v \ge 0\f$), \f$-((1 - v)^{2 - \lambda} - 1)/(2 - \lambda)\f$ (\f$v < 0\f$) | \f$(1 + \lambda u)^{1/\lambda} - 1\f$ (\f$u \ge 0\f$), \f$1 - (1 - (2 - \lambda) u)^{1/(2 - \lambda)}\f$ (\f$u < 0\f$) | \f$(-\infty, \infty)\f$ | \f$(-\infty, \infty)\f$ (\f$0 \le \lambda \le 2\f$), \f$(-\infty, -1/\lambda)\f$ (\f$\lambda < 0\f$), \f$(1/(2 - \lambda), \infty)\f$ (\f$\lambda > 2\f$) | exponent \f$\lambda \in (-\infty, \infty)\f$ |
 
-The factory `scalar_bijector::power(exponent)` normalizes standard exponents to parameter-free maps: `1` yields `identity`, `0.5` yields `sqrt`, `-1` yields `inverse`, `-2` yields `inverse_sq`, and `0` yields `log`.
+Calling `scalar_bijector::power(exponent)` with `1`, `0.5`, `-1`, `-2`, or `0` returns `identity`, `sqrt`, `inverse`, `inverse_sq`, or `log`.
 
 ### Parameter partial derivatives
 
-For total order \f$K \in \{1, \dots, 6\}\f$, \ref laplace::bijector::bijector_partials "bijector_partials" holds `double c[(K + 1) * (K + 2) / 2]` storing all partial derivatives of order \f$n_0\f$ in the argument, \f$n_1\f$ in the first parameter \f$p_1\f$, and \f$n_2\f$ in the second parameter \f$p_2\f$ (\f$n_0 + n_1 + n_2 = K\f$) at \ref laplace::bijector::bijector_partials::index "index"(\f$n_1, n_2\f$) \f$= n_2(K + 1) - n_2(n_2 - 1)/2 + n_1\f$. Components are ordered primarily by \f$n_2\f$ and secondarily by \f$n_1\f$, so the pure argument derivative (`n1 = 0, n2 = 0`) always sits at `c[0]`. Parameter queries `parameter_1()`, `parameter_2()`, and `parameter_count()` return active parameter values (`0.0` when absent) and the active count (`0`, `1`, or `2`). Parameter-free maps zero `c[1 ... ]`; `power` returns the pure argument derivative in `c[0]` and quiet NaN in all remaining components because parameter derivatives in \f$\lambda\f$ diverge as \f$\lambda \to 0\f$.
+For total order \f$K \in \{1, \dots, 6\}\f$, \ref laplace::bijector::bijector_partials "bijector_partials" stores `double c[(K + 1) * (K + 2) / 2]` for partials of orders \f$n_0\f$ (argument), \f$n_1\f$ (\f$p_1\f$), and \f$n_2\f$ (\f$p_2\f$) with \f$n_0 + n_1 + n_2 = K\f$. Entry \f$(n_1, n_2)\f$ lies at \ref laplace::bijector::bijector_partials::index "index"(\f$n_1, n_2\f$) \f$= n_2(K + 1) - n_2(n_2 - 1)/2 + n_1\f$, with the pure argument derivative at `c[0]`. `parameter_1()`, `parameter_2()`, and `parameter_count()` return active parameter values (`0.0` when absent) and count (`0`, `1`, or `2`). Parameter-free maps zero `c[1 ... ]`; `power` fills `c[1 ... ]` with quiet NaN because \f$\lambda\f$-derivatives diverge as \f$\lambda \to 0\f$.
 
 ### Non-smooth points
 
-The structure \ref laplace::bijector::bijector_kinks "bijector_kinks" (returned by `forward_kinks()` and `inverse_kinks()`) reports non-smooth points through `count`, `point`, and `continuous_order`. Only `yeo_johnson` with \f$\lambda \ne 1\f$ has a kink, located at \f$0\f$ (`count = 1`, `continuous_order = 2`, third-derivative jump \f$(1 - \lambda)(2 - \lambda)\f$), where evaluations follow the right-hand branch (\f$v \ge 0\f$, \f$u \ge 0\f$). For \f$\lambda = 1\f$ and all other maps, `count` is `0`.
+\ref laplace::bijector::bijector_kinks "bijector_kinks", returned by `forward_kinks()` and `inverse_kinks()`, reports `count`, `point`, and `continuous_order`. Only `yeo_johnson` with \f$\lambda \ne 1\f$ has a kink, at \f$0\f$ (`count = 1`, `continuous_order = 2`, third-derivative jump \f$(1 - \lambda)(2 - \lambda)\f$), using the right-hand branch (\f$v \ge 0\f$, \f$u \ge 0\f$). Otherwise `count` is `0`.
 
 ### Distances to the bounds
 
-The functions `inverse_distance_upper(u)` and `inverse_distance_lower(u)` evaluate \f$v_{\max} - h(u)\f$ and \f$h(u) - v_{\min}\f$ without catastrophic cancellation near finite bounds when \f$h(u)\f$ would round to the bound (for `logit`, \f$1 - h(u)\f$ rounds to \f$0\f$ from \f$u = 37.4\f$, while \f$\mathrm{expit}(-u)\f$ remains exact). Direct bound formulas are used for the six unit-interval or \f$(-1, 1)\f$ maps and the bounded or shifted exponential maps:
+`inverse_distance_upper(u)` and `inverse_distance_lower(u)` evaluate \f$v_{\max} - h(u)\f$ and \f$h(u) - v_{\min}\f$ directly for bounded and shifted exponential maps without rounding-induced cancellation:
 
 | Map | Upper distance \f$v_{\max} - h(u)\f$ | Lower distance \f$h(u) - v_{\min}\f$ |
 |---|---|---|
@@ -71,66 +71,46 @@ The functions `inverse_distance_upper(u)` and `inverse_distance_lower(u)` evalua
 | `lower_bounded` | \f$+\infty\f$ | \f$e^u\f$ |
 | `upper_bounded` | \f$e^{-u}\f$ | \f$+\infty\f$ |
 
-All other maps and inverted bijectors (`inverted == true`) use generic bound differences (returning \f$+\infty\f$ for infinite bounds).
+Other maps and inverted bijectors use generic bound differences, returning \f$+\infty\f$ for infinite bounds.
 
 ## Domain and special values
 
-If an input falls strictly outside the closed domain or is NaN, every function returns quiet NaN; invalid construction parameters (such as non-finite values, scale \f$0\f$, exponent \f$0\f$ in direct `power` construction, sharpness \f$\le 0\f$, or \f$a \ge b\f$ in `bounded`) likewise cause domain bounds and evaluations to return quiet NaN. On domain boundaries, functions return mathematical limits such as \f$\mathrm{logit}(0) = -\infty\f$ and \f$\mathrm{logit}(1) = +\infty\f$. Values are never clamped: over- and underflow yield infinity or zero in IEEE double precision.
+Inputs strictly outside the closed domain or NaN yield quiet NaN. Invalid parameters (non-finite values, scale \f$0\f$, exponent \f$0\f$ in `power`, sharpness \f$\le 0\f$, or \f$a \ge b\f$ in `bounded`) likewise make bounds and evaluations return quiet NaN. Domain boundaries yield mathematical limits such as \f$\mathrm{logit}(0) = -\infty\f$ and \f$\mathrm{logit}(1) = +\infty\f$. Values are never clamped; overflow and underflow follow IEEE double precision.
 
 ## Method
 
-Every formula is written directly for its direction rather than obtained by numerical inversion, and derivative polynomials were derived and verified symbolically in SymPy 1.14.0 (Meurer and others, 2017).
+Every direction is evaluated directly rather than numerically inverted, with derivative polynomials derived in SymPy 1.14.0 (Meurer and others, 2017). `identity`, `log`, `inverse`, `inverse_sq`, and `sqrt` use closed-form exponential and monomial derivatives.
 
-- **Elementary and power-like maps:** `identity`, `log`, `inverse`, `inverse_sq`, and `sqrt` use closed-form exponential and monomial derivatives. For `sqrt` forward derivatives and `inverse_sq` inverses, expressions are evaluated as integer powers of \f$1/\sqrt{\cdot}\f$, applying scalar coefficients first so partial products neither underflow prematurely nor overflow unnecessarily.
-- **Symmetric rational-pole maps:** `logit` branches at \f$v = 1/2\f$ via \f$\mathrm{log1p}\f$, factors even-order forward derivatives into positive sums \f$S_k(a, b) = \sum_{j=0}^{k-1} a^{k-1-j} b^j\f$ with \f$a = 1/v\f$, \f$b = 1/(1 - v)\f$, and computes inverse derivatives \f$h^{(k)}(u) = U(A_k(U) + D B_k(U))\f$ by differentiating \f$h'(u) = U\f$, \f$U' = U D\f$, \f$D' = -2U\f$ with \f$U = e/(1+e)^2\f$, \f$e = e^{-|u|}\f$, \f$D = 1 - 2p\f$, and \f$D^2 = 1 - 4U\f$. `atanh` uses \f$\mathrm{log1p}\f$ for \f$g(v)\f$ and switches \f$\log|g'(v)|\f$ at \f$|v| = 1/2\f$, applies the same positive-sum factorization for forward derivatives, and computes inverse derivatives \f$S P_k(T)\f$ (\f$T = \tanh u\f$, \f$S = 1 - T^2\f$) via \f$P_1 = 1\f$, \f$P_{k+1} = (1 - T^2)P_k' - 2T P_k\f$, expanding in \f$T^2\f$ for \f$T^2 < 1/2\f$ and in \f$S\f$ otherwise. `bounded` evaluates \f$g(v) = \log((v - a)/(b - v))\f$ in one quotient, mirrors `logit`, and factors \f$B - S = (v - a) S B\f$ and \f$A - S = (b - v) S A\f$ (where \f$A = 1/(v-a)\f$, \f$B = 1/(b-v)\f$, \f$S = 1/(b-a)\f$) in mixed parameter partials to avoid cancellation near endpoints. `lower_bounded` and `upper_bounded` shift `log` and use \f$\partial/\partial p_1 = -\partial/\partial v\f$.
-- **Probit:** To avoid loss of accuracy when \f$z = \Phi^{-1}(v)\f$ is large, the implementation computes \f$1/\phi(z)\f$ from \f$v\f$ via the Mills ratio (Mills, 1926) \f$m(z) = \Phi(z)/\phi(z) = \sqrt{\pi/2}\operatorname{erfcx}(-z/\sqrt{2})\f$ as \f$m(z)/v\f$ for \f$v \le 1/2\f$ and symmetrically via \f$\operatorname{erfcx}(z/\sqrt{2})/(1 - v)\f$ for \f$v > 1/2\f$. Forward derivatives follow \f$Q_k(z)/\phi(z)^k\f$ with \f$Q_1 = 1\f$, \f$Q_{k+1} = Q_k' + k z Q_k\f$; forward log-Jacobian derivatives follow \f$R_k(z)/\phi(z)^k\f$ with \f$R_1 = z\f$, \f$R_{k+1} = R_k' + k z R_k\f$; inverse derivatives are \f$(-1)^{k-1}\mathrm{He}_{k-1}(u)\phi(u)\f$.
-- **Cauchit and inverse hyperbolic sine:** `cauchit` (Koenker and Yoon, 2009) splits \f$\tan(\pi(v - 1/2))\f$ at \f$v = 1/4\f$ and \f$3/4\f$ via \f$-1/\tan(\pi v)\f$ and \f$1/\tan(\pi(1 - v))\f$, with forward derivatives \f$\pi^k T_k(z)\f$ satisfying \f$T_1 = 1 + z^2\f$, \f$T_{k+1} = (1 + z^2) T_k'\f$. Both `cauchit` inverse and `asinh` forward use \f$r = 1/\operatorname{hypot}(1, x)\f$, \f$s = x r\f$, \f$r^2 = 1 - s^2\f$, switching expansion variable between \f$s^2\f$ (\f$s^2 < 1/2\f$) and \f$r^2\f$ (\f$s^2 \ge 1/2\f$): `cauchit` inverse \f$\frac{1}{\pi}\mathrm{atan2}(1, -u)\f$ uses \f$W_{m+1} = -(m + 2)s W_m + (1 - s^2) W_m'\f$ (\f$W_0 = 1\f$), `asinh` forward uses \f$V_{m+1} = -(m + 1)s V_m + (1 - s^2) V_m'\f$ (\f$V_0 = 1\f$), and both share \f$X_{m+1} = -(m + 1)s X_m + (1 - s^2) X_m'\f$ (\f$X_0 = s\f$) for the log-Jacobian derivatives. `asinh` inverse evaluates \f$\log\cosh u\f$ for \f$|u| < 1\f$ as \f$\mathrm{log1p}(e_m^2 / (2(1 + e_m)))\f$ with \f$e_m = \mathrm{expm1}(|u|)\f$.
-- **Complementary log-log and log-log:** `cloglog` (McCullagh and Nelder, 1989) sets \f$t = \mathrm{log1p}(-v)\f$ and \f$c = 1/((1 - v) t)\f$, evaluating \f$g^{(k)}(v) = (-1)^k C_k(t) c^k\f$ via \f$C_1 = 1\f$, \f$C_{k+1} = t C_k' - k(1 + t) C_k\f$, and \f$E_k(t) = -C_k(t) + (-1)^k(k - 1)! t^k\f$ for the log-Jacobian. Its inverse uses \f$w = e^u\f$ and returns \f$0.0\f$ for higher derivatives when \f$w > 1000\f$, with \f$P_1(w) = 1\f$, \f$P_{k+1}(w) = (1 - w) P_k(w) + w P_k'(w)\f$, and \f$P_2(w) = -\mathrm{expm1}(u)\f$. `loglog` uses \f$t = \log v\f$ with \f$C_k\f$ and \f$E_k\f$, and obtains its inverse via \f$h(u) = 1 - h_{\mathrm{cloglog}}(-u)\f$.
-- **Affine, power, softplus, Box-Cox, and Yeo-Johnson:** `affine` forms \f$v - \mu\f$ in a single subtraction, so the difference is exact when \f$v\f$ and \f$\mu\f$ are close, and reduces mixed partials to linear forms in \f$v, u, \mu\f$ and powers of \f$1/\sigma\f$. `power` splits \f$\lambda - k\f$ and \f$1/\lambda - k\f$ via Knuth's two-sum algorithm (1997) \f$s + e\f$, computes \f$x^s(1 + e\log x)\f$ (halving \f$s\f$ on intermediate overflow or underflow), and forms \f$1/\lambda - j\f$ as \f$\mathrm{fma}(-j, \lambda, 1)/\lambda\f$. `softplus` (Dugas and others, 2001) cancels \f$x\f$-linear terms analytically in pure \f$a\f$-derivatives and computes mixed partials of the forward log-Jacobian from a Bernoulli series (DLMF §24.2) of \f$-\log\operatorname{exprel}(-a v)\f$ for \f$0 < a v < 3\f$ and direct \f$-\log(1 - e^{-a v})\f$ derivatives beyond. `box_cox` (Box and Cox, 1964) and `yeo_johnson` (Yeo, 2000) express forward and inverse values in \f$\operatorname{exprel}\f$ and \f$\operatorname{log1prel}\f$ (switching `box_cox` forward to \f$(v^\lambda - 1)/\lambda\f$ for \f$|\lambda\log v| \ge 1\f$), avoiding branching across \f$\lambda = 0\f$ and \f$\lambda = 2\f$, and assemble inverse parameter derivatives via partial Bell polynomials (Comtet, 1974) in one pass.
+`logit` and `atanh` factor even-order forward derivatives via \f$S_k(a, b) = \sum_{j=0}^{k-1} a^{k-1-j} b^j\f$ (\f$a = 1/v\f$, \f$b = 1/(1 - v)\f$ for `logit`). Inverse `logit` sets \f$e = e^{-|u|}\f$, \f$U = e/(1 + e)^2\f$, and \f$D = 1 - 2p\f$ (\f$p = h(u)\f$) for \f$h^{(k)}(u) = U(A_k(U) + D B_k(U))\f$ from \f$h'(u) = U\f$, \f$U' = U D\f$, \f$D' = -2U\f$. Inverse `atanh` sets \f$T = \tanh u\f$ and \f$S = 1 - T^2\f$ for \f$S P_k(T)\f$ via \f$P_1 = 1\f$, \f$P_{k+1} = (1 - T^2)P_k' - 2T P_k\f$ expanded in \f$T^2\f$ when \f$T^2 < 1/2\f$ and in \f$S\f$ otherwise. `bounded` mirrors `logit`; `lower_bounded` and `upper_bounded` shift `log` with \f$\partial/\partial p_1 = -\partial/\partial v\f$.
+
+`probit` evaluates \f$1/\phi(z)\f$ at \f$z = \Phi^{-1}(v)\f$ from the Mills ratio (Mills, 1926) \f$m(z) = \Phi(z)/\phi(z) = \sqrt{\pi/2}\operatorname{erfcx}(-z/\sqrt{2})\f$ as \f$m(z)/v\f$ for \f$v \le 1/2\f$ and \f$\sqrt{\pi/2}\operatorname{erfcx}(z/\sqrt{2})/(1 - v)\f$ above. Forward derivatives are \f$Q_k(z)/\phi(z)^k\f$ (\f$Q_1 = 1\f$, \f$Q_{k+1} = Q_k' + k z Q_k\f$), log-Jacobian derivatives are \f$R_k(z)/\phi(z)^k\f$ (\f$R_1 = z\f$, \f$R_{k+1} = R_k' + k z R_k\f$), and inverse derivatives are \f$(-1)^{k-1}\mathrm{He}_{k-1}(u)\phi(u)\f$.
+
+`cauchit` (Koenker and Yoon, 2009) evaluates \f$\tan(\pi(v - 1/2))\f$ as \f$-1/\tan(\pi v)\f$ for \f$v < 1/4\f$ and as \f$1/\tan(\pi(1 - v))\f$ for \f$v > 3/4\f$, with forward derivatives \f$\pi^k T_k(z)\f$ (\f$T_1 = 1 + z^2\f$, \f$T_{k+1} = (1 + z^2) T_k'\f$). With \f$r = 1/\operatorname{hypot}(1, x)\f$, \f$s = x r\f$ and \f$r^2 = 1 - s^2\f$, and the expansion in \f$s^2\f$ when \f$s^2 < 1/2\f$ and in \f$r^2\f$ otherwise, `cauchit` inverse uses \f$W_{m+1} = -(m + 2)s W_m + (1 - s^2) W_m'\f$ (\f$W_0 = 1\f$), `asinh` forward uses \f$V_{m+1} = -(m + 1)s V_m + (1 - s^2) V_m'\f$ (\f$V_0 = 1\f$), and both use \f$X_{m+1} = -(m + 1)s X_m + (1 - s^2) X_m'\f$ (\f$X_0 = s\f$) for log-Jacobians.
+
+`cloglog` (McCullagh and Nelder, 1989) sets \f$t = \mathrm{log1p}(-v)\f$ and \f$c = 1/((1 - v) t)\f$, giving \f$g^{(k)}(v) = (-1)^k C_k(t) c^k\f$ (\f$C_1 = 1\f$, \f$C_{k+1} = t C_k' - k(1 + t) C_k\f$) and \f$E_k(t) = -C_k(t) + (-1)^k(k - 1)! t^k\f$ for the log-Jacobian. Its inverse uses \f$w = e^u\f$ (\f$0.0\f$ for higher derivatives when \f$w > 1000\f$) via \f$P_1(w) = 1\f$, \f$P_{k+1}(w) = (1 - w) P_k(w) + w P_k'(w)\f$, and \f$P_2(w) = -\mathrm{expm1}(u)\f$. `loglog` sets \f$t = \log v\f$ with \f$C_k\f$ and \f$E_k\f$, and inverse \f$h(u) = 1 - h_{\mathrm{cloglog}}(-u)\f$.
+
+`power` splits \f$\lambda - k\f$ and \f$1/\lambda - k\f$ via Knuth's two-sum algorithm (1997) \f$s + e\f$, computing \f$x^s(1 + e\log x)\f$ and \f$1/\lambda - j = \mathrm{fma}(-j, \lambda, 1)/\lambda\f$. `softplus` (Dugas and others, 2001) uses a Bernoulli series (DLMF §24.2) of \f$-\log\operatorname{exprel}(-a v)\f$ for mixed forward log-Jacobian partials on \f$0 < a v < 3\f$ and \f$-\log(1 - e^{-a v})\f$ beyond. `box_cox` (Box and Cox, 1964) and `yeo_johnson` (Yeo, 2000) use \f$\operatorname{exprel}\f$ and \f$\operatorname{log1prel}\f$ (switching `box_cox` forward to \f$(v^\lambda - 1)/\lambda\f$ for \f$|\lambda\log v| \ge 1\f$), assembling inverse partials via partial Bell polynomials (Comtet, 1974).
 
 ## Accuracy
 
-See \ref accuracy "How accuracy is measured" for test conventions and error metrics. Errors are reported in ulpC on the \ref accuracy_conditioned "conditioned scale": \f$s = |f_k(x)| + |x f_{k+1}(x)|\f$ for parameter-free functions (using \f$h'\f$ as \f$f_{k+1}\f$ for bound distances) and \f$s = |f| + |x\,\partial f/\partial x| + |p_1\,\partial f/\partial p_1| + |p_2\,\partial f/\partial p_2|\f$ for parameterized functions.
+Errors use the \ref accuracy_conditioned "conditioned scale" (\ref accuracy "How accuracy is measured"): \f$s = |f_k(x)| + |x f_{k+1}(x)|\f$ for parameter-free functions (using \f$h'\f$ as \f$f_{k+1}\f$ for bound distances) and \f$s = |f| + |x\,\partial f/\partial x| + |p_1\,\partial f/\partial p_1| + |p_2\,\partial f/\partial p_2|\f$ for parameterized functions. Maximum ulpC over orders 0 to 6 (`gcc / CUDA`):
 
-The measured maximum error in ulpC over orders 0 to 6 on gcc (OpenMP) and CUDA (`gcc / CUDA`):
+| Group | Max error (gcc / CUDA) | Worst quantity |
+|---|---|---|
+| Parameter-free maps | 11 / 10.9 | `loglog` inverse (gcc), `sqrt` forward (CUDA) |
+| Parameter-free distances | 2.28 / 2.28 | six bounded parameter-free maps |
+| `affine`, `power`, `bounded`, `lower_bounded`, `upper_bounded` | 7.09 / 5.88 | `bounded` inverse (gcc), `power` forward log-Jacobian (CUDA) |
+| `softplus`, `box_cox`, `yeo_johnson` | 18.4 / 18.4; 42.8 / 46.3; 27.8 / 30.5 | `softplus` order-6 forward log-Jacobian (\f$a v = 7.6\f$); `box_cox`, `yeo_johnson` order 4–6 inverses (\f$\lambda = 0\f$) |
 
-| Parameter-free map | Forward | Inverse | Forward log-Jacobian | Inverse log-Jacobian |
-|---|---|---|---|---|
-| `identity` | 0 / 0 (exact) | 0 / 0 (exact) | 0 / 0 (exact) | 0 / 0 (exact) |
-| `log` | 3.84 / 3.84 | 0.574 / 0.574 | 3.84 / 3.84 | 0 / 0 |
-| `logit` | 3.17 / 3.17 | 10.5 / 10.1 | 5.17 / 5.17 | 10.5 / 10.1 |
-| `probit` | 6.17 / 6.17 | 2.28 / 2.28 | 6.57 / 6.57 | 0.832 / 0.832 |
-| `cauchit` | 6.19 / 6.19 | 8.63 / 8.63 | 5.23 / 5.23 | 7.78 / 7.78 |
-| `cloglog` | 6.73 / 3.12 | 9.98 / 7.61 | 4.16 / 3.34 | 0.969 / 0.969 |
-| `loglog` | 4.58 / 3.23 | 11 / 8.49 | 4.84 / 3.38 | 0.883 / 0.883 |
-| `inverse` | 3.92 / 3.92 | 3.25 / 3.25 | 3.92 / 3.92 | 3.25 / 3.25 |
-| `inverse_sq` | 3.09 / 3.09 | 7.29 / 7.29 | 3.86 / 3.86 | 2.79 / 2.79 |
-| `sqrt` | 10.9 / 10.9 | 0.246 / 0.246 | 2.43 / 2.43 | 2.95 / 2.95 |
-| `atanh` | 2.78 / 2.78 | 2.67 / 1.67 | 3.53 / 5.05 | 2.67 / 1.67 |
-| `asinh` | 8.55 / 9.49 | 0.494 / 0.622 | 5.35 / 7.85 | 1.9 / 2.27 |
-
-For parameter-free maps at orders 0 and 1, plain ulp errors are within 4.1 ulp on gcc except for `cloglog` (up to 147 ulp) and `loglog` (up to 1430 ulp), whose conditioned errors remain at most 2.01 ulpC. Across both bound distances on the six bounded parameter-free maps, the maximum conditioned error is 2.28 ulpC on gcc and CUDA (reaching 130 ulp for `cloglog` upper distance and 173–174 ulp for `loglog` lower distance).
-
-| Parameterized map | Forward | Inverse | Forward log-Jacobian | Inverse log-Jacobian | Distances (upper, lower) |
-|---|---|---|---|---|---|
-| `affine` | 0.362 / 0.362 | 0.5 / 0.5 | 0.495 / 0.495 | 0.495 / 0.495 | - |
-| `power` | 4.76 / 4.37 | 5.59 / 4.93 | 5.88 / 5.88 | 5.87 / 5.87 | - |
-| `softplus` | 7.67 / 7.04 | 4.38 / 4.25 | 18.4 / 18.4 | 3.48 / 3.47 | - |
-| `bounded` | 1.1 / 1.1 | 7.09 / 5.82 | 1.1 / 1.1 | 7.09 / 5.82 | 0.721 / 0.721, 0.584 / 0.584 |
-| `lower_bounded` | 0.679 / 0.679 | 0.725 / 0.725 | 0.679 / 0.679 | 0 / 0 | 0.273 / 0.273 |
-| `upper_bounded` | 0.679 / 0.679 | 0.467 / 0.467 | 0.679 / 0.679 | 0 / 0 | 0.193 / 0.193 |
-| `box_cox` | 7.97 / 9.71 | 42.8 / 46.3 | 1.28 / 1.28 | 6.61 / 5.22 | - |
-| `yeo_johnson` | 5.83 / 5.33 | 27.8 / 30.5 | 3.06 / 3.06 | 6.38 / 5.88 | - |
-
-Peaks occur in the inverses of `box_cox` and `yeo_johnson` at orders 4–6 near \f$\lambda = 0\f$ (up to 46.3 ulpC) and in the forward log-Jacobian of `softplus` at order 6 near \f$a v = 7.6\f$ (18.4 ulpC); all remaining quantities across parameterized maps are within 8 ulpC on both builds. See `docs/numerics.md`.
+`identity` is exact (`0` ulpC); outside higher-order `box_cox`, `yeo_johnson`, and `softplus` peaks, remaining parameterized quantities stay within 8 ulpC on both builds, except the forward map of `box_cox` (7.97 ulpC on gcc, 9.71 on CUDA). See `docs/numerics.md`.
 
 ## Speed
 
-Measured over \f$2^{16}\f$ interior points on one gcc thread, scalar evaluations and log-Jacobians take 3–70 ns per call, order-1 parameter partials take 5–78 ns, and order-6 partials take 15–116 ns for most maps and 193–268 ns for `yeo_johnson` and `box_cox`. With six OpenMP threads on gcc, these timings fall to 0.9–14.3 ns for most maps and 37.8–45.8 ns for order-6 partials of `yeo_johnson` and `box_cox`. On CUDA (NVIDIA RTX 4070 SUPER), all operations complete in 0.38–3.64 ns per call except the parameter partials of `box_cox` and `yeo_johnson`, which take 8.34–11.2 ns at order 1 and 27.4–27.8 ns at order 6.
+Over \f$2^{16}\f$ interior points on one gcc thread, scalar evaluations and log-Jacobians take 3–70 ns, order-1 partials 5–78 ns, and order-6 partials 15–116 ns (193–268 ns for `yeo_johnson` and `box_cox`). With six OpenMP threads, timings fall to 0.9–14.3 ns for most maps and 37.8–45.8 ns for order-6 partials of `yeo_johnson` and `box_cox`. On CUDA (NVIDIA RTX 4070 SUPER), calls take 0.38–3.64 ns except `box_cox` and `yeo_johnson` partials (8.34–11.2 ns at order 1, 27.4–27.8 ns at order 6).
 
 ## Example
 
-The following example evaluates the inverse map \f$h(u)\f$ of logit and its first derivative \f$h'(u)\f$ inside a `Kokkos::parallel_for` kernel:
+Evaluating \f$h(u)\f$ and \f$h'(u)\f$ for `logit` inside a `Kokkos::parallel_for` kernel:
 
 \code{.cpp}
 #include <laplace/bijector/scalar.hpp>
@@ -154,7 +134,7 @@ All member functions belong to \ref laplace::bijector::scalar_bijector "scalar_b
 
 - Types: \ref laplace::bijector::scalar_bijector_map "scalar_bijector_map", \ref laplace::bijector::scalar_bijector "scalar_bijector", \ref laplace::bijector::bijector_partials "bijector_partials" (with \ref laplace::bijector::bijector_partials::index "index()"), and \ref laplace::bijector::bijector_kinks "bijector_kinks".
 - Factories for maps with parameters: \ref laplace::bijector::scalar_bijector::affine "affine()", \ref laplace::bijector::scalar_bijector::power "power()", \ref laplace::bijector::scalar_bijector::softplus "softplus()", \ref laplace::bijector::scalar_bijector::bounded "bounded()", \ref laplace::bijector::scalar_bijector::lower_bounded "lower_bounded()", \ref laplace::bijector::scalar_bijector::upper_bounded "upper_bounded()", \ref laplace::bijector::scalar_bijector::box_cox "box_cox()", and \ref laplace::bijector::scalar_bijector::yeo_johnson "yeo_johnson()".
-- Parameter inspection: \ref laplace::bijector::scalar_bijector::parameter_1 "parameter_1()" (returns `0.0` if none), \ref laplace::bijector::scalar_bijector::parameter_2 "parameter_2()" (returns `0.0` if none), and \ref laplace::bijector::scalar_bijector::parameter_count "parameter_count()".
+- Parameter inspection: \ref laplace::bijector::scalar_bijector::parameter_1 "parameter_1()", \ref laplace::bijector::scalar_bijector::parameter_2 "parameter_2()", and \ref laplace::bijector::scalar_bijector::parameter_count "parameter_count()".
 - Forward value and derivatives: \ref laplace::bijector::scalar_bijector::forward "forward()", \ref laplace::bijector::scalar_bijector::forward_d1 "forward_d1()", \ref laplace::bijector::scalar_bijector::forward_d2 "forward_d2()", \ref laplace::bijector::scalar_bijector::forward_d3 "forward_d3()", \ref laplace::bijector::scalar_bijector::forward_d4 "forward_d4()", \ref laplace::bijector::scalar_bijector::forward_d5 "forward_d5()", and \ref laplace::bijector::scalar_bijector::forward_d6 "forward_d6()".
 - Inverse value and derivatives: \ref laplace::bijector::scalar_bijector::inverse "inverse()", \ref laplace::bijector::scalar_bijector::inverse_d1 "inverse_d1()", \ref laplace::bijector::scalar_bijector::inverse_d2 "inverse_d2()", \ref laplace::bijector::scalar_bijector::inverse_d3 "inverse_d3()", \ref laplace::bijector::scalar_bijector::inverse_d4 "inverse_d4()", \ref laplace::bijector::scalar_bijector::inverse_d5 "inverse_d5()", and \ref laplace::bijector::scalar_bijector::inverse_d6 "inverse_d6()".
 - Forward log-Jacobian and derivatives: \ref laplace::bijector::scalar_bijector::forward_log_jacobian "forward_log_jacobian()", \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d1 "forward_log_jacobian_d1()", \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d2 "forward_log_jacobian_d2()", \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d3 "forward_log_jacobian_d3()", \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d4 "forward_log_jacobian_d4()", \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d5 "forward_log_jacobian_d5()", and \ref laplace::bijector::scalar_bijector::forward_log_jacobian_d6 "forward_log_jacobian_d6()".
