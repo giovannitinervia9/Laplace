@@ -289,18 +289,7 @@ struct exponential_distrib {
    * \return Log-probability (\f$-\infty\f$ for \f$y \le 0\f$).
    */
   LAPLACE_HD double log_cdf(double y) const {
-    if (y <= 0.0) return -distrib_infinity;
-    const double u = y / mu;
-    // Two routes, split where the derivatives below already split. Written as
-    // log(-expm1(-u)) throughout, the value is lost once e^-u falls below half
-    // an ulp of one: at u = 40, 1 - e^-u rounds to exactly 1, so -expm1(-u) is
-    // 1.0 and the logarithm returns exactly 0 instead of -4.2484e-18. Above
-    // the split, log1p(-e^-u) keeps every digit of a log F that is itself
-    // tiny, which is the whole reason for having a log F.
-    // Found on 2026-11-15 by the exact twin of weibull_distrib at sigma = 1,
-    // which returned the right value where this one returned zero.
-    if (u >= detail_exponential::u_split) return Kokkos::log1p(-math::exp(-u));
-    return math::log(-Kokkos::expm1(-u));
+    return y <= 0.0 ? -distrib_infinity : math::log(-Kokkos::expm1(-y / mu));
   }
   /**
    * \ingroup distrib_exponential

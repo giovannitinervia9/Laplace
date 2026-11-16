@@ -1,6 +1,6 @@
 # Measurement tools (accuracy and speed); not part of the test suite.
 
-laplace_kokkos_sources(math_elementary.cpp math_special.cpp math_incomplete.cpp math_ibeta.cpp math_inverse.cpp math_normal.cpp math_gamma_deriv.cpp math_gamma_mixed.cpp math_gamma_ratio.cpp math_beta_deriv.cpp math_student.cpp math_owen.cpp math_bessel.cpp math_bessel_k.cpp math_faa.cpp math_quad.cpp math_dd.cpp math_rel.cpp math_stirling.cpp bijector_scalar.cpp distrib_generic.cpp pdmat_pilot.cpp bijector_coupled.cpp pdmat_unstructured.cpp pdmat_toeplitz.cpp pdmat_factor_analytic.cpp pdmat_reduced_rank.cpp basis_bspline.cpp basis_cyclic_bspline.cpp basis_tensor.cpp distrib_negbin.cpp distrib_betabinom.cpp distrib_pig.cpp distrib_weibull.cpp distrib_beta.cpp distrib_vonmises_scale.cpp distrib_vonmises.cpp)
+laplace_kokkos_sources(math_elementary.cpp math_special.cpp math_incomplete.cpp math_ibeta.cpp math_inverse.cpp math_normal.cpp math_gamma_deriv.cpp math_gamma_mixed.cpp math_gamma_ratio.cpp math_beta_deriv.cpp math_student.cpp math_owen.cpp math_bessel.cpp math_bessel_k.cpp math_faa.cpp math_quad.cpp math_dd.cpp math_rel.cpp math_stirling.cpp bijector_scalar.cpp distrib_generic.cpp pdmat_pilot.cpp bijector_coupled.cpp pdmat_unstructured.cpp pdmat_toeplitz.cpp pdmat_factor_analytic.cpp pdmat_reduced_rank.cpp basis_bspline.cpp basis_cyclic_bspline.cpp basis_tensor.cpp distrib_negbin.cpp distrib_betabinom.cpp distrib_pig.cpp)
 
 add_executable(math_elementary math_elementary.cpp)
 target_link_libraries(math_elementary PRIVATE Laplace::laplace)
@@ -76,22 +76,6 @@ target_link_libraries(distrib_betabinom PRIVATE Laplace::laplace)
 
 add_executable(distrib_pig distrib_pig.cpp)
 target_link_libraries(distrib_pig PRIVATE Laplace::laplace)
-
-add_executable(distrib_weibull distrib_weibull.cpp)
-target_link_libraries(distrib_weibull PRIVATE Laplace::laplace)
-target_compile_definitions(distrib_weibull PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
-
-add_executable(distrib_beta distrib_beta.cpp)
-target_link_libraries(distrib_beta PRIVATE Laplace::laplace)
-target_compile_definitions(distrib_beta PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
-
-add_executable(distrib_vonmises_scale distrib_vonmises_scale.cpp)
-target_link_libraries(distrib_vonmises_scale PRIVATE Laplace::laplace)
-target_compile_definitions(distrib_vonmises_scale PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
-
-add_executable(distrib_vonmises distrib_vonmises.cpp)
-target_link_libraries(distrib_vonmises PRIVATE Laplace::laplace)
-target_compile_definitions(distrib_vonmises PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
 
 add_executable(pdmat_pilot pdmat_pilot.cpp)
 target_link_libraries(pdmat_pilot PRIVATE Laplace::laplace)

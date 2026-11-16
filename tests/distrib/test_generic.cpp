@@ -14,6 +14,7 @@
 #include <laplace/distrib/generic_info.hpp>
 #include <laplace/distrib/generic_quantile.hpp>
 #include <laplace/distrib/generic_rng.hpp>
+#include <laplace/distrib/generic_start.hpp>
 #include <laplace/distrib/laplace1.hpp>
 #include <laplace/distrib/logistic.hpp>
 #include <laplace/distrib/cauchy.hpp>
@@ -508,3 +509,58 @@ void generic_routes_kernel_case() {
 }
 
 TEST_CASE("distrib generic: every route inside a kernel") { generic_routes_kernel_case(); }
+
+// A family whose starting value rests on a statistic that no other family uses:
+// it declares start_value over the sample and computes that statistic itself,
+// so that the summary is never built for it.
+namespace {
+
+struct circular_start_probe {
+  double mu = 0.0;
+  double mean_cos = 0.0;
+
+  circular_start_probe start_value(const std::vector<double>& y) const {
+    double c = 0.0;
+    double s = 0.0;
+    for (double v : y) {
+      c += std::cos(v);
+      s += std::sin(v);
+    }
+    const double n = static_cast<double>(y.size());
+    return {std::atan2(s / n, c / n), c / n};
+  }
+};
+
+}  // namespace
+
+TEST_CASE("distrib generic: the start value from the sample, by either route") {
+  const std::vector<double> y = {0.2, 0.5, 1.0, 1.5, 2.0, 2.6, 3.1};
+
+  // a distrib with start_value(summary) only: the sample route summarizes once
+  // and gives exactly what the summary route gives
+  const ld::gaussian1_distrib g{0.0, 1.0};
+  const ld::gaussian1_distrib a = ld::distrib_start_value(g, ld::summarize_sample(y));
+  const ld::gaussian1_distrib b = ld::distrib_start_value(g, y);
+  CHECK(b.mu == a.mu);
+  CHECK(b.sigma == a.sigma);
+
+  // the same from a View, which copies to the host once and delegates
+  Kokkos::View<double*, Kokkos::HostSpace> yv("y", y.size());
+  for (std::size_t i = 0; i < y.size(); ++i) yv(i) = y[i];
+  const ld::gaussian1_distrib c =
+      ld::distrib_start_value(g, Kokkos::View<const double*, Kokkos::HostSpace>(yv));
+  CHECK(c.mu == a.mu);
+  CHECK(c.sigma == a.sigma);
+
+  // a distrib with start_value(sample): its own statistic, no summary between
+  double want_cos = 0.0;
+  double want_sin = 0.0;
+  for (double v : y) {
+    want_cos += std::cos(v);
+    want_sin += std::sin(v);
+  }
+  const double n = static_cast<double>(y.size());
+  const circular_start_probe p = ld::distrib_start_value(circular_start_probe{}, y);
+  CHECK(p.mean_cos == want_cos / n);
+  CHECK(p.mu == std::atan2(want_sin / n, want_cos / n));
+}

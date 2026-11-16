@@ -4,6 +4,9 @@
 //   summarize_sample(y)                    the distrib_sample_summary of y (core.hpp)
 //   distrib_start_value(prototype, s)      the distrib's own start_value(s) member,
 //                                          a copy of prototype with theta set
+//   distrib_start_value(prototype, y)      the same from the sample: the distrib's own
+//                                          start_value(y) where it has one, else the
+//                                          summary route above
 //
 // Every distrib carries its own member (a moment estimate, or the closed-form
 // MLE where one exists); a distrib without one does not compile here. The
@@ -127,6 +130,52 @@ D distrib_start_value(const D& prototype, const distrib_sample_summary& s) {
   static_assert(requires { prototype.start_value(s); },
                 "distrib_start_value: this distrib has no start_value member; supply a start");
   return prototype.start_value(s);
+}
+
+/**
+ * \ingroup distrib_start
+ * \brief Computes starting parameters for a distribution from a sample vector.
+ *
+ * Host-only routine that returns \c prototype.start_value(y) when \p D declares a member
+ * over the sample, without building a summary, and otherwise calls
+ * summarize_sample(std::vector<double>) once and returns \c prototype.start_value(summary).
+ * The selection is made at compile time, preserving any non-parameter fields of \p prototype
+ * (such as \c size on \c binomial_distrib). Fails to compile if \p D declares neither
+ * \c start_value member.
+ * \tparam D Distribution type.
+ * \param prototype Distribution instance supplying any non-parameter fields.
+ * \param y Sample vector held on the host.
+ * \return Copy of \p prototype with starting parameters strictly inside their open domains.
+ * \see summarize_sample(std::vector<double>), distrib_start_value(const D&, const distrib_sample_summary&), start_inside(), distrib_start
+ */
+// The starting value from the sample: the distrib's own start_value(y) where it
+// has one, else its start_value(summary) over the shared summary.
+template <class D>
+D distrib_start_value(const D& prototype, const std::vector<double>& y) {
+  if constexpr (requires { prototype.start_value(y); })
+    return prototype.start_value(y);
+  else
+    return prototype.start_value(summarize_sample(y));
+}
+
+/**
+ * \ingroup distrib_start
+ * \brief Computes starting parameters for a distribution from a sample stored in a \c Kokkos::View.
+ *
+ * Host-only routine that copies \p y from its memory space to the host once and delegates to
+ * distrib_start_value(const D&, const std::vector<double>&), preserving any non-parameter
+ * fields of \p prototype.
+ * \tparam D Distribution type.
+ * \tparam Props View properties deduced from \p y.
+ * \param prototype Distribution instance supplying any non-parameter fields.
+ * \param y Sample view in any Kokkos memory space.
+ * \return Copy of \p prototype with starting parameters strictly inside their open domains.
+ * \see distrib_start_value(const D&, const std::vector<double>&), summarize_sample(const Kokkos::View<const double*, Props...>&), distrib_start
+ */
+template <class D, class... Props>
+D distrib_start_value(const D& prototype, const Kokkos::View<const double*, Props...>& y) {
+  auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, y);
+  return distrib_start_value(prototype, std::vector<double>(h.data(), h.data() + h.extent(0)));
 }
 
 }  // namespace laplace::distrib

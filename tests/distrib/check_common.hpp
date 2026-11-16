@@ -13,7 +13,6 @@
 #include <laplace/math/quadrature.hpp>
 
 #include <cmath>
-#include <limits>
 #include <vector>
 
 namespace laplace_distrib_check {
@@ -197,26 +196,6 @@ std::vector<double> yderiv(const D& d, double y, int J, int K) {
   }
 }
 
-// The rounding floor of the 5-point stencil (f0 - 8 f1 + 8 f2 - f3)/(12 h).
-// The numerator cancels to a result of size h^4 f^(5) while its terms are of
-// size |f|, so its own rounding error is about 18 eps |f|, and dividing by
-// 12 h leaves about 1.5 eps |f| / h in the quotient however smooth f is. A
-// stencil of an exactly constant f therefore returns noise of that size and
-// not zero.
-//
-// This floor matters wherever the exact derivative is itself zero, because
-// then a tolerance relative to the exact tensor has nothing to scale against.
-// The beta is the first family here with such a tensor: its y terms are linear
-// in the shapes, so d^J/dy^J d^K/dtheta^K vanishes identically for J >= 1 and
-// K >= 3, and the stencil of the constant d^K/dtheta^K returned 7.1e-11
-// against a flat 1e-12. The quantity that sets the scale is the one being
-// differenced, not the one being checked.
-inline double stencil_floor(const std::vector<std::vector<double>>& f, int i, double h) {
-  double s = 0.0;
-  for (const auto& v : f) s = std::fmax(s, std::fabs(v[i]));
-  return 4.0 * std::numeric_limits<double>::epsilon() * s / std::fabs(h);
-}
-
 // every (J, K): against the difference in y of (J - 1, K) and in theta of (J, K - 1)
 template <class D>
 void check_y_derivs(const std::vector<double>& th, double y, double hy, double rel) {
@@ -231,25 +210,17 @@ void check_y_derivs(const std::vector<double>& th, double y, double hy, double r
       for (int i = 0; i < (int)exact.size(); ++i) {
         const double fd = (v[0][i] - 8.0 * v[1][i] + 8.0 * v[2][i] - v[3][i]) / (12.0 * hy);
         INFO("dy: J = " << J << ", K = " << K << ", component " << i << ", y = " << y);
-        CHECK(std::fabs(exact[i] - fd) <= rel * scale + 1e-12 + stencil_floor(v, i, hy));
+        CHECK(std::fabs(exact[i] - fd) <= rel * scale + 1e-12);
       }
       if (K == 0) continue;
       // in theta
       for (const auto& idx : sorted_indices(2, K)) {
         const std::vector<int> lower(idx.begin(), idx.end() - 1);
         const int j = idx.back();
-        const double h = 1e-3 * std::fmax(1e-3, std::fabs(th[j]));
-        const auto fd = diff5([&](const double* t) { return yderiv(make<D>(t), y, J, K - 1); }, th, j, h);
-        // the same floor, read off the tensor the stencil differenced
-        std::vector<std::vector<double>> w;
-        for (double s : {-2.0, -1.0, 1.0, 2.0}) {
-          std::vector<double> t2 = th;
-          t2[j] = th[j] + s * h;
-          w.push_back(yderiv(make<D>(t2.data()), y, J, K - 1));
-        }
-        const int pl = position_of(2, lower);
+        const auto fd = diff5([&](const double* t) { return yderiv(make<D>(t), y, J, K - 1); }, th, j,
+                              1e-3 * std::fmax(1e-3, std::fabs(th[j])));
         INFO("dtheta: J = " << J << ", K = " << K << ", component " << position_of(2, idx) << ", y = " << y);
-        CHECK(std::fabs(exact[position_of(2, idx)] - fd[pl]) <= rel * scale + 1e-12 + stencil_floor(w, pl, h));
+        CHECK(std::fabs(exact[position_of(2, idx)] - fd[position_of(2, lower)]) <= rel * scale + 1e-12);
       }
     }
 }
