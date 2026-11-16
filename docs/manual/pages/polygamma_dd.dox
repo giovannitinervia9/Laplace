@@ -1,0 +1,125 @@
+/**
+\defgroup polygamma_double_double Polygamma functions in double-double
+\ingroup special_gamma
+\brief Double-double polygamma functions, differences, and monomial remainders for orders 0 to 13.
+
+This module evaluates polygamma functions, their differences at a positive shift, and their remainders after the leading asymptotic term for integer orders \f$n = 0, \dots, 13\f$ from `<laplace/math/polygamma_dd.hpp>`. All six public functions are in `laplace::math`, carry `LAPLACE_HD`, and run on the host and inside Kokkos device kernels. Against 300-bit `mpmath` references, worst errors stay within \f$4.47\f$, \f$3.29\f$, and \f$9.05\f$ units of \f$2^{-104}\f$ for the three families on both gcc/OpenMP and CUDA. See \ref gamma "the gamma page" for double-precision polygammas to order \f$6\f$.
+
+## Mathematical definitions
+
+Arguments and results are double-doubles: each value is the unevaluated sum \f$\mathrm{hi} + \mathrm{lo}\f$ of two IEEE 754 `double` values (Dekker, 1971), held in `laplace::math::detail::ddm::dd` with members `hi` and `lo`; a `double` converts to it implicitly.
+
+For integer order \f$n \in \{0, \dots, 13\}\f$ and \f$x > 0\f$, the module defines the polygamma function (DLMF §5.15), its shift difference for \f$h > 0\f$, and its monomial remainder as
+\f[
+\psi_n(x) = \frac{\mathrm{d}^{n+1}}{\mathrm{d}x^{n+1}} \log \Gamma(x), \qquad
+G_n(x, h) = \psi_n(x + h) - \psi_n(x), \qquad
+r_n(x) = \psi_n(x) - \mu_n(x),
+\f]
+where the leading monomial is \f$\mu_0(x) = \log x\f$ and \f$\mu_n(x) = (-1)^{n+1}(n - 1)!\, x^{-n}\f$ for \f$n \ge 1\f$.
+
+Both \f$G_n\f$ and \f$r_n\f$ are computed without forming the subtraction, so their relative precision does not depend on \f$h / x\f$ or \f$x\f$. Forming \f$G_n\f$ by subtracting two `polygamma_dd()` values loses about \f$x / h\f$ units of \f$2^{-104}\f$: worst over all orders, subtraction loses \f$61\f$ units for \f$\log_{10}(x / h) < 1.5\f$ and \f$6.5 \times 10^{15}\f$ units for \f$\log_{10}(x / h) \in [12.5, 17]\f$, where `polygamma_difference_dd()` stays within \f$2.9\f$ and \f$3.3\f$ units. Each family also provides an all-orders function filling `out[0..N]` in one call by sharing the shift loop and powers.
+
+## Domain and special values
+
+All functions require \f$x > 0\f$, integer order \f$n\f$ or upper order \f$N\f$ in \f$\{0, \dots, 13\}\f$, and \f$h > 0\f$ for differences. Single-order functions return quiet NaN for out-of-domain or NaN inputs. All-orders functions leave `out` untouched when \f$N < 0\f$ or \f$N > 13\f$, and fill `out[0..N]` with quiet NaN when \f$x \le 0\f$, \f$h \le 0\f$, or any input is NaN. Double-double precision holds while the result magnitude lies above about \f$10^{-292}\f$ (below which the low part is subnormal, reached at order \f$13\f$ only for \f$x > 10^{23}\f$) and below about \f$10^{300}\f$ (where Dekker's split overflows on the host).
+
+## Method
+
+Below \f$X_0 = 20\f$, \f$x\f$ shifts up to \f$z = x + m \ge 20\f$ with \f$m = \lfloor 20 - x \rfloor + 1\f$ steps (\f$m = 0\f$ for \f$x \ge 20\f$) via DLMF §5.15:
+\f[
+\psi_n(x) = \psi_n(x + m) + (-1)^{n+1} n! \sum_{j=0}^{m-1} (x + j)^{-(n+1)},
+\f]
+where \f$j\f$ is the step index. At \f$z \ge 20\f$, the Bernoulli asymptotic expansion (DLMF §5.15) is summed to at most \f$36\f$ terms per order until a term falls below \f$2^{-110}\f$ of the leading term:
+\f[
+\psi(z) \sim \log z - \frac{1}{2z} - \sum_{k=1}^{36} b_{0,k} z^{-2k}, \qquad
+\psi_n(z) \sim (-1)^{n+1} z^{-n} \left[ (n - 1)! + \frac{n!}{2z} + \sum_{k=1}^{36} b_{n,k} z^{-2k} \right] \quad (n \ge 1),
+\f]
+with \f$b_{0,k} = B_{2k} / (2k)\f$ and \f$b_{n,k} = B_{2k} (2k + n - 1)! / (2k)!\f$ generated as exact rationals from SymPy's Bernoulli numbers rounded to `(hi, lo)` (Meurer and others, 2017). At \f$z = 20\f$ order \f$13\f$ needs \f$33\f$ terms to reach \f$2^{-107}\f$, within the table; at \f$18\f$ it would need \f$45\f$, and at \f$15\f$ the divergent series never reaches \f$2^{-107}\f$ for orders \f$6\f$ and above. Among the thresholds \f$20\f$, \f$25\f$, \f$30\f$ and \f$40\f$, which give the same accuracy, \f$20\f$ is the cheapest. On CUDA, the \f$8064\f$-byte coefficient table resides in global device memory.
+
+For \f$G_n(x, h)\f$, let \f$u = 1 / z\f$ and \f$v = 1 / (z + h)\f$ after the common shift. Power differences use positive-term sums:
+\f[
+u^p - v^p = (u - v) S_p, \qquad u - v = h u v, \qquad S_p = \sum_{i=0}^{p-1} u^i v^{p-1-i}, \qquad S_1 = 1, \quad S_{p+1} = u S_p + v^p,
+\f]
+for \f$p \ge 1\f$, and shift pole terms use the same identity with \f$a_j = x + j\f$ and \f$b_j = a_j + h\f$. For \f$n = 0\f$, \f$\log((z + h) / z)\f$ is evaluated as \f$2 \operatorname{atanh}(h / (2z + h))\f$ by its series when \f$h < z / 2\f$, and by the double-double logarithm otherwise.
+
+For \f$r_n(x)\f$, the expansion omits its leading term and, for \f$m > 0\f$, adds \f$\mu_n(z) - \mu_n(x)\f$ in closed form: \f$\log(1 + m / x)\f$ via the same series for \f$n = 0\f$, and \f$x^{-n} - z^{-n} = m x^{-1} z^{-1} S_n(1 / x, 1 / z)\f$ for \f$n \ge 1\f$.
+
+## Accuracy
+
+References are \f$8022\f$ rows from 300-bit `mpmath` (2023), confirmed at 400 bits to \f$2^{-200}\f$ and checked against quadrature of the integral representations at \f$55\f$ points up to \f$x = 10^{13}\f$, \f$n = 13\f$ to \f$1.2 \times 10^{-75}\f$. Grids cover \f$x \in [10^{-6}, 3.3 \times 10^{15}]\f$ for \f$\psi_n\f$ and \f$r_n\f$, and \f$x \in [10^{-3}, 10^{13}]\f$, \f$h \in [10^{-3}, 333.3]\f$ (\f$x / h\f$ up to \f$10^{16}\f$) for \f$G_n\f$. Errors are measured in units of \f$2^{-104} |f|\f$ (\f$2^{-104} \max(|f|, 1)\f$ for \f$\psi_0\f$); see \ref accuracy "How accuracy is measured". Measured maxima are identical on gcc/OpenMP and CUDA (RTX 4070 SUPER); \f$r_n\f$ peaks at \f$x \in [12, 15]\f$.
+
+| Order | \f$\psi_n\f$ single | \f$\psi_n\f$ all | \f$\psi_n\f$ bound | \f$G_n\f$ both | \f$G_n\f$ bound | \f$r_n\f$ single | \f$r_n\f$ all | \f$r_n\f$ bound |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 0.96 | 0.96 | 1.5 | 0.79 | 1.2 | 8.97 | 8.97 | 14 |
+| 1 | 0.74 | 0.74 | 1.2 | 0.69 | 1.1 | 3.44 | 3.44 | 5.2 |
+| 2 | 1.04 | 1.04 | 1.6 | 1.09 | 1.7 | 6.13 | 6.13 | 9.2 |
+| 3 | 1.26 | 1.26 | 1.9 | 1.00 | 1.5 | 5.00 | 5.00 | 7.5 |
+| 4 | 1.27 | 1.75 | 2.7 | 1.75 | 2.7 | 5.32 | 5.24 | 8.0 |
+| 5 | 1.50 | 2.05 | 3.1 | 1.55 | 2.4 | 9.05 | 7.01 | 14 |
+| 6 | 2.07 | 2.15 | 3.3 | 1.47 | 2.3 | 8.27 | 7.07 | 12.5 |
+| 7 | 2.10 | 2.01 | 3.2 | 1.70 | 2.6 | 7.66 | 7.05 | 11.5 |
+| 8 | 2.63 | 2.23 | 4.0 | 2.13 | 3.2 | 7.78 | 6.28 | 11.7 |
+| 9 | 3.08 | 2.64 | 4.7 | 2.39 | 3.6 | 7.29 | 6.44 | 11 |
+| 10 | 3.15 | 3.07 | 4.8 | 2.85 | 4.3 | 6.30 | 4.99 | 9.5 |
+| 11 | 3.53 | 3.53 | 5.3 | 2.84 | 4.3 | 7.62 | 6.38 | 11.5 |
+| 12 | 3.93 | 3.87 | 5.9 | 3.26 | 4.9 | 8.49 | 4.76 | 12.8 |
+| 13 | 4.47 | 3.95 | 6.8 | 3.29 | 5.0 | 8.38 | 5.65 | 12.6 |
+
+For per-band details, see `docs/numerics.md`.
+
+## Speed
+
+Evaluation times in nanoseconds per call (\f$h = 0.37\f$) were measured on one gcc thread, 16 OpenMP threads (prototype), and CUDA (RTX 4070 SUPER).
+
+| Function | 1 thread \f$[10^{-2}, 10^8]\f$ | 1 thread \f$[20, 10^8]\f$ | OpenMP 16 \f$[10^{-2}, 10^8]\f$ | CUDA \f$[10^{-2}, 10^8]\f$ | CUDA \f$[20, 10^8]\f$ |
+|---|---|---|---|---|---|
+| \f$\psi_0\f$ | 868 | 650 | 100 | 40–90 | 8.0 |
+| \f$\psi_{13}\f$ | 560 | 134 | 106 | 10.1 | 3.0 |
+| \f$G_{13}\f$ | 1936 | 407 | 388 | 37.0 | 8.4 |
+| \f$r_{13}\f$ | 612 | 124 | 127 | 11.2 | 2.9 |
+| \f$\psi\f$ all orders | 3072 | 1664 | 489 | 50.3 | 25.8 |
+| \f$G\f$ all orders | 3894 | 1543 | 632 | 63.5 | 24.1 |
+| \f$r\f$ all orders | 2667 | 917 | — | 45.9 | 18.6 |
+| `polygamma(6, x)` (`double`) | 24 | 19 | 4.4 | 0.5 | 0.1 |
+
+For \f$N = 13\f$ on one thread over \f$[10^{-2}, 10^8]\f$, one all-orders call takes \f$3193\f$ ns against \f$7807\f$ ns for fourteen single calls for \f$\psi_n\f$, and \f$4252\f$ ns against \f$20991\f$ ns for \f$G_n\f$.
+
+## Example
+
+The kernel below evaluates \f$G_n(x, h)\f$ for orders \f$0\f$ to \f$13\f$ inside a `Kokkos::parallel_for`:
+
+\code{.cpp}
+#include <laplace/math/polygamma_dd.hpp>
+#include <Kokkos_Core.hpp>
+
+void eval_pgdd(const Kokkos::View<const double*>& x,
+               const Kokkos::View<const double*>& h,
+               Kokkos::View<double* [14]>& out_hi,
+               int count) {
+  using laplace::math::detail::ddm::dd;
+  Kokkos::parallel_for("polygamma_diff_dd", count, KOKKOS_LAMBDA(const int i) {
+    dd out[14];
+    laplace::math::polygamma_difference_orders_dd(13, x(i), h(i), out);
+    for (int n = 0; n <= 13; ++n) out_hi(i, n) = out[n].hi;
+  });
+}
+\endcode
+
+## Module functions
+
+All functions are called in `laplace::math`.
+
+- \ref laplace::math::polygamma_dd "polygamma_dd()" — \f$\psi_n(x)\f$ for one order \f$n \in \{0, \dots, 13\}\f$
+- \ref laplace::math::polygamma_difference_dd "polygamma_difference_dd()" — \f$\psi_n(x + h) - \psi_n(x)\f$ without cancellation
+- \ref laplace::math::polygamma_monomial_remainder_dd "polygamma_monomial_remainder_dd()" — \f$\psi_n(x) - \mu_n(x)\f$ without cancellation
+- \ref laplace::math::polygamma_orders_dd "polygamma_orders_dd()" — \f$\psi_n(x)\f$ for orders \f$0\f$ to \f$N\f$
+- \ref laplace::math::polygamma_difference_orders_dd "polygamma_difference_orders_dd()" — \f$\psi_n(x + h) - \psi_n(x)\f$ for orders \f$0\f$ to \f$N\f$
+- \ref laplace::math::polygamma_monomial_remainder_orders_dd "polygamma_monomial_remainder_orders_dd()" — \f$\psi_n(x) - \mu_n(x)\f$ for orders \f$0\f$ to \f$N\f$
+
+## References
+
+- NIST Digital Library of Mathematical Functions, §5.15 Polygamma Functions, https://dlmf.nist.gov/5.15
+- T. J. Dekker (1971), A floating-point technique for extending the available precision, Numerische Mathematik, 18(3), 224–242. https://doi.org/10.1007/bf01397083
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

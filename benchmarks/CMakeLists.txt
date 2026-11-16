@@ -52,6 +52,10 @@ target_link_libraries(math_quad PRIVATE Laplace::laplace)
 add_executable(math_dd math_dd.cpp)
 target_link_libraries(math_dd PRIVATE Laplace::laplace)
 
+laplace_kokkos_sources(math_polygamma_dd.cpp)
+add_executable(math_polygamma_dd math_polygamma_dd.cpp)
+target_link_libraries(math_polygamma_dd PRIVATE Laplace::laplace)
+
 add_executable(math_rel math_rel.cpp)
 target_link_libraries(math_rel PRIVATE Laplace::laplace)
 

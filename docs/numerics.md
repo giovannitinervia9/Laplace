@@ -8089,3 +8089,167 @@ route.
 avoided: if a configuration ever needs the quadrature there, with the other
 shape at one and x above `x_wide`, the anchor and the scale have to read the
 single factor that is left.
+
+## Polygamma functions to order 13 in double-double
+
+What: `include/laplace/math/polygamma_dd.hpp` (2026-11-16), in `laplace::math`:
+psi_n(x), G_n(x, h) = psi_n(x + h) - psi_n(x) for h > 0, and
+r_n(x) = psi_n(x) - mu_n(x) with mu_0 = log x and mu_n = (-1)^(n+1) (n-1)! x^-n,
+for n = 0..13, arguments and results in double-double. Each comes as a single-order
+function (`polygamma_dd`, `polygamma_difference_dd`, `polygamma_monomial_remainder_dd`),
+which is the general route, and as an all-orders function filling out[0..N]
+(`polygamma_orders_dd`, `polygamma_difference_orders_dd`,
+`polygamma_monomial_remainder_orders_dd`). The all-orders form is an exception to one
+function per order, accepted for this layer only because it was measured to pay
+(Giovanni, 2026-11-16; table below). It is the first prerequisite of the generalized
+gamma in the mean, whose order-six derivatives need polygammas to order 12-13 in
+double-double towards the lognormal limit d/p -> inf (`note/piano_distrib_restanti.md`
+section 5).
+
+How: below X0 = 20 the shift recurrence, at z >= 20 the asymptotic expansion with at
+most 36 Bernoulli terms per order, stopped when a term falls below 2^-110 of the
+leading one. The coefficients b_(0,k) = B_2k/(2k) and b_(n,k) = B_2k (2k+n-1)!/(2k)!
+are exact rationals from SymPy's Bernoulli numbers, rounded to (hi, lo)
+(`tools/reference/polygamma_dd_coefficients.py`). G_n is never formed as a difference:
+with u = 1/z, v = 1/(z + h) after the common shift, u^p - v^p = h u v S_p with
+S_1 = 1, S_(p+1) = u S_p + v^p, all terms positive, and the same identity for the pole
+terms a_j^-(n+1) - b_j^-(n+1), a_j = x + j, b_j = a_j + h; log((z + h)/z) is
+2 atanh(h/(2z + h)) by its series below h = z/2. r_n leaves the leading term out of
+the expansion and adds mu_n(z) - mu_n(x) in closed form (log1p(m/x) by the same
+series, x^-n - z^-n = m x^-1 z^-1 S_n(1/x, 1/z)). The table (8064 bytes) is in global
+device memory (`LAPLACE_DEVICE_GLOBAL_TABLE`), not in the constant bank (below).
+
+Threshold X0. Bernoulli terms needed for a truncation below 2^-107 of the bracket at
+z = X0 (mpmath):
+
+| X0 | n = 0 | n = 1 | n = 6 | n = 9 | n = 13 |
+|---|---|---|---|---|---|
+| 15 | 21 | 22 | never | never | never |
+| 18 | 18 | 18 | 26 | 32 | 45 |
+| 20 | 16 | 16 | 23 | 27 | 33 |
+| 25 | 14 | 14 | 18 | 21 | 24 |
+| 30 | 13 | 12 | 16 | 18 | 20 |
+| 40 | 11 | 11 | 14 | 15 | 16 |
+
+At 15 the divergent series never reaches 2^-107 for n >= 6; at 18 order 13 needs 45
+terms, more than the table holds. Cost on one
+thread (gcc) over x in [1e-2, 1e8], at the same accuracy within a unit: psi_13 576,
+656, 778, 959 ns and G_13 2202, 2441, 2801, 3525 ns at X0 = 20, 25, 30, 40. The
+recurrence step (a double-double division and a power) costs more than the series
+terms it saves, so the smallest admissible X0 wins: 20.
+
+References: `tools/reference/polygamma_dd.py`, mpmath at 300 bits from `mpmath.psi`
+(Hurwitz zeta), each row recomputed at 400 bits and kept when the two agree to
+2^-200; values stored as three doubles (`tests/data/reference/polygamma_dd.csv`, 8022
+rows). psi_n and r_n at x from 1e-6 to 3.3e15, dense from 0.25 to 60 and on both sides
+of X0, and at double-double arguments d/p; G_n at x from 1e-3 to 1e13 against h from
+1e-3 to 333 (x/h from 3e-6 to 1e16) and at the generalized gamma's pairs x = d/p,
+h = 1/p, d = 10..1e9, p = 0.003..30. mpmath.psi was checked once against the integral
+representations psi_n(x) = (-1)^(n+1) int_0^inf t^n e^(-xt)/(1 - e^(-t)) dt and their
+analogues for G_n (with -expm1(-ht)) and psi(x) - log x, by quadrature, at 55 points
+up to x = 1e13 and n = 13: agreement to 1.2e-75. (mpmath.nsum of the defining series
+failed at large x, and mpmath.quad stops on an absolute tolerance: the integrands,
+near 1e-160, had to be scaled.)
+
+Accuracy: worst over the file, units of 2^-104 of the value (psi_0: of max(|f|, 1)),
+identical on gcc/OpenMP and CUDA (`benchmarks/math_polygamma_dd.cpp`):
+
+| n | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| psi_n, one order | 0.96 | 0.74 | 1.04 | 1.26 | 1.27 | 1.50 | 2.07 | 2.10 | 2.63 | 3.08 | 3.15 | 3.53 | 3.93 | 4.47 |
+| psi_n, all orders | 0.96 | 0.74 | 1.04 | 1.26 | 1.75 | 2.05 | 2.15 | 2.01 | 2.23 | 2.64 | 3.07 | 3.53 | 3.87 | 3.95 |
+| G_n, both forms | 0.79 | 0.69 | 1.09 | 1.00 | 1.75 | 1.55 | 1.47 | 1.70 | 2.13 | 2.39 | 2.85 | 2.84 | 3.26 | 3.29 |
+| r_n, one order | 8.97 | 3.44 | 6.13 | 5.00 | 5.32 | 9.05 | 8.27 | 7.66 | 7.78 | 7.29 | 6.30 | 7.62 | 8.49 | 8.38 |
+| r_n, all orders | 8.97 | 3.44 | 6.13 | 5.00 | 5.24 | 7.01 | 7.07 | 7.05 | 6.28 | 6.44 | 4.99 | 6.38 | 4.76 | 5.65 |
+
+r_n is worst at x = 12 to 15, a shift of one to eight steps, where the pole sum and
+the difference of the two monomials are of one size: the digit the double
+`polygamma_monomial_remainder` also loses there. Test bounds
+(`tests/math/test_polygamma_dd.cpp`): the worst of the two forms plus half, per order.
+On the same grid the double `polygamma(n, x)`, n <= 6, is at 2.86 ulp1 (n = 0) and
+1.67, 1.95, 1.82, 3.34, 4.09, 5.03 ulp.
+
+What the difference form buys: G_n formed as polygamma_dd(n, x + h) - polygamma_dd(n, x),
+worst over all orders, by band of log10(x/h): below 1.5, 61 units (exact form 2.9);
+1.5-3.5, 1540 (2.1); 3.5-5.5, 2.7e5 (2.8); 5.5-7.5, 6.4e7 (2.0); 7.5-9.5, 8.7e9 (2.2);
+9.5-12.5, 3.4e12 (0.95); 12.5-17, 6.5e15 (3.3). The subtraction loses about x/h units;
+at x/h = 1e7, the lognormal regime d/p = 1e7 with p = 1, that is 7e-25 relative
+against 1e-31.
+
+Speed, ns per evaluation (h = 0.37; all orders = one call for N = 13):
+
+| | 1 thread [1e-2, 1e8] | 1 thread [20, 1e8] | OpenMP 16 [1e-2, 1e8] | OpenMP 16 [20, 1e8] | CUDA [1e-2, 1e8] | CUDA [20, 1e8] |
+|---|---|---|---|---|---|---|
+| psi_0 | 868 | 650 | 100 | 57 | 40-90 | 8.0 |
+| psi_1 | 403 | 99 | | | 8.0 | 1.9 |
+| psi_6 | 485 | 119 | 93 | 17 | 8.9 | 2.5 |
+| psi_13 | 560 | 134 | 106 | 21 | 10.1 | 3.0 |
+| G_0 | 957 | 414 | 159 | 57 | 18.3 | 7.2 |
+| G_6 | 1249 | 305 | 233 | 43 | 24.2 | 6.0 |
+| G_13 | 1936 | 407 | 388 | 58 | 37.0 | 8.4 |
+| r_0 | 484 | 92 | 100 | 13 | 10.4 | 1.7 |
+| r_13 | 612 | 124 | 127 | 21 | 11.2 | 2.9 |
+| psi, all orders | 3072 | 1664 | 489 | 236 | 50.3 | 25.8 |
+| G, all orders | 3894 | 1543 | 632 | 235 | 63.5 | 24.1 |
+| r, all orders | 2667 | 917 | | | 45.9 | 18.6 |
+| double polygamma(6) | 24 | 19 | 4.4 | 3.1 | 0.5 | 0.1 |
+
+(OpenMP from the prototype, which computes the same operations.) psi_0 is dominated
+by the double-double logarithm (about 600 ns on one thread); on CUDA it is the first
+kernel timed and varies from 40 to 90 ns between runs. Fourteen single calls against
+one all-orders call, one thread: psi_0..psi_13 7807 against 3193 ns over [1e-2, 1e8]
+and 2584 against 1947 over [20, 1e8]; G_0..G_13 20991 against 4252 and 5587 against
+1429. This is the measurement behind the exception to one function per order.
+
+Table placement. With the table in `__constant__` (`LAPLACE_DEVICE_TABLE`) the -rdc
+device program of laplace_tests needed 0x11918 = 71960 bytes of constant data against
+the 64 KB bank, and nvlink failed for every build (measured by another session on
+2026-11-16). In global memory the CUDA cost is the same to 0.1 ns on every function
+above (both placements built from the same bench, two runs each), and laplace_tests
+links, with 63896 bytes of the 65536 in the constant bank (.nv.constant3 of the
+linked program, cuobjdump -elf): 1640 bytes left. Decided with Giovanni: tables of several kilobytes go to global memory.
+
+Open: values below about 1e-292 in magnitude lose double-double precision (their low
+part is subnormal; order 13 only, x > 1e23) and values above about 1e300 may be NaN on
+the host (Dekker's split overflows); both are declared, not handled.
+
+Update (2026-11-16, 09:50): after `factor_analytic_pdmat::inverse_dk` moved to the
+augmented matrix [[Psi, Lambda], [Lambda', -I]], mvgaussian1 over factor_analytic
+measures, worst ulp1N over A = 0..2 and K <= 6, 118 on gcc and 78.9 on CUDA (A = 0,
+K = 5, psi = e^-6; was 3.1e6), and the information (trace route) 33.1 / 12.1 (was
+1.6e6); mvgaussian2 over factor_analytic at most 1.73 everywhere, its information
+included (was 1.2e5). Bounds in `tests/distrib/test_mvgaussian.cpp` reset to the
+larger of the two times 1.5. The log_cholesky A = 0, K = 6 block is back at 4.58 /
+5.25 (bound 8), so the open note above is closed.
+
+## Device tables in global memory: incomplete gamma and beta derivatives
+
+What: on 2026-11-16 the device tables of `math/incomplete_gamma_deriv.hpp` (nine
+tables, 6688 bytes: the quadrature nodes and weights `d_ee1_*`, `d_ee2_*`, `d_ts_*`,
+and the series coefficients `d_lgam_c`, `d_eta_d`, `d_temme_c`) and of
+`math/incomplete_beta_deriv.hpp` (`map_dev` and `gl_dev`, 5024 bytes) moved from
+`LAPLACE_DEVICE_TABLE` (`__constant__`) to `LAPLACE_DEVICE_GLOBAL_TABLE`, so that the
+64 KB constant bank shared by the whole -rdc device program has room (decided with
+Giovanni; the count is kept in `note/cuda_constant_budget.md`).
+
+How: one scratch bench of the public derivative functions, built once with the
+tables in each place, two runs each, on CUDA (RTX 4070 SUPER), ns per call:
+
+| function, region | global | constant |
+|---|---|---|
+| log P da1, all | 127.0 | 127.0 |
+| log Q da5, all | 178.9 | 178.9 |
+| log P da6, centre 1-50 | 139.7 | 140.0 |
+| log Q da5, a < 1 | 68.3 | 68.6 |
+| log P da5, upper tail | 102.5 | 102.4 |
+| log I d5, all shapes | 436.4 | 436.3 |
+| log I d6, small shapes | 781.6 | 781.6 |
+| log I d5, large shapes | 141.8 | 141.7 |
+
+Every function and region timed (gamma orders 1, 5, 6 of P and Q in six regions,
+beta orders 1, 5, 6 of I and 1 - I in three) agrees within 0.3 per cent, including
+the quadratures, whose nodes every thread of a warp reads at the same time; the
+only outlier, 139 against 127 ns, was the first kernel of the first run and did not
+repeat. The values are unchanged (same arithmetic). After the move the linked
+laplace_tests needs 50520 bytes of constant data (.nv.constant3, cuobjdump -elf),
+15016 below the ceiling.
