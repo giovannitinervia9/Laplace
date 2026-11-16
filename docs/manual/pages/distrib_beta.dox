@@ -1,0 +1,103 @@
+/**
+\defgroup distrib_beta Beta
+\brief Continuous distribution on \f$(0, 1)\f$ parametrized by mean \f$\mu \in (0, 1)\f$ and precision \f$\phi > 0\f$, with closed derivatives, Fisher information, and incomplete-beta cumulative functions.
+
+Defined in `<laplace/distrib/beta.hpp>` as \ref laplace::distrib::beta_distrib "beta_distrib", this module evaluates the beta log-density, its parameter derivatives to order \f$6\f$, mixed observation-parameter derivatives, closed expected Fisher information and its derivatives to order \f$4\f$, cumulative and complementary distribution functions with their logarithms and parameter derivatives to order \f$6\f$, quantiles from probabilities and tail log-probabilities, and host starting values. Every member except `start_value()` is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). Random variates by inversion come from \ref distrib_generic "the generic routes". Against high-precision reference values on `gcc`, log-density orders \f$0\f$ and \f$1\f$ stay within \f$1.38\,\varepsilon\f$ of the sum of their terms, orders \f$2\f$ to \f$6\f$ stay within \f$12.2\f$ ulp of each order's largest component, expected information stays within \f$5.66\,\varepsilon\f$ of its scale, cumulative values stay within \f$6.6 \times 10^{-14}\f$ relative, and cumulative log-derivatives stay within \f$2.8 \times 10^{-10}\f$ of the order's largest component, outside the large-\f$\phi\f$ and small-shape cancellation corners noted below.
+
+## Classic form and parametrization
+
+In its classic two-shape form (Johnson, Kotz and Balakrishnan, 1995), the beta distribution on \f$y \in (0, 1)\f$ has positive shapes \f$\alpha > 0\f$ and \f$\beta > 0\f$ and density \f$f_{\mathrm{classic}}(y; \alpha, \beta) = y^{\alpha - 1}(1 - y)^{\beta - 1} / B(\alpha, \beta)\f$, where \f$B(\alpha, \beta) = \Gamma(\alpha)\Gamma(\beta)/\Gamma(\alpha + \beta)\f$. Substituting \f$\alpha = \mu\phi\f$ and \f$\beta = (1 - \mu)\phi = \nu\phi\f$, with \f$\nu = 1 - \mu\f$ and \f$\alpha + \beta = \phi\f$, yields the mean-precision parametrization (Ferrari and Cribari-Neto, 2004) with mean \f$\mu \in (0, 1)\f$ and precision \f$\phi > 0\f$:
+\f[
+f(y; \mu, \phi) = \frac{\Gamma(\phi)}{\Gamma(\mu\phi)\,\Gamma((1 - \mu)\phi)}\, y^{\mu\phi - 1} (1 - y)^{(1 - \mu)\phi - 1}, \qquad y \in (0, 1).
+\f]
+This parametrization gives \f$\mathbb{E}[Y] = \mu\f$ and \f$\operatorname{Var}(Y) = \mu(1 - \mu)/(\phi + 1)\f$, so \f$\phi\f$ acts as a precision parameter: larger \f$\phi\f$ concentrates the distribution more tightly around \f$\mu\f$. On the log scale, the implemented log-density is
+\f[
+\ell(\mu, \phi; y) = \log\Gamma(\phi) - \log\Gamma(\mu\phi) - \log\Gamma((1 - \mu)\phi) + (\mu\phi - 1)\log y + \bigl((1 - \mu)\phi - 1\bigr)\log(1 - y),
+\f]
+evaluated with `Kokkos::log1p(-y)` for \f$\log(1 - y)\f$.
+
+## Parameters, domain, and regularity
+
+Struct `beta_distrib` sets `kind = distrib_kind::continuous`, `n_params = 2`, and `y_regularity = infinitely_smooth`. In `params`, `mu` has open domain \f$(0, 1)\f$ and `phi` has open domain \f$(0, \infty)\f$; both set `circular = false`, `moves_support = false`, `regularity = infinitely_smooth`, and `cdf_regularity = infinitely_smooth`. The support is \f$(0, 1)\f$ (`support_lower()` returns \f$0\f$ and `support_upper()` returns \f$1\f$), and neither `param_kinks()` nor `y_kinks()` reports any non-smooth point. Member `center()` returns \f$\mu\f$ and `scale()` returns the standard deviation \f$\sqrt{\mu(1 - \mu)/(\phi + 1)}\f$. Parameter derivatives pack into `sym_tensor<2, K>`, whose component \f$j\f$ holds \f$\partial^K / \partial\mu^{K - j}\partial\phi^j\f$, and expected information derivatives pack into `expected_info_tensor<2, K>` with `pair[0]` for \f$(\mu, \mu)\f$, `pair[1]` for \f$(\mu, \phi)\f$, and `pair[2]` for \f$(\phi, \phi)\f$ (\ref distrib_core "distrib_core").
+
+## Data dependence and parameter derivatives
+
+The shape maps \f$\alpha(\mu, \phi) = \mu\phi\f$ and \f$\beta(\mu, \phi) = \nu\phi\f$ are linear in each parameter separately: \f$\partial\alpha/\partial\mu = \phi\f$, \f$\partial\beta/\partial\mu = -\phi\f$, \f$\partial\alpha/\partial\phi = \mu\f$, and \f$\partial\beta/\partial\phi = \nu\f$. Their only nonzero second derivatives are \f$\partial^2\alpha/\partial\mu\,\partial\phi = 1\f$ and \f$\partial^2\beta/\partial\mu\,\partial\phi = -1\f$, and every derivative of order \f$3\f$ and above vanishes. Because \f$y\f$ enters \f$\ell\f$ linearly in the shapes as \f$(\alpha - 1)\log y + (\beta - 1)\log(1 - y)\f$, the observation survives in the parameter derivatives only up to order \f$2\f$. At order \f$1\f$, the components are
+\f[
+\frac{\partial \ell}{\partial \mu} = \phi R, \qquad R = \log\left(\frac{y}{1 - y}\right) - \psi(\alpha) + \psi(\beta),
+\f]
+where the residual \f$R\f$ is kept as one group carrying \f$\phi\log(y/(1 - y))\f$ from the data, and
+\f[
+\frac{\partial \ell}{\partial \phi} = \psi(\phi) + \mu\bigl(\log y - \psi(\alpha)\bigr) + \nu\bigl(\log(1 - y) - \psi(\beta)\bigr),
+\f]
+carrying \f$\mu\log y + \nu\log(1 - y)\f$ from the data. At order \f$2\f$, only the mixed component \f$\partial^2\ell/\partial\mu\,\partial\phi\f$ retains \f$y\f$, adding \f$\log(y/(1 - y))\f$. From order \f$3\f$ on, the derivatives are free of \f$y\f$ and are the observed and expected derivatives at once. Mixed observation-parameter derivatives `logpdf_dy_dk<J, K>(y)` (\f$J + K \le 6\f$) evaluate \f$y_a = \mathrm{d}^J \log y / \mathrm{d}y^J = (-1)^{J-1}(J - 1)!\,y^{-J}\f$ and \f$y_b = \mathrm{d}^J \log(1 - y) / \mathrm{d}y^J = -(J - 1)!\,(1 - y)^{-J}\f$ for \f$J \ge 1\f$: order \f$K = 0\f$ gives \f$(\alpha - 1)y_a + (\beta - 1)y_b\f$, \f$K = 1\f$ gives \f$(\phi(y_a - y_b),\, \mu y_a + \nu y_b)\f$, \f$K = 2\f$ places \f$y_a - y_b\f$ in the mixed component with zeros elsewhere, and \f$K \ge 3\f$ returns zero.
+
+For total order \f$K = i + j \ge 1\f$ with \f$i\f$ derivatives in \f$\mu\f$ and \f$j\f$ in \f$\phi\f$, writing \f$g^{(m)}(\alpha)\f$ for the \f$m\f$-th derivative of a univariate function \f$g\f$ at \f$\alpha = \mu\phi\f$, Leibniz's rule gives
+\f[
+\frac{\partial^{i+j}}{\partial\mu^i \partial\phi^j} g(\mu\phi) = \sum_{r=0}^{\min(i, j)} \binom{i}{r} \frac{j!}{(j - r)!}\, \mu^{j - r} \phi^{i - r} g^{(i + j - r)}(\alpha).
+\f]
+With \f$g = -\log\Gamma\f$, so \f$g^{(m)} = -\psi_{m-1}\f$ (polygamma of order \f$m - 1\f$), the second shape term \f$-\log\Gamma(\beta)\f$ repeats this sum with \f$\nu\f$ in place of \f$\mu\f$, \f$\beta\f$ in place of \f$\alpha\f$, and the sign \f$(-1)^i\f$, since \f$\partial/\partial\mu = -\partial/\partial\nu\f$. The term \f$\log\Gamma(\phi)\f$ adds \f$\psi_{K-1}(\phi)\f$ to the pure \f$\phi\f$ component (\f$i = 0\f$) only. Every component is thus a sum of polygamma functions at \f$\alpha\f$, \f$\beta\f$, and \f$\phi\f$ multiplied by powers of \f$\mu\f$, \f$\nu\f$, and \f$\phi\f$; these closed forms were derived symbolically with SymPy (Meurer and others, 2017) and checked by `tools/reference/distrib_beta.py`.
+
+## Expected information
+
+The expected Fisher information has the closed form
+\f[
+I_{\mu\mu} = \phi^2\bigl(\psi_1(\alpha) + \psi_1(\beta)\bigr), \qquad
+I_{\mu\phi} = \phi\bigl(\mu\psi_1(\alpha) - \nu\psi_1(\beta)\bigr), \qquad
+I_{\phi\phi} = \mu^2\psi_1(\alpha) + \nu^2\psi_1(\beta) - \psi_1(\phi).
+\f]
+Because \f$I_{\mu\mu}\f$ and \f$I_{\phi\phi}\f$ equal minus the \f$y\f$-free second derivatives of \f$\ell\f$, their derivatives of order \f$K \in \{1, \dots, 4\}\f$ with \f$i\f$ differentiations in \f$\mu\f$ and \f$j\f$ in \f$\phi\f$ are minus the \f$y\f$-free components two orders up: \f$(i + 2, j)\f$ for \f$I_{\mu\mu}\f$ and \f$(i, j + 2)\f$ for \f$I_{\phi\phi}\f$, with \f$\psi_{K+1}(\phi)\f$ entering the pure \f$\phi\f$ derivatives of \f$I_{\phi\phi}\f$ only. By contrast, \f$I_{\mu\phi}\f$ is not minus the observed second derivative: the observed mixed second derivative is \f$\partial^2\ell/\partial\mu\,\partial\phi = R - I_{\mu\phi}\f$, where \f$R\f$ has expectation zero. Derivatives of \f$I_{\mu\phi}\f$ are therefore evaluated from \f$\phi\mu\psi_1(\alpha) - \phi\nu\psi_1(\beta)\f$ by Leibniz's rule over the product of \f$\phi q\f$ (\f$q = \mu\f$ with \f$\mathrm{d}q/\mathrm{d}\mu = 1\f$, or \f$q = \nu\f$ with \f$\mathrm{d}q/\mathrm{d}\mu = -1\f$) and \f$\psi_1(q\phi)\f$, applying the same shape-derivative sum to \f$\psi_1(q\phi)\f$.
+
+## Cumulative functions, quantiles, and support endpoints
+
+The cumulative distribution function is the regularized incomplete beta function (DLMF §8.17), \f$F(y) = I_y(\alpha, \beta)\f$. Members `cdf()`, `ccdf()`, `log_cdf()`, and `log_ccdf()` return \f$F(y)\f$, \f$1 - F(y)\f$, \f$\log F(y)\f$, and \f$\log(1 - F(y))\f$ through \ref laplace::math::ibeta "ibeta()", \ref laplace::math::ibetac "ibetac()", \ref laplace::math::log_ibeta "log_ibeta()", and \ref laplace::math::log_ibetac "log_ibetac()" (\ref incomplete_beta "incomplete beta"), returning \f$(0, 1, -\infty, 0)\f$ for \f$y \le 0\f$ and \f$(1, 0, 0, -\infty)\f$ for \f$y \ge 1\f$. For orders \f$K = 1\f$ to \f$6\f$, `log_cdf_dk()` and `log_ccdf_dk()` obtain the mixed shape partials of \f$\log I_y(\alpha, \beta)\f$ and \f$\log(1 - I_y(\alpha, \beta))\f$ from \ref laplace::math::own::log_ibeta_d1 "log_ibeta_d1()"..`log_ibeta_d6()` and \ref laplace::math::own::log_ibetac_d1 "log_ibetac_d1()"..`log_ibetac_d6()` (\ref incomplete_beta "incomplete beta") and compose them with the two linear shape maps \f$\alpha(\mu, \phi)\f$ and \f$\beta(\mu, \phi)\f$ (Johnson, 2002) via \ref laplace::math::chain_rule_pair_dk "chain_rule_pair_dk()" (\ref chain_pair "chain_pair").
+
+Quantiles `quantile()`, `quantile_from_log()`, and `quantile_from_log_upper()` call \ref laplace::math::ibeta_inv "ibeta_inv()", \ref laplace::math::ibeta_inv_logp "ibeta_inv_logp()", and \ref laplace::math::ibetac_inv_logq "ibetac_inv_logq()" (\ref incomplete_beta "incomplete beta"); the logarithmic forms avoid forming \f$1 - p\f$, keeping far-tail quantiles at the accuracy of `log_cdf()` and `log_ccdf()`. Random draws use \ref distrib_generic "rng_by_inversion()", and `start_value()` computes a method-of-moments estimate from \ref distrib_start "Starting values" (\f$\mu\f$ from the sample mean clamped to \f$[10^{-6}, 1 - 10^{-6}]\f$, and \f$\phi = \max(\mu(1 - \mu)/s_y^2 - 1, 10^{-3})\f$, defaulting to \f$\phi = 1\f$ when the mean is outside \f$(0, 1)\f$ or the variance is zero or non-finite, and \f$\mu = 1/2\f$ on NaN, before applying `start_inside()`). At the endpoints \f$y = 0\f$ and \f$y = 1\f$, outside the open support \f$(0, 1)\f$, `logpdf()` returns \f$-\infty\f$ and the observation score \f$(\alpha - 1)/y - (\beta - 1)/(1 - y)\f$ is not finite; a random draw by inversion can still land on \f$0\f$ or \f$1\f$ when either shape \f$\alpha\f$ or \f$\beta\f$ is below about \f$0.06\f$.
+
+## Accuracy and limits
+
+Against mpmath references (The mpmath development team, 2023) computed at \f$200\f$ and \f$300\f$ bits by `tools/reference/distrib_beta.py` (`beta_logpdf.csv` for \f$\phi \in [10^{-2}, 10^8]\f$, `beta_info.csv`, `beta_cdf.csv`, and `beta_logcdf.csv`), the `gcc` build meets the test bounds in `tests/distrib/test_beta.cpp` below (see \ref accuracy "How accuracy is measured" and \ref distrib_core "distrib_core"). Tensor errors are measured relative to each order's largest component; `cdf()` and `ccdf()` errors are relative, and `log_cdf()` and `log_ccdf()` errors are absolute divided by \f$\max(1, |\log|)\f$.
+
+| Quantity | Measured maximum (`gcc`) | Test bound |
+| --- | --- | --- |
+| `logpdf()` and `logpdf_d1()` | \f$1.38\,\varepsilon\f$ of term sum | \f$8\,\varepsilon\f$ of term sum |
+| `logpdf_d2()`..`logpdf_d6()` | \f$2.14\f$, \f$4.37\f$, \f$5.72\f$, \f$12.2\f$, \f$9.61\f$ ulp | \f$40\f$ ulp |
+| `expected_info()`, `expected_info_d1()`..`d4()` | \f$5.66\,\varepsilon\f$ of scale | \f$64\,\varepsilon\f$ of scale |
+| `cdf()`, `ccdf()` | \f$6.2 \times 10^{-14}\f$, \f$6.6 \times 10^{-14}\f$ | \f$5 \times 10^{-12}\f$ |
+| `log_cdf()`, `log_ccdf()` | \f$1.9 \times 10^{-15}\f$, \f$1.4 \times 10^{-15}\f$ | \f$5 \times 10^{-12}\f$ |
+| `log_cdf_d1()`..`log_cdf_d6()` | \f$4.3 \times 10^{-14}\f$, \f$4.7 \times 10^{-14}\f$, \f$1.2 \times 10^{-13}\f$, \f$1.1 \times 10^{-12}\f$, \f$2.4 \times 10^{-11}\f$, \f$2.8 \times 10^{-10}\f$ | \f$7 \times 10^{-14}\f$, \f$7 \times 10^{-14}\f$, \f$2 \times 10^{-13}\f$, \f$2 \times 10^{-12}\f$, \f$4.5 \times 10^{-11}\f$, \f$4.5 \times 10^{-10}\f$ |
+| `log_ccdf_d1()`..`log_ccdf_d6()` | \f$2.9 \times 10^{-15}\f$, \f$1.8 \times 10^{-14}\f$, \f$8.3 \times 10^{-14}\f$, \f$1.3 \times 10^{-12}\f$, \f$2.8 \times 10^{-11}\f$, \f$1.8 \times 10^{-10}\f$ | \f$7 \times 10^{-14}\f$, \f$7 \times 10^{-14}\f$, \f$2 \times 10^{-13}\f$, \f$2 \times 10^{-12}\f$, \f$4.5 \times 10^{-11}\f$, \f$4.5 \times 10^{-10}\f$ |
+
+The derivative components are assembled from the polygamma functions as written, with no rearrangement, so two properties of the parametrization govern the smaller components. First, at large \f$\phi\f$, the leading monomials of \f$\psi_m(\alpha)\f$, \f$\psi_m(\beta)\f$, and \f$\psi_m(\phi)\f$ cancel identically in the pure-\f$\phi\f$ components (and nearly so in the mixed ones) because \f$\mu^2/\alpha + \nu^2/\beta = 1/\phi\f$. Those pure-\f$\phi\f$ components keep about one digit fewer per decade of \f$\phi\f$, roughly \f$\varepsilon\phi\f$ relative: on `gcc`, the pure-\f$\phi\f$ log-density components lose \f$63\f$ to \f$230\f$ ulp of themselves for \f$\phi \le 10^2\f$ and \f$1.6 \times 10^8\f$ to \f$3.9 \times 10^8\f$ ulp at \f$\phi = 10^8\f$ (test bound \f$6\phi + 100\f$ ulp), while the pure-\f$\phi\f$ block of `expected_info()` stays within \f$4.89\,\varepsilon(\phi + 1)\f$ of itself (test bound \f$40\,\varepsilon(\phi + 1) + 40\,\varepsilon\f$). Second, at small \f$\alpha\f$ or \f$\beta\f$, the pole terms \f$(-1)^{m+1} m!/\alpha^{m+1}\f$ (or in \f$\beta\f$) cancel in the mixed components; in `log_cdf_d5()`, `log_cdf_d6()`, `log_ccdf_d5()`, and `log_ccdf_d6()`, the worst grid errors occur at \f$\mu = 0.5\f$ and \f$\phi = 0.05\f$ (\f$\alpha = \beta = 0.025\f$). Every tensor is also checked against central differences, the expected information against the variance of the score, the derivatives of the two log tails against the generic quadrature route, and the order-six tensor on the device against the same tensor on the host. See `docs/numerics.md` for the full measurements.
+
+## Speed
+
+On `gcc` at \f$(\mu, \phi) = (0.3, 6)\f$, `logpdf()` takes \f$241\f$ ns on one thread and \f$109\f$ ns with OpenMP, `logpdf_d6()` takes \f$221\f$ ns and \f$131\f$ ns, `expected_info()` takes \f$13\f$ ns and \f$74\f$ ns, `expected_info_d4()` takes \f$343\f$ ns and \f$151\f$ ns, `log_cdf()` takes \f$259\f$ ns and \f$130\f$ ns, and `log_cdf_d1()` and `log_cdf_d6()` take \f$5556\f$ ns and \f$23301\f$ ns on one thread (\f$735\f$ ns and \f$2082\f$ ns with OpenMP), fourteen times faster than the generic quadrature route at order \f$2\f$ (\f$85281\f$ ns on one thread and \f$27844\f$ ns with OpenMP).
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/beta.hpp>
+
+void eval_beta(Kokkos::View<const double*> y, Kokkos::View<double*> out, double mu, double phi) {
+  const laplace::distrib::beta_distrib d{mu, phi};
+  Kokkos::parallel_for("beta_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0];
+  });
+}
+```
+
+## Members
+
+Struct \ref laplace::distrib::beta_distrib "beta_distrib" implements \ref distrib_core "distrib_core" for `n_params = 2`: `mu`, `phi`, `kind`, `n_params`, `y_regularity`, `params`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, `logpdf()`, `logpdf_d1()`..`logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `expected_info()`, `expected_info_d1()`..`expected_info_d4()`, `expected_info_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `log_cdf_d1()`..`log_cdf_d6()`, `log_ccdf_d1()`..`log_ccdf_d6()`, `log_cdf_dk()`, `log_ccdf_dk()`, `cdf_dk()`, `quantile()`, `quantile_from_log()`, `quantile_from_log_upper()`, and `start_value()`.
+
+## References
+
+- S. L. P. Ferrari and F. Cribari-Neto (2004), Beta regression for modelling rates and proportions, Journal of Applied Statistics, 31(7), 799–815. https://doi.org/10.1080/0266476042000214501
+- N. L. Johnson, S. Kotz and N. Balakrishnan (1995), Continuous Univariate Distributions, Volume 2, 2nd edition, Wiley.
+- NIST Digital Library of Mathematical Functions, §8.17 Incomplete Beta Functions, https://dlmf.nist.gov/8.17
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- W. P. Johnson (2002), The Curious History of Faa di Bruno's Formula, The American Mathematical Monthly, 109(3), 217–234. https://doi.org/10.2307/2695352
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+*/

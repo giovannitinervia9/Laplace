@@ -30,7 +30,7 @@ Both \f$\log I_0(k)\f$ and \f$\log I_0(k) - k\f$ require \f$k \ge 0\f$, equal \f
 
 The ratio \f$A(k)\f$ and \f$A^{(1 \dots 6)}(k)\f$ require \f$k \ge 0\f$ and return quiet NaN for \f$k < 0\f$ or NaN. At \f$k = 0\f$, \f$A(0) = 0.0\f$, \f$A'(0) = 0.5\f$, \f$A'''(0) = -0.375\f$, \f$A^{(5)}(0) = 1.25\f$, and even orders vanish (\f$A''(0) = A^{(4)}(0) = A^{(6)}(0) = 0.0\f$). As \f$k \to +\infty\f$, \f$A(k) \to 1.0\f$ and every derivative approaches \f$0.0\f$.
 
-The inverse \f$K(\rho)\f$ is defined on \f$[0, 1)\f$, returning \f$0.0\f$ at \f$\rho = 0\f$, \f$+\infty\f$ at \f$\rho = 1\f$, and quiet NaN elsewhere. Its derivatives \f$K^{(1 \dots 6)}(A(\kappa))\f$ require \f$\kappa \ge 0\f$ and return quiet NaN for \f$\kappa < 0\f$ or NaN. At \f$\kappa = 0\f$, \f$K'(0) = 2.0\f$, \f$K'''(0) = 6.0\f$, \f$K^{(5)}(0) = 100.0\f$, and \f$K''(0) = K^{(4)}(0) = K^{(6)}(0) = 0.0\f$.
+The inverse \f$K(\rho)\f$ is defined on \f$[0, 1)\f$, returning \f$0.0\f$ at \f$\rho = 0\f$, \f$+\infty\f$ at \f$\rho = 1\f$, and quiet NaN elsewhere. The complement form \ref laplace::math::own::bessel_i_ratio_inv_c "bessel_i_ratio_inv_c()" is defined on \f$(0, 1]\f$, returning \f$+\infty\f$ at \f$q = 0\f$, \f$0.0\f$ at \f$q = 1\f$, and quiet NaN elsewhere. Its derivatives \f$K^{(1 \dots 6)}(A(\kappa))\f$ require \f$\kappa \ge 0\f$ and return quiet NaN for \f$\kappa < 0\f$ or NaN. At \f$\kappa = 0\f$, \f$K'(0) = 2.0\f$, \f$K'''(0) = 6.0\f$, \f$K^{(5)}(0) = 100.0\f$, and \f$K''(0) = K^{(4)}(0) = K^{(6)}(0) = 0.0\f$.
 
 For \f$k \ge 0\f$ and \f$m \ge 1\f$, \ref laplace::math::own::bessel_i_ratios "bessel_i_ratios()" writes \f$0.0\f$ at \f$k = 0\f$, quiet NaN for \f$k < 0\f$ or NaN, and \f$1.0\f$ for \f$k \ge 10^{308}\f$. When \f$m < 1\f$, it returns without writing.
 
@@ -55,6 +55,12 @@ The derivatives \f$K^{(1 \dots 6)}(A(\kappa))\f$ use three regimes:
 - For \f$\kappa < 0.25\f$, evaluation sums \f$\kappa^p \sum_{\ell=0}^\infty g_{n,\ell} \kappa^{2\ell}\f$ with \f$p = (n + 1) \bmod 2\f$ and exact rational coefficients.
 - For \f$0.25 \le \kappa < 30.0\f$, evaluation forms the inverse-rule polynomials in \f$r_j = A^{(j)}/A'\f$ and powers of \f$w = 1/A'\f$ in double-double arithmetic.
 - For \f$\kappa \ge 30.0\f$, evaluation sums \f$n!\, 2^n \kappa^{n+1} (1 + \sum_{\ell=1}^\infty c_{n,\ell} \kappa^{-\ell})\f$, keeping \f$\kappa^{n+1}\f$ in double-double for \f$\kappa < 10^{40}\f$.
+
+### Inverse from the complement
+
+Given the complement \f$q = 1 - \rho\f$, \ref laplace::math::own::bessel_i_ratio_inv_c "bessel_i_ratio_inv_c()" returns the argument \f$\kappa = K(1 - q)\f$ at which \f$A(\kappa) = 1 - q\f$. As \f$\kappa\f$ grows, \f$A(\kappa)\f$ approaches 1 with \f$1 - A(\kappa) \sim \frac{1}{2\kappa}\f$, so \f$\kappa\f$ is determined by the complement rather than by \f$\rho\f$ itself, through \f$\mathrm{d}\kappa/\kappa = -\mathrm{d}q/q\f$. A complement formed by subtracting a rounded \f$\rho\f$ from 1 carries an absolute error of half an ulp of 1, which against \f$q \approx 1/(2\kappa)\f$ is a relative error of about \f$\kappa\epsilon\f$, \f$\epsilon\f$ being the unit roundoff; a caller that holds \f$q\f$ itself keeps every digit of it, and above \f$\kappa = 1/(2\epsilon)\f$ the subtraction leaves nothing at all. The two entry points share one solver, which reads the residual from the complement whenever \f$q \le 0.5\f$ and never forms \f$1 - \rho\f$ there.
+
+Where the two differ is at a complement too small to live in \f$\rho\f$: at \f$q = 10^{-17}\f$ the value \f$1 - q\f$ rounds to 1, so \ref laplace::math::own::bessel_i_ratio_inv "bessel_i_ratio_inv()" returns \f$+\infty\f$, while the complement form returns \f$\kappa \approx 5 \times 10^{16}\f$, which is \f$1/(2q)\f$ to eight digits. Over the band where both receive an exact argument, \f$q \in [0.5, 1]\f$, the two agree to \f$8 \times 10^{-16}\f$ relative, and the returned argument reproduces its own defining relation to \f$10^{-12}\f$ relative.
 
 ### Sequence of ratios
 
@@ -139,6 +145,7 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::bessel_i_ratio_d5 "bessel_i_ratio_d5()" — \f$A^{(5)}(k)\f$
 - \ref laplace::math::own::bessel_i_ratio_d6 "bessel_i_ratio_d6()" — \f$A^{(6)}(k)\f$
 - \ref laplace::math::own::bessel_i_ratio_inv "bessel_i_ratio_inv()" — \f$K(\rho) = A^{-1}(\rho)\f$
+- \ref laplace::math::own::bessel_i_ratio_inv_c "bessel_i_ratio_inv_c()" — \f$K(1 - q) = A^{-1}(1 - q)\f$
 - \ref laplace::math::own::bessel_i_ratio_inv_d1 "bessel_i_ratio_inv_d1()" — \f$K'(\rho)\f$ at \f$\rho = A(\kappa)\f$
 - \ref laplace::math::own::bessel_i_ratio_inv_d2 "bessel_i_ratio_inv_d2()" — \f$K''(\rho)\f$ at \f$\rho = A(\kappa)\f$
 - \ref laplace::math::own::bessel_i_ratio_inv_d3 "bessel_i_ratio_inv_d3()" — \f$K'''(\rho)\f$ at \f$\rho = A(\kappa)\f$

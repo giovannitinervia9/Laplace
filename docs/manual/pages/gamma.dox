@@ -41,6 +41,22 @@ The routine `own::polygamma()` evaluates in two stages:
 
 For \f$n \ge 1\f$, every term shares the sign of the result, so accumulation runs from the asymptotic part to \f$j = 0\f$ without cancellation. For \f$n = 0\f$, the recurrence sum and \f$\log z\f$ have opposite signs near \f$x_0\f$, so relative error diverges while absolute error stays at a few ulps. When \f$z > 10^{30}\f$, \f$z^{-n}\f$ can be subnormal. The bracket is therefore scaled by \f$2^{600}\f$ before multiplying powers of \f$z^{-1}\f$ and descaled by \f$2^{-600}\f$ afterward, so only the final product rounds as a subnormal.
 
+### The leading term removed
+
+The function \ref laplace::math::own::polygamma_monomial_remainder "own::polygamma_monomial_remainder()" (called in `laplace::math` as \ref laplace::math::polygamma_monomial_remainder "polygamma_monomial_remainder()") returns the polygamma function minus the leading term of its asymptotic expansion (DLMF §5.15),
+\f[
+r_n(x) = \psi^{(n)}(x) - \mu_n(x),
+\f]
+for integer order \f$n \in \{0, \dots, 6\}\f$ and \f$x \in (0, \infty)\f$. It returns quiet NaN outside this domain. The leading term is defined as
+\f[
+\mu_0(x) = \log x, \qquad \mu_n(x) = (-1)^{n+1} (n - 1)!\, x^{-n} \quad (n \ge 1).
+\f]
+Against \f$\psi^{(n)}(x)\f$ itself, the remainder has relative size \f$1 / (2x)\f$, so it is the part that survives when the leading terms of several polygamma functions cancel.
+
+For \f$x \ge 15.0\f$, the asymptotic expansion of `own::polygamma()` is evaluated with its first term left out, so the leading term is never formed and never cancelled, keeping the \f$2^{600}\f$ scaling guard for \f$z > 10^{30}\f$. Below \f$15.0\f$, the recurrence shifts \f$x\f$ up by \f$m\f$ whole steps to \f$z = x + m \ge 15.0\f$, differences the leading terms of \f$z\f$ and \f$x\f$ in closed form via \f$\log(1 + m / x)\f$ for \f$n = 0\f$ or \f$(-1)^{n+1} (n - 1)!\, (z^{-n} - x^{-n})\f$ for \f$n \ge 1\f$, and adds the shifted remainder and pole terms.
+
+Against the same `mpmath` references, the largest error on gcc is 14.8 \ref accuracy_ulp "ulp", at \f$n = 2\f$ and \f$x = 13\f$, where the shift is by one step and the two leading terms \f$z^{-n}\f$ and \f$x^{-n}\f$ are of one size. The test bounds, which both gcc and CUDA pass, are 12.0, 12.0, 22.0, 12.0, 16.0, 20.0 and 24.0 ulp for \f$n = 0\f$ to \f$6\f$.
+
 ## Accuracy
 
 Accuracy is measured against 200-bit `mpmath` (2023) references over approximately 20000 positive arguments per function, with dense sampling near \f$x = 1.0\f$, \f$x = 2.0\f$, and \f$x_0\f$. See \ref accuracy "How accuracy is measured" for the definitions of \ref accuracy_ulp "ulp", \ref accuracy_ulp1 "ulp1", correctly rounded share, and \ref accuracy_bounds "test bounds".
@@ -98,7 +114,9 @@ Functions in `<laplace/math/special.hpp>` are called in `laplace::math`, and Lap
 - \ref laplace::math::digamma "digamma()" — \f$\psi(x)\f$ via Boost.Math
 - \ref laplace::math::trigamma "trigamma()" — \f$\psi'(x)\f$ via Boost.Math
 - \ref laplace::math::polygamma "polygamma()" — \f$\psi^{(n)}(x)\f$ for \f$n \in \{0, \dots, 6\}\f$, dispatching to `digamma()`, `trigamma()`, or `own::polygamma()`
+- \ref laplace::math::polygamma_monomial_remainder "polygamma_monomial_remainder()" — \f$\psi^{(n)}(x) - \mu_n(x)\f$ for \f$n \in \{0, \dots, 6\}\f$, forwarding to `own::polygamma_monomial_remainder()`
 - \ref laplace::math::own::polygamma "own::polygamma()" — \f$\psi^{(n)}(x)\f$ for \f$n \in \{0, \dots, 6\}\f$ via recurrence and asymptotic expansion
+- \ref laplace::math::own::polygamma_monomial_remainder "own::polygamma_monomial_remainder()" — \f$\psi^{(n)}(x) - \mu_n(x)\f$ for \f$n \in \{0, \dots, 6\}\f$ without subtracting the leading term
 - \ref laplace::math::own::digamma "own::digamma()" — \f$\psi(x)\f$ via `own::polygamma(0, x)`
 - \ref laplace::math::own::trigamma "own::trigamma()" — \f$\psi'(x)\f$ via `own::polygamma(1, x)`
 
@@ -107,4 +125,5 @@ Functions in `<laplace/math/special.hpp>` are called in `laplace::math`, and Lap
 - Boost.Math, C++ library of special functions and numerical tools, https://www.boost.org/libs/math
 - The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 - NIST Digital Library of Mathematical Functions, §5.2 Definitions (Gamma Function), https://dlmf.nist.gov/5.2
+- NIST Digital Library of Mathematical Functions, §5.15 Polygamma Functions, https://dlmf.nist.gov/5.15
 */

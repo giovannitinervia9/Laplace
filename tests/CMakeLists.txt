@@ -35,6 +35,7 @@ set(LAPLACE_TEST_SOURCES
   math/test_exprel.cpp
   math/test_log1prel.cpp
   math/test_stirling.cpp
+  math/test_psi_remainder.cpp
   distrib/test_pilot.cpp
   distrib/test_generic.cpp
   distrib/test_gaussian2.cpp
@@ -62,6 +63,10 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_skewnormal.cpp
   distrib/test_pseudohuber.cpp
   distrib/test_skewt.cpp
+  distrib/test_weibull.cpp
+  distrib/test_beta.cpp
+  distrib/test_vonmises_scale.cpp
+  distrib/test_vonmises.cpp
   distrib/test_mvgaussian.cpp
   math/test_chain_pair.cpp
   pdmat/test_pilot.cpp
