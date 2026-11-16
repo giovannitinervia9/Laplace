@@ -23,6 +23,7 @@
 #pragma once
 
 #include <laplace/pdmat/core.hpp>
+#include <laplace/pdmat/detail/from_matrix.hpp>
 
 namespace laplace::pdmat {
 
@@ -73,6 +74,39 @@ struct compound_symmetry_pdmat : pdmat_orders<compound_symmetry_pdmat> {
    * \return 0.
    */
   LAPLACE_HD int scratch_size() const { return 0; }
+
+  /**
+   * \ingroup pdmat
+   * \brief Computes starting parameters \f$\theta\f$ from a target packed covariance matrix \f$\hat{M}\f$.
+   *
+   * Host-only function. Forms the correlation matrix of \f$\hat{M}\f$ after flooring
+   * diagonal entries at \f$10^{-6}\f$ times the largest, averages the off-diagonal
+   * correlations to obtain \f$\rho\f$, clamps \f$u = (\rho - a)/(1 - a)\f$ with
+   * \f$a = -1/(p - 1)\f$ to \f$[0.005, 0.995]\f$, and sets \f$\theta_0 = \log(u/(1 - u))\f$
+   * (or \f$0.0\f$ for \f$p = 1\f$).
+   *
+   * \param m_hat Target symmetric \f$p \times p\f$ matrix in packed lower-triangular storage.
+   * \param theta Output array of \c n_params() doubles inside the domain.
+   *
+   * Accuracy: recovers \f$\theta\f$ from `matrix()` within \f$1.7 \times 10^{-16}\f$ on gcc 14.2/OpenMP (test bounds \f$10^{-14}\f$ at \f$p = 4\f$ and \f$10^{-13}\f$ at \f$p = 2\f$).
+   *
+   * \see matrix(), pdmat
+   */
+  // host: rho the mean off-diagonal correlation of m_hat, with
+  // (rho - a)/(1 - a) = expit(theta) clamped to [(1 - rho_max)/2, (1 + rho_max)/2]
+  void params_from_matrix(const double* m_hat, double* theta) const {
+    if (dim == 1) {
+      theta[0] = 0.0;
+      return;
+    }
+    const auto r = detail_pdmat::correlation_of(dim, m_hat);
+    double s = 0.0;
+    for (int i = 1; i < dim; ++i)
+      for (int j = 0; j < i; ++j) s += r[packed_index(i, j)];
+    const double rho = s / packed_size(dim - 1), a = -1.0 / (dim - 1.0), c = detail_pdmat::start_rho_max;
+    const double u = std::clamp((rho - a) / (1.0 - a), 0.5 * (1.0 - c), 0.5 * (1.0 + c));
+    theta[0] = std::log(u / (1.0 - u));
+  }
 
   /**
    * \ingroup pdmat

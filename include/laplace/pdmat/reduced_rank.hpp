@@ -15,6 +15,7 @@
 #pragma once
 
 #include <laplace/pdmat/core.hpp>
+#include <laplace/pdmat/detail/from_matrix.hpp>
 #include <laplace/pdmat/detail/loadings.hpp>
 
 namespace laplace::pdmat {
@@ -63,6 +64,11 @@ struct reduced_rank_psdmat : psdmat_orders<reduced_rank_psdmat> {
    * \return Rank of \f$M(\theta)\f$, equal to `n_factors`.
    */
   LAPLACE_HD int rank() const { return n_factors; }
+  /// \brief Compile-time descriptor: \c false, the null space of \f$\Lambda\Lambda^\top\f$ depends on \f$\theta\f$.
+  // the null space of Lambda Lambda^T moves with theta, and no basis of it is supplied
+  static constexpr bool constant_null_space = false;
+  /// \brief Compile-time descriptor: \c false, no null-space basis is supplied (`null_space_basis()` is not provided).
+  static constexpr bool supplies_null_space = false;
   /**
    * \ingroup psdmat
    * \brief Doubles of caller scratch buffer required by functions of this structure.
@@ -76,6 +82,36 @@ struct reduced_rank_psdmat : psdmat_orders<reduced_rank_psdmat> {
   LAPLACE_HD int scratch_size() const {
     const int p = dim, d = n_factors, nm = detail_pdmat::generic_masks;
     return p * d + p + 2 * d * d + 2 * nm * d * d + 2 * d;
+  }
+
+  /**
+   * \ingroup psdmat
+   * \brief Computes starting parameters \f$\theta\f$ from a target packed matrix \f$\hat{M}\f$.
+   *
+   * Host-only function. Forms \f$A\f$ from the \f$d\f$ leading eigenpairs of \f$\hat{M}\f$
+   * (columns scaled by square roots of eigenvalues floored at \f$10^{-6}\f$ times the
+   * largest, or \f$1\f$ if none is positive), and converts \f$AA^\top\f$ to lower-trapezoidal
+   * loadings via the first \f$d\f$ Cholesky columns of \f$AA^\top\f$ (pivots floored).
+   *
+   * \param m_hat Target symmetric \f$p \times p\f$ matrix in packed lower-triangular storage.
+   * \param theta Output array of \c n_params() doubles inside the domain.
+   *
+   * Accuracy: recovers \f$\theta\f$ from `matrix()` within \f$1.7 \times 10^{-16}\f$ at \f$(p, d) = (5, 2)\f$ on gcc 14.2/OpenMP (test bound \f$10^{-12}\f$).
+   *
+   * \see matrix(), psdmat
+   */
+  // host: Lambda the leading d eigenvectors of m_hat scaled by the square
+  // roots of their eigenvalues (floored), to the trapezoidal convention
+  // (exact, up to rounding, on matrix(theta))
+  void params_from_matrix(const double* m_hat, double* theta) const {
+    namespace dp = detail_pdmat;
+    const int p = dim, d = n_factors;
+    std::vector<double> lam, V, A(p * d);
+    dp::eigen_decreasing(p, m_hat, lam, V);
+    const double low = lam[0] > 0.0 ? dp::start_eigen_floor * lam[0] : 1.0;
+    for (int i = 0; i < p; ++i)
+      for (int k = 0; k < d; ++k) A[i * d + k] = V[i * p + k] * std::sqrt(std::max(lam[k], low));
+    dp::trapezoid_params(p, d, A.data(), theta);
   }
 
   /**

@@ -128,3 +128,7 @@ laplace_kokkos_sources(optimizers_fit_distrib.cpp)
 add_executable(optimizers_fit_distrib optimizers_fit_distrib.cpp)
 target_link_libraries(optimizers_fit_distrib PRIVATE Laplace::laplace Laplace::dense)
 target_compile_definitions(optimizers_fit_distrib PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
+
+laplace_kokkos_sources(distrib_mvgaussian.cpp)
+add_executable(distrib_mvgaussian distrib_mvgaussian.cpp)
+target_link_libraries(distrib_mvgaussian PRIVATE Laplace::laplace)

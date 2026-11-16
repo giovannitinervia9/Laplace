@@ -12,6 +12,7 @@
 #pragma once
 
 #include <laplace/pdmat/core.hpp>
+#include <laplace/pdmat/detail/from_matrix.hpp>
 
 namespace laplace::pdmat {
 
@@ -62,6 +63,30 @@ struct ar1_pdmat : pdmat_orders<ar1_pdmat> {
    * \return 0.
    */
   LAPLACE_HD int scratch_size() const { return 0; }
+
+  /**
+   * \ingroup pdmat
+   * \brief Computes starting parameters \f$\theta\f$ from a target packed covariance matrix \f$\hat{M}\f$.
+   *
+   * Host-only function. Forms the correlation matrix of \f$\hat{M}\f$ after flooring
+   * diagonal entries at \f$10^{-6}\f$ times the largest, averages the lag-1 correlations,
+   * clamps \f$\rho\f$ to \f$[-0.99, 0.99]\f$, and sets \f$\theta_0 = \operatorname{atanh}\rho\f$
+   * (or \f$0.0\f$ for \f$p = 1\f$).
+   *
+   * \param m_hat Target symmetric \f$p \times p\f$ matrix in packed lower-triangular storage.
+   * \param theta Output array of \c n_params() doubles inside the domain.
+   *
+   * Accuracy: recovers \f$\theta\f$ from `matrix()` within \f$8.9 \times 10^{-16}\f$ on gcc 14.2/OpenMP (test bounds \f$10^{-14}\f$ and \f$10^{-13}\f$).
+   *
+   * \see matrix(), pdmat
+   */
+  // host: rho the mean lag-1 correlation of m_hat, clamped
+  void params_from_matrix(const double* m_hat, double* theta) const {
+    const auto r = detail_pdmat::correlation_of(dim, m_hat);
+    double s = 0.0;
+    for (int i = 1; i < dim; ++i) s += r[packed_index(i, i - 1)];
+    theta[0] = dim == 1 ? 0.0 : std::atanh(detail_pdmat::clamp_rho(s / (dim - 1)));
+  }
 
   /**
    * \ingroup pdmat

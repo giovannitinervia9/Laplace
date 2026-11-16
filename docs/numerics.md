@@ -7779,6 +7779,166 @@ its first launch; the price measured on an RTX 4070 SUPER is 588 MB of device me
 12282. A family with more parameters will need more, and the figure has to be measured again
 then.
 
+## Start values of the structures: params_from_matrix
+
+What: `params_from_matrix(m_hat, theta)`, a host member of every structure
+that maps a target symmetric matrix (packed by rows) to parameters inside the
+domain. Helpers in `include/laplace/pdmat/detail/from_matrix.hpp`, tests in
+`tests/pdmat/test_params_from_matrix.cpp`.
+
+How the parameters are found:
+
+| structure | route |
+|---|---|
+| `diagonal_pdmat` | theta_i = log(M_ii)/2 |
+| `ar1_pdmat` | rho = mean lag-1 correlation |
+| `compound_symmetry_pdmat` | rho = mean off-diagonal correlation, (rho - a)/(1 - a) = expit(theta), a = -1/(p - 1) |
+| `toeplitz_pdmat` | m_k = mean correlation on diagonal k, partial autocorrelations by Durbin-Levinson |
+| `unstructured_pdmat<B>` | the bijector's forward map (on the correlation matrix for partial_corr) |
+| `unit_diagonal_scaled_pdmat<R>` | s_i = log(M_ii)/2 (their mean with common_scale), then R's |
+| `factor_analytic_pdmat` | 100 steps of principal axis factoring from the probabilistic PCA fit, then the trapezoid |
+| `reduced_rank_psdmat` | the d leading eigenvectors scaled by the square roots of their eigenvalues, then the trapezoid |
+| `weighted_sum_psdmat` | lambda_j by least squares in the Frobenius inner product |
+
+The trapezoid (lower trapezoidal Lambda with positive diagonal, the
+convention of `factor_analytic_pdmat`) is the first d columns of the Cholesky
+factor of A A^T. The structures with unit diagonal read the target as a
+covariance and take its correlations. Guards: correlations clamped to
+[-0.99, 0.99] (`start_rho_max`; for compound symmetry the clamp is on
+expit(theta), [0.005, 0.995]), eigenvalues and diagonal entries floored at
+1e-6 times the largest (`start_eigen_floor`); a target is changed only when a
+guard acts, so the exact routes stay exact.
+
+Measured (gcc 14.2, OpenMP), params_from_matrix(matrix(theta)) against theta,
+max |difference|:
+
+| structure | error |
+|---|---|
+| diagonal (p = 4), ar1 (p = 5, theta = 0.7), unstructured log_cholesky (p = 4), unit_diagonal_scaled<ar1> common, compound_symmetry (p = 2) | 0 |
+| compound_symmetry (p = 4), toeplitz (p = 5), unstructured_corr (p = 4), unit_diagonal_scaled<ar1>, <corr>, reduced_rank (5, 2) | 5.6e-17 to 1.7e-16 |
+| unstructured matrix_log (p = 3), ar1 at theta = -1.9 | 5.6e-16, 8.9e-16 |
+| weighted_sum (three 6 x 6 difference penalties) | 2.1e-13 |
+
+The weighted sum loses three digits to the conditioning of the 3 x 3 Gram
+matrix of the penalties. Factor analysis (p = 8,
+d = 2) reaches 1.1e-3 on a matrix of its own structure and 0.17 on a generic
+positive definite matrix: a start value, not an estimate. Degenerate targets
+(rank one with a zero diagonal entry, all correlations equal to 1) give finite
+theta inside the guards.
+
+
+## The multivariate Gaussian: mvgaussian1 and mvgaussian2
+
+What: the first multivariate distribs (design in `note/distrib_multivariate.md`,
+2026-11-15): `include/laplace/distrib/multivariate_core.hpp` (the concept
+`multivariate_distrib`, `distrib_normalization`, `distrib_mv_info_block`,
+`distrib_mv_sample_summary` and `summarize_mv_sample`),
+`include/laplace/distrib/mvgaussian1.hpp` (covariance Sigma = M(theta)) and
+`include/laplace/distrib/mvgaussian2.hpp` (precision Q = M(theta)), over any
+pdmat structure; the shared code in `distrib/detail/mvgaussian_common.hpp`.
+Test `tests/distrib/test_mvgaussian.cpp`, references
+`tools/reference/distrib_mvgaussian.py`, bench `benchmarks/distrib_mvgaussian.cpp`.
+
+How. `theta_state(theta, w)` writes log det M (the structure's `log_det`),
+the matrix W of the quadratic form (Sigma^-1 by `inverse`, or Q by `matrix`)
+and the Cholesky factor of M (the structure's `cholesky`, or a Cholesky
+factorization of `matrix` when it has none). The blocks with A derivatives in
+mu and K in theta along a tuple T are, with r = y - mu and c = -1/2 (Sigma)
+or +1/2 (Q): A = 0, c d_T log det M - 1/2 r' d_T W r; A = 1, d_T W r;
+A = 2, -d_T W; zero for A >= 3. d_T W is the structure's `inverse_dk`
+(mvgaussian1) or `matrix_dk` (mvgaussian2); nothing new in the numerics. The
+expected information in theta is I_ab = -c d_ab log det M + 1/2 tr(V d_ab W),
+V = W^-1, and its derivatives to order 4 by Leibniz's rule on the trace,
+d_T I_ab = -c d_abT log det M + 1/2 sum_(U subset T) tr(d_U V d_(ab, T\U) W).
+Draws y = mu + L z (Sigma = L L') or mu + L^-T z (Q = L L'), z by inversion
+from `counter_uniform_source{seed, unit}`. `start_value` floors the
+eigenvalues of the sample covariance (divisor n) at 1e-6 of the largest,
+inverts it for mvgaussian2 and calls the structure's `params_from_matrix`.
+
+References: mpmath at 60 digits from the definition (log det and the solve by
+mpmath's Cholesky), the blocks by `mpmath.diff` over (mu, theta); the
+information as d^2 F(t', theta)/dt'_a dt'_b at t' = theta with
+F = E_theta[-l(t')] up to a constant (F1 = 1/2 log det Sigma(t') +
+1/2 tr(Sigma(t')^-1 Sigma(theta)), F2 likewise), its derivatives by
+`mpmath.diff` in theta. Every value computed at 60 and 75 digits, agreement
+within 1e-40 (1 + |value|). 5693 values: six structures (diagonal, ar1,
+compound_symmetry, unstructured log_cholesky, unit_diagonal_scaled<ar1>,
+factor_analytic with one factor), d = 2 to 5, a random point and a hard one
+each (log L22 = -11.5, rho = tanh 3.5, compound symmetry at theta = 8, scales
+e^+-2 with rho = tanh(-2.5), psi = e^-6, residuals up to 30); A = 0 to order
+6, A = 1 to 5, A = 2 to 4, the information to order 4. 1017 s on 4 processes.
+
+Error measure: ulp1N, the largest error of the block over its entries in ulps
+of the largest |ref| over every tuple and entry of the same point, A and K
+(and at least 1); for the information at least the largest |I_ab| at that
+point. A per-entry measure is wrong here: at the log_cholesky hard point the
+information has entries of 2.3e10 next to exact zeros and entries of order 1.
+
+Results, worst ulp1N over the points, gcc/OpenMP and CUDA (RTX 4070 SUPER):
+
+| | blocks A = 0..2, orders 0..6 | information, orders 0..4 |
+|---|---|---|
+| mvgaussian1: diagonal, compound_symmetry, log_cholesky, scaled_ar1 | 5.6 (gcc and CUDA) | 286 (gcc), 238 (CUDA), log_cholesky order 4; compound_symmetry 1080 (CUDA) |
+| mvgaussian1: ar1 | 34 (gcc), 22 (CUDA), hard point | 8150 (CUDA, order 4) |
+| mvgaussian1: factor_analytic | 3.1e6 (gcc), 1.4e6 (CUDA), hard point | 1.0e6 |
+| mvgaussian2, every structure | 9.0 (gcc), 4.0 (CUDA) | 7.7e4 (factor_analytic, order 2), 1030 (ar1), else below 100 |
+
+What this says:
+- The blocks are as accurate as the structure's derivatives: a few ulp where
+  those are. The large figures are all at hard points.
+- factor_analytic at psi = e^-6 (mvgaussian1, so through `inverse_dk`): up to
+  3.1e6 ulp1N, while one ulp of any theta_k moves the exact A = 0 blocks of
+  order 3 by at most 10.5 ulp (mpmath). The loss is in
+  `factor_analytic_pdmat::inverse_dk` at that point, not in the conditioning;
+  that structure's own test has a bound of 5.5e5 ulpN on M^-1. mvgaussian2,
+  which uses its `matrix_dk`, is within 1.3 ulp there.
+- The information of mvgaussian1 near a singular Sigma loses up to about
+  cond(Sigma) eps relative to the largest entry: the traces
+  tr(d_U Sigma d_(ab, T\U) Sigma^-1) multiply small derivatives of Sigma by
+  large ones of Sigma^-1 and cancel (ar1 at rho = tanh 3.5: 8150; compound
+  symmetry at theta = 8: 1080). Normwise over the information this is small;
+  per entry, an entry of order 1 next to entries of 1e10 has no correct
+  digits. mvgaussian2 does not cancel at the same points.
+- The two parametrizations agree to the bit where M(-theta) = M(theta)^-1
+  (diagonal, unstructured matrix_log): every block and the information, with
+  the sign (-1)^K (0 ulp on gcc, 0.7 on CUDA).
+- Orders 5 and 6 and the information's orders 1 to 4 agree with central
+  differences of the order below within 1e-6 of the scales of the two orders
+  (1e-5 for factor_analytic, whose hard point has large orders K + 2).
+- Draws, 2e5 units on the device: mean and covariance (by
+  `summarize_mv_sample`) within 1.2 standard errors of mu and of the
+  covariance, the mean of -d^2 l within 1.2 standard errors of the information
+  in (theta, theta) and of zero in (mu, theta), identical on gcc and CUDA (the
+  counter source). `start_value` reproduces the sample covariance to 1e-12
+  relative for log_cholesky in both parametrizations.
+
+Speed, ns per unit, n = 1e5, unstructured log_cholesky; order 0 the
+log-density, order 1 the gradient (mu and every theta_j), order 2 every block
+of order 2; theta shared (state computed once) or per unit (each unit computes
+its state). Each cell: OpenMP 16 threads; CUDA.
+
+| | d | shared, orders 0 / 1 / 2 | per unit, orders 0 / 1 / 2 |
+|---|---|---|---|
+| mvgaussian1 | 2 | 1.3 / 28 / 103; 0.3 / 5.3 / 29 | 8.9 / 34 / 113; 1.0 / 6.0 / 30 |
+| | 3 | 1.6 / 71 / 463; 0.3 / 23 / 221 | 16 / 81 / 507; 2.0 / 25 / 223 |
+| | 5 | 3.2 / 310 / 5316; 0.6 / 197 / 3989 | 33 / 334 / 5314; 6.1 / 211 / 4118 |
+| | 10 | 7.6 / 3925 / 2.38e5; 2.0 / 3407 / 2.37e5 | 88 / 4169 / 2.40e5; 26 / 3351 / 2.38e5 |
+| mvgaussian2 | 2 | 1.4 / 6.4 / 11; 0.3 / 1.0 / 1.8 | 5.6 / 10 / 15; 0.8 / 1.5 / 2.5 |
+| | 3 | 2.0 / 15 / 32; 0.3 / 2.8 / 6.7 | 12 / 22 / 37; 1.4 / 3.9 / 8.0 |
+| | 5 | 2.3 / 38 / 137; 0.6 / 17 / 55 | 20 / 50 / 151; 3.5 / 20 / 59 |
+| | 10 | 7.1 / 248 / 2021; 2.3 / 186 / 922 | 50 / 287 / 2118; 13 / 201 / 956 |
+
+What this says: the log-density follows the plan, O(d^2) a unit with a shared
+theta and O(d^3) with theta per unit (7 to 13 times at d = 10). The
+derivatives in theta do not: every block with K >= 1 recomputes d_T W, which
+depends on theta only, inside the unit, so a shared theta saves almost
+nothing at orders 1 and 2. For mvgaussian1 over log_cholesky that is the
+generic route to d_T Sigma^-1 (about 3^K d^3 / 6 a tuple): 2.4e5 ns a unit at
+d = 10, order 2, 100 to 250 times mvgaussian2. Open: how the shared-theta case
+avoids it (d_T W computed once outside the units, or the sum over the units of
+r r' formed first so that the theta blocks are traces against one matrix)
+belongs to the fitting engine and is to be decided with Giovanni.
+
 ## Which side the derivatives of the incomplete beta compute
 
 **What.** `log_ibeta_dK` and `log_ibetac_dK` each ask for one side of the

@@ -41,6 +41,7 @@
 #pragma once
 
 #include <laplace/pdmat/core.hpp>
+#include <laplace/pdmat/detail/from_matrix.hpp>
 #include <laplace/pdmat/detail/loadings.hpp>
 
 namespace laplace::pdmat {
@@ -121,6 +122,58 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
     const int p = dim, nm = detail_pdmat::generic_masks;
     return woodbury_size() + nm * packed_size(p) + nm * p * p + p * p;
   }
+
+  /**
+   * \ingroup pdmat
+   * \brief Computes starting parameters \f$\theta\f$ from a target packed matrix \f$\hat{M}\f$.
+   *
+   * Host-only function. Initializes \f$\psi_i\f$ to the mean of the \f$p - d\f$ trailing
+   * eigenvalues of \f$\hat{M}\f$ (probabilistic PCA fit, floored at \f$10^{-6}\f$ times
+   * the largest diagonal entry), runs \c start_fa_iterations steps of principal axis
+   * factoring updating \f$\Lambda\f$ from the \f$d\f$ leading eigenpairs of \f$\hat{M} - \Psi\f$
+   * and \f$\Psi = \operatorname{diag}(\hat{M} - \Lambda\Lambda^\top)\f$ (floored), and
+   * converts the loadings to lower-trapezoidal form via the first \f$d\f$ Cholesky columns
+   * of \f$AA^\top\f$.
+   *
+   * \param m_hat Target symmetric \f$p \times p\f$ matrix in packed lower-triangular storage.
+   * \param theta Output array of \c n_params() doubles inside the domain.
+   *
+   * Accuracy: on \f$(p, d) = (8, 2)\f$, relative matrix distance \f$\max|M(\hat\theta) - \hat{M}|/\max|\hat{M}|\f$ reaches \f$1.1 \times 10^{-3}\f$ on a matrix of its own structure (test bound 0.05) and 0.17 on a generic positive definite matrix on gcc 14.2/OpenMP.
+   *
+   * \see matrix(), start_fa_iterations, pdmat
+   */
+  // host: principal axis factoring, start_fa_iterations steps from the
+  // probabilistic PCA fit (psi the mean of the trailing eigenvalues): Lambda
+  // the leading d eigenvectors of M_hat - Psi scaled by the square roots of
+  // their eigenvalues, then Psi = diag(M_hat - Lambda Lambda^T); eigenvalues
+  // and psi_i floored; Lambda to the trapezoidal convention
+  void params_from_matrix(const double* m_hat, double* theta) const {
+    namespace dp = detail_pdmat;
+    const int p = dim, d = n_factors;
+    const auto dg = dp::floored_diagonal(p, m_hat);
+    const double top = *std::max_element(dg.begin(), dg.end()), low = dp::start_eigen_floor * top;
+    std::vector<double> lam, V, A(p * d), e(m_hat, m_hat + packed_size(p)), psi(p);
+    dp::eigen_decreasing(p, m_hat, lam, V);
+    double s2 = 0.0;
+    for (int k = d; k < p; ++k) s2 += lam[k] / (p - d);
+    for (int i = 0; i < p; ++i) psi[i] = std::max(d < p ? s2 : 0.0, low);
+    for (int it = 0; it < start_fa_iterations && d > 0; ++it) {
+      for (int i = 0; i < p; ++i) e[packed_index(i, i)] = m_hat[packed_index(i, i)] - psi[i];
+      dp::eigen_decreasing(p, e.data(), lam, V);
+      for (int i = 0; i < p; ++i)
+        for (int k = 0; k < d; ++k) A[i * d + k] = V[i * p + k] * std::sqrt(std::max(lam[k], low));
+      for (int i = 0; i < p; ++i) {
+        double r = m_hat[packed_index(i, i)];
+        for (int k = 0; k < d; ++k) r -= A[i * d + k] * A[i * d + k];
+        psi[i] = std::max(r, low);
+      }
+    }
+    if (d > 0) dp::trapezoid_params(p, d, A.data(), theta);
+    for (int i = 0; i < p; ++i) theta[n_loadings() + i] = 0.5 * std::log(psi[i]);
+  }
+  /// \brief Number of principal axis factoring iterations used by `params_from_matrix()` (100).
+  // the steps of principal axis factoring in params_from_matrix
+  static constexpr int start_fa_iterations = 100;
 
   /**
    * \ingroup pdmat

@@ -29,6 +29,10 @@
 //   matrix_dK(theta, idx, m, w)    d^K M / dtheta_idx[0] ... dtheta_idx[K-1], K = 1..6
 //   log_det_dK(theta, idx, w)      likewise for log det M
 //   inverse_dK, cholesky_dK        likewise for M^-1 and L
+//   params_from_matrix(m_hat, theta)  host: theta from a target symmetric
+//                                  matrix m_hat (packed), exact where the map
+//                                  inverts, a simple fit elsewhere, always
+//                                  inside the domain (detail/from_matrix.hpp)
 //
 // w is a caller buffer of scratch_size() doubles (0 for the pilot structures),
 // one per thread; the functions use it freely and leave nothing in it.
@@ -266,6 +270,8 @@ struct pdmat_orders {
  * `has_density`, matrix evaluation `matrix()`,
  * log-determinant `log_det()`, and the named derivative methods
  * `matrix_d1()`, `matrix_d6()`, `log_det_d1()`, and `log_det_d6()`.
+ * It also requires the host method `params_from_matrix()` mapping a packed
+ * target matrix to parameters inside the domain.
  */
 template <class S>
 concept pdmat_structure = requires(const S s, const double* t, double* m, double* w, const int (&i1)[1], const int (&i6)[6]) {
@@ -282,6 +288,7 @@ concept pdmat_structure = requires(const S s, const double* t, double* m, double
   { s.matrix_d6(t, i6, m, w) } -> std::same_as<bool>;
   { s.log_det_d1(t, i1, w) } -> std::same_as<double>;
   { s.log_det_d6(t, i6, w) } -> std::same_as<double>;
+  s.params_from_matrix(t, m);
 };
 
 /**
@@ -297,7 +304,9 @@ concept pdmat_structure = requires(const S s, const double* t, double* m, double
 // section 10): theta -> M(theta) symmetric p x p of rank r, constant in theta,
 // with the storage and the conventions of the pdmat above. In place of
 // log det M they supply log|M|_+, the log of the product of the r nonzero
-// eigenvalues (log_pdet), and they have no inverse. A structure S derives from
+// eigenvalues (log_pdet), and they have no inverse. Two static flags describe the
+// null space: constant_null_space (it does not move with theta) and
+// supplies_null_space (null_space_basis() exists, required only then). A structure S derives from
 // psdmat_orders<S> and implements matrix_dk<K> and log_pdet_dk<K>, or (a host
 // only structure) writes the named functions itself; psdmat_structure checks
 // only the members, so a host-only type satisfies it.
@@ -376,7 +385,11 @@ struct psdmat_orders {
  * parameter count `n_params()`, scratch size `scratch_size()`, constant rank
  * `rank()`, matrix evaluation `matrix()`, log pseudo-determinant `log_pdet()`,
  * and the named derivative methods `matrix_d1()` to `matrix_d6()` returning
- * `bool` and `log_pdet_d1()` to `log_pdet_d6()` returning `double`. The concept
+ * `bool` and `log_pdet_d1()` to `log_pdet_d6()` returning `double`. It also
+ * requires the host method `params_from_matrix()` mapping a packed target
+ * matrix to parameters inside the domain, and compile-time descriptors
+ * `constant_null_space` and `supplies_null_space` (requiring
+ * `null_space_basis()` only when `supplies_null_space` is `true`). The concept
  * checks nothing about execution space, so a host-only structure satisfies it.
  */
 template <class S>
@@ -391,6 +404,10 @@ concept psdmat_structure = requires(const S s, const double* t, double* m, doubl
   { s.matrix_d6(t, i6, m, w) } -> std::same_as<bool>;
   { s.log_pdet_d1(t, i1, w) } -> std::same_as<double>;
   { s.log_pdet_d6(t, i6, w) } -> std::same_as<double>;
+  s.params_from_matrix(t, m);
+  { S::constant_null_space } -> std::convertible_to<bool>;
+  { S::supplies_null_space } -> std::convertible_to<bool>;
+  requires(!S::supplies_null_space || requires(const S& x) { x.null_space_basis(); });
 };
 
 namespace detail_pdmat {

@@ -61,6 +61,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_skewnormal.cpp
   distrib/test_pseudohuber.cpp
   distrib/test_skewt.cpp
+  distrib/test_mvgaussian.cpp
   math/test_chain_pair.cpp
   pdmat/test_pilot.cpp
   pdmat/test_unstructured.cpp
@@ -69,6 +70,7 @@ set(LAPLACE_TEST_SOURCES
   pdmat/test_factor_analytic.cpp
   pdmat/test_reduced_rank.cpp
   pdmat/test_weighted_sum.cpp
+  pdmat/test_params_from_matrix.cpp
   basis/test_bspline.cpp
   basis/test_cyclic_bspline.cpp
   basis/test_fourier.cpp

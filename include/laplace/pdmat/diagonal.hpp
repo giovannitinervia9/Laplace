@@ -9,6 +9,7 @@
 #pragma once
 
 #include <laplace/pdmat/core.hpp>
+#include <laplace/pdmat/detail/from_matrix.hpp>
 
 namespace laplace::pdmat {
 
@@ -59,6 +60,27 @@ struct diagonal_pdmat : pdmat_orders<diagonal_pdmat> {
    * \return 0.
    */
   LAPLACE_HD int scratch_size() const { return 0; }
+
+  /**
+   * \ingroup pdmat
+   * \brief Computes starting parameters \f$\theta\f$ from a target packed matrix \f$\hat{M}\f$.
+   *
+   * Host-only function. Sets \f$\theta_i = \frac{1}{2}\log \hat{M}_{ii}\f$ after flooring
+   * diagonal entries at \f$10^{-6}\f$ times the largest diagonal entry (all ones if none
+   * is positive). Exact up to rounding on matrices of the structure when no guard acts.
+   *
+   * \param m_hat Target symmetric \f$p \times p\f$ matrix in packed lower-triangular storage.
+   * \param theta Output array of \c n_params() doubles inside the domain.
+   *
+   * Accuracy: recovers \f$\theta\f$ from `matrix()` with 0 difference on gcc 14.2/OpenMP (test bound \f$10^{-15}\f$).
+   *
+   * \see matrix(), pdmat
+   */
+  // host: theta_i = log M_ii / 2, the diagonal floored (exact on matrix(theta))
+  void params_from_matrix(const double* m_hat, double* theta) const {
+    const auto d = detail_pdmat::floored_diagonal(dim, m_hat);
+    for (int i = 0; i < dim; ++i) theta[i] = 0.5 * std::log(d[i]);
+  }
 
   /**
    * \ingroup pdmat

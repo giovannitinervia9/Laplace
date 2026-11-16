@@ -46,6 +46,7 @@
 
 #include <laplace/dense/dense.hpp>
 #include <laplace/pdmat/core.hpp>
+#include <laplace/pdmat/detail/from_matrix.hpp>
 
 #include <Kokkos_Core.hpp>
 
@@ -287,6 +288,12 @@ class weighted_sum_psdmat {
    * \return Rank of \f$\sum_{j=1}^m S_j / \max_{ik}\lvert(S_j)_{ik}\rvert\f$ computed at construction.
    */
   int rank() const { return rank_; }
+  /// \brief Compile-time descriptor: \c true, the common null space of \f$M(\theta)\f$ does not depend on \f$\theta\f$.
+  // the null space, the intersection of those of the S_j, does not depend on
+  // theta, and null_space_basis() returns an orthonormal basis of it
+  static constexpr bool constant_null_space = true;
+  /// \brief Compile-time descriptor: \c true, `null_space_basis()` returns an orthonormal basis of the constant null space.
+  static constexpr bool supplies_null_space = true;
   /**
    * \ingroup psdmat
    * \brief Orthonormal basis of the constant null space of \f$M(\theta)\f$.
@@ -311,6 +318,50 @@ class weighted_sum_psdmat {
   int scratch_size() const {
     const int p = dim, m = n_params();
     return (2 * m + 10) * p * p + 4 * p + 2 * m;
+  }
+
+  /**
+   * \ingroup psdmat
+   * \brief Computes starting parameters \f$\theta\f$ from a target packed matrix \f$\hat{M}\f$.
+   *
+   * Host-only function. Solves the normal equations in the Frobenius inner product for
+   * \f$\lambda\f$ minimizing \f$\lVert \hat{M} - \sum_{j=1}^m \lambda_j S_j\rVert_F\f$,
+   * floors each \f$\lambda_j \max_{ik}\lvert(S_j)_{ik}\rvert\f$ at \f$10^{-6}\f$ times the
+   * largest (setting \f$\theta_j = 0\f$ if none is positive), and sets \f$\theta_j = \log\lambda_j\f$.
+   * Exact up to rounding on matrices of the structure when the \f$S_j\f$ are linearly independent.
+   *
+   * \param m_hat Target symmetric \f$p \times p\f$ matrix in packed lower-triangular storage.
+   * \param theta Output array of \c n_params() doubles inside the domain.
+   *
+   * Accuracy: recovers \f$\theta\f$ from `matrix()` within \f$2.1 \times 10^{-13}\f$ on three \f$6 \times 6\f$ difference penalties on gcc 14.2/OpenMP (test bound \f$10^{-12}\f$).
+   *
+   * \see matrix(), psdmat
+   */
+  // host: lambda_j by least squares on the entries of m_hat (Frobenius inner
+  // product), each floored so that lambda_j max|S_j| >= start_eigen_floor
+  // times the largest of these (all ones when none is positive), theta_j =
+  // log lambda_j; exact, up to rounding, on matrix(theta) when the S_j are
+  // linearly independent
+  void params_from_matrix(const double* m_hat, double* theta) const {
+    namespace dp = detail_pdmat;
+    const int p = dim, m = n_params();
+    auto dot = [&](auto&& a, auto&& b) {
+      double s = 0.0;
+      for (int i = 0; i < p; ++i)
+        for (int k = 0; k <= i; ++k) s += (i == k ? 1.0 : 2.0) * a(i, k) * b(i, k);
+      return s;
+    };
+    auto hat = [&](int i, int k) { return m_hat[packed_index(i, k)]; };
+    std::vector<double> G(m * m), b(m);
+    for (int j = 0; j < m; ++j) {
+      b[j] = dot(S_[j], hat);
+      for (int k = 0; k <= j; ++k) G[j * m + k] = G[k * m + j] = dot(S_[j], S_[k]);
+    }
+    const auto lam = dp::spd_solve_small(m, G, b);
+    double top = 0.0;
+    for (int j = 0; j < m; ++j) top = std::max(top, lam[j] * max_abs_[j]);
+    for (int j = 0; j < m; ++j)
+      theta[j] = top > 0.0 ? std::log(std::max(lam[j] * max_abs_[j], dp::start_eigen_floor * top) / max_abs_[j]) : 0.0;
   }
 
   /**

@@ -1,0 +1,182 @@
+/**
+\defgroup distrib_multivariate Multivariate
+\ingroup distrib
+\brief Multivariate probability distributions, shared core interface, and the covariance and precision parametrizations of the multivariate Gaussian.
+
+Include `<laplace/distrib/multivariate_core.hpp>` for the shared multivariate distribution interface, `<laplace/distrib/mvgaussian1.hpp>` for the covariance parametrization \ref laplace::distrib::mvgaussian1_distrib "mvgaussian1_distrib\<S\>", and `<laplace/distrib/mvgaussian2.hpp>` for the precision parametrization \ref laplace::distrib::mvgaussian2_distrib "mvgaussian2_distrib\<S\>". Every type and function in this module lives in namespace `laplace::distrib`; all evaluation, derivative, expected information, moment, and draw members are marked `LAPLACE_HD` for host and Kokkos device kernels, whereas \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample()" and `start_value()` run on the host only. Across derivative blocks of orders 0 to 6 over six matrix structures, `mvgaussian1_distrib\<S\>` matches 60-digit mpmath references within 5.6 to 34 ulp1N except at a near-singular `factor_analytic_pdmat` point (up to \f$3.1 \times 10^6\f$ ulp1N from structure inversion), and `mvgaussian2_distrib\<S\>` stays within 9.0 ulp1N across all tested structures.
+
+## Multivariate distribution interface
+
+A multivariate distribution models \ref laplace::distrib::multivariate_distrib "multivariate_distrib", which requires static `normalization`, `state_type`, `dim()`, `n_params()`, `state_size()`, `scratch_size()`, `theta_state()`, `logpdf()`, and `logpdf_dmu_dk`. Each distribution has one vector parameter \f$\mu \in \mathbb{R}^d\f$ that varies by unit, together with the parameter vector \f$\theta \in \mathbb{R}^q\f$ of a matrix structure \f$M(\theta)\f$ modeling \ref laplace::pdmat::pdmat_structure "pdmat_structure" (see \ref pdmat "Positive definite structures"). The distribution holds its structure by value in the public member `structure`.
+
+The static constant `normalization` has type \ref laplace::distrib::distrib_normalization "distrib_normalization". Both `mvgaussian1_distrib\<S\>` and `mvgaussian2_distrib\<S\>` set `normalization` to `distrib_normalization::proper`, denoting a positive definite matrix in either parametrization. The enumeration also declares `degenerate` (singular covariance, representing a proper law on \f$\mu + \operatorname{col}(\Sigma)\f$) and `improper` (singular precision, flat along its null space).
+
+Work is split between a structure state and per-unit evaluations. Calling `theta_state(theta, w)` writes what depends only on \f$\theta\f$ into `w[0, state_size())` using `w[state_size(), scratch_size())` as working scratch, and returns a small state (`mvgaussian1_state` or `mvgaussian2_state`) pointing into `w` and at `theta`. Both `w` and `theta` must remain alive while the state is used. When \f$\theta\f$ is shared across units, `theta_state()` runs once; when \f$\theta\f$ varies by unit, each unit builds its own state with the same calls. For both Gaussian parametrizations, `state_size()` is \f$2 d(d + 1)/2\f$ doubles and `scratch_size()` is \f$2 d(d + 1)/2\f$ plus `structure.scratch_size()` doubles.
+
+Symmetric \f$d \times d\f$ matrices are stored in row-major packed lower-triangular order, with entry \f$(i, j)\f$ for \f$0 \le j \le i < d\f$ at linear index \f$i(i + 1)/2 + j\f$ (see \ref laplace::pdmat::packed_index "packed_index()" on \ref pdmat "Positive definite structures"). By contrast, derivative tensors of order 3 or higher over \f$d\f$ components use \ref laplace::distrib::sym_tensor "sym_tensor" ordering over sorted tuples in lexicographic order (see \ref distrib_core "the distribution core page"); the two storage orders already differ at order 2.
+
+| Member | Meaning |
+|---|---|
+| `normalization` | Static `distrib_normalization` descriptor (`proper` for both Gaussian forms) |
+| `state_type` | Precomputed state struct (`mvgaussian1_state` or `mvgaussian2_state`) |
+| `structure` | Matrix structure \f$M(\theta)\f$ held by value |
+| `dim()` | Dimension \f$d\f$ of observations \f$y\f$ and vector parameter \f$\mu\f$ |
+| `n_params()` | Number of structure parameters \f$q\f$ |
+| `state_size()` | Doubles required to store the state matrices |
+| `scratch_size()` | Working scratch doubles for `theta_state()`, derivatives, and information |
+| `theta_state(theta, w)` | Precomputes state depending on \f$\theta\f$ into `w` |
+| `logpdf(state, y, mu)` | Evaluates the log-density at unit \f$y\f$ and vector parameter \f$\mu\f$ |
+| `logpdf_dmu_dk<A, K>(...)` | Block with \f$A\f$ derivatives in \f$\mu\f$ and \f$K\f$ in \f$\theta\f$, \f$A + K \le 6\f$ |
+| `logpdf_dy_dk<J, K>(...)` | Block with \f$J\f$ derivatives in \f$y\f$ and \f$K\f$ in \f$\theta\f$, \f$J + K \le 6\f$ |
+| `expected_info_dk<K>(...)` | Order-\f$K\f$ derivative of an expected Fisher information block, \f$K \le 4\f$ |
+| `rng(state, mu, seed, unit, y)` | Generates one draw for unit `unit` |
+| `mean(mu, out)` | Copies mean vector \f$\mu\f$ into `out` |
+| `covariance(theta, out, w)` | Writes packed covariance matrix into `out` |
+| `start_value(summary, theta)` | Host-only starting parameters \f$\theta\f$ from a sample summary |
+
+## Covariance and precision parametrizations
+
+The classic \f$d\f$-variate normal distribution \f$\mathcal{N}_d(\mu, \Sigma)\f$ with mean \f$\mu \in \mathbb{R}^d\f$, positive definite covariance matrix \f$\Sigma \in \mathbb{R}^{d \times d}\f$, and residual \f$r = y - \mu\f$ for \f$y \in \mathbb{R}^d\f$ has density \f$(2\pi)^{-d/2}\det(\Sigma)^{-1/2}\exp(-\tfrac{1}{2} r^\top \Sigma^{-1} r)\f$.
+
+In \ref laplace::distrib::mvgaussian1_distrib "mvgaussian1_distrib\<S\>", the covariance matrix is structured as \f$\Sigma = M(\theta)\f$, giving density and log-density
+\f[
+f_1(y; \mu, \theta) = (2\pi)^{-d/2}\det(\Sigma)^{-1/2}\exp\!\left(-\tfrac{1}{2} r^\top \Sigma^{-1} r\right), \qquad
+\ell_1 = -\tfrac{d}{2}\log 2\pi - \tfrac{1}{2}\log\det\Sigma - \tfrac{1}{2} r^\top\Sigma^{-1}r.
+\f]
+
+In \ref laplace::distrib::mvgaussian2_distrib "mvgaussian2_distrib\<S\>", substituting the precision matrix \f$Q = \Sigma^{-1} = M(\theta)\f$ yields density and log-density
+\f[
+f_2(y; \mu, \theta) = (2\pi)^{-d/2}\det(Q)^{1/2}\exp\!\left(-\tfrac{1}{2} r^\top Q r\right), \qquad
+\ell_2 = -\tfrac{d}{2}\log 2\pi + \tfrac{1}{2}\log\det Q - \tfrac{1}{2} r^\top Q r.
+\f]
+
+For both parametrizations, `theta_state(theta, w)` records \f$\log\det M\f$ from `structure.log_det()`, the quadratic-form matrix \f$W\f$ (\f$\Sigma^{-1}\f$ via `structure.inverse()` for `mvgaussian1_distrib\<S\>`, or \f$Q\f$ via `structure.matrix()` for `mvgaussian2_distrib\<S\>`), and the lower Cholesky factor \f$L\f$ of \f$M\f$ (`structure.cholesky()` when `S::closed_factor` is `true`, or a lower Cholesky factorization of `structure.matrix()` otherwise).
+
+## Log-density derivative blocks
+
+The member template `logpdf_dmu_dk<A, K>(state, y, mu, idx, out, w)` computes the derivative block of order \f$A\f$ in \f$\mu\f$ and order \f$K\f$ in \f$\theta\f$ along the sorted index tuple `idx` (\f$T\f$, ignored when \f$K = 0\f$), for \f$A + K \le 6\f$. The output buffer `out` receives a scalar when \f$A = 0\f$, a \f$d\f$-vector when \f$A = 1\f$, or a packed symmetric \f$d \times d\f$ matrix when \f$A = 2\f$; `w` must hold `scratch_size()` doubles. If a block vanishes identically by structure, the call returns `false` and leaves `out` untouched.
+
+Let \f$c = -\tfrac{1}{2}\f$ for `mvgaussian1_distrib\<S\>` and \f$c = +\tfrac{1}{2}\f$ for `mvgaussian2_distrib\<S\>`, and let \f$\partial_T\f$ denote partial differentiation along \f$T\f$. The non-trivial blocks are
+\f[
+A = 0:\quad c\,\partial_T\log\det M - \tfrac{1}{2} r^\top(\partial_T W)r, \qquad
+A = 1:\quad (\partial_T W)r, \qquad
+A = 2:\quad -\partial_T W,
+\f]
+where \f$\partial_T W\f$ is obtained from `structure.inverse_dk<K>()` for `mvgaussian1_distrib\<S\>` or `structure.matrix_dk<K>()` for `mvgaussian2_distrib\<S\>`, and \f$\partial_T \log\det M\f$ comes from `structure.log_det_dk<K>()`. For \f$A \ge 3\f$, all derivatives vanish identically and `logpdf_dmu_dk` returns `false`.
+
+Mixed derivatives in the observation vector \f$y\f$ and \f$\theta\f$ are provided by `logpdf_dy_dk<J, K>(state, y, mu, idx, out, w)` for \f$J + K \le 6\f$, which equals \f$(-1)^J\f$ times the corresponding \f$\mu\f$ block with \f$A = J\f$.
+
+## Expected Fisher information
+
+The member template `expected_info_dk<K>(state, block, ab, idx, out, w)` evaluates the order-\f$K\f$ derivative (\f$0 \le K \le 4\f$) of the expected Fisher information block selected by `block` of type \ref laplace::distrib::distrib_mv_info_block "distrib_mv_info_block". Passing `vector_vector` writes the packed \f$d \times d\f$ matrix \f$\partial_T W\f$ (\f$W\f$ when \f$K = 0\f$). Passing `vector_rest` corresponds to the \f$(\mu, \theta)\f$ cross block, which vanishes identically by symmetry, so the call returns `false` without touching `out`.
+
+Passing `rest_rest` writes the scalar \f$\partial_T I_{ab}\f$ for the parameter pair `ab` = \f$(a, b)\f$. With covariance \f$V = W^{-1}\f$ (\f$\Sigma\f$ for `mvgaussian1_distrib\<S\>` and \f$Q^{-1}\f$ for `mvgaussian2_distrib\<S\>`), the entries and their \f$\theta\f$-derivatives are evaluated by Leibniz's rule on the trace:
+\f[
+I_{ab} = -c\,\partial_{ab}\log\det M + \tfrac{1}{2}\operatorname{tr}\!\big(V\,\partial_{ab}W\big),
+\f]
+\f[
+\partial_T I_{ab} = -c\,\partial_{abT}\log\det M + \tfrac{1}{2}\sum_{U \subseteq T}\operatorname{tr}\!\big(\partial_U V\;\partial_{ab,\,T\setminus U}W\big),
+\f]
+where \f$U\f$ runs over the sub-tuples of the positions of \f$T\f$. No product of the form \f$V(\partial_a W)V(\partial_b W)\f$ is formed.
+
+## Draws, moments, and starting values
+
+Calling `rng(state, mu, seed, unit, y)` generates a pseudorandom observation vector \f$y = \mu + L z\f$ for `mvgaussian1_distrib\<S\>` (\f$\Sigma = L L^\top\f$) and \f$y = \mu + L^{-\top} z\f$ for `mvgaussian2_distrib\<S\>` (\f$Q = L L^\top\f$). Each standard normal coordinate \f$z_k\f$ (\f$k = 0, \dots, d - 1\f$) is generated by \ref laplace::distrib::standard_normal_by_inversion "standard_normal_by_inversion()" from \ref laplace::distrib::counter_uniform_source "counter_uniform_source" `{seed, unit}` (see \ref distrib_generic "Generic routes"), so each unit's draw depends solely on `(seed, unit)` across threads and backends.
+
+For moments, `mean(mu, out)` copies \f$\mu\f$ into `out`, and `covariance(theta, out, w)` writes packed \f$\Sigma\f$ via `structure.matrix()` or \f$Q^{-1}\f$ via `structure.inverse()`, using `structure.scratch_size()` doubles in `w`.
+
+On the host, \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample(y, n, d)" reads \f$n\f$ contiguous \f$d\f$-vectors and returns a \ref laplace::distrib::distrib_mv_sample_summary "distrib_mv_sample_summary" containing `count`, `dim`, sample `mean`, and packed sample `covariance` with divisor \f$n\f$ (all zero when \f$n = 0\f$). Host member `start_value(summary, theta)` floors the eigenvalues of the sample covariance at \f$10^{-6}\f$ times the largest eigenvalue, inverts the matrix for `mvgaussian2_distrib\<S\>`, and maps it to \f$\theta\f$ via `structure.params_from_matrix()` (see \ref pdmat "Positive definite structures").
+
+## Accuracy
+
+Methodology is explained on \ref accuracy "How accuracy is measured". Reference values (`tools/reference/distrib_mvgaussian.py`, `tests/data/reference/mvgaussian.csv`) were computed with mpmath (The mpmath development team, 2023) at 60 digits from the definitions (verified against 75 digits to \f$10^{-40}(1 + |v|)\f$) across 5693 evaluations over six structures (`diagonal_pdmat`, `ar1_pdmat`, `compound_symmetry_pdmat`, `unstructured_pdmat\<log_cholesky_bijector\>`, `unit_diagonal_scaled_pdmat\<ar1_pdmat\>`, and `factor_analytic_pdmat` with one factor) at dimensions \f$d \in \{2, 3, 4, 5\}\f$, combining one random point and one hard point per structure. Errors are measured in `ulp1N`, the largest entry error over a block in units of \f$\mathrm{ulp}(\max(S_{\mathrm{block}}, 1))\f$, where \f$S_{\mathrm{block}}\f$ is the largest reference magnitude over every tuple and entry of that point, \f$A\f$, and \f$K\f$ (and at least the largest \f$|I_{ab}|\f$ at that point for expected information).
+
+| Parametrization and structures | Blocks gcc (CUDA), bound | Information gcc (CUDA), bound |
+|---|---|---|
+| `mvgaussian1`: diagonal, CS, log-Cholesky, scaled AR(1) | 5.6 (5.6), 1–9 | 286 (238; CS 1080), 2–1700 |
+| `mvgaussian1`: `ar1_pdmat` | 34 (22), 52 | 4560 (8150), 13000 |
+| `mvgaussian1`: `factor_analytic_pdmat` | \f$3.1 \times 10^6\f$ (\f$1.4 \times 10^6\f$), \f$4.7 \times 10^6\f$ | \f$1.0 \times 10^6\f$ (\f$2.8 \times 10^5\f$), \f$1.6 \times 10^6\f$ |
+| `mvgaussian2`: all six structures | 9.0 (4.0), 1–14 | \f$7.7 \times 10^4\f$ FA / 1030 AR(1) / \f$< 100\f$ rest, \f$1.2 \times 10^5\f$ FA / 200 AR(1) / 1–6 rest |
+
+In the table, blocks cover \f$A \in \{0, 1, 2\}\f$ up to total order 6 and expected information covers orders 0 to 4; bounds are from `tests/distrib/test_mvgaussian.cpp` on gcc/OpenMP and CUDA (RTX 4070 SUPER). All large errors occur at hard points: at the `factor_analytic_pdmat` hard point (\f$\psi = e^{-6}\f$), `mvgaussian1_distrib\<S\>` inherits the inversion loss of `factor_analytic_pdmat::inverse_dk` while 1 ulp in \f$\theta\f$ moves the exact \f$A = 0\f$ order-3 blocks by at most 10.5 ulp (whereas `mvgaussian2_distrib\<S\>` uses `matrix_dk` and stays within 1.3 ulp there). In `mvgaussian1_distrib\<S\>`, expected information near a singular \f$\Sigma\f$ (`ar1_pdmat` at \f$\rho = \tanh 3.5\f$, `compound_symmetry_pdmat` at \f$\theta = 8\f$) cancels in the trace products and loses up to about \f$\operatorname{cond}(\Sigma)\varepsilon\f$ relative to the largest entry.
+
+For `diagonal_pdmat` and `unstructured_pdmat\<matrix_log_bijector\>`, where \f$M(-\theta) = M(\theta)^{-1}\f$, the tests compare `mvgaussian1_distrib\<S\>` at \f$\theta\f$ with `mvgaussian2_distrib\<S\>` at \f$-\theta\f$: every block and the information agree up to the sign \f$(-1)^K\f$ (measured 0 ulp1N on gcc and 0.7 ulp1N on CUDA, bound 1). The tests also check central differences at orders 5–6 and information orders 1–4 (within \f$10^{-6}\f$ of the scales of orders \f$K\f$ and \f$K - 1\f$, or \f$10^{-5}\f$ for `factor_analytic_pdmat`), \f$2 \times 10^5\f$ device draws (mean, covariance, and score-Hessian checks within 1.2 standard errors, bound 5), and `start_value()` covariance recovery (within \f$10^{-12}\f$ relative for `log_cholesky_bijector`). See `docs/numerics.md` for full error breakdowns.
+
+## Speed
+
+Execution times in `benchmarks/distrib_mvgaussian.cpp` were measured over \f$n = 10^5\f$ units with `unstructured_pdmat\<log_cholesky_bijector\>` in nanoseconds per unit, reporting order 0 (`logpdf()`), order 1 (full gradient in \f$\mu\f$ and all \f$\theta_j\f$), and order 2 (all order-2 blocks) on OpenMP (16 threads) and CUDA (RTX 4070 SUPER).
+
+| Parametrization | \f$d\f$ | Mode | Backend | Order 0 (ns) | Order 1 (ns) | Order 2 (ns) |
+|---|---|---|---|---|---|---|
+| `mvgaussian1` | 2 | Shared \f$\theta\f$ | OpenMP / CUDA | 1.3 / 0.3 | 28 / 5.3 | 103 / 29 |
+| `mvgaussian1` | 2 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 8.9 / 1.0 | 34 / 6.0 | 113 / 30 |
+| `mvgaussian1` | 3 | Shared \f$\theta\f$ | OpenMP / CUDA | 1.6 / 0.3 | 71 / 23 | 463 / 221 |
+| `mvgaussian1` | 3 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 16 / 2.0 | 81 / 25 | 507 / 223 |
+| `mvgaussian1` | 5 | Shared \f$\theta\f$ | OpenMP / CUDA | 3.2 / 0.6 | 310 / 197 | 5316 / 3989 |
+| `mvgaussian1` | 5 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 33 / 6.1 | 334 / 211 | 5314 / 4118 |
+| `mvgaussian1` | 10 | Shared \f$\theta\f$ | OpenMP / CUDA | 7.6 / 2.0 | 3925 / 3407 | \f$2.38 \times 10^5\f$ / \f$2.37 \times 10^5\f$ |
+| `mvgaussian1` | 10 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 88 / 26 | 4169 / 3351 | \f$2.40 \times 10^5\f$ / \f$2.38 \times 10^5\f$ |
+| `mvgaussian2` | 2 | Shared \f$\theta\f$ | OpenMP / CUDA | 1.4 / 0.3 | 6.4 / 1.0 | 11 / 1.8 |
+| `mvgaussian2` | 2 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 5.6 / 0.8 | 10 / 1.5 | 15 / 2.5 |
+| `mvgaussian2` | 3 | Shared \f$\theta\f$ | OpenMP / CUDA | 2.0 / 0.3 | 15 / 2.8 | 32 / 6.7 |
+| `mvgaussian2` | 3 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 12 / 1.4 | 22 / 3.9 | 37 / 8.0 |
+| `mvgaussian2` | 5 | Shared \f$\theta\f$ | OpenMP / CUDA | 2.3 / 0.6 | 38 / 17 | 137 / 55 |
+| `mvgaussian2` | 5 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 20 / 3.5 | 50 / 20 | 151 / 59 |
+| `mvgaussian2` | 10 | Shared \f$\theta\f$ | OpenMP / CUDA | 7.1 / 2.3 | 248 / 186 | 2021 / 922 |
+| `mvgaussian2` | 10 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 50 / 13 | 287 / 201 | 2118 / 956 |
+
+For `logpdf()`, sharing \f$\theta\f$ across units costs \f$O(d^2)\f$ per unit whereas computing the state per unit costs \f$O(d^3)\f$ (7 to 13 times slower at \f$d = 10\f$). For \f$K \ge 1\f$, each block call recomputes \f$\partial_T W\f$, so `mvgaussian1_distrib\<S\>` over `log_cholesky_bijector` takes 100 to 250 times longer than `mvgaussian2_distrib\<S\>` at \f$d = 10\f$, order 2.
+
+## Example
+
+The following example computes a shared precision state once on the device and evaluates `logpdf()` and the \f$\mu\f$-gradient block in parallel over units:
+
+\code{.cpp}
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/mvgaussian2.hpp>
+#include <laplace/pdmat/ar1.hpp>
+
+void eval_mvgaussian(const Kokkos::View<const double**>& y,
+                     const Kokkos::View<const double**>& mu,
+                     const Kokkos::View<const double*>& theta,
+                     Kokkos::View<double*>& log_lik,
+                     Kokkos::View<double**>& grad_mu) {
+  constexpr int d = 3;
+  const int n = static_cast<int>(y.extent(0));
+  const laplace::distrib::mvgaussian2_distrib<laplace::pdmat::ar1_pdmat> dist(laplace::pdmat::ar1_pdmat(d));
+  Kokkos::View<double*> state_buf("state_buf", dist.state_size() + dist.scratch_size());
+  Kokkos::View<laplace::distrib::mvgaussian2_state> state_view("state");
+
+  Kokkos::parallel_for(
+      "mv_state", 1, KOKKOS_LAMBDA(int) { state_view() = dist.theta_state(theta.data(), state_buf.data()); });
+
+  Kokkos::parallel_for(
+      "mv_eval", n, KOKKOS_LAMBDA(int i) {
+        constexpr int scratch_cap = 2 * laplace::pdmat::packed_size(d);
+        double w[scratch_cap];
+        double g[d];
+        const auto st = state_view();
+        log_lik(i) = dist.logpdf(st, &y(i, 0), &mu(i, 0));
+        if (dist.template logpdf_dmu_dk<1, 0>(st, &y(i, 0), &mu(i, 0), nullptr, g, w)) {
+          for (int k = 0; k < d; ++k) grad_mu(i, k) = g[k];
+        }
+      });
+}
+\endcode
+
+## Module types and functions
+
+- \ref laplace::distrib::distrib_normalization "distrib_normalization" — normalization class of the matrix parameter (`proper`, `degenerate`, `improper`)
+- \ref laplace::distrib::distrib_mv_info_block "distrib_mv_info_block" — block selector for expected Fisher information (`vector_vector`, `vector_rest`, `rest_rest`)
+- \ref laplace::distrib::multivariate_distrib "multivariate_distrib" — concept defining the core interface of a multivariate distribution
+- \ref laplace::distrib::distrib_mv_sample_summary "distrib_mv_sample_summary" — host summary holding sample count, dimension, mean, and packed covariance
+- \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample()" — computes `distrib_mv_sample_summary` from \f$n\f$ observation vectors on the host
+- \ref laplace::distrib::mvgaussian1_state "mvgaussian1_state" — precomputed \f$\theta\f$-dependent state for the covariance parametrization
+- \ref laplace::distrib::mvgaussian1_distrib "mvgaussian1_distrib\<S\>" — multivariate Gaussian in the covariance parametrization \f$\Sigma = M(\theta)\f$
+- \ref laplace::distrib::mvgaussian2_state "mvgaussian2_state" — precomputed \f$\theta\f$-dependent state for the precision parametrization
+- \ref laplace::distrib::mvgaussian2_distrib "mvgaussian2_distrib\<S\>" — multivariate Gaussian in the precision parametrization \f$Q = M(\theta)\f$
+
+## References
+
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

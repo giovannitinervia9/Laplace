@@ -28,6 +28,7 @@
 #include <laplace/bijector/matrix_log.hpp>
 #include <laplace/bijector/partial_corr.hpp>
 #include <laplace/pdmat/core.hpp>
+#include <laplace/pdmat/detail/from_matrix.hpp>
 
 #include <type_traits>
 
@@ -102,6 +103,32 @@ struct unstructured_pdmat : pdmat_orders<unstructured_pdmat<B>> {
   // the generic route's buffers (or -theta for matrix_log), then the bijector's
   LAPLACE_HD int scratch_size() const {
     return detail_pdmat::generic_inverse_scratch(dim) + n_params() + b.scratch_size();
+  }
+
+  /**
+   * \ingroup pdmat
+   * \brief Computes starting parameters \f$\theta\f$ from a target packed matrix \f$\hat{M}\f$.
+   *
+   * Host-only function. For \c partial_corr_bijector, scales \f$\hat{M}\f$ to a correlation
+   * matrix from its floored diagonal; then floors any eigenvalues below \f$10^{-6}\f$ times
+   * the largest (re-normalizing to unit diagonal for \c partial_corr_bijector when modified),
+   * and applies \c B::forward(). Exact up to rounding when no guard acts.
+   *
+   * \param m_hat Target symmetric \f$p \times p\f$ matrix in packed lower-triangular storage.
+   * \param theta Output array of \c n_params() doubles inside the domain.
+   *
+   * Accuracy: recovers \f$\theta\f$ from `matrix()` to 0 (`log_cholesky_bijector`), \f$5.6 \times 10^{-16}\f$ (`matrix_log_bijector`), and within \f$1.7 \times 10^{-16}\f$ (`partial_corr_bijector`) on gcc 14.2/OpenMP (test bound \f$10^{-13}\f$).
+   *
+   * \see matrix(), pdmat
+   */
+  // host: exact through the bijector's forward map, after flooring the
+  // eigenvalues (and, for partial_corr, scaling to unit diagonal)
+  void params_from_matrix(const double* m_hat, double* theta) const {
+    namespace dp = detail_pdmat;
+    std::vector<double> v = is_partial_corr ? dp::correlation_of(dim, m_hat) : std::vector<double>(m_hat, m_hat + packed_size(dim));
+    if (dp::floor_eigenvalues(dim, v.data()) && is_partial_corr) v = dp::correlation_of(dim, v.data());
+    std::vector<double> w(b.scratch_size());
+    b.forward(v.data(), theta, w.data());
   }
 
   /**

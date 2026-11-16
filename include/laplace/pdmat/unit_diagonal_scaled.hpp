@@ -20,6 +20,7 @@
 #pragma once
 
 #include <laplace/pdmat/core.hpp>
+#include <laplace/pdmat/detail/from_matrix.hpp>
 
 namespace laplace::pdmat {
 
@@ -152,6 +153,33 @@ struct unit_diagonal_scaled_pdmat : pdmat_orders<unit_diagonal_scaled_pdmat<R>> 
    * \return Number of scratch doubles required.
    */
   LAPLACE_HD int scratch_size() const { return unit_structure.scratch_size(); }
+
+  /**
+   * \ingroup pdmat
+   * \brief Computes starting parameters \f$\theta\f$ from a target packed matrix \f$\hat{M}\f$.
+   *
+   * Host-only function. Sets \f$s_i = \frac{1}{2}\log \hat{M}_{ii}\f$ from the floored
+   * diagonal (or their mean when \c common_scale is \c true), then calls
+   * `unit_structure.params_from_matrix()`, which reads \f$\hat{M}\f$ as a covariance and
+   * uses its correlations.
+   *
+   * \param m_hat Target symmetric \f$p \times p\f$ matrix in packed lower-triangular storage.
+   * \param theta Output array of \c n_params() doubles inside the domain.
+   *
+   * Accuracy: recovers \f$\theta\f$ from `matrix()` to 0 for AR(1) with `common_scale` and within \f$1.7 \times 10^{-16}\f$ for AR(1) and unstructured correlation on gcc 14.2/OpenMP (test bounds \f$10^{-14}\f$ and \f$10^{-13}\f$).
+   *
+   * \see matrix(), pdmat
+   */
+  // host: s_i = log M_ii / 2 from the floored diagonal (their mean with
+  // common_scale), then R's own params_from_matrix, which reads m_hat as a
+  // correlation matrix
+  void params_from_matrix(const double* m_hat, double* theta) const {
+    const auto d = detail_pdmat::floored_diagonal(dim, m_hat);
+    double mean = 0.0;
+    for (int i = 0; i < dim; ++i) mean += 0.5 * std::log(d[i]) / dim;
+    for (int i = 0; i < n_scales(); ++i) theta[i] = common_scale ? mean : 0.5 * std::log(d[i]);
+    unit_structure.params_from_matrix(m_hat, theta + n_scales());
+  }
 
   /**
    * \ingroup pdmat

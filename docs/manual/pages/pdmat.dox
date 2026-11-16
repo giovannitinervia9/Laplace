@@ -2,7 +2,7 @@
 \defgroup pdmat Positive definite structures
 \brief Structured symmetric positive definite matrices with exact values, log-determinants, inverses, Cholesky factors, and derivatives to order 6.
 
-Functions in this module are marked `LAPLACE_HD` for host and Kokkos device execution, except host-only \ref laplace::pdmat::factor_analytic_max_factors "factor_analytic_max_factors()". Include `<laplace/pdmat/core.hpp>` with `diagonal.hpp`, `compound_symmetry.hpp`, `ar1.hpp`, `toeplitz.hpp`, `unstructured.hpp`, `unit_diagonal_scaled.hpp`, or `factor_analytic.hpp`.
+Functions in this module are marked `LAPLACE_HD` for host and Kokkos device execution, except host-only \ref laplace::pdmat::factor_analytic_max_factors "factor_analytic_max_factors()" and `params_from_matrix()`. Include `<laplace/pdmat/core.hpp>` with `diagonal.hpp`, `compound_symmetry.hpp`, `ar1.hpp`, `toeplitz.hpp`, `unstructured.hpp`, `unit_diagonal_scaled.hpp`, or `factor_analytic.hpp`.
 
 Each structure holds dimension \f$p \ge 1\f$ in `dim`, parameter count \f$q\f$ via `n_params()`, and scratch requirement via `scratch_size()`. Symmetric matrices and lower Cholesky factors use row-major packed lower-triangular storage indexed by \ref laplace::pdmat::packed_index "packed_index(i, j)" (\f$i(i + 1)/2 + j\f$, \f$0 \le j \le i < p\f$), of length \ref laplace::pdmat::packed_size "packed_size(p)" (\f$p(p + 1)/2\f$). Across orders 0–6, diagonal, compound symmetry, AR(1), and unstructured structures stay within 60 ulpN, Toeplitz within 163 ulpN, and factor-analytic within \f$2.5 \times 10^4\f$ ulpN outside an ill-conditioned `(3, 1)` point.
 
@@ -21,7 +21,7 @@ Eight structures implement diagonal, correlation, scaled, unstructured, and fact
 | `unit_diagonal_scaled_pdmat\<R\>` | \f$n_{\text{scales}} + q_R\f$ | `false` | `R::closed_inverse` | `R::closed_factor` | `R::has_density` | `unit_structure.scratch_size()` | 83.4 ulpN |
 | `factor_analytic_pdmat` | \f$pd-\frac{d(d-1)}{2}+p\f$ | `false` | `true` | `false` | `false` | \f$2pd+p+129d^2+2d+64\frac{p(p+1)}{2}+65p^2\f$ | \f$2.4 \times 10^5\f$ ulpN |
 
-Structures satisfy \ref laplace::pdmat::pdmat_structure "pdmat_structure", exposing `matrix()`, `log_det()`, `inverse()`, conditional `cholesky()` (`closed_factor`) and `log_jacobian()` (`has_density`), and `*_dk<K>()` for \f$1 \le K \le 6\f$. Base \ref laplace::pdmat::pdmat_orders "pdmat_orders" adds \ref laplace::pdmat::pdmat_orders::matrix_d1 "matrix_d1()"–`matrix_d6()`, `log_det_d1()`–`log_det_d6()`, `inverse_d1()`–`inverse_d6()`, `cholesky_d1()`–`cholesky_d6()`, and `log_jacobian_d1()`–`log_jacobian_d6()`.
+Structures satisfy \ref laplace::pdmat::pdmat_structure "pdmat_structure", exposing `matrix()`, `log_det()`, `inverse()`, conditional `cholesky()` (`closed_factor`) and `log_jacobian()` (`has_density`), `*_dk<K>()` for \f$1 \le K \le 6\f$, and host-only `params_from_matrix()`. Base \ref laplace::pdmat::pdmat_orders "pdmat_orders" adds \ref laplace::pdmat::pdmat_orders::matrix_d1 "matrix_d1()"–`matrix_d6()`, `log_det_d1()`–`log_det_d6()`, `inverse_d1()`–`inverse_d6()`, `cholesky_d1()`–`cholesky_d6()`, and `log_jacobian_d1()`–`log_jacobian_d6()`.
 
 Derivative calls take sorted zero-based parameter indices `idx` (\f$0 \le i_1 \le \dots \le i_K < q\f$); passing an unsorted tuple is undefined. Matrix derivatives either detect structural zeros early and return `false` without touching the output buffer, or overwrite all \f$p(p + 1)/2\f$ packed entries and return `true`. Scalar derivatives (`log_det_dk()` and `log_jacobian_dk()`) return `double` directly (`0.0` when identically zero, or `NaN` for `log_jacobian*` when `common_scale` is `true` so no invertible density exists).
 
@@ -76,6 +76,37 @@ with unit scale product for \f$L\f$ under `common_scale` (zero if \f$A\f$ has ov
 ### Factor-analytic structure
 
 In \ref laplace::pdmat::factor_analytic_pdmat "factor_analytic_pdmat" (\f$0 \le d \le p\f$), lower-trapezoidal \f$p \times d\f$ loadings \f$\Lambda\f$ (\f$\Lambda_{jj} = e^\theta\f$, \f$j < d\f$) and \f$t_0, \dots, t_{p-1}\f$ form \f$\Psi = \operatorname{diag}(e^{2t_0}, \dots, e^{2t_{p-1}})\f$ and \f$M = \Lambda\Lambda^\top + \Psi\f$ (Jennrich and Schluchter, 1986). At \f$d = 0\f$, \f$M = \Psi\f$ matches `diagonal_pdmat`; at \f$d = p\f$, \f$\Psi\f$ is non-identifiable (\f$M - \Psi\f$ matches log-Cholesky). Identifiability requires Ledermann's bound (1937) \f$(p - d)^2 \ge p + d\f$; \ref laplace::pdmat::factor_analytic_max_factors "factor_analytic_max_factors(p)" returns maximum \f$d\f$. With \f$C = I_d + \Lambda^\top\Psi^{-1}\Lambda\f$, Woodbury's identity (1950) evaluates \f$\log\det M = 2\sum_{i=0}^{p-1}t_i + \log\det C\f$ and \f$M^{-1} = \Psi^{-1} - \Psi^{-1}\Lambda C^{-1}\Lambda^\top\Psi^{-1}\f$ in \f$O(pd^2 + d^3)\f$ operations. Sparse \f$M\f$ derivatives vanish when mixing \f$t\f$ and loadings, two columns, or three coordinates; \f$M^{-1}\f$ derivatives recurse on \f$M\f$ from its Cholesky inverse. Derivatives of \f$\log\det M\f$ use Woodbury's recursion on \f$C\f$ for \f$d < p\f$ and, at \f$d = p\f$, where its terms cancel, the sum of traces on \f$M\f$ with the \f$M^{-1}\f$ derivatives.
+
+## Start values from a matrix
+
+Every structure provides a host-only `params_from_matrix()` that takes a symmetric target matrix \f$\hat{M}\f$ (packed lower triangle by rows, the storage of `matrix()`) and writes unconstrained \f$\theta\f$ in the domain such that \f$M(\theta)\f$ approximates \f$\hat{M}\f$. Unit-diagonal structures read \f$\hat{M}\f$ as a covariance matrix and extract its correlations.
+
+| Structure | Start rule from \f$\hat{M}\f$ |
+| :--- | :--- |
+| `diagonal_pdmat` | \f$\theta_i = \frac{1}{2}\log \hat{M}_{ii}\f$ |
+| `ar1_pdmat` | \f$\rho\f$ from mean lag-1 correlation, \f$\theta_0 = \operatorname{atanh}\rho\f$ |
+| `compound_symmetry_pdmat` | \f$\rho\f$ from mean off-diagonal correlation, \f$(\rho - a)/(1 - a) = \operatorname{expit}(\theta_0)\f$, \f$a = -1/(p - 1)\f$ |
+| `toeplitz_pdmat` | Mean correlation \f$m_k\f$ on diagonal \f$k\f$, then Durbin-Levinson partial autocorrelations (Durbin, 1960) |
+| `unstructured_pdmat\<B\>` | Forward map of `B` (on correlation matrix of \f$\hat{M}\f$ for `partial_corr_bijector`) |
+| `unit_diagonal_scaled_pdmat\<R\>` | \f$s_i = \frac{1}{2}\log \hat{M}_{ii}\f$ (or their mean under `common_scale`), then `R` on \f$\hat{M}\f$ |
+| `factor_analytic_pdmat` | \f$100\f$ (`start_fa_iterations`) principal axis factoring steps from probabilistic PCA fit, then trapezoidal Cholesky |
+
+For `factor_analytic_pdmat`, initialization sets \f$\psi_i\f$ to the mean of the trailing \f$p - d\f$ eigenvalues of \f$\hat{M}\f$, each step takes \f$\Lambda\f$ from the \f$d\f$ leading eigenpairs of \f$\hat{M} - \Psi\f$ and updates \f$\Psi = \operatorname{diag}(\hat{M} - \Lambda\Lambda^\top)\f$, and the final loadings are converted to canonical lower-trapezoidal form via the first \f$d\f$ columns of the Cholesky factor of \f$\Lambda\Lambda^\top\f$.
+
+To keep \f$\theta\f$ finite even on boundary or indefinite targets, sample correlations are clamped to \f$[-0.99, 0.99]\f$ (`expit` coordinate of compound symmetry to \f$[0.005, 0.995]\f$), and eigenvalues, diagonal entries, and trapezoidal Cholesky pivots are floored at \f$10^{-6}\f$ times the largest entry (defaulting to unit scale when none is positive). The target is modified only when a guard acts, and the returned \f$\theta\f$ is always inside the domain.
+
+On exact model matrices `matrix(theta)`, round-trip parameter recovery errors \f$\max_i \lvert \hat{\theta}_i - \theta_i \rvert\f$ (gcc 14.2, OpenMP) are:
+
+| Structure | Max parameter error |
+| :--- | :--- |
+| `diagonal_pdmat` (\f$p = 4\f$), `ar1_pdmat` (\f$p = 5, \theta = 0.7\f$), `compound_symmetry_pdmat` (\f$p = 2\f$), `unstructured_pdmat` (`log_cholesky_bijector`, \f$p = 4\f$), `unit_diagonal_scaled_pdmat` (`ar1_pdmat`, `common_scale`, \f$p = 4\f$) | \f$0\f$ |
+| `compound_symmetry_pdmat` (\f$p = 4\f$), `toeplitz_pdmat` (\f$p = 5\f$), `unstructured_corr_pdmat` (\f$p = 4\f$), `unit_diagonal_scaled_pdmat` (`ar1_pdmat`, \f$p = 4\f$; `unstructured_corr_pdmat`, \f$p = 3\f$) | \f$5.6 \times 10^{-17}\f$ to \f$1.7 \times 10^{-16}\f$ |
+| `unstructured_pdmat` (`matrix_log_bijector`, \f$p = 3\f$) | \f$5.6 \times 10^{-16}\f$ |
+| `ar1_pdmat` (\f$p = 5, \theta = -1.9\f$) | \f$8.9 \times 10^{-16}\f$ |
+
+The tests bound these errors between \f$10^{-15}\f$ and \f$10^{-13}\f$.
+
+For `factor_analytic_pdmat` (\f$p = 8, d = 2\f$), relative matrix error \f$\max \lvert M(\hat{\theta}) - \hat{M} \rvert / \max \lvert \hat{M} \rvert\f$ is \f$1.1 \times 10^{-3}\f$ on its own model matrix (test bound \f$0.05\f$) and \f$0.17\f$ on a generic SPD matrix. A rank-one target with a zero diagonal entry and a target whose correlations all equal 1 give finite parameters inside the guards.
 
 ## Measured accuracy
 
