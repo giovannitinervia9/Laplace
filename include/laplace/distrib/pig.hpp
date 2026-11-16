@@ -20,9 +20,11 @@
 //   l = (s - mu) - alpha + y log mu - y log(mu + s) - y log 2 + log Q(theta) - loggamma(y + 1),
 //   Q(theta) = sum_(j=1)^y a_j e^(j theta),   a_j = (2y - 1 - j)! / ((y - j)! (j - 1)!),
 //
-// with Q = 1 at y = 0, where the mass is e^(s - mu - alpha) exactly. So no Bessel routine, no Debye
-// expansion and no table enter this family: everything is the logarithm of a positive sum and its
-// cumulants.
+// with Q = 1 at y = 0, where the mass is e^(s - mu - alpha) exactly. So the mass and all of its
+// parameter derivatives are the logarithm of a positive sum and its cumulants, with no Bessel
+// routine, no Debye expansion and no table. The one place where the Bessel function itself is
+// called is the tail of the information in alpha, below, which needs the mass at a count that is
+// not an integer.
 //
 // How the sum is evaluated. The terms a_j e^(j theta) are walked outwards from their largest one,
 // whose index j* is the root in [1, y] of j^2 - (2y - 1 + 2 alpha) j + 2 alpha y = 0, by the exact
@@ -78,8 +80,15 @@
 //
 // The expected information is diagonal in this parametrization: I_mu_mu = c = 1/mu - 1/s and
 // I_mu_alpha = 0 exactly, so the member supplies both of those closed (and the derivatives of
-// I_mu_mu are the partials of c), and takes I_alpha_alpha and its derivatives from the generic sum
-// over the support (generic_info.hpp). The cumulative function has no closed form: it and the
+// I_mu_mu are the partials of c). I_alpha_alpha is the sum of (dl/dalpha)^2 p(y) over the support,
+// which is dominated by the small counts, half of it at y <= 1, but whose terms then fall as a
+// power of y until the geometric factor e^(-lambda y), lambda = log1p(alpha^2 / (2 mu (s + mu))),
+// takes over at counts of the size of mu^2 / alpha^2. The generic sweep (generic_info.hpp) needs
+// terms of that order to pass its own tail test, 1.7e7 of them at alpha / mu = 0.003, and above
+// 2^26 in a direction it reports no convergence. Where the spread asks for more than a thousand of
+// them the member therefore sums the first y_info_cut + 1 counts itself and adds the rest in closed
+// form, by info_alpha_tail below; the derivatives of I_alpha_alpha still come from the generic sum.
+// Both routes agree to 1.6e-11 of the value or better where the generic one converges. The cumulative function has no closed form: it and the
 // derivatives of log F and log(1 - F) come from the generic summation route (generic_cdf.hpp).
 // start_value inverts the moments: mu = mean, and from Var = mu + mu^2 / (s - mu),
 // alpha = sqrt(d (d + 2 mu)) with d = s - mu = mu^2 / (Var - mu), the denominator floored at
@@ -89,9 +98,11 @@
 #include <laplace/core/config.hpp>
 #include <laplace/distrib/core.hpp>
 #include <laplace/distrib/generic_info.hpp>
+#include <laplace/math/bessel_k.hpp>
 #include <laplace/math/chain_pair.hpp>
 #include <laplace/math/elementary.hpp>
 #include <laplace/math/faa_di_bruno.hpp>
+#include <laplace/math/quadrature.hpp>
 #include <laplace/math/special.hpp>
 #include <laplace/math/stirling.hpp>
 
@@ -265,6 +276,10 @@ LAPLACE_HD void c_partials(double mu, double alpha, double* C, double* M) {
   if constexpr (K >= 1) {
     double G[pair_count(K)], GM[pair_count(K)], U0[pair_count(K)], U1[pair_count(K)], U1m[pair_count(K)];
     for (int i = 0; i < n; ++i) G[i] = GM[i] = U0[i] = U1[i] = U1m[i] = 0.0;
+    // below the split m = 1 - h(u) has no second factor, so its outer function is of one variable
+    // and the cheaper composition applies
+    double GS[K + 1];
+    for (int i = 0; i <= K; ++i) GS[i] = 0.0;
     // the inner map x: (alpha^2) (mu^-2) when alpha <= mu, (mu^2) (alpha^-2) otherwise. The partials
     // of a product of a function of mu and a function of alpha are the product of theirs.
     const double big = low ? mu : alpha, small = low ? alpha : mu;
@@ -281,9 +296,7 @@ LAPLACE_HD void c_partials(double mu, double alpha, double* C, double* M) {
     for (int p = 0; p <= K; ++p) {
       const double c1 = ((p & 1) ? -f1 : f1);
       U1[low ? pair_index(p, 0) : pair_index(0, p)] = c1;
-      if (low) {
-        U1m[pair_index(p, 0)] = c1;  // unused: m = 1 - h(u) has no factor
-      } else {
+      if (!low) {
         // u_1m = mu / alpha: (mu or 1) times (-1)^p p! / alpha^(p+1)
         U1m[pair_index(0, p)] = c1 * mu;
         if (p + 1 <= K) U1m[pair_index(1, p)] = c1;
@@ -296,7 +309,7 @@ LAPLACE_HD void c_partials(double mu, double alpha, double* C, double* M) {
       if (low) {
         G[pair_index(i, 0)] = hi / mu;
         if (i + 1 <= K) G[pair_index(i, 1)] = hi;
-        GM[pair_index(i, 0)] = -hi;
+        GS[i] = -hi;
       } else {
         G[pair_index(i, 0)] = -Gx[i] / alpha;
         if (i + 1 <= K) G[pair_index(i, 1)] = -Gx[i];
@@ -309,7 +322,7 @@ LAPLACE_HD void c_partials(double mu, double alpha, double* C, double* M) {
   if constexpr (K >= ORD) {                                                         \
     math::chain_rule_pair_dk<ORD>(G, U0, U1, out);                                  \
     for (int b = 0; b <= ORD; ++b) C[pair_index(ORD - b, b)] = out[b];              \
-    math::chain_rule_pair_dk<ORD>(GM, U0, low ? U1 : U1m, out);                     \
+    if (low) math::chain_rule_pair_scalar_dk<ORD>(GS, U0, out);                           else math::chain_rule_pair_dk<ORD>(GM, U0, U1m, out);                             \
     for (int b = 0; b <= ORD; ++b) M[pair_index(ORD - b, b)] = out[b];              \
   }
     LAPLACE_PIG_CHAIN(1)
@@ -328,6 +341,66 @@ LAPLACE_HD void c_partials(double mu, double alpha, double* C, double* M) {
     }
   }
 }
+
+// The mass and its score in alpha at a count that is not an integer, from the definition. The
+// half-integer polynomial needs an integer, so the Bessel function is called as it stands
+// (bessel_k.hpp, whose uniform branch covers the large orders) and the score takes its derivative
+// in the argument:
+//
+//   log p(y) = log(2 alpha / pi) / 2 + (s - mu) + y log(mu alpha / (mu + s))
+//              + log K_(y - 1/2)(alpha) - loggamma(y + 1),
+//   dl/dalpha = 1/(2 alpha) + alpha / s + y (1/alpha - lambda') + d log K_(y - 1/2)(alpha) / dalpha,
+//
+// with lambda' = alpha / (s (mu + s)) the derivative of lambda = log((mu + s) / (2 mu)). Against the
+// family's own logpmf and logpmf_d1 at integer counts up to 3000 the two agree to 3.1e-13 and
+// 3.7e-13 of the value.
+struct real_count_mass {
+  double mu, alpha, s, lam_d1, log_const, log_rate;
+  LAPLACE_HD real_count_mass(double mu_in, double alpha_in, double s_in)
+      : mu(mu_in),
+        alpha(alpha_in),
+        s(s_in),
+        lam_d1(alpha_in / (s_in * (mu_in + s_in))),
+        // log(2 / pi) / 2 = -0.2257913526447274
+        log_const(0.5 * math::log(alpha_in) - 0.22579135264472743236 + (s_in - mu_in)),
+        log_rate(math::log(mu_in * alpha_in / (mu_in + s_in))) {}
+  LAPLACE_HD double log_mass(double y) const {
+    return log_const + y * log_rate + math::log_bessel_k(y - 0.5, alpha) - math::lgamma(y + 1.0);
+  }
+  LAPLACE_HD double score_alpha(double y) const {
+    return 0.5 / alpha + alpha / s + y * (1.0 / alpha - lam_d1) + math::log_bessel_k_dx1(y - 0.5, alpha);
+  }
+  // the integrand of I_alpha_alpha
+  LAPLACE_HD double operator()(double y) const {
+    const double g = score_alpha(y);
+    return math::exp(log_mass(y)) * g * g;
+  }
+};
+
+// The counts above y_cut of the sum for I_alpha_alpha. The integrand above is smooth in a real
+// count, so the sum over the integers above y_cut is the integral from y_cut + 1/2 plus the first
+// Euler-Maclaurin correction f'(y_cut + 1/2) / 24, the midpoint rule's own term. The integral is
+// taken by exp_sinh_quad with the decay length 1 / lambda, and the derivative of the correction
+// from the tail model A y^(-3/2) e^(-lambda y) (a - lambda' y)^2, a = 1/alpha + alpha / s, whose
+// three digits are enough for a term that is itself 1e-5 of the tail: with it the result moves from
+// 5.3e-10 to 1.6e-11 of the value at y_cut = 1024, against the same sum cut at 16384.
+LAPLACE_HD double info_alpha_tail(double mu, double alpha, double s, double y_cut) {
+  const real_count_mass f{mu, alpha, s};
+  const double lam = Kokkos::log1p(alpha * alpha / (2.0 * mu * (s + mu)));
+  const double x = y_cut + 0.5;
+  const double width = lam > 0.0 && 1.0 / lam > 1.0 ? 1.0 / lam : 1.0;
+  const auto q = math::quad::exp_sinh_quad(f, x, width);
+  const double g_model = 1.0 / alpha + alpha / s - f.lam_d1 * x;
+  return q.value + f(x) * (-1.5 / x - lam - 2.0 * f.lam_d1 / g_model) / 24.0;
+}
+
+// the last count summed term by term before info_alpha_tail takes over, and the spread above which
+// that route is taken at all. This route costs 0.42 ms whatever the parameters, while the generic
+// sweep costs 0.09 ms at a spread of 1.8, 0.27 at 3.1, 0.70 at 4.9 and 6.0 at 14, so the two cross
+// at a spread of about 4; above it the sweep is also the less accurate of the two, and at
+// (mu, alpha) = (40, 1e-2) it stops early and reports convergence 4.2e-5 away from the value.
+inline constexpr double y_info_cut = 1024.0;
+inline constexpr double info_cut_scale = 4.0;
 
 // d^q s / dalpha^q, q = 0..Q (Q <= 6), s = sqrt(mu^2 + alpha^2): the value, alpha / s at the first
 // order, and above it mu^2 d^(q-2) (mu^2 + alpha^2)^(-3/2) / dalpha^(q-2), which is exact where
@@ -385,6 +458,94 @@ LAPLACE_HD void log_mu_plus_s_derivs(double mu, double alpha, double* out) {
   if constexpr (Q >= 4) out[4] = math::chain_rule_d4(f, sd);
   if constexpr (Q >= 5) out[5] = math::chain_rule_d5(f, sd);
   if constexpr (Q >= 6) out[6] = math::chain_rule_d6(f, sd);
+}
+
+// The partials of log p of orders 1 to N at a count that is not an integer, in the packing of
+// detail_generic::log_density_partials: component b of order n holds b derivatives in alpha and
+// n - b in mu. The components with at least one index in mu are the family's own Leibniz form,
+// which is an identity in y and needs no integer count; the constant -1 of the score in mu belongs
+// to that one component alone, since every further derivative kills it. The pure ones in alpha come
+// from the real-count form of the mass, whose Bessel factor carries all of them:
+//
+//   l_0q = (1/2) (-1)^(q-1) (q-1)! / alpha^q + s^(q)
+//          + y [(-1)^(q-1) (q-1)! / alpha^q - (log(mu + s))^(q)]
+//          + d^q log K_(y - 1/2)(alpha) / dalpha^q.
+//
+// Against the family's own partials at integer counts to order 5 the two agree to 1.9e-12 of the
+// scale of the order, over mu from 0.5 to 100, alpha from 1e-3 to 10 and counts to 3000.
+template <int N>
+LAPLACE_HD void real_count_partials(double mu, double alpha, double y,
+                                    detail_generic::log_density_partials<2, N>& L) {
+  constexpr int NC = N - 1 > 5 ? 5 : (N - 1 > 0 ? N - 1 : 0);
+  double C[pair_count(NC)], M[pair_count(NC)];
+  c_partials<NC>(mu, alpha, C, M);
+  double sd[N + 1], lms[N + 1], kd[N + 1];
+  s_alpha_derivs<N>(mu, alpha, sd);
+  log_mu_plus_s_derivs<N>(mu, alpha, lms);
+  math::log_bessel_k_dx_upto<N>(y - 0.5, alpha, kd);
+  for (int n = 1; n <= N; ++n)
+    for (int b = 0; b <= n; ++b) {
+      const int p = n - b, q = b;
+      double v;
+      if (p >= 1) {
+        v = y * C[pair_index(p - 1, q)] + M[pair_index(p - 1, q)] - (p == 1 && q == 0 ? 1.0 : 0.0);
+      } else {
+        double pw = 1.0, fact = 1.0;
+        for (int k = 1; k <= q; ++k) {
+          pw *= alpha;
+          if (k >= 2) fact *= (k - 1);
+        }
+        const double d = ((q & 1) ? fact : -fact) / pw;  // (-1)^(q-1) (q-1)! / alpha^q
+        v = 0.5 * d + sd[q] + y * (d - lms[q]) + kd[q];
+      }
+      L.v[L.offset(n) + b] = v;
+    }
+}
+
+// The derivatives of order K of I_alpha_alpha, one per multi-index C, by the same cut as the value:
+// the integrands are the generic ones of generic_info.hpp in the score form, taken from this
+// family's own partials below the cut and from the real-count partials above it, where the sum over
+// the integers becomes the integral from y_info_cut + 1/2. These components carry powers of y, so
+// their tails weigh far more than the value's, from 1.6 per cent to ninety times the component
+// itself, and the integral is taken without the Euler-Maclaurin term the value uses: measured
+// against the same route cut at 16384 the difference is 2.5e-8 of the scale of the order at worst,
+// at order 4 and (mu, alpha) = (1, 0.1), and 5e-10 on most components, which is that missing term.
+template <int K, class D>
+LAPLACE_HD void info_alpha_dk_cut(const D& d, double* out) {
+  constexpr int N = K + 1;
+  constexpr int n_c = K + 1;  // sym_tensor_size(2, K)
+  const bool valid[3] = {true, true, true};
+  for (int i = 0; i < n_c; ++i) out[i] = 0.0;
+  for (double y = 0.0; y <= y_info_cut; y += 1.0) {
+    detail_generic::log_density_partials<2, N> L;
+    L.fill(d, y);
+    const double mass = math::exp(d.logpmf(y));
+    int c[K] = {};
+    for (int pos = 0; pos < n_c; ++pos) {
+      double v[3];
+      detail_generic::info_integrands<K, 2>(L, c, info_form::score, valid, v, 1);
+      out[pos] += mass * v[2];
+      detail_generic::next_multi_index<2, K>(c);
+    }
+  }
+  const double s = Kokkos::hypot(d.mu, d.alpha);
+  const double lam = Kokkos::log1p(d.alpha * d.alpha / (2.0 * d.mu * (s + d.mu)));
+  const double width = lam > 0.0 && 1.0 / lam > 1.0 ? 1.0 / lam : 1.0;
+  const real_count_mass f{d.mu, d.alpha, s};
+  int c[K] = {};
+  for (int pos = 0; pos < n_c; ++pos) {
+    const auto q = math::quad::exp_sinh_quad(
+        [&](double y) {
+          detail_generic::log_density_partials<2, N> L;
+          real_count_partials<N>(d.mu, d.alpha, y, L);
+          double v[3];
+          detail_generic::info_integrands<K, 2>(L, c, info_form::score, valid, v, 1);
+          return math::exp(f.log_mass(y)) * v[2];
+        },
+        y_info_cut + 0.5, width);
+    out[pos] += q.value;
+    detail_generic::next_multi_index<2, K>(c);
+  }
 }
 
 }  // namespace detail_pig
@@ -519,6 +680,21 @@ struct pig_distrib {
       // at the first order alpha/s - 1 is -mu^2 / (s (s + alpha)), which does not cancel when
       // alpha is much larger than mu
       const double lead = K == 1 ? -mu * mu / (sd[0] * (sd[0] + alpha)) : sd[K];
+      // At the first order the two remaining terms are kappa_1 / alpha and y alpha / (s (mu + s)),
+      // which both tend to y / alpha when alpha is much larger than mu and cancel there. Since
+      // alpha^2 = s^2 - mu^2 and s (mu + s) - alpha^2 = mu (s + mu), the second is exactly
+      // (y / alpha) (1 - mu / s), so their difference is (kappa_1 - y) / alpha + y mu / (alpha s),
+      // where kappa_1 - y is formed as (j* - y) + m_1 / sum, both of them exact. That form is taken
+      // where it helps and only there: above the split the cancellation is gone (measured 1577 ulp
+      // against 2.6 over the reference file), below it the division of kappa_1 - y, which is then of
+      // the size of y, by a small alpha carries the walk's own error up instead (74.4 ulp against
+      // 1.2e4 at y = 949, mu = 100, alpha = 5).
+      if constexpr (K == 1) {
+        if (alpha >= mu && y >= 1.0) {
+          t[1] = lead + (mean_j - y) / alpha + y * (mu / (alpha * sd[0]));
+          return t;
+        }
+      }
       t[K] = lead - y * ld[K] + q_term;
     }
     return t;
@@ -546,16 +722,31 @@ struct pig_distrib {
    * \ingroup distrib_pig
    * \brief Evaluates the expected Fisher information, diagonal in this parametrization.
    *
-   * \f$I_{\mu\mu} = 1/\mu - 1/s\f$ and \f$I_{\mu\alpha} = 0\f$ are closed; \f$I_{\alpha\alpha}\f$
-   * comes from the generic sum over the support.
+   * \f$I_{\mu\mu} = 1/\mu - 1/s\f$ and \f$I_{\mu\alpha} = 0\f$ are closed. \f$I_{\alpha\alpha}\f$
+   * is the sum of \f$(\partial\ell/\partial\alpha)^2 p(y)\f$ over the support: the generic sweep
+   * where the spread is small, and where it is not the first \f$1025\f$ counts summed here plus the
+   * rest in closed form, since the generic sweep would need terms of the order of
+   * \f$(\mu/\alpha)^2\f$ and reports no convergence above \f$2^{26}\f$ of them in a direction.
    * \return Symmetric tensor \c sym_tensor<2, 2> of the information.
    */
   LAPLACE_HD sym_tensor<2, 2> expected_info() const {
-    sym_tensor<2, 2> t = expected_info_by_integral<0, info_form::score>(*this);
+    sym_tensor<2, 2> t;
     double C[1], Mp[1];
     detail_pig::c_partials<0>(mu, alpha, C, Mp);
     t[0] = C[0];
     t[1] = 0.0;
+    if (scale() > detail_pig::info_cut_scale) {
+      // the first counts term by term, the rest in closed form: the generic sweep would need terms
+      // of the order of (mu / alpha)^2 here, and gives up above 2^26 of them in a direction
+      double acc = 0.0;
+      for (double y = 0.0; y <= detail_pig::y_info_cut; y += 1.0) {
+        const double g = logpmf_d1(y)[1];
+        acc += math::exp(logpmf(y)) * g * g;
+      }
+      t[2] = acc + detail_pig::info_alpha_tail(mu, alpha, radius(), detail_pig::y_info_cut);
+    } else {
+      t[2] = expected_info_by_integral<0, info_form::score>(*this)[2];
+    }
     return t;
   }
   /**
@@ -563,13 +754,22 @@ struct pig_distrib {
    * \brief Evaluates the \f$K\f$-th derivative of the expected Fisher information.
    *
    * The \f$(\mu, \mu)\f$ block is the derivative tensor of \f$c = 1/\mu - 1/s\f$ and the
-   * \f$(\mu, \alpha)\f$ block is zero; the \f$(\alpha, \alpha)\f$ block comes from the generic sum.
+   * \f$(\mu, \alpha)\f$ block is zero. The \f$(\alpha, \alpha)\f$ block follows the two routes of
+   * expected_info(): the generic sweep where the spread is at most \f$4\f$, and the same cut sum with
+   * the integral of its tail above that, which is where the sweep needs terms of the order of
+   * \f$(\mu/\alpha)^2\f$ and stops reporting convergence.
    * \tparam K Derivative order (\f$1 \le K \le 4\f$).
    * \return Container \c expected_info_tensor<2, K> of information derivatives.
    */
   template <int K>
   LAPLACE_HD expected_info_tensor<2, K> expected_info_dk() const {
-    expected_info_tensor<2, K> t = expected_info_by_integral<K, info_form::score>(*this);
+    expected_info_tensor<2, K> t;
+    if (scale() > detail_pig::info_cut_scale) {
+      detail_pig::info_alpha_dk_cut<K>(*this, &t.pair[2][0]);
+    } else {
+      const auto g = expected_info_by_integral<K, info_form::score>(*this);
+      for (int b = 0; b <= K; ++b) t.pair[2][b] = g.pair[2][b];
+    }
     double C[math::detail_chain_pair::pair_count(K)], Mp[math::detail_chain_pair::pair_count(K)];
     detail_pig::c_partials<K>(mu, alpha, C, Mp);
     for (int b = 0; b <= K; ++b) {

@@ -170,6 +170,14 @@ def check_forms():
     assert worst_leib < mpmath.mpf(10) ** -40, ("Leibniz form", worst_leib)
     print("  the Leibniz form of the derivatives with an index in mu: orders 1 and 2 symbolic,")
     print(f"  orders 3 to 6 within {float(worst_leib):.2g} relative at 200 digits on five (mu, alpha)")
+    # the first-order derivative in alpha, where the cumulant of the Bessel sum and the term of the
+    # count cancel: y d/dalpha log(mu + s) is exactly (y / alpha) (1 - mu / s), so the first order
+    # is -mu^2 / (s (s + alpha)) + (kappa_1 - y) / alpha + y mu / (alpha s), with no difference of
+    # two terms of the size of y / alpha left
+    assert sp.simplify(sp.diff(sp.log(mu_s + S_OF), al_s) - al_s / (S_OF * (mu_s + S_OF))) == 0, "d log(mu + s)"
+    assert sp.simplify(al_s ** 2 / (S_OF * (mu_s + S_OF)) - (1 - mu_s / S_OF)) == 0, "the cancelling factor"
+    assert sp.simplify((al_s / S_OF - 1) + mu_s ** 2 / (S_OF * (S_OF + al_s))) == 0, "alpha / s - 1"
+    print("  the first order in alpha: y d log(mu + s) / dalpha = (y / alpha) (1 - mu / s)")
     # h and its derivatives, and c = h(u) / mu
     w_s = sp.sqrt(1 + u_s)
     h = 1 - (1 + u_s) ** sp.Rational(-1, 2)
@@ -246,6 +254,78 @@ def check_information():
         print(f"  (mu, alpha) = ({mu}, {al}): mass 1 - {1.0 - tot:.3g}, I_mu_mu {imm:.17g} against "
               f"1/mu - 1/s {c:.17g}, I_mu_alpha {ima:.3g}")
 
+
+# ------------------------------------------------------------------ the information in alpha
+
+INFO_OUT = Path(__file__).resolve().parents[2] / "tests" / "data" / "reference" / "pig_info.csv"
+
+# (mu, alpha) for the reference of I_alpha_alpha, from a spread below one to the heavy-tailed end,
+# with both of the member's routes covered. The Poisson limit is left out because mpmath's Bessel
+# function is slow where its order and its argument are close, the same band the mass rows avoid:
+# at alpha = 1e3 the summation does not finish, and the library's route there is the generic sweep,
+# which converges in 26 terms and is checked against the variance of the score.
+INFO_PARAMS = [
+    (0.1, 0.1),
+    (2.0, 3.0),
+    (10.0, 10.0),
+    (1.0, 0.5),
+    (1.0, 1.0),
+    (3.5, 2.0),
+    (1.0, 0.3),
+    (0.5, 0.1),
+    (1.0, 0.1),
+    (10.0, 1.0),
+    (100.0, 1.0),
+    (1.0, 1e-2),
+    (40.0, 1e-2),
+    (10.0, 3e-2),
+    (1.0, 3e-3),
+    (0.1, 1e-3),
+    (1.0, 1e-3),
+    (10.0, 1e-3),
+]
+
+
+def info_integrand(mu, al):
+    """p(y) (dl/dalpha)^2 at a real count, from the definition with besselk of real order."""
+    s = mpmath.sqrt(mu ** 2 + al ** 2)
+
+    def term(y):
+        nu = y - mpmath.mpf(1) / 2
+        log_p = (mpmath.log(2 * al / mpmath.pi) / 2 + (s - mu) + y * mpmath.log(mu * al / (mu + s))
+                 + mpmath.log(mpmath.besselk(nu, al)) - mpmath.loggamma(y + 1))
+        # d/dalpha log K_nu(alpha) = -(K_(nu-1) + K_(nu+1)) / (2 K_nu)
+        k0 = mpmath.besselk(nu, al)
+        dk = -(mpmath.besselk(nu - 1, al) + mpmath.besselk(nu + 1, al)) / (2 * k0)
+        g = 1 / (2 * al) + al / s + y * (1 / al - al / (s * (mu + s))) + dk
+        return mpmath.e ** log_p * g ** 2
+
+    return term
+
+
+def info_alpha_alpha(mu, al, dps=40):
+    """I_alpha_alpha by mpmath's own summation of the definition over y = 0, 1, 2, ..."""
+    mpmath.mp.dps = dps
+    mu, al = mpmath.mpf(mu), mpmath.mpf(al)
+    f = info_integrand(mu, al)
+    head = mpmath.fsum(f(mpmath.mpf(y)) for y in range(0, 1025))
+    tail = mpmath.nsum(f, [1025, mpmath.inf], method="euler-maclaurin")
+    out = head + tail
+    mpmath.mp.dps = 15
+    return out
+
+
+def write_info_rows():
+    """mu, alpha, I_alpha_alpha as hexadecimal doubles, hi and lo."""
+    rows = []
+    for (mu, al) in INFO_PARAMS:
+        v = info_alpha_alpha(mu, al)
+        hi = float(v)
+        lo = float(v - mpmath.mpf(hi))
+        rows.append(f"{mu.hex()},{al.hex()},{hi.hex()},{lo.hex()}")
+        print(f"  I_alpha_alpha({mu:g}, {al:g}) = {hi:.17g}")
+    INFO_OUT.write_text("mu,alpha,hi,lo\n" + "\n".join(rows) + "\n")
+    print(f"  {len(rows)} rows -> {INFO_OUT}")
 
 # ------------------------------------------------------------------ mpmath references
 
@@ -339,6 +419,9 @@ def init():
 
 def main():
     check_forms()
+    if "--info" in sys.argv:
+        write_info_rows()
+        return
     check_information()
     jobs = [(0, mu, al) for (mu, al) in PARAMS]
     if CDF_ROWS:

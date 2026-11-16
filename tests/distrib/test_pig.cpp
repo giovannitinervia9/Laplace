@@ -4,7 +4,8 @@
 // the closed blocks of the expected information against the variance of the score and its
 // derivatives against differences, the cdf of the generic sum against the partial sums of the mass,
 // the derivatives of log F and log(1 - F) against differences, a kernel launch of the highest
-// orders, and every order against mpmath (tools/reference/distrib_pig.py).
+// orders, I_alpha_alpha against the reference that mpmath sums from the definition by its own
+// route, and every order against mpmath (tools/reference/distrib_pig.py).
 #include <doctest/doctest.h>
 
 #include <laplace/distrib/generic_cdf.hpp>
@@ -277,6 +278,115 @@ void pig_kernel_case() {
 
 TEST_CASE("distrib pig: every order inside a kernel") { pig_kernel_case(); }
 
+// I_alpha_alpha against tests/data/reference/pig_info.csv, which
+// tools/reference/distrib_pig.py --info writes: mpmath sums the same definition at 40 digits with
+// its own Bessel function of real order and its own Euler-Maclaurin acceleration, so neither the
+// half-integer polynomial of the mass nor the quadrature of the library's tail enters it. The rows
+// run from the Poisson limit to alpha / mu = 1e-4 and cover both of the member's routes, the
+// generic sweep below a spread of 4 and the cut sum with its closed tail above it, which is also
+// the only one of the two that is defined at the heavy-tailed end.
+void check_pig_info_reference() {
+  std::FILE* f = std::fopen(LAPLACE_REFERENCE_DIR "/pig_info.csv", "r");
+  REQUIRE(f != nullptr);
+  char line[256];
+  std::fgets(line, sizeof line, f);
+  // the bound is 1.5 times the worst measured on the gcc and the CUDA builds (2026-11-16)
+  constexpr double bound = 2.1e-11;
+  double worst = 0.0, worst_mu = 0.0, worst_al = 0.0;
+  int rows = 0, cut_rows = 0;
+  while (std::fgets(line, sizeof line, f)) {
+    char mus[64], als[64], his[64], los[64];
+    if (std::sscanf(line, "%63[^,],%63[^,],%63[^,],%63s", mus, als, his, los) != 4) continue;
+    const double mu = std::strtod(mus, nullptr), alpha = std::strtod(als, nullptr);
+    const double hi = std::strtod(his, nullptr), lo = std::strtod(los, nullptr);
+    const ld::pig_distrib d{mu, alpha};
+    const double v = d.expected_info()[2];
+    const double rel = std::fabs((v - hi) - lo) / std::fabs(hi);
+    INFO("mu " << mu << ", alpha " << alpha << ", spread " << d.scale() << ", value " << v << ", reference "
+               << hi << ", relative " << rel);
+    CHECK(rel <= bound);
+    if (rel > worst) worst = rel, worst_mu = mu, worst_al = alpha;
+    ++rows;
+    if (d.scale() > ld::detail_pig::info_cut_scale) ++cut_rows;
+  }
+  std::fclose(f);
+  CHECK(rows >= 15);
+  CHECK(cut_rows >= 8);      // both routes are exercised
+  CHECK(rows - cut_rows >= 4);
+  if (std::getenv("LAPLACE_PRINT_ERRORS"))
+    std::printf("pig I_alpha_alpha: max %.3g relative (mu %.6g, alpha %.6g), %d rows, %d of them cut\n", worst,
+                worst_mu, worst_al, rows, cut_rows);
+}
+
+// The derivatives of I_alpha_alpha on the cut route, against the generic sweep where the sweep
+// still converges. Both points have a spread above 4, so the member takes the cut route, and the
+// sweep is reached here on purpose to compare the two. The tolerances are the worst measured on the
+// gcc and the CUDA builds times about 4: at (3.5, 2) the two agree to 1.9e-15 of the scale of the
+// order, and at (1, 0.1), where the sweep needs 1.6e5 terms and the tail of these components weighs
+// far more than the value's, to 2.5e-8.
+template <int K>
+void check_pig_info_dk_against_sweep(double mu, double alpha, double tol) {
+  const ld::pig_distrib d{mu, alpha};
+  REQUIRE(d.scale() > ld::detail_pig::info_cut_scale);
+  const auto mine = d.expected_info_dk<K>();
+  const auto sweep = ld::expected_info_by_integral<K, ld::info_form::score>(d);
+  double scale = 0.0;
+  for (int b = 0; b <= K; ++b) scale = std::fmax(scale, std::fabs(mine.pair[2][b]));
+  for (int b = 0; b <= K; ++b) {
+    if (!(std::fabs(sweep.pair[2][b]) < 1e308)) continue;  // the sweep gives up at the heavy end
+    INFO("K = " << K << ", component " << b << ", mu " << mu << ", alpha " << alpha << ", cut "
+                << mine.pair[2][b] << ", sweep " << sweep.pair[2][b]);
+    CHECK(std::fabs(mine.pair[2][b] - sweep.pair[2][b]) <= tol * scale);
+  }
+  // the mean blocks stay closed whichever route the shape block takes
+  const double s = std::sqrt(mu * mu + alpha * alpha);
+  CHECK(d.expected_info()[0] == doctest::Approx(1.0 / mu - 1.0 / s).epsilon(1e-14));
+  for (int b = 0; b <= K; ++b) CHECK(mine.pair[1][b] == 0.0);
+}
+
+TEST_CASE("distrib pig: the derivatives of I_alpha_alpha, cut route against the sweep") {
+  check_pig_info_dk_against_sweep<1>(3.5, 2.0, 1e-13);
+  check_pig_info_dk_against_sweep<2>(3.5, 2.0, 1e-13);
+  check_pig_info_dk_against_sweep<3>(3.5, 2.0, 1e-13);
+  check_pig_info_dk_against_sweep<4>(3.5, 2.0, 1e-13);
+  check_pig_info_dk_against_sweep<1>(1.0, 0.1, 1e-7);
+  check_pig_info_dk_against_sweep<2>(1.0, 0.1, 1e-7);
+  check_pig_info_dk_against_sweep<3>(1.0, 0.1, 1e-7);
+  check_pig_info_dk_against_sweep<4>(1.0, 0.1, 1e-7);
+}
+
+// At the heavy-tailed end the sweep reports no convergence, so there is nothing to compare against
+// but the family itself: every component must be finite, and the derivatives must agree with the
+// differences of the order below, which run on the same route.
+TEST_CASE("distrib pig: the information and its derivatives at the heavy-tailed end") {
+  for (const auto& th : {std::vector<double>{10.0, 1e-3}, std::vector<double>{1.0, 1e-2}}) {
+    const ld::pig_distrib d{th[0], th[1]};
+    const auto I = d.expected_info();
+    INFO("mu " << th[0] << ", alpha " << th[1] << ", spread " << d.scale());
+    CHECK(std::isfinite(I[2]));
+    CHECK(I[2] > 0.0);
+    const auto g = d.expected_info_d1();
+    for (int b = 0; b <= 1; ++b) CHECK(std::isfinite(g.pair[2][b]));
+    check_info_derivs(th, 2, 2e-4);
+  }
+}
+
+TEST_CASE("distrib pig: I_alpha_alpha against the mpmath reference") { check_pig_info_reference(); }
+
+// The two routes of I_alpha_alpha where both are defined: the generic sweep is forced by asking it
+// directly, and must agree with the member wherever it converges honestly.
+TEST_CASE("distrib pig: the two routes of I_alpha_alpha agree") {
+  for (double mu : {0.5, 1.0, 10.0, 100.0})
+    for (double alpha : {0.1, 0.3, 1.0, 3.0}) {
+      const ld::pig_distrib d{mu, alpha};
+      const auto sweep = ld::expected_info_by_integral<0, ld::info_form::score>(d);
+      if (!(sweep[2] > 0.0)) continue;  // the sweep gives up at the heavy-tailed end
+      const double v = d.expected_info()[2];
+      INFO("mu " << mu << ", alpha " << alpha << ", spread " << d.scale());
+      CHECK(v == doctest::Approx(sweep[2]).epsilon(1e-9));
+    }
+}
+
 TEST_CASE("distrib pig: every order against mpmath") {
   // tools/reference/distrib_pig.py: kind 0 log p, 1 log F, 2 log(1 - F); b of the K derivatives
   // taken in alpha, K - b in mu. The error is the library value minus the mpmath value (low part
@@ -314,11 +424,13 @@ TEST_CASE("distrib pig: every order against mpmath") {
   // since the cumulative functions of this family have no closed form and every reference value
   // would be a numerical derivative of a sum of Bessel functions; the generic summation route that
   // computes them here is measured in its own section, and against differences above.
-  // The order-1 bound is the one wide one: at (mu, alpha) = (1, 1e3), y = 1 the derivative in alpha
-  // is 5e-7 while the two terms that make it, the first cumulant over alpha and
-  // y alpha / (s (mu + s)), are both 1e-3, so the whole tensor of that order is small and the
-  // absolute error is 2e-19.
-  const double bound[3][7] = {{10.0, 2400.0, 10.0, 16.0, 30.0, 150.0, 310.0},
+  // The order-1 bound is the one wide one, and now only below the split: above alpha = mu the
+  // derivative in alpha is taken as -mu^2 / (s (s + alpha)) + (kappa_1 - y) / alpha + y mu /
+  // (alpha s), where the cancellation of the first cumulant against y alpha / (s (mu + s)) is gone
+  // (2.6 ulp where that form had 1577); below it the same form divides kappa_1 - y, of the size of
+  // y there, by a small alpha, so the sum's own form is kept and its worst is 74.4 ulp at y = 949,
+  // mu = 100, alpha = 5.
+  const double bound[3][7] = {{10.0, 112.0, 10.0, 16.0, 30.0, 150.0, 310.0},
                               {40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0},
                               {40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0}};
   for (const auto& r : rows) {
