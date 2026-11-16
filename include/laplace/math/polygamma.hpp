@@ -107,6 +107,97 @@ LAPLACE_HD double polygamma(int n, double x) {
 
 /**
  * \ingroup gamma
+ * \brief Polygamma remainder \f$\psi^{(n)}(x) - \mu_n(x)\f$ for \f$n \in \{0, \dots, 6\}\f$.
+ *
+ * Evaluates \f$r_n(x) = \psi^{(n)}(x) - \mu_n(x)\f$, where \f$\mu_0(x) = \log x\f$
+ * and \f$\mu_n(x) = (-1)^{n+1} (n - 1)!\, x^{-n}\f$ for \f$n \ge 1\f$. For
+ * \f$x \ge 15.0\f$, the asymptotic expansion omits its leading term; below that, the
+ * recurrence shifts the argument up by whole steps and the two leading terms are
+ * differenced in closed form.
+ *
+ * \param n Derivative order \f$n \in \{0, \dots, 6\}\f$.
+ * \param x Positive argument \f$x \in (0, \infty)\f$.
+ * \return The value of \f$\psi^{(n)}(x) - \mu_n(x)\f$.
+ *
+ * \par Domain and special values
+ * Returns quiet NaN if \f$x \le 0\f$, \f$x\f$ is NaN, \f$n < 0\f$, or \f$n > 6\f$.
+ *
+ * \par Measured accuracy
+ * Maximum error on gcc is 14.8 ulp at \f$n = 2\f$ (\f$x = 13\f$), and all orders
+ * pass test bounds of 12.0 to 24.0 ulp on gcc and CUDA; see \ref gamma for per-order bounds.
+ *
+ * \see gamma, polygamma()
+ */
+LAPLACE_HD double polygamma_monomial_remainder(int n, double x) {
+  // B_2k for k = 1..10, as in polygamma()
+  constexpr double B[10] = {1.0 / 6.0,           -1.0 / 30.0,        1.0 / 42.0,
+                            -1.0 / 30.0,         5.0 / 66.0,         -691.0 / 2730.0,
+                            7.0 / 6.0,           -3617.0 / 510.0,    43867.0 / 798.0,
+                            -174611.0 / 330.0};
+  constexpr double factorial[8] = {1.0, 1.0, 2.0, 6.0, 24.0, 120.0, 720.0, 5040.0};
+  constexpr double X0 = 15.0;
+  constexpr int K = 10;
+
+  if (!(x > 0.0) || n < 0 || n > 6) return detail::quiet_nan();
+
+  int m = 0;
+  if (x < X0) m = static_cast<int>(X0 - x) + 1;
+  const double z = x + static_cast<double>(m);
+  const double iz = 1.0 / z;
+  const double w = iz * iz;
+
+  if (n == 0) {
+    double s = B[K - 1] / (2.0 * K);
+    for (int k = K - 1; k >= 1; --k) s = s * w + B[k - 1] / (2.0 * k);
+    s *= w;
+    // r_0(x) = (log z - log x) - 1/(2z) - s - sum_j 1/(x + j); the difference of
+    // the two logarithms is log1p(m/x), which is exact in the sense that it
+    // never forms either logarithm.
+    double result = -0.5 * iz - s;
+    if (m > 0) result += Kokkos::log1p(static_cast<double>(m) / x);
+    for (int j = m - 1; j >= 0; --j) result -= 1.0 / (x + static_cast<double>(j));
+    return result;
+  }
+
+  auto coef = [&](int k) {
+    double c = B[k - 1];
+    for (int i = 1; i <= n - 1; ++i) c *= static_cast<double>(2 * k + i);
+    return c;
+  };
+  double s = coef(K);
+  for (int k = K - 1; k >= 1; --k) s = s * w + coef(k);
+  s *= w;
+  // The bracket of the asymptotic expansion with its leading (n-1)! left out.
+  // At large z the product by z^-n is subnormal, so the same 2^600 scaling as
+  // polygamma() keeps only the last multiplication in that range.
+  const bool big = z > 1e30;
+  double result = 0.5 * factorial[n] * iz + s;
+  if (big) result *= 4.149515568880993e+180;   // 2^600
+  for (int i = 0; i < n; ++i) result *= iz;
+  if (big) result *= 2.409919865102884e-181;   // 2^-600
+  if (m > 0) {
+    // mu_n(z) - mu_n(x) in magnitude, plus the recurrence's pole terms. For
+    // small x the pole terms dominate both, so no cancellation arises; near X0
+    // the two monomials are comparable and the loss is at most the one digit
+    // that z^-n - x^-n costs.
+    double zp = 1.0, xp = 1.0;
+    for (int i = 0; i < n; ++i) {
+      zp *= iz;
+      xp /= x;
+    }
+    result += factorial[n - 1] * (zp - xp);
+    for (int j = m - 1; j >= 0; --j) {
+      const double t = 1.0 / (x + static_cast<double>(j));
+      double p = t;
+      for (int i = 0; i < n; ++i) p *= t;
+      result += factorial[n] * p;
+    }
+  }
+  return (n % 2 == 1) ? result : -result;
+}
+
+/**
+ * \ingroup gamma
  * \brief Digamma function \f$\psi(x) = \psi^{(0)}(x)\f$ via recurrence and asymptotic expansion.
  *
  * Evaluates \f$\psi(x) = \frac{\mathrm{d}}{\mathrm{d}x} \log \Gamma(x)\f$ by

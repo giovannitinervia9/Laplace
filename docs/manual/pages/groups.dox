@@ -199,6 +199,21 @@ parent here, in tree order; the module pages define their groups without
 /** \addtogroup distrib_invgauss
 \ingroup distrib_positive */
 
+/** \addtogroup distrib_weibull
+\ingroup distrib_positive */
+
+/** \defgroup distrib_bounded Continuous on a bounded interval
+\ingroup distrib
+\brief Continuous distributions whose support is a bounded interval. */
+/** \addtogroup distrib_beta
+\ingroup distrib_bounded */
+
+/** \defgroup distrib_circular Continuous on the circle
+\ingroup distrib
+\brief Continuous distributions whose support is the circle, with a mean direction as their first parameter. */
+/** \addtogroup distrib_vonmises
+\ingroup distrib_circular */
+
 /** \defgroup distrib_discrete Discrete
 \ingroup distrib
 \brief Distributions on the non-negative integers. */

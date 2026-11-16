@@ -331,21 +331,35 @@ LAPLACE_HD double ratio_dm(double k, const params& p) {
   return ratio_large<M>(k);
 }
 
-// k = A^-1(rho) by Newton's method. In the continued fraction's range the
-// iterates use the fraction in double (and A' from the Riccati identity in
-// double) until the step falls below 1e-9 k, then the fraction in
-// double-double for the last steps, which fix the last bits.
-LAPLACE_HD double ratio_inv(double rho, const params& p) {
-  if (!(rho >= 0.0 && rho <= 1.0)) return nan();
-  if (rho == 0.0) return 0.0;
-  if (rho == 1.0) return laplace::math::detail::pos_inf();
-  const double r = rho;
+// k = A^-1(rho) by Newton's method, taking rho and its complement c = 1 - rho
+// as a pair. In the continued fraction's range the iterates use the fraction in
+// double (and A' from the Riccati identity in double) until the step falls
+// below 1e-9 k, then the fraction in double-double for the last steps, which
+// fix the last bits.
+//
+// The pair is what lets a caller that holds the complement to full relative
+// accuracy keep it. For k large, A(k) = 1 - 1/(2k) - ..., so k is determined by
+// the complement alone and dk/k = -dc/c: a complement recovered as 1 - rho
+// carries an absolute error of half an ulp of 1, which against c = 1/(2k) is a
+// relative error of about k eps, and above k = 1/(2 eps) the subtraction leaves
+// nothing at all. Both branches below that depend on the complement read it from c
+// and never form 1 - r. ratio_inv() passes (rho, 1 - rho), where the
+// subtraction is harmless because it is the caller's own rho that is exact;
+// ratio_inv_c() passes (1 - q, q), where it is the complement that is exact.
+LAPLACE_HD double ratio_inv_rc(double r, double c, const params& p) {
+  if (!(r >= 0.0 && r <= 1.0) || !(c >= 0.0)) return nan();
+  if (r == 0.0) return 0.0;
+  if (c <= 0.0) return laplace::math::detail::pos_inf();
+  // The guess: the series of A^-1 below 0.53, a fitted form in the middle, and
+  // 1/(2c) with its next factor above 0.85. The last is written in c because
+  // the equivalent r^3 - 4 r^2 + 3 r = r (3 - r) c loses the whole quantity as
+  // r approaches one.
   double g = r < 0.53 ? 2.0 * r + r * r * r + 5.0 * (r * r) * (r * r) * r / 6.0
-                      : (r < 0.85 ? -0.4 + 1.39 * r + 0.43 / (1.0 - r) : 1.0 / (r * r * r - 4.0 * r * r + 3.0 * r));
+                      : (r < 0.85 ? -0.4 + 1.39 * r + 0.43 / c : 1.0 / (r * (3.0 - r) * c));
   const double lo = 2.0 * r;  // A(k) < k/2 puts the root above 2 rho
   if (!(g >= lo)) g = lo;
-  const bool upper = r >= 0.5;
-  const double c = 1.0 - r;  // exact for r >= 1/2
+  if (!(g < 1e308)) g = 1e308;
+  const bool upper = c <= 0.5;
   bool fine = false;
   for (int it = 0; it < 100; ++it) {
     const double kk = g;
@@ -380,6 +394,18 @@ LAPLACE_HD double ratio_inv(double rho, const params& p) {
     if (step <= 1e-9 * kn) fine = true;
   }
   return g;
+}
+
+// k = A^-1(rho) from rho.
+LAPLACE_HD double ratio_inv(double rho, const params& p) {
+  if (!(rho >= 0.0 && rho <= 1.0)) return nan();
+  return ratio_inv_rc(rho, 1.0 - rho, p);
+}
+
+// k = A^-1(1 - q) from the complement q = 1 - rho.
+LAPLACE_HD double ratio_inv_c(double q, const params& p) {
+  if (!(q >= 0.0 && q <= 1.0)) return nan();
+  return ratio_inv_rc(1.0 - q, q, p);
 }
 
 // The polynomial of the inverse function rule in r_j = A^(j)/A' (T is double
@@ -715,6 +741,26 @@ LAPLACE_HD double bessel_i_ratio_inv(double rho) { return detail_bessel::ratio_i
 
 /**
  * \ingroup bessel_i
+ * \brief Inverse of the Bessel function ratio from the complement, \f$K(1 - q) = A^{-1}(1 - q)\f$.
+ *
+ * Solves \f$A(k) = 1 - q\f$ for \f$k = K(1 - q)\f$, reading the complement \f$q = 1 - \rho\f$
+ * directly instead of \f$\rho\f$ as bessel_i_ratio_inv() does. Because \f$1 - A(k) \sim \frac{1}{2k}\f$
+ * as \f$k \to \infty\f$, taking \f$q\f$ directly avoids the rounding error of forming \f$1 - \rho\f$ near \f$\rho = 1\f$.
+ *
+ * \param q Complement \f$q = 1 - \rho \in (0, 1]\f$.
+ * \return The value \f$k = K(1 - q) \in [0, \infty)\f$, equal to \f$0.0\f$ at \f$q = 1\f$,
+ *         \f$+\infty\f$ at \f$q = 0\f$, and quiet NaN for \f$q < 0\f$, \f$q > 1\f$, or NaN.
+ *
+ * \par Test accuracy
+ * Agrees with bessel_i_ratio_inv() to \f$8 \times 10^{-16}\f$ relative where both arguments are
+ * exact, \f$q \in [0.5, 1]\f$, and reproduces its defining relation to \f$10^{-12}\f$ relative.
+ *
+ * \see bessel_i, bessel_i_ratio(), bessel_i_ratio_inv(), bessel_i_ratio_inv_d1()
+ */
+LAPLACE_HD double bessel_i_ratio_inv_c(double q) { return detail_bessel::ratio_inv_c(q, detail_bessel::params{}); }
+
+/**
+ * \ingroup bessel_i
  * \brief First derivative of the inverse ratio, \f$K'(\rho)\f$, evaluated at \f$\rho = A(\kappa)\f$.
  *
  * Computes \f$K'(\rho) = \frac{\mathrm{d}K}{\mathrm{d}\rho} = w\f$, where \f$w = \frac{1}{A'(\kappa)}\f$ and \f$r_j = \frac{A^{(j)}(\kappa)}{A'(\kappa)}\f$.
@@ -838,6 +884,7 @@ using own::bessel_i_ratio_d4;
 using own::bessel_i_ratio_d5;
 using own::bessel_i_ratio_d6;
 using own::bessel_i_ratio_inv;
+using own::bessel_i_ratio_inv_c;
 using own::bessel_i_ratio_inv_d1;
 using own::bessel_i_ratio_inv_d2;
 using own::bessel_i_ratio_inv_d3;

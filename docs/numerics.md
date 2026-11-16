@@ -1080,6 +1080,49 @@ there (nu = 0..4, x = sqrt(nu_ph)).
 
 **Scaling in the recurrences.** The running product of the value is kept in a single double precision accumulator and rescaled when it exceeds 1e280, to prevent overflow. In the derivatives in the argument, the recurrence of 2n + 4 steps (n being the step count, in double precision) is rescaled by 2^-500 when |Q_1| > 2^500.
 
+**The scaled pair.** `log_bessel_k_scaled(nu, x)` is log K_nu(x) + x and
+`log_bessel_k_scaled_dx_upto<N>(nu, x, out)` fills out[0] with it, out[1] with
+(log K_nu)'(x) + 1 and out[n] with the plain derivative of order n for n >= 2,
+which the shift leaves alone. They exist because a caller whose own quantity is
+one of the two shifted entries would otherwise receive a difference of numbers
+of size x, or of size one, and lose about log2(x) bits of it: the pseudo-Huber
+families need log K_1(x) + x and (log K_1)'(x) + 1 to carry their normalizer and
+their Bessel ratio apart from sqrt(nu). Nothing is recomputed for them. Each
+regime writes the shifted entry instead of the plain one: Steed's branch omits
+the -x it would subtract and Temme's branch, used only for x <= 2 where the two
+terms are of a size, adds it; the asymptotic expansion in 1/x omits the -1 of its
+order one; the Riccati regime adds one to g in double-double, so the order one is
+exact to the double; and the Debye form uses
+-nu eta + x = -nu^2/(nu s + x) - nu log(z/(1 + s)) and 1 - s/z = -1/(z(s + z)),
+with z = x/nu and s = sqrt(1 + z^2). The plain functions are untouched, and at
+x = +inf the scaled value and its order one are 0 where the plain ones are -inf
+and -1.
+
+The Debye branch needed one step beyond the shift. Its second term is
+-nu log(z/(1 + s)), whose argument is 1 - 1/z + O(1/z^2) for large z, so nu
+multiplies the rounding of a logarithm near one: at nu = 3.1e4, x = 6.2e7 that
+alone put the scaled value 8693 ulp out. Written as
+nu log1p(-(1 + 1/(s + z))/(1 + s)), which is exact because s - z = 1/(s + z), it
+is 101. Below z = 1 the argument is nowhere near one and the plain logarithm is
+the accurate form, so the branch keeps both.
+
+Measured against the module's own reference grids, the reference pair (hi, lo)
+plus the shift summed without error in the test (one two_sum, the shift being
+exact as a double), so that what is measured is the scaled routine and not a
+difference formed in the test: the first derivative is at or below 1.17 ulp of
+its own size in every regime, in units of one ulp plus four eps of (log K)',
+the irreducible error where the shifted quantity crosses zero near x = 1. The
+value is 0.49 ulp for x <= 2, in units of one ulp plus eight eps of log K, which
+is the accuracy the plain value itself is measured to; above x = 2 it carries no
+floor and reaches 35.2 ulp at nu = 4, x = 9.5 (the continued fraction) and 101
+ulp at nu = 248, x = 7635 (Debye), because there the scaled value is what remains
+of a sum of terms of the expansion that can be tens of times larger than it, so
+it is accurate to about 1e-13 absolute and not to its own last place. The orders
+the distributions ask for are far below that: the pseudo-Huber uses nu = 1 only,
+and its own grid reads 3.71 ulp on the value at nu_ph = 1e8. The orders two and
+up are the plain ones to the bit, on every reference grid and regime boundary.
+Tested in `tests/math/test_bessel_k.cpp` on both builds, bounds 160 and 2.
+
 ## Faa di Bruno's formula and the partial Bell polynomials to order 7
 
 **What.** `include/laplace/math/faa_di_bruno.hpp`: `bell_partial(n, k, g)`, the
@@ -3636,6 +3679,20 @@ log-Jacobian of theta -> M with its derivatives (`log_jacobian`,
   M^-1[F] = sum_(T in F) Y[T]^T Y[F \ T] by Leibniz; about
   3^K p^3/6 + 2^K p^3/3 operations for K distinct positions, and a
   derivative is zero by structure when every product has a zero factor.
+- Equal sub-tuples are computed once. Two masks that select the same
+  multiset of indices give the same L[T] and Y[T], so `cholesky_dK` is
+  called and Y[T] computed only for the canonical mask of each class (the
+  lowest positions of each group of equal indices,
+  `detail/tuple_classes.hpp`), and every other mask reads it: prod (m_v + 1) - 1
+  sub-tuples instead of 2^K - 1, with m_v the number of times index v occurs
+  in the tuple (6 instead of 63 for the pure tuple of order 6, unchanged for
+  K distinct indices). The sums still run over every subset, so the result
+  is rounded exactly as without the merging: the error maxima of the
+  references are the same, on gcc and CUDA. Summing over the classes
+  instead, with binomial weights prod_g C(c_g, a_g), was 2 to 5 times faster
+  again at order 6 but moved the errors (log_cholesky order 4 from 28.2 to
+  34.7 ulpN, order 5 from 19.2 to 25.6) and was not taken (decided with
+  Giovanni on 2026-11-16).
   Scratch 64 p^2 + 64 p(p+1)/2 + p^2 doubles before the structure's own.
 - Why L and not M. The first version ran the same recursion on M,
   X[S] = -X[0] sum M[T] X[S \ T]: its cancellation grows with kappa(M), and
@@ -3679,20 +3736,6 @@ their tolerance (1e-6 of the largest entries).
 
 ns per call (`benchmarks/pdmat_unstructured.cpp`, u_k = 0.1 x + 0.05 k, x
 uniform in [-3, 3]; one gcc thread / 8 OpenMP threads / CUDA), M^-1 at
-- Equal sub-tuples are computed once. Two masks that select the same
-  multiset of indices give the same L[T] and Y[T], so `cholesky_dK` is
-  called and Y[T] computed only for the canonical mask of each class (the
-  lowest positions of each group of equal indices,
-  `detail/tuple_classes.hpp`), and every other mask reads it: prod (m_v + 1) - 1
-  sub-tuples instead of 2^K - 1, with m_v the number of times index v occurs
-  in the tuple (6 instead of 63 for the pure tuple of order 6, unchanged for
-  K distinct indices). The sums still run over every subset, so the result
-  is rounded exactly as without the merging: the error maxima of the
-  references are the same, on gcc and CUDA. Summing over the classes
-  instead, with binomial weights prod_g C(c_g, a_g), was 2 to 5 times faster
-  again at order 6 but moved the errors (log_cholesky order 4 from 28.2 to
-  34.7 ulpN, order 5 from 19.2 to 25.6) and was not taken (decided with
-  Giovanni on 2026-11-16).
 order 0, and order 6 along the pure tuple (0, ..., 0) and along six distinct
 coordinates (the order-6 columns of log_cholesky and partial_corr measured on
 2026-11-16 with the merging of equal sub-tuples; before it, the pure tuple
@@ -4830,20 +4873,33 @@ M_ii (2^K e^(2 t_i)); loadings reach M only along at most two variables of
 one column; a tuple that mixes a t with a loading is zero. The values by
 Woodbury with C = I + Lambda^T Psi^-1 Lambda (d x d) and C = R R^T:
 log det M = 2 sum t_i + log det C, M^-1 = Psi^-1 - Z^T Z with
-Z = R^-1 Lambda^T Psi^-1, O(p d^2 + d^3). The derivatives of log det M by
-Woodbury: C[T] (the derivative along the positions in the mask T) is zero
-unless T lies in one row of M, X[S] = -X[0] sum_T C[T] X[S \ T] with
-X = C^-1, and d^F log det C = sum_(T subset of F \ f) tr(X[T] C[f + (F \ f \ T)]),
-f the first position. The derivatives of M^-1 by the recursion on M itself,
-G[S] = -G[0] sum_T M[T] G[S \ T], G = M^-1, with G[0] from a Cholesky
-factorization of M and the M[T] that are zero by structure skipped. At d = p
-the derivatives of log det M come from the same sum of traces on M,
-d^F log det M = sum_(T subset of F \ f) tr(G[T] M[f + (F \ f \ T)]), with the
-G[T] of that recursion (only the masks within F \ f are formed).
+Z = R^-1 Lambda^T Psi^-1, O(p d^2 + d^3); at d = p M^-1 comes from a
+Cholesky factorization of M instead, because Psi^-1 and Z^T Z cancel when
+every row is explained by the factors (5253 ulpN at small psi, 26 by
+Cholesky in a NumPy transcription). The derivatives of log det M at d < p by Woodbury: C[T] (the
+derivative along the positions in the mask T) is zero unless T lies in one
+row of M, X[S] = -X[0] sum_T C[T] X[S \ T] with X = C^-1, and
+d^F log det C = sum_(T subset of F \ f) tr(X[T] C[f + (F \ f \ T)]),
+f the first position.
+
+The derivatives of M^-1 (every d >= 1) and those of log det M at d = p come
+from the recursion on the augmented (p + d) x (p + d) matrix
+A = [[Psi, Lambda], [Lambda^T, -I_d]], whose inverse is
+G = A^-1 = [[M^-1, U], [U^T, -C^-1]] with U = Psi^-1 Lambda C^-1 = M^-1 Lambda,
+and log|det A| = log det M:
+G[S] = -G[0] sum_T A[T] G[S \ T], d^F M^-1 is the top-left p x p block of
+G[F], and d^F log det M = sum_(T subset of F \ f) tr(G[T] A[f + (F \ f \ T)]).
+A is linear in each loading, so A[T] is nonzero only along one repeated
+parameter: 2^k psi_i at (i, i) for t_i, the derivative of the loading (r, c)
+at (r, p + c) and (p + c, r). Each A[T] G[R] touches one or two rows, and
+G[S] is one product of G[0] with those rows. G[0] is assembled from its
+blocks: M^-1 as the value above, U and C^-1 as products, so that neither
+M^-1 Lambda nor C^-1 is formed by a subtraction.
 
 Three routes to the derivatives of M^-1 were measured in double (a
-transcription in Python with NumPy) against the references below (worst ulpN over orders 1-6; "spread" is the point with
-psi_i from e^-4 to e^2 and loadings +-1.5):
+transcription in Python with NumPy) on 2026-11-14 against the references
+below (worst ulpN over orders 1-6; "spread" is the point with psi_i from
+e^-4 to e^2 and loadings +-1.5):
 
 | (p, d), point | Woodbury | factor of M | recursion on M |
 |---|---|---|---|
@@ -4858,101 +4914,108 @@ Woodbury's derivatives of M^-1 cancel, Psi^-1 against B C^-1 B^T
 (B = Psi^-1 Lambda), when psi_i is small against the loadings of its row:
 both terms are of order 1/psi_i while d/dt_i M^-1 = -2 psi_i (M^-1 e_i)(M^-1 e_i)^T
 is small, and each order multiplies the Psi^-1 term by -2. The factor route
-(the Cholesky factor of M with its derivatives over the sub-masks, then
-Y = L^-1 and sum_T Y[T]^T Y[F \ T]) and the recursion on M are of the same
-class; at order 6 the factor route cost 3 to 6 times as much (p = 16: 105
-against 31 us per call on OpenMP), because the derivatives of L are dense
-while most M[T] are zero. Giovanni chose the recursion on M. Its G[0] comes
-from a Cholesky factorization of M: with Woodbury's M^-1 in its place the
-recursion lost up to 1.2e5 ulpN at the spread points (933 with Cholesky at
-(3, 3)).
+(the Cholesky factor of M with its derivatives over the sub-masks) and the
+recursion on M (G[S] = -G[0] sum_T M[T] G[S \ T], G[0] from a Cholesky
+factorization of M) were of the same class there; the factor route cost 3 to
+6 times as much, and the recursion on M was chosen (Giovanni, 2026-11-14).
 
-**Measured** (gcc/OpenMP, 2026-11-14; references
-`tools/reference/pdmat_factor_analytic.py`, mpmath at 640 bits from the
-definition of M, mixed central differences with steps 2^-60 and 2^-70 that
-agree to 1.0e-34; 19186 values; (p, d) in {(1, 1), (2, 1), (3, 1), (3, 2),
-(3, 3), (5, 2)}, a random point and a spread one). Worst over orders 0..6, M
-and M^-1 in ulpN, log det in ulp:
+**Small specific variances (2026-11-16).** The recursion on M lost up to
+3.1e6 ulp1N at psi = e^-6 inside `mvgaussian1`, where the problem is well
+conditioned. New references `tools/reference/pdmat_factor_analytic_small_psi.py`
+(the same method; 98373 values, steps that agree to 2.5e-34): for (p, d) in
+{(3, 1), (4, 1), (4, 2), (5, 2), (3, 3), (4, 4)}, the spread loadings with
+every t_i = -1, -2, -3, -4 (psi from e^-2 to e^-8), the spread loadings with
+t_i = -3 and 1 alternating, random loadings N(0, 0.5^2) with every t_i = -3,
+and the point (4, 1), Lambda = (e^0.4, 1.5, -1.5, 1.5), t = (-3, -3, 1, -3).
+Conditioning in theta (mpmath, one relative ulp on every theta_k, summed): at
+most 500 ulpN for the derivatives of M^-1 at most of these points; 2.0e3 and
+3.4e3 at order 6 at two (4, 2) points, and 1.6e3 to 9.1e3 at the points with
+alternating t, inflections like the one below.
+Worst ulpN over orders 1-6 on these 37 points (gcc), by route:
 
-| (p, d), point | M | M^-1 | log det |
-|---|---|---|---|
-| (1, 1) random / spread | 0.43 / 0.42 | 27 / 58 | 13 / 19 |
-| (2, 1) random / spread | 0.76 / 0.40 | 83 / 233 | 120 / 764 |
-| (3, 1) random / spread | 0.43 / 0.40 | 117 / 2.4e5 | 11 / 41 |
-| (3, 2) random / spread | 0.41 / 0.40 | 46 / 310 | 16 / 766 |
-| (3, 3) random / spread | 0.49 / 0.40 | 1903 / 360 | 38 / 820 |
-| (5, 2) random / spread | 0.64 / 0.40 | 112 / 2.5e4 | 361 / 795 |
+| route | small psi | the 12 earlier points |
+|---|---|---|
+| recursion on M | 3.0e8 (2.2e4 at order 1) | 2.4e5 |
+| the same with G[0] exact (rounded from mpmath) | 7.2e8 | |
+| Woodbury | 3.3e12 | 1.2e8 |
+| Woodbury or the recursion on M, chosen by estimates of their losses | 7.3e5 | 3.3e4 |
+| recursion on A | 1.8e4 | 2.1e4 |
 
-By order, gcc / CUDA (RTX 4070 SUPER), K = 0..6:
-M^-1 56 / 90, 183 / 156, 2.3e5 / 3.6e5, 7076 / 8748, 2.4e5 / 3.6e5,
-1.5e4 / 1.1e4, 2.3e5 / 3.6e5; log det for d < p 2.0 / 2.0, 1.7 / 2.7,
-3.7 / 4.0, 14 / 12, 66 / 73, 129 / 359, 795 / 926; log det at d = p 3.2 / 3.2,
-1.1 / 1.3, 3.0 / 3.3, 13 / 29, 35 / 31, 101 / 239, 820 / 840; M within
-0.76 ulpN on both.
+The recursion on M loses in its products, not in G[0]: with M close to rank
+d, G[0] has entries of order 1/psi, and G[0] M[T] with M[T] along a loading
+forms M^-1 lambda_c, of order 1, as a difference of terms of order 1/psi.
+Woodbury cancels where the rows with small psi are fully explained by the
+factors (d = p, or d small-psi rows at d < p). A third recursion, on M with
+M^-1 Lambda and Lambda^T M^-1 Lambda carried as recursions of their own, lost
+up to 1e13: the cancellation moved into the products with the columns of
+G[0]. The recursion on A loses neither way. With its block M^-1 by Woodbury
+at d = p it lost up to 2.4e5 ulpN; with Cholesky there, 3.6e3 (Python).
 
-**What it says.** The 2.4e5 of M^-1 at the (3, 1) spread point (orders 2, 4,
-6, along t_2) is the conditioning of that derivative. With A = M - psi_2 e_2 e_2^T,
-u = A^-1 e_2 and a_22 = (A^-1)_22, M^-1 = A^-1 - u u^T / (e^(-2 t_2) + a_22),
-and at that point e^(-2 t_2) = 54.598 is within 2.5e-4 (relative) of
-a_22 = 54.584: an inflection of 1/(e^(-2 t_2) + a_22), where the even
-derivatives nearly vanish. Their largest entries are 0.0069, 0.055 and 0.93
-against 27, 55 and 437 at orders 1, 3 and 5, so 2.4e5 ulpN of order 2 are
-about 60 ulp of the scale of its neighbours. mpmath: a relative change of one
-ulp in one theta_k moves the exact derivative by up to 1.6e4 ulpN (4.3e4 summed
-over k), and one ulp on every entry of M by 1.9e6 ulpN, the floor of every
-route that forms M; the three routes above all lose 3e4 to 2.4e5 there. Only a
-route for tuples along one t_i that computes a_22 without forming M could go
-lower, by at most 5 to 15 times, at points where the derivative is near a zero;
-it was not written. Elsewhere M^-1 is within 2.5e4 ulpN.
+**Measured** (2026-11-16, both reference files, 49 points). By order, worst
+gcc / CUDA (RTX 4070 SUPER), K = 0..6; M and M^-1 in ulpN, log det in ulp:
+M 1.01 / 1.01 at K = 0, then within 0.49; M^-1 178 / 374, 1436 / 747,
+1.7e4 / 1.7e4, 5465 / 2651, 1.9e4 / 1.8e4, 5538 / 3697, 2.1e4 / 2.3e4;
+log det for d < p 3.5 / 3.5, 4.5 / 3.5, 11 / 5.9, 23 / 33, 66 / 88,
+221 / 359, 795 / 926; log det at d = p 35 / 32, 836 / 98, 461 / 88,
+680 / 188, 1464 / 269, 4141 / 794, 4091 / 492. Before the recursion on A,
+M^-1 reached 3.0e8 / 5.6e8 and log det at d = p 1.7e6 / 4.8e5 on these
+points. The orders 2, 4, 6 of M^-1 peak at the (3, 1) spread point (below);
+the other peaks of M^-1 and of log det at d = p are at (3, 3) and (4, 4) with
+psi from e^-6 to e^-8, where the conditioning is below 500.
 
-log det is well conditioned at every reference point: a relative change of
-one ulp in every theta_k moves the exact derivative by at most 96 ulp in total
-(mpmath; 14.5 at the (3, 3) spread point). Woodbury's derivatives cancel at
-d = p, where every row is explained by the factors: C is close to
-Lambda^T Psi^-1 Lambda, the traces along t_r are of order 2^K and the exact
-derivative of order psi_r (7.3e5 ulp at the (3, 3) spread point on gcc,
-1.0e6 on CUDA). The traces on M do not cancel there (820 ulp at order 6, along
-one repeated diagonal loading, the class of d < p), but at d < p they lose
-2.1e6 and 8.4e5 ulp at the (3, 1) and (5, 2) spread points, where Woodbury
-loses 41 and 795, because they carry the error of the derivatives of M^-1.
-The choice is structural, d = p. At d < p log det stays within 926 ulp.
+**What it says.** The 2.1e4 of M^-1 at the (3, 1) spread point (orders 2, 4,
+6, along t_2) is the conditioning of that derivative. With
+A2 = M - psi_2 e_2 e_2^T, u = A2^-1 e_2 and a_22 = (A2^-1)_22,
+M^-1 = A2^-1 - u u^T / (e^(-2 t_2) + a_22), and at that point
+e^(-2 t_2) = 54.598 is within 2.5e-4 (relative) of a_22 = 54.584: an
+inflection of 1/(e^(-2 t_2) + a_22), where the even derivatives nearly
+vanish. Their largest entries are 0.0069, 0.055 and 0.93 against 27, 55 and
+437 at orders 1, 3 and 5. mpmath: a relative change of one ulp in one theta_k
+moves the exact derivative by up to 1.6e4 ulpN (4.3e4 summed over k), and one
+ulp on every entry of M by 1.9e6 ulpN, the floor of every route that forms M.
+The recursion on M lost 2.4e5 there.
+
+log det is well conditioned at every earlier reference point: a relative
+change of one ulp in every theta_k moves the exact derivative by at most
+96 ulp in total (mpmath). Woodbury's derivatives of log det cancel at d = p,
+where C is close to Lambda^T Psi^-1 Lambda: the traces along t_r are of order
+2^K and the exact derivative of order psi_r (7.3e5 ulp at the (3, 3) spread
+point on gcc, 1.0e6 on CUDA). From 2026-11-15 to 2026-11-16 the derivatives
+at d = p came from the same traces on M with the recursion on M, 820 ulp at
+the earlier points and 1.7e6 at psi = e^-6. At d < p the traces on A were
+measured too (91 ulp at small psi and 67 at the earlier points against 457 and
+795 by Woodbury) and not chosen: they cost 2 to 5 times as much at order 6
+for p >= 8 (Giovanni, 2026-11-16).
 
 ns per call (`benchmarks/pdmat_factor_analytic.cpp`, gcc, theta_k =
-0.1 x + 0.05 sin k, x uniform in [-3, 3]), one thread / OpenMP; order 6
-along K distinct parameters spread over the rows; "recursion with Cholesky"
-is the same recursion on M written in the bench, with M^-1 by Cholesky also
-at order 0:
+0.1 x + 0.05 sin k, x uniform in [-3, 3]), one thread / OpenMP on 8 threads;
+order 6 along K distinct parameters spread over the rows ("pure": along
+theta_0 alone); "recursion on M" is the route of 2026-11-14, kept in the
+bench:
 
-| (p, d) | M^-1, K = 0 | M^-1, K = 6 | recursion with Cholesky, K = 0 / 6 | log det, K = 0 | log det, K = 6 |
-|---|---|---|---|---|---|
-| (4, 2) | 383 / 60 | 7835 / 1183 | 546 / 6303 | 380 / 49 | 2912 / 425 |
-| (8, 2) | 844 / 139 | 26804 / 3815 | 1446 / 22883 | 739 / 122 | 3113 / 519 |
-| (16, 2) | 1691 / 284 | 126049 / 20182 | 5464 / 120995 | 1484 / 278 | 3898 / 750 |
-| (16, 4) | 2865 / 468 | 128777 / 19712 | 6531 / 118704 | 2342 / 356 | 8631 / 1470 |
+| (p, d) | M^-1, K = 0 | M^-1, K = 6 | M^-1, K = 6 pure | recursion on M, K = 6 / pure | log det, K = 0 | log det, K = 6 |
+|---|---|---|---|---|---|---|
+| (4, 2) | 414 / 56 | 5551 / 906 | 8450 / 1547 | 6506 / 13204 | 388 / 65 | 2927 / 581 |
+| (8, 2) | 806 / 125 | 12280 / 1914 | 12031 / 2243 | 22409 / 44558 | 746 / 112 | 3182 / 582 |
+| (16, 2) | 1651 / 303 | 26262 / 6829 | 23222 / 6027 | 114697 / 191916 | 1587 / 310 | 4099 / 778 |
+| (16, 4) | 2766 / 488 | 31762 / 6615 | 28267 / 7324 | 117467 / 200021 | 2372 / 370 | 8714 / 1632 |
+| (4, 4) | 618 / 106 | 8801 / 1479 | 9999 / 1893 | 5687 / 13804 | 545 / 89 | 4991 / 1544 |
+| (8, 8) | | | | | 1674 / 309 | 17472 / 3478 |
 
-Woodbury makes the values 1.4 to 3.2 times faster than a Cholesky
-factorization of M at these sizes, and log det at order 6 costs 2.7 to
-32 times less than M^-1 at order 6 (one thread).
+(the recursion-on-M column in ns on one thread). The recursion on A is 1.8 to
+8 times faster than the recursion on M at order 6 for p >= 8, and up to 1.5
+times slower at (4, 4) on mixed tuples; log det at (8, 8), order 6 along one
+parameter, 14973 ns.
 
-log det at d = p, Woodbury against the traces on M (2026-11-15, same bench,
-the whole machine idle otherwise), one thread / OpenMP on 8 threads:
-
-| (p, d), K | Woodbury | traces on M |
-|---|---|---|
-| (4, 4), 6 mixed | 9423 / 1953 | 4794 / 848 |
-| (8, 8), 3 mixed | 4666 / 1092 | 2995 / 493 |
-| (8, 8), 6 mixed | 36878 / 8591 | 13388 / 3258 |
-| (8, 8), 6 along one parameter | 117457 / 27571 | 24043 / 5585 |
-
-**Chosen.** Woodbury for the values and, at d < p, for the derivatives of
-log det; the recursion on M, started from a Cholesky factorization, for the
-derivatives of M^-1 (Giovanni, 2026-11-14) and, through the traces on M, for
-those of log det at d = p (Giovanni, 2026-11-15). Tested in
-`tests/pdmat/test_factor_analytic.cpp` on gcc and CUDA, bounds 1.5 times the
-larger measured error, log det at d = p in a row of its own; twins: d = 0 is
+**Chosen.** Woodbury for the values (Cholesky for M^-1 at d = p) and, at
+d < p, for the derivatives of log det; the recursion on the augmented matrix
+for the derivatives of M^-1 and, through its traces, for those of log det at
+d = p (Giovanni, 2026-11-16). Tested in `tests/pdmat/test_factor_analytic.cpp`
+on gcc and CUDA against both reference files, bounds 1.5 times the larger
+measured error, log det at d = p in a row of its own; twins: d = 0 is
 `diagonal_pdmat` bit for bit, at d = p M - Psi is `log_cholesky`'s M.
 
-**Test bounds.** The bounds of `tests/pdmat/test_factor_analytic.cpp` are 1.5 times the larger of the measured errors on gcc/OpenMP and CUDA, rounded up, for orders 0 to 6: for M, 2, 1, 1, 1, 1, 1, 1 ulpN; for M^-1, 136, 275, 543626, 13123, 545236, 23109, 545993 ulpN; for log det M with d < p, 4, 5, 6, 21, 110, 539, 1390 ulp; for log det M at d = p, 5, 2, 5, 44, 53, 359, 1260 ulp. The difference check against the derivative of order K - 1 uses tolerance 1e-6 relative to the sum of the scales of orders K and K - 1.
+**Test bounds.** The bounds of `tests/pdmat/test_factor_analytic.cpp` are 1.5 times the larger of the measured errors on gcc/OpenMP and CUDA, rounded up, for orders 0 to 6: for M, 2, 1, 1, 1, 1, 1, 1 ulpN; for M^-1, 561, 2155, 25214, 8198, 27872, 8307, 35027 ulpN; for log det M with d < p, 6, 7, 17, 50, 133, 539, 1390 ulp; for log det M at d = p, 53, 1254, 692, 1020, 2197, 6211, 6137 ulp. The difference check against the derivative of order K - 1 uses tolerance 1e-6 relative to the sum of the scales of orders K and K - 1.
 
 ## Reduced-rank matrices: reduced_rank_psdmat
 
@@ -4978,8 +5041,13 @@ C[T] is zero unless every index of the mask T is a loading of one row r, and
 then it is the Leibniz sum over those loadings of lambda_r lambda_r^T;
 X[S] = -X[0] sum_T C[T] X[S \ T] with X = C^-1, and
 d^F log det C = sum_(T subset of F \ f) tr(X[T] C[f + (F \ f \ T)]). The
-helpers (the loadings, the d x d Cholesky, the recursion) are shared with
+helpers (the loadings and, for the value, the d x d Cholesky) are shared with
 `factor_analytic_pdmat` in `include/laplace/pdmat/detail/loadings.hpp`.
+Since 2026-11-16 the derivatives of log|M|_+ for d < p run in double-double
+(`include/laplace/math/detail/double_double.hpp`) from C onward: C, C[T],
+the Cholesky factor of C and C^-1, X[T] and the traces, with Lambda in double
+and the result rounded to double at the end. The value (order 0) keeps the
+Cholesky factorization of C in double.
 
 **Measured** (2026-11-14; references `tools/reference/pdmat_reduced_rank.py`,
 mpmath at 640 bits, log|M|_+ as the sum of the logs of the d largest
@@ -4995,16 +5063,38 @@ CUDA (RTX 4070 SUPER), K = 0..6:
 |---|---|---|---|---|---|---|---|
 | M | 0.63 / 0.55 | 0.43 / 0.43 | 0.49 / 0.38 | 0.38 / 0.38 | 0.38 / 0.38 | 0.38 / 0.38 | 0.38 / 0.38 |
 | Lambda | 0.34 / 0.34 | 0.49 / 0.43 | 0.49 / 0.34 | 0.49 / 0.43 | 0.49 / 0.43 | 0.49 / 0.43 | 0.49 / 0.43 |
-| log\|M\|_+ | 0.97 / 1.6 | 9.6 / 21 | 131 / 146 | 742 / 219 | 161 / 1440 | 3850 / 2502 | 3682 / 2946 |
+| log\|M\|_+ | 1.3 / 1.6 | 0.63 / 0.63 | 0.85 / 0.85 | 6.2 / 6.2 | 3.2 / 3.2 | 2.3 / 2.3 | 13 / 13 |
+| log\|M\|_+, double (2026-11-14) | 0.97 / 1.6 | 9.6 / 21 | 131 / 146 | 742 / 219 | 161 / 1440 | 3850 / 2502 | 3682 / 2946 |
 
-At d = p log|M|_+ is within 0.42 ulp at every order. The peaks of log|M|_+
-at orders 4 to 6 come from the spread point of (p, d) = (5, 4) along one
-repeated diagonal loading (Lambda_22). There the reference is well
-conditioned: one ulp of any theta_k moves the order-5 derivative by 1.1 ulp
-and the order-6 one by 2.2 ulp (mpmath, the same script). The loss is the
-recursion's: the Leibniz sums of a repeated e^theta grow like 2^K and cancel
-in the traces. The same class as `factor_analytic_pdmat`'s log det for d < p
-(795 ulp at order 6).
+The log|M|_+ row is the double-double route of 2026-11-16 (test bounds 3, 1,
+2, 10, 5, 4, 19 ulp); the row below it is the route in double that it
+replaced. At d = p log|M|_+ is within 0.42 ulp at every order.
+
+The loss of the route in double. Its peaks at orders 4 to 6 came from the
+spread point of (p, d) = (5, 4) along one repeated diagonal loading
+(Lambda_22). There the reference is well conditioned: one ulp of any theta_k
+moves the order-5 derivative by 1.1 ulp and the order-6 one by 2.2 ulp
+(mpmath, the same script). At order 6 the trace terms sum to 1.2e4 in
+absolute value against a result of 0.006, and each stage after Lambda (C,
+C[T], the recursion, the traces) loses digits on its own: a prototype in
+mpmath with the stages after Lambda at 106 bits was within 0.004 ulp. A route
+by Stirling numbers in s = e^theta was no better (9.4e3 ulp at order 6).
+Repetition of a diagonal loading is not a usable criterion for switching
+precision: without one the route in double lost up to 674 ulp at order 5
+(CUDA).
+
+Worst log|M|_+ over the 1697 reference rows with d < p, ulp of
+max(|ref|, 1), by how much of the route runs in double-double (measurement
+twin `benchmarks/pdmat_reduced_rank_dd.cpp`), gcc/OpenMP / CUDA, orders 1..6:
+
+| route | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| double | 9.5 / 20.5 | 131 / 146 | 752 / 219 | 203 / 1440 | 3850 / 2502 | 3682 / 2946 |
+| double-double, C^-1 in double | 8 / 14 | 83 / 62 | 52 / 119 | 67 / 159 | 134 / 339 | 297 / 698 |
+| double-double, C^-1 in double-double | 1 / 1 | 1 / 1 | 6 / 6 | 4 / 4 | 4 / 4 | 18 / 18 |
+
+C^-1 must be in double-double too: X[0] enters every term of the recursion.
+The last route was chosen for every order (Giovanni, 2026-11-16).
 
 A second route was measured and removed (Giovanni, 2026-11-14): for a tuple
 within one row r, log det C = log det A_r + log g with
@@ -5019,13 +5109,21 @@ derivatives of log g. The two near-singular reference points did not move the
 worst errors of the recursion on C.
 
 Speed (gcc, ns per call, one thread / OpenMP on 8 threads, log|M|_+ along K
-distinct parameters spread over the rows):
+distinct parameters spread over the rows; M and the double row measured on
+2026-11-14, the double-double row on 2026-11-16):
 
 | (p, d) | M | log\|M\|_+ K=0 | K=1 | K=3 | K=6 |
 |---|---|---|---|---|---|
-| (4, 1) | 112 / 23 | 127 / 23 | 143 / 39 | 279 / 60 | 1910 / 317 |
-| (8, 2) | 553 / 74 | 557 / 75 | 613 / 99 | 938 / 162 | 3132 / 434 |
-| (16, 4) | 2308 / 314 | 2223 / 299 | 2339 / 348 | 3103 / 496 | 9686 / 2171 |
+| (4, 1) | 112 / 23 | 119 / 24 | 240 / 40 | 369 / 74 | 1944 / 326 |
+| (8, 2) | 553 / 74 | 480 / 66 | 877 / 131 | 1299 / 202 | 5361 / 747 |
+| (16, 4) | 2308 / 314 | 1856 / 274 | 4129 / 563 | 6045 / 830 | 29242 / 3960 |
+| (16, 4), double | | 2223 / 299 | 2339 / 348 | 3103 / 496 | 9686 / 2171 |
+
+Double-double costs 1.0 to 1.7 times the route in double at (4, 1) and
+(8, 2), and 2 to 3.4 times at (16, 4) (same run of the measurement twin). On
+CUDA (ns per call, one thread of the Serial backend / CUDA) the order-6 call
+at (16, 4) went from 9289 / 987 to 46055 / 2326, and at (8, 2) from
+3404 / 155 to 5999 / 183; orders 0 to 3 and d = 1 cost 1.0 to 1.7 times.
 
 ## Weighted sums of penalties: weighted_sum_psdmat
 
@@ -6986,20 +7084,89 @@ as d^q s / dalpha^q = mu^2 d^(q-2) (mu^2 + alpha^2)^(-3/2) / dalpha^(q-2), which
 cancellation that 1/s - alpha^2/s^3 has when alpha is much larger than mu, and at the first order
 alpha/s - 1 is taken as -mu^2 / (s (s + alpha)).
 
+At the first order two of those pieces cancel against each other above the split, kappa_1 / alpha
+against y alpha / (s (mu + s)), which both tend to y / alpha as alpha grows. Since alpha^2 =
+s^2 - mu^2 and s (mu + s) - alpha^2 = mu (s + mu), the second is exactly (y / alpha) (1 - mu / s),
+so the difference of the two is (kappa_1 - y) / alpha + y mu / (alpha s), where kappa_1 - y is
+formed as (j* - y) + m_1 / sum and both of those are exact. That form is taken where alpha >= mu
+and nowhere else: there it leaves 2.6 ulp where the first form had 1577, and below the split it
+divides kappa_1 - y, which is then of the size of y, by a small alpha and carries the walk's own
+error up instead (1.2e4 ulp at y = 949, mu = 100, alpha = 5, against 74.4 for the first form). The
+worst of the order over the whole reference file is therefore 74.4 ulp, at that point below the
+split.
+
+Below the split m = 1 - h(u) has no second factor, so its outer function is of one variable and
+`chain_rule_pair_scalar_dk` composes it instead of `chain_rule_pair_dk`, which takes about a
+quarter off the order-6 tensor there: 3.55 us against 4.84 with the two headers compiled into the
+same probe one after the other, every component unchanged to the digit. Above the split, where m
+carries the factor mu / alpha, the pair form is the one that applies and nothing changes, which the
+same probe confirms (5.62 us against 4.76, one run against the other, the difference being the
+machine). The absolute figures of the speed table below were measured on a quiet machine in another
+session and are not re-measured here.
+
 **The expected information.** Measured with mpmath at 40 digits by summing the mass:
 I_mu_mu = 1/mu - 1/s = c exactly and I_mu_alpha = 0 exactly (the off-diagonal block 5.2e-28 to
 4.7e-44 of I_mu_mu at four (mu, alpha) with alpha >= mu, where the cut support sum holds the second
 moment). The member therefore supplies both of those closed, the derivatives of I_mu_mu being the
-partials of c already written, and takes only I_alpha_alpha and its derivatives from the generic sum
-over the support.
+partials of c already written, and takes only I_alpha_alpha and its derivatives from a sum over the
+support.
 
-**What is open.** (i) The generic support sum for I_alpha_alpha has no series at the Poisson limit;
-where it does not converge it returns NaN, as the generic route documents. (ii) One cancellation is
-left in the derivatives in alpha at the Poisson limit, between the first cumulant over alpha and
-y alpha / (s (mu + s)), which both tend to y / alpha: at (mu, alpha) = (1, 1e3) and y = 1 the first
-derivative is 5e-7 while those two terms are 1e-3, so the order-1 tensor is accurate to 1577 ulp of
-its own scale, that is to 2e-19 absolute. Every other order is below 201 ulp. (iii) The reference
-file holds the mass only, for the reason in the next section.
+**I_alpha_alpha, and why the generic sweep is not enough for it.** The sum of
+(dl/dalpha)^2 p(y) over the support is dominated by the small counts, half of it at y <= 1 and 98
+per cent at y <= 1000, but its terms then fall as a power of y until the geometric factor
+e^(-lambda y), lambda = log1p(alpha^2 / (2 mu (s + mu))), takes over at counts of the size of
+mu^2 / alpha^2. The generic sweep stops a direction when two neighbouring terms are below 2^-60 of
+the running sum of absolute values, so it needs terms of that order: measured 444 at alpha = mu,
+17.4e3 at alpha / mu = 0.1, 1.6e6 at 0.01 and 1.7e7 at 0.003, which is 0.4 ms, 6 ms, 0.5 s and 6 s
+a call, and at alpha / mu = 1e-3 and below it passes its cap of 2^26 terms a direction and reports
+no convergence, so the component is NaN. At (mu, alpha) = (40, 1e-2) it does worse than give up: it
+stops early on an underflowed mass and reports convergence 4.2e-5 away from the value.
+
+Above a cut the count can be treated as a real number instead. The half-integer polynomial of the
+mass needs an integer, so the tail calls the Bessel function as it stands (`bessel_k`, whose
+uniform branch covers the large orders) and takes the score from its derivative in the argument:
+
+    log p(y) = log(2 alpha / pi) / 2 + (s - mu) + y log(mu alpha / (mu + s))
+               + log K_(y - 1/2)(alpha) - loggamma(y + 1),
+    dl/dalpha = 1/(2 alpha) + alpha / s + y (1/alpha - lambda') + d log K_(y - 1/2)(alpha) / dalpha,
+
+with lambda' = alpha / (s (mu + s)). Against the family's own logpmf and logpmf_d1 at integer counts
+up to 3000 those two agree to 3.1e-13 and 3.7e-13 of the value, which is the twin check of the
+whole construction. The integrand is then smooth in a real count, so the sum over the integers above
+y_cut = 1024 is the integral from y_cut + 1/2, taken by `exp_sinh_quad` with the decay length
+1 / lambda, plus the first Euler-Maclaurin correction f'(y_cut + 1/2) / 24, the midpoint rule's own
+term, whose derivative is taken from the tail model A y^(-3/2) e^(-lambda y) (a - lambda' y)^2 with
+a = 1/alpha + alpha / s. Three digits of that model are enough for a term that is itself 1e-5 of the
+tail: with it the result moves from 5.3e-10 to 1.6e-11 of the value, measured against the same sum
+cut at 16384, and the quadrature's own error estimate is never above 5e-21 of the result.
+
+The member takes this route where the spread is above 4 and the generic sweep below it. The cut
+route costs 0.42 ms whatever the parameters, the sweep 0.09 ms at a spread of 1.8, 0.27 at 3.1, 0.70
+at 4.9 and 6.0 at 14, so between a spread of 4 and about 6 the sweep can still be the faster of the
+two by up to a factor of two (0.25 ms against 0.43 at (mu, alpha) = (3.5, 2)), and the single number
+is kept because above the switch the cut route is the only one of the two that stays right.
+
+**The derivatives of I_alpha_alpha take the same two routes.** Every partial of log p in
+(mu, alpha) is available at a count that is not an integer: mu does not enter the order of the
+Bessel function, so the components with an index in mu are the family's own Leibniz form, which is
+an identity in y, and the pure ones in alpha are the real-count form's own, with the derivatives of
+log K in alpha to order 7 from `bessel_k`. Against the family's own partials at integer counts to
+order 5 the two agree to 1.9e-12 of the scale of the order. The integrands are then the generic ones
+of generic_info.hpp in the score form, taken from the family's partials below the cut and from the
+real-count ones above it. These components carry powers of y, so their tails weigh far more than the
+value's, from 1.6 per cent to ninety times the component itself, and the integral is taken without
+the Euler-Maclaurin term the value uses: against the same route cut at 16384 the difference is
+2.5e-8 of the scale of the order at worst, at order 4 and (mu, alpha) = (1, 0.1), and 5e-10 on most
+components, which is that missing term.
+Against the generic sweep where it still converges the two agree to 1.9e-15 of the scale at a spread
+of 5.2 and to 2.5e-8 at (mu, alpha) = (1, 0.1), where the sweep itself needs 1.6e5 terms. What it
+costs: at (10, 0.1) the order-4 tensor is 7.3 ms against the sweep's 11.0 s, and at (1, 1e-3), where
+the sweep gives up after 310 s, 12.6 ms. At a spread between 4 and about 6 the cut route is again
+the slower of the two, 6.7 ms against 4.2 at (3.5, 2).
+
+**What is open.** (i) The reference file of the mass holds
+the mass only, for the reason in the next section; I_alpha_alpha has a reference file of its own,
+written by the same script, and no reference exists for its derivatives.
 
 ### Forms checked before transcription
 
@@ -7048,7 +7215,7 @@ so the figure is raw.
 | order | betabinom sums, / (n/50)^(3/2) | betabinom Stirling, raw | pig |
 |---|---|---|---|
 | 0 (the value) | 63.3 | 520 | 6.24 |
-| 1 | 98.2 | 1.83e3 | 1577 |
+| 1 | 98.2 | 1.83e3 | 74.4 |
 | 2 | 37.9 | 156 | 5.81 |
 | 3 | 48.3 | 23.6 | 10.4 |
 | 4 | 37.8 | 27.0 | 19.7 |
@@ -7060,12 +7227,25 @@ Stirling region at n = 1000, and the law covers both. Every one of the Stirling 
 above is at n = 1e5, sigma = 0.01, and the three that are not small are the value and its first two
 orders: that route splits the log-mass into the binomial's and a correction, and in the tail of a
 large size the two are each of the size of n while the log-mass is not. At n = 1e4 the whole tensor
-is within 64.6 ulp, so this is a corner of n = 1e5 and not of the route. The pig's order-1 figure is
-the one Poisson-limit corner named above; every other order is below 201 ulp at counts from 0 to
-3000 and shapes from 1e-3 to 1e3. The two builds agree everywhere within a few ulp, so the table
+is within 64.6 ulp, so this is a corner of n = 1e5 and not of the route. The pig's order-1 figure is the one
+below the split named above; every other order is below 201 ulp at counts from 0 to 3000 and shapes
+from 1e-3 to 1e3. The two builds agree everywhere within a few ulp, so the table
 gives one figure for both. betabinom's cumulative rows, which measure the generic summation route
 and not this family, run from 34 ulp at order 0 to 4.1e6 at order 6, the worst at mu = 0.02 and
 mu = 0.98, where the mass sits at one end of the support.
+
+**The reference of I_alpha_alpha.** `tests/data/reference/pig_info.csv` holds 18 rows,
+(mu, alpha, hi, lo) as hexadecimal doubles, written by `tools/reference/distrib_pig.py --info`:
+mpmath sums the same definition at 40 digits with its own Bessel function of real order, through
+the identity d log K_nu / dalpha = -(K_(nu-1) + K_(nu+1)) / (2 K_nu), and accelerates the tail with
+its own Euler-Maclaurin summation, so neither the half-integer polynomial nor the library's
+quadrature enters the reference. The rows run from a spread of 0.58 to 4.5e4, that is from
+alpha / mu = 1.5 down to 1e-4, and cover both of the member's routes, four of them the sweep and
+fourteen the cut. The Poisson limit is left out for the same reason the mass rows avoid that band:
+mpmath's Bessel function is slow where its order and its argument are close, and at alpha = 1e3 the
+summation does not finish. The member measures 1.36e-11 of the value at worst against those rows,
+at (mu, alpha) = (10, 1e-3), with every other row below 4.5e-12; the four rows of the sweep are
+within 1.9e-15. The test bound is 2.1e-11.
 
 ### Speed
 
@@ -7417,9 +7597,22 @@ three parameters are the three moments by quadrature, the reflection in the
 sign of gamma, the derivatives of log F against differences of its own log F,
 and the family inside a Kokkos kernel (host and device within 6.4e-13).
 
-**Open.** A series in cc of W for |cc| < 0.05, whose coefficients start at
-cc^3 He_3, would repair the score and the orders two and three near zero; it is
-not written. The descriptors say `infinitely_smooth` with no non-smooth points,
+**Open.** A series in cc of W near zero skewness was examined and not
+written, and the reason is measured rather than guessed. The expansion of W in
+powers of cc, taken with SymPy and with log Phi left as an unknown function L,
+has no cc^1 and no cc^2 term at all: the first vanishes because
+L'(0) = b = sqrt(2/pi) is exactly the factor the quadratic part contributes,
+the second because L''(0) = -2/pi, and the cc^3 coefficient is
+(1 - kappa) He_3(z)/6 = gamma He_3(z)/6, which is the score the family already
+writes in closed form at gamma = 0. A series would therefore have to remove two
+orders of cancellation and not one, and it cannot be short: the natural
+variable is u = alpha t, about cc z / b, and the Taylor series of log Phi at
+zero has radius about 1.7, the nearest complex zero of Phi, so at |cc| = 0.05
+and the |z| = 12 of the reference grid about forty terms are needed for the last
+bit. What it would buy is small beside that: the score in gamma keeps seven
+digits at |gamma| = 1e-12 and ten at 1e-8, which a fit can use, and the orders
+two and above diverge like gamma^(-2/3) because the law is only C^1 in gamma at
+zero, so there is nothing there to be accurate about. The descriptors say `infinitely_smooth` with no non-smooth points,
 while the law is only C^1 in gamma at zero: declaring a non-smooth point there
 with `continuous_order` 1 would be truthful, and would make the generic
 information NaN for the components with two or more indices in gamma although
@@ -7584,6 +7777,28 @@ each of size exp(-x) is never formed. The normalizer h(nu) takes its nu-derivati
 set of Bessel derivatives, log R - log x being the same function as log K_2 - log K_1, so the
 whole family needs one evaluation of log_bessel_k and of its orders one to seven a tensor.
 
+Above the split Lambda and h are carried shifted by x = sqrt(nu), because Lambda tends to -x and h
+to +x while their sum is O(1): their pure-nu derivatives are O(nu^(1/2 - c)) and the sum is
+O(nu^(-1/2 - c)), so the one component that holds them both used to lose a whole factor of nu.
+With Rm = R - x,
+
+    Lambda + x = -rho z^2 / (G + sqrt q) = -(z^2/2) (1 + Theta),
+    Theta = (4 Rm - z^2) / ( [(R + Rm)/rho + G] (G + sqrt q) ),
+    h - x = (1/2) log R - log x - gs(x),   gs(x) = log K_1(x) + x,
+    Rm = 1 - x gs'(x),   gs'(x) = (log K_1)'(x) + 1,
+
+the second form of Lambda + x from 2 rho - sqrt q - G = (4 Rm - z^2)/[(R + Rm)/rho + G], which
+multiplies the difference by its conjugate. Theta is O(nu^(-1/2)) and Rm tends to 3/2, and no
+quantity on the right is a difference of larger ones. The shift is taken where R z^2 <= nu, which
+keeps 1 + Theta = 2 R/(sqrt(nu + R z^2) + x) away from zero; above that Lambda is nowhere near -x
+and the two pair as they stand, h being restored by adding the derivatives of x back. The two
+scaled Bessel pieces are `math::log_bessel_k_scaled` and `log_bessel_k_scaled_dx_upto`, which cost
+nothing beyond the plain ones: Steed's branch omits the -x it would subtract, the asymptotic
+expansion omits the -1, the Riccati regime adds one to g in double-double, and the Debye form uses
+-nu eta + x = -nu^2/(nu s + x) - nu log(z/(1 + s)) and 1 - s/z = -1/(z(s + z)). h - x is the same
+h_derivs fed with the scaled set, and the only entry of the (nu, z) table that changes is the one
+at c = K, j = 0, which is where mixed_shape_dk reads the pure-nu derivative.
+
 Lambda = -sqrt(nu + R z^2) is written as -rho(nu) G(q(nu), z) with rho = sqrt(R), q = nu/R and
 G = sqrt(q + z^2); the table D[c][j] of its mixed (nu, z) derivatives feeds
 `detail_location_scale::mixed_shape_dk`. The z-derivatives of (q + z^2)^p come from a recurrence
@@ -7598,13 +7813,21 @@ sigma from 2^-20 to 2^20. The three regions have different causes, so they have 
 
 | order | nu < 1 | 1 <= nu < 1e4 | nu >= 1e4 |
 |---|---|---|---|
-| value | 1.61 | 41.5 | 1.6e4 |
-| 1 | 29.2 | 1.5e3 | 1.2e4 |
-| 2 | 4.67 | 747 | 1.0e4 |
-| 3 | 5.49 | 1.0e3 | 5.3e3 |
-| 4 | 8.19 | 339 | 5.4e3 |
-| 5 | 13.5 | 869 | 8.6e3 |
-| 6 | 9.08 | 1.4e3 | 9.1e3 |
+| value | 1.61 | 4.51 | 7.02 |
+| 1 | 29.2 | 33.2 | 6.55 |
+| 2 | 4.67 | 19.9 | 84.8 |
+| 3 | 5.49 | 53.7 | 71.5 |
+| 4 | 8.19 | 86.6 | 129 |
+| 5 | 13.5 | 79.7 | 37.1 |
+| 6 | 9.08 | 278 | 24.8 |
+
+The two columns above one are what the shift of Lambda and h by x bought: before it they read 41.5,
+1.5e3, 747, 1.0e3, 339, 869 and 1.4e3, and 1.6e4, 1.2e4, 1.0e4, 5.3e3, 5.4e3, 8.6e3 and 9.1e3, so
+the value and the first order at nu >= 1e4 improve by 2300 and 1800 times and no order anywhere is
+worse. At nu = 1e8 every order now sits between 0.61 and 3.7 ulp, and the worst point of the whole
+grid is the order six at nu = 1 (278 ulp), where the shift also took away most of what used to be
+1.4e3. The two builds agree to the digit on every entry of the table. The split at nu = 1 and the
+series below it are unchanged, and the first column is bit for bit what it was.
 
 The first column is the small-shape region after the series below, which replaced the Bessel
 route there: before it the same column read 9.4 on the value and 1.8e4, 1.8e6, 6.8e6, 1.4e7,
@@ -7643,7 +7866,9 @@ The generic information costs 3 ms (nu = 0.05) to 16 ms (nu = 2.5) at order zero
 160 ms at order four, the score form being 1.5 to 2 times faster than the hessian form.
 
 **Chosen.** As above, with the bounds of `tests/distrib/test_pseudohuber.cpp` (15 cases, 21033
-assertions) at about 1.5 times the worst of the two builds, per region of nu and per order. The
+assertions) at about 1.5 times the worst of the two builds, per region of nu and per order; the
+symmetry of the generic quantile, q(p) + q(1 - p) - 2 mu, moved from 1.1e-15 to 1.9e-15 when the
+density changed in its last bits and the root stopped elsewhere (1.27e-15 on both builds). The
 closed forms are checked against SymPy by
 `python -I tools/reference/distrib_pseudohuber.py forms` (the R identity, the recurrence for
 (q + z^2)^p, the identity at p = 1/2 and the whole table D, worst 1.4e-51 relative at five
@@ -7682,12 +7907,12 @@ this family sits. It agrees with the single-order functions bit for bit on gcc (
 differ, every regime and both sides of nu = 20, x = 200 and x = 1) and to 1.2e-15 relative on
 CUDA, where nvcc contracts and schedules the two differently.
 
-**Open.** Two corners.
-- nu >= 1e4: the value and the first order reach 1.6e4 and 1.2e4 ulp, because log f is a
-  difference of numbers of size sqrt(nu); at nu = 1e8 the value carries an absolute error of
-  about 1e-12.
-- nu = 1 at order six: 1.4e3 ulp, which the series does not explain (using it at nu = 1 still
-  leaves 746), so it comes from the assembly of Lambda. Not chased.
+**Open.** One corner, the other having been repaired by the shift of Lambda and h by x: nu = 1 at
+order six, 278 ulp and the worst point of the grid, down from 1.4e3 before the shift and still not
+chased. It is where the series and the Bessel route meet, and before the shift the series was not
+the explanation either (using it at nu = 1 left 746 ulp of the 1.4e3). For the record, what the
+shift replaced: the value and the first order at nu >= 1e4 used to reach 1.6e4 and 1.2e4 ulp, an
+absolute error of about 1e-12 on the value at nu = 1e8.
 
 ## skewt, Azzalini's skew t
 
@@ -8090,6 +8315,83 @@ avoided: if a configuration ever needs the quadrature there, with the other
 shape at one and x above `x_wide`, the anchor and the scale have to read the
 single factor that is left.
 
+## mvgaussian1 and mvgaussian2: the factor form of the information and the theta table
+
+What: two changes decided with Giovanni on 2026-11-16 (`note/distrib_multivariate.md`
+section 12, items 2 and 3), in `include/laplace/distrib/detail/mvgaussian_common.hpp`
+and the two headers; tests and bench as in the section above.
+
+The factor form. The information of mvgaussian1 in theta lost up to cond(Sigma) eps
+near a singular Sigma through the traces of the Leibniz route (section above). Over a
+structure with its Cholesky factor (`closed_factor`) it is now
+I_ab = 1/2 tr(B_a B_b), B_a = G_a + G_a', G_a = L^-1 d_a L, and
+d_T I_ab = 1/2 sum_(U subset T) tr(d_U B_a d_(T\U) B_b). Every derivative of G is
+formed from whitened lower-triangular matrices only: H[m] = L^-1 L[m] by forward
+substitution (L[m] the structure's `cholesky_dk` along the indices at the positions
+of the mask m), X[S, R] = Y[S] L[R] with X[0, R] = H[R] and
+X[S, R] = -sum_(0 != T subset S) H[T] X[S\T, R] (Y = L^-1), and
+d_S G_a = sum_(S1 subset S) X[S1, {a} + (S\S1)]; with G lower triangular,
+1/2 tr(B1 B2) = sum_i G1_ii G2_ii + sum_(j <= i) G1_ij G2_ij. No large matrix is
+formed, so nothing cancels. factor_analytic and matrix_log (no `closed_factor`) keep
+the trace route, as does mvgaussian2, which does not cancel. Scratch: 113 d^2 doubles
+plus a packed matrix and the structure's scratch, at order 4 (`info_scratch_size()`).
+
+Worst ulp1N of the information over orders 0 to 4 (normwise, as above), trace route
+before and factor form now, gcc / CUDA:
+
+| structure | trace route | factor form |
+|---|---|---|
+| ar1 | 4560 / 8150 | 16.4 / 16.3 |
+| compound_symmetry | 664 / 1080 | 1.35 / 1.35 |
+| log_cholesky | 286 / 238 | 1.25 / 1.25 |
+| unit_diagonal_scaled<ar1> | 67 / 68 | 11.6 / 11.6 |
+| diagonal | 1 / 1 | 0 / 0 |
+
+Measured first in a host prototype (one thread, heap allocations): 1.1 to 4.9 times the
+trace route's cost per pair on log_cholesky; the information depends on theta only.
+
+The theta table. Every block with K >= 1 recomputed d_T W inside the unit, so a shared
+theta saved nothing at orders 1 and 2. The table holds, for the sorted tuples of orders
+1..k_max in lexicographic order, one entry of np + 2 doubles: a flag (d_T W not zero
+by structure), d_T log det M and d_T W packed. `theta_table_entries(k_max)`,
+`theta_table_size(k_max)`, `fill_theta_table_entry(state, k_max, entry, table, w)`
+(one entry per call, so that a kernel fills it in parallel) and
+`with_theta_table(state, k_max, table)`, which attaches it to the state; the unit
+functions (`logpdf_dmu_dk`, `logpdf_dy_dk`, the (mu, mu) block of `expected_info_dk`)
+read it when it covers the order asked for and compute as before otherwise. Test:
+every block of orders 1 to 3 of the reference file read from a table equals the block
+computed directly, to the bit, on gcc and CUDA.
+
+Speed, ns per unit, n = 1e5, unstructured log_cholesky, theta shared, without and with
+the table (orders 1 / 2), and the fill of the table of order 2 (once per theta),
+OpenMP 16 threads and CUDA:
+
+| | d | OpenMP, shared | OpenMP, table | CUDA, shared | CUDA, table | fill (OpenMP / CUDA) |
+|---|---|---|---|---|---|---|
+| mvgaussian1 | 2 | 32 / 128 | 3.7 / 8.3 | 6.8 / 31 | 0.5 / 0.9 | 81 / 35 us |
+| | 3 | 77 / 570 | 7.2 / 27 | 25 / 210 | 0.9 / 3.0 | 71 / 45 us |
+| | 5 | 342 / 6217 | 27 / 188 | 209 / 4050 | 3.7 / 29 | 96 / 119 us |
+| | 10 | 4526 / 2.50e5 | 158 / 4775 | 3412 / 2.40e5 | 36 / 1002 | 414 / 497 us |
+| mvgaussian2 | 2 | 9.5 / 15 | 3.4 / 7.0 | 1.2 / 2.1 | 0.5 / 0.7 | 90 / 13 us |
+| | 3 | 18 / 41 | 7.9 / 21 | 3.0 / 7.2 | 1.0 / 2.0 | 95 / 14 us |
+| | 5 | 48 / 163 | 22 / 119 | 17 / 52 | 3.7 / 12 | 102 / 15 us |
+| | 10 | 267 / 2070 | 157 / 1953 | 185 / 908 | 35 / 245 | 70 / 17 us |
+
+What this says: with the table, a shared theta costs a unit what the reading of the
+blocks costs, O(d^2) a tuple; mvgaussian1 at d = 10, order 2 drops 52 times on OpenMP
+and 240 times on CUDA, and the two parametrizations come within a factor of 2.4
+(OpenMP) and 4.1 (CUDA) of each other. The fill is paid once per theta: 0.4 ms
+on OpenMP and 0.5 ms on CUDA at d = 10, order 2 for mvgaussian1, below 0.1 ms
+elsewhere. Order 0 is unchanged (8.8 and 6.9 ns at d = 10 on OpenMP, noise). These
+timings were taken on quiet cores under the build lock; the earlier table of the
+section above was taken while another build ran, and its figures differ from these
+by up to 25 per cent (mvgaussian1 at d = 2, order 2: 103 then, 128 now).
+
+Open: the block A = 0, K = 6 of mvgaussian1 over log_cholesky moved from 4.6 to 10.0
+ulp1N on gcc with an uncommitted change of another session to the generic route of
+M^-1 in `pdmat/core.hpp` (sums over classes of equal indices); its bound (8) is left
+until that change is final.
+
 ## Polygamma functions to order 13 in double-double
 
 What: `include/laplace/math/polygamma_dd.hpp` (2026-11-16), in `laplace::math`:
@@ -8253,3 +8555,298 @@ only outlier, 139 against 127 ns, was the first kernel of the first run and did 
 repeat. The values are unchanged (same arithmetic). After the move the linked
 laplace_tests needs 50520 bytes of constant data (.nv.constant3, cuobjdump -elf),
 15016 below the ceiling.
+
+## kappa from the circular standard deviation s, with its six derivatives (2026-11-17)
+
+The von Mises family of Laplace is parametrized in the mean direction mu and the
+circular standard deviation s = sqrt(-2 log rho), where rho = A(kappa) = I_1(kappa)/I_0(kappa)
+is the mean resultant length. Every per-observation quantity is written in kappa,
+so the family needs kappa(s) and its derivatives to order six
+(`include/laplace/distrib/vonmises_scale.hpp`). The map has no closed form:
+it is the inverse of s(kappa) = sqrt(-2 log A(kappa)).
+
+Three routes, chosen by s, because each of the other two loses the quantity it
+needs where the third keeps it:
+
+| region | route | why |
+|---|---|---|
+| s <= 0.05 | series in v = s^2/2 | kappa diverges like 1/v, and 1 - rho = -expm1(-v) is the only form that keeps v when rho is within an ulp of one |
+| 0.05 < s < 4 | the inverse of A, read in rho or in its complement | the general case; the derivatives follow by Faa di Bruno over exp(-s^2/2) |
+| s >= 4 | series in rho | kappa is about 2 rho, and rho = exp(-s^2/2) underflows gracefully while A's inverse would be asked for a value it cannot resolve |
+
+The series coefficients come from `tools/reference/vonmises_kappa_series.py`
+(SymPy, reverting the Taylor series of A and composing with the exact series of
+exp(-s^2/2)): 8 terms below, 7 above, the first of each being 1/(2v) and 2 rho.
+The derivatives of exp(-a s^2/2) are generated by the recurrence
+d[n+1] = -a (s d[n] + n d[n-1]), exact in double and free of the cancellation
+that a transcribed polynomial of order six would carry.
+
+The middle region needed a new entry point in `math/bessel_i.hpp`. For large
+kappa, A is within an ulp of one, so the quantity that determines kappa is the
+complement 1 - A, not A: a complement formed as `1.0 - rho` from a rounded rho
+has already lost half its digits. `ratio_inv` was refactored into
+`ratio_inv_rc(r, c, p)`, which takes rho and its complement as a pair, and two
+entry points were published: `bessel_i_ratio_inv(rho)` as before and
+`bessel_i_ratio_inv_c(q)`, which reads the complement. The map calls the second
+whenever rho > 0.5, where `-expm1(-s^2/2)` gives the complement exactly. At
+q = 1e-17 the rho route returns infinity (rho rounds to one) while the
+complement route returns kappa = 5e16 to eight digits
+(`tests/distrib/test_vonmises_scale.cpp`).
+
+Accuracy over the reference grid, s from 1e-8 to 4.5, gcc/OpenMP, worst ulp of
+the order's own value (`benchmarks/distrib_vonmises_scale.cpp`):
+
+| order | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| own (the three routes) | 5.32 | 6.12 | 9.55 | 6.79 | 20.4 | 25.7 | 25.3 |
+| the inverse alone | 5.32 | 6.12 | 9.55 | 8.19 | 20.4 | 26.7 | 46.6 |
+| the series in v alone | 3.5e30 | 2.7e30 | 1.9e30 | 1.3e30 | 7.9e29 | 4.4e29 | 4.4e29 |
+| the series in rho alone | 8.8e15 | 8.8e15 | 8.9e15 | 8.7e15 | 9.1e15 | 9.0e15 | 8.8e15 |
+
+The last two rows are each route evaluated over the whole grid, which is what
+makes the switch points measured rather than chosen: outside its own region each
+series is wrong by thirty or sixteen orders of magnitude. The worst point of
+every order but the value is s = 0.2, the low end of the inverse's band; the
+value's is s = 4.1, just below the switch to the series in rho. Bounds in the
+test are the worst of the two builds times about one and a half:
+{8, 10, 15, 20, 32, 40, 50}.
+
+Above s = 4.5 there is no reference file and should be none: kappa is about
+2 exp(-s^2/2), so d kappa / kappa = -s^2 (ds / s) and one eps of s moves kappa by
+s^2 eps whatever computes it. At s = 17.8 that is 178 ulp, which is the
+conditioning of the map and not an error of the code; the test checks the
+asymptote there instead.
+
+Speed, ns per call, gcc (Serial, then OpenMP on 16 threads): the value 244 / 17,
+order six 1290 / 97, and the joint routine `vonmises_kappa_from_s_upto<6>`, which
+returns all seven, 1302 / 99 against 4854 / 367 for the six separate calls. The
+joint routine is 3.7 times cheaper and gives bit for bit what the per-order
+functions give (checked against the same references), so it is an addition to the
+per-order functions and not a replacement: the rule of one function per
+derivative order stands.
+
+How the references were made, and a lesson. `tools/reference/vonmises_scale.py`
+builds the derivatives from the Riccati identity A' = 1 - A/kappa - A^2 and the
+chain rule, at mpmath precision. Two mistakes were made and both were caught by
+cross-checking, which is the only reason they are in this entry and not in the
+library:
+
+- The constant 1 was dropped from the Riccati identity, which flips the sign of
+  every derivative. Caught against `mpmath.diff` of the map itself, an
+  independent route, which then agreed to 1e-79.
+- At s = 1e-8 the order-six derivative came out as 1.34e68 against the true
+  5.04e67. The identity for A^(j) needs about (j + 1) log2(kappa) bits and had
+  166 of the 371 required. The reference script now sizes its precision as
+  (n + 1) bits + 80 and evaluates every row at two precisions, keeping only the
+  rows that agree to 2^-140. The library's disagreement of 3.5e15 ulp is what
+  exposed it, and the exact leading Laurent term settled which of the two was
+  wrong.
+
+A reference is not a reference until two routes that share no arithmetic agree on
+it.
+
+## The polygamma remainder psi^(n)(x) - mu_n(x) (2026-11-17)
+
+`own::polygamma_monomial_remainder(n, x)` in `include/laplace/math/polygamma.hpp`
+returns psi^(n)(x) minus its leading term mu_n(x), with mu_0(x) = log x and
+mu_n(x) = (-1)^(n+1) (n - 1)! x^-n, for n from 0 to 6.
+
+Why it exists. Every expected information of a family parametrized in a
+precision has the shape of a weighted sum of polygammas whose leading terms
+cancel exactly. The beta in the mean mu and the precision phi has
+
+    I_phi,phi = mu^2 psi_1(alpha) + nu^2 psi_1(beta) - psi_1(phi),
+
+with alpha = mu phi, beta = nu phi, nu = 1 - mu, and the leading terms cancel
+because mu^2/alpha + nu^2/beta = 1/phi exactly. The true value is of size
+1/(2 phi^2) while the terms are of size 1/phi, so the straight form keeps about
+eps phi of relative error: measured over the reference grid of the beta, the pure
+phi block of the order-K derivative loses 182 ulp of itself at phi = 1e2,
+1.7e4 at 1e4, 3.3e6 at 1e6 and 3.9e8 at 1e8, which is eps phi to within a factor
+of four at every band. Carrying only the remainders, with the bracket of
+monomials summed algebraically (that is, not summed at all, since it is zero),
+the same quantity is accurate to between one and seven ulp.
+
+How it is computed, with no subtraction anywhere. For x >= 15 the asymptotic
+expansion is evaluated with its first term simply left out, so the leading term
+is never formed and never cancelled. Below 15 the recurrence shifts x up by whole
+steps, and the monomials of the two arguments are differenced in closed form
+(for n = 0 as log1p(m/x), m being the shift). The 2^600 scaling guard of
+`polygamma` is kept.
+
+This is not what `own::detail_ibd::dpsi_all` does. Regrouping the three
+polygammas into differences leaves ab/s^3, ab/s^3 and -2 ab/s^3, so the
+cancellation only moves one level down; the monomials have to leave the sum
+entirely.
+
+Accuracy against `tools/reference/psi_remainder.py` (mpmath at 200 bits, 75 rows
+per order, x from 1e-3 to 1e12, no row dropped), gcc, worst ulp per order:
+12, 12, 14.8, 12, 16, 20, 24 as the bounds in
+`tests/math/test_psi_remainder.cpp`, where order two's 14.8 sits at x = 13, just
+below the recurrence threshold 15: the shift is then by one, the two monomials
+z^-n and x^-n are of one size, and their difference costs the digit the header
+predicts. The CUDA build passes the same bounds. The references subtract at a
+precision where the subtraction costs nothing, while the library never performs
+it at all, so the two routes share no arithmetic.
+
+Open (point 4a of `note/piano_distrib_restanti.md`): the layer exists and no
+family calls it yet. Wiring the beta onto it means having
+`detail_beta::free_component` carry the monomial and the remainder separately so
+that the exact cancellation can be used, and then measuring. Decided with
+Giovanni on 2026-11-17: the function lands now, the wiring is a separate piece of
+work.
+
+## weibull, beta and vonmises: the three remaining continuous families (2026-11-17)
+
+Three families of phase 4, each with the full interface (value and six orders in
+theta, the mixed derivatives in (y, theta), the expected information with four
+orders, cdf, log cdf with six orders, quantile, draw, start values). The
+gengamma was left out by Giovanni's decision of the same day.
+
+### weibull (mean m, shape sigma)
+
+The parametrization of statmodels7's weibull3: the mean is the first parameter,
+so the scale is m / Gamma(1 + 1/sigma) and every derivative in sigma carries the
+polygammas of that Gamma. Accuracy over the reference grid, gcc, worst scaled ulp
+per order (the error of a component divided by the ulp of the largest component
+of the same order):
+
+| | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| log f | 45.3 | 7.33 | 8.01 | 12.1 | 9.78 | 8.79 | 8.09 |
+| log F | 2.52 | 4.10 | 13.0 | 9.75 | 110 | 402 | 479 |
+| log(1 - F) | 9.35 | 6.80 | 8.03 | 12.1 | 9.78 | 8.78 | 8.27 |
+| in y | - | 2.53 | 3.66 | 4.81 | 107 | 137 | 71.1 |
+
+The expected information is at 1.8e-16, 1.6e-16 and 3.0e-16 of the natural scale
+for the three blocks. log F is the hard route, as it is for every family on the
+half line: its high orders carry the derivatives of log(-expm1(-u)) with u the
+transformed argument, and the worst points are where u is of order 1e-3 and the
+logarithm's own cancellation is the error.
+
+Speed, gcc, ns per call Serial / OpenMP at (m, sigma) = (2, 1.5): log f 39 / 75,
+order six 360 / 199, the (y, theta) block of total order five 341 / 187, cdf with
+both logarithms 176 / 88, log F order six 788 / 351, quantile 85 / 83, the
+information 7 / 62 and its order four 138 / 137. At sigma = 0.4 the density costs
+three times more (123 / 110 at order zero), which is the cost of the polygammas
+of 1 + 1/sigma.
+
+Two defects of the test, not of the family, found by its own twins and worth
+recording because both printed numbers that looked like bugs in the code. The
+twin against the exponential divided by a reference value that is exactly zero
+and printed no label, so the first failure named neither the quantity nor the
+point. And the closed form checked in the underflow case (y of order 1e-28,
+sigma = 0.01) was missing the factor (-1)^K: only the odd orders failed, with
+magnitudes agreeing to six digits, which is what finally identified it.
+
+### beta (mean mu, precision phi)
+
+statmodels7's beta1, with alpha = mu phi and beta = (1 - mu) phi. Accuracy, gcc:
+
+- orders zero and one: 1.38 eps of the sum of the terms.
+- orders two to six: 2.14, 4.37, 5.72, 12.2 and 9.61 ulp of the order's largest
+  component.
+- expected information: 5.66 eps of the largest component; its pure phi block
+  4.89 eps of (phi + 1) of itself.
+- cdf: 6.2e-14 on F and 6.6e-14 on 1 - F relative, 1.9e-15 on log F and 1.4e-15
+  on log(1 - F) absolute over max(1, |log|).
+- the six orders of log F: 4.3e-14, 4.7e-14, 1.2e-13, 1.1e-12, 2.4e-11, 2.8e-10
+  of the order's largest component, and of log(1 - F) 2.9e-15, 1.8e-14, 8.3e-14,
+  1.3e-12, 2.8e-11, 1.8e-10. The two tails are of one size, which they were not
+  before the side-selecting derivatives of the incomplete beta landed.
+
+The pure phi component is the exception and is the subject of point 4a above:
+1.6e8 to 3.9e8 ulp of itself at phi = 1e8, falling to between 63 and 230 at
+phi <= 1e2, exactly the eps phi of the cancellation. It is a corner of the
+parametrization and not a bound of the test, which measures each order against
+its largest component.
+
+Speed at (mu, phi) = (0.3, 6), ns per call Serial / OpenMP: log f 241 / 109,
+order six 221 / 131, the information 13 / 74 and its order four 343 / 151, log F
+through the incomplete beta 259 / 130, its closed derivatives 5556 / 735 at order
+one and 23301 / 2082 at order six. The generic quadrature route for the same
+order two costs 85281 / 27844, so the closed derivatives are 14 times faster and
+are what the family uses; the quadrature stays as the test's independent route.
+
+### vonmises (mean direction mu, circular standard deviation s)
+
+A new parametrization, not one of statmodels7's: see the map above. The density is
+written so that nothing cancels, the tensor separates as W_a(z) kappa^(b)(s) with
+z = y - mu (the component with a derivatives in mu is a function of z times a
+derivative of the map), and the information is diagonal, with I_mu,mu = kappa A
+and I_ss from the map alone.
+
+The measure is not the per-component relative ulp. Many components of the tensor
+vanish identically by symmetry, at y - mu = pi/2 and at the ends of the grid, so
+dividing by a component that is exactly zero reports 1e11 or 1e16 ulp for a value
+that is correct. `benchmarks/distrib_vonmises.cpp` prints those columns and they
+are not the bound; the test measures the error of a component against the ulp of
+the largest component of the same order plus a stencil floor, which is the
+honest measure. On that measure, gcc:
+
+| | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| log f, s <= 4.5 | 4.70 | 5.01 | 4.99 | 5.10 | 4.87 | 4.90 | 5.02 |
+| log f, s > 4.5 | 0.10 | 0.53 | 0.49 | 0.53 | 0.55 | 0.61 | 0.81 |
+| mixed (y, theta), s <= 4.5 | - | 0.52 | 0.70 | 1.15 | 1.30 | 2.50 | 3.33 |
+| mixed (y, theta), s > 4.5 | - | 0.53 | 0.49 | 0.53 | 0.55 | 0.57 | 0.60 |
+
+The CUDA build measures 4.70 to 5.16 and 0.10 to 0.81 on the same grid, identical
+to gcc within a hundredth of an ulp, so one set of bounds holds for both builds.
+
+The cdf is measured from a fixed -pi (Giovanni's choice of 2026-11-17: the
+alternative, measuring from the mode, would make F depend on mu through its own
+lower limit). It is computed as the mass of the arc from -pi to y, by a series in
+Bessel ratios where that converges and by panelled quadrature otherwise, and the
+worst error over its own tolerance is 0.24 for the series and 0.18 for the
+integral.
+
+The arc mass in closed form. The quadrature route was wrong in the fourth digit
+at s = 1e-4 on CUDA (0.841804 against 0.841345). Two causes: the panels were
+laid out by s rather than by the decay length of the integrand, which for large
+kappa is 1/(kappa |sin((c - mu)/2)|) and not s; and the route never read
+`r.converged`. The panels are now laid out by the decay length, and where the
+quadrature does not converge the mass is computed in closed form through
+w = 2 sin((t - mu)/2), with `log_Phi` for both tails and `log1mexp` for their
+difference, g being evaluated at the dominating endpoint moved in by one decay
+length. The route is selected by `!r.converged` and not by a threshold in kappa,
+so no band of the parameter is assumed to be the hard one. Decided with Giovanni
+on 2026-11-17 after two weaker guards had been measured and rejected: a guard on
+the bare flag threw away correct values, because the integrand underflows to
+exact zero on the far panels where no relative stopping test can be met, and a
+guard on `r.error` did not help, because the quadrature genuinely does not
+converge there.
+
+Open: the crossover of the closed form, w_0 sqrt(kappa) of order one, where
+neither the Gaussian tail nor the series in w is the dominant behaviour. There F
+is accurate to 2.9e-10 and log F to 1.8e-9 against the 1e-15 of everywhere else.
+The test delimits that band narrowly (|2 sin((y - mu)/2)| sqrt(kappa) between 0.2
+and 5) instead of widening its global tolerance, so the rest keeps its 1e-15.
+Closing it needs a second order in the expansion of g, which is work and not a
+repair.
+
+Speed, gcc, ns per call Serial / OpenMP: the tensor 622 / 47 at order zero and
+2891 / 204 at order six, of which the map alone is 2746 / 200, so above order
+three the family's cost is the map's; the information 821 / 67 and its order four
+2276 / 186; the cdf 29613 / 1643 and log F the same; a draw by inversion
+72074 / 5851. The generic derivatives of log F, which the family does not use and
+the test compares against, cost 4.1e6 / 5.9e5 at order six.
+
+## The exponential's log F where 1 - F is within an ulp of one (2026-11-17)
+
+Found while the three families above were being tested, in a family committed by
+another session: `exponential_distrib::log_cdf` returned exactly 0 for u = y/mu
+above about 36. It computed log F as log(-expm1(-u)), which is correct only where
+exp(-u) is resolvable against one; above 36 the argument of the logarithm rounds
+to one and the result to zero, while the true log F is about -exp(-u), that is
+-2e-16 and smaller. Repaired by splitting at a threshold and using
+log1p(-exp(-u)) above it, which keeps the small quantity:
+
+    if (u >= u_split) return log1p(-exp(-u));
+    return log(-expm1(-u));
+
+The lesson, agreed with the session that wrote the family, is not the line but
+the gap it fell through: the family's own test never evaluated log F at a point
+where 1 - F is within an ulp of one. A test grid that stops at moderate
+quantiles cannot see this class of defect, and every family on the half line has
+the same two-form structure in its tails.
