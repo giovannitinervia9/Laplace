@@ -8555,6 +8555,10 @@ K = 5, psi = e^-6; was 3.1e6), and the information (trace route) 33.1 / 12.1 (wa
 included (was 1.2e5). Bounds in `tests/distrib/test_mvgaussian.cpp` reset to the
 larger of the two times 1.5. The log_cholesky A = 0, K = 6 block is back at 4.58 /
 5.25 (bound 8), so the open note above is closed.
+Accepted with the current bounds (Giovanni, 2026-11-16): mvgaussian1 over
+factor_analytic at 118 ulp1N, about 10 times what the conditioning (10.5) explains,
+and the information of mvgaussian2 over AR(1) at 129 ulp1N (order 4, near rho = 1,
+trace route).
 
 ## Device tables in global memory: incomplete gamma and beta derivatives, Bessel I
 
