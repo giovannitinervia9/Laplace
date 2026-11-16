@@ -17,6 +17,8 @@
 //   center(), scale()             rough location and spread, for quadratures
 //   start_value(summary)          (host) a starting theta from a distrib_sample_summary
 //                                 (generic_start.hpp), strictly inside the domain
+//   n_atoms, atom_point(i)        (optional) points carrying mass beyond what kind implies,
+//   atom_log_mass(i)              read through distrib_n_atoms() and its two companions
 //   param_kinks(j, y)             points of theta_j, placed by y, at which l is not smooth
 //                                 (params[j].axis_kinks holds the ones fixed on theta_j's axis)
 //   y_regularity, y_kinks()       (continuous) regularity of l in y and its non-smooth points
@@ -112,6 +114,73 @@ struct distrib_param_info {
   /// Points of this parameter's own axis at which \f$\log f\f$ is not smooth (none by default).
   distrib_kinks axis_kinks = {};
 };
+
+// Atoms. A law may carry mass on points that its kind does not already account
+// for: a continuous family with a point mass (a zero-adjusted gamma) is neither
+// continuous nor discrete in the usual reading, and a route that integrates has
+// to know where that mass sits. An atom here is a point carrying mass BEYOND
+// what kind implies, so a discrete family declares none, its kind already
+// saying that the dominating measure counts the support. A family that has them
+// declares
+//
+//   static constexpr int n_atoms = 1;
+//   LAPLACE_HD double atom_point(int i) const;      where the mass sits
+//   LAPLACE_HD double atom_log_mass(int i) const;   log P(Y = atom_point(i))
+//
+// and nothing else. In particular no derivative function: logpdf(y) returns the
+// log mass at an atom, by the rule below, so the mass's derivatives to order
+// six are logpdf_dk<K> at that point, which every family already supplies;
+// atom_log_mass only spares a route the call.
+//
+// Two rules come with the declaration. logpdf(y) is one log-density with
+// respect to Lebesgue measure plus a counting measure on the atoms, so it gives
+// the log mass at an atom and the log density elsewhere; a quadrature node that
+// landed on an atom would read a mass as if it were a density, and the rule
+// that stops it is that a declared atom is also reported by y_kinks(), which
+// the panel routines already split on. And logpdf_dy_dk<J, K> with J >= 1 has
+// no meaning at an atom, the derivative in y of a mass not being a quantity.
+//
+// Every route asks through the three functions below and never through kind,
+// which is the defect to avoid: a route that asks the object what it carries
+// cannot be wrong about a family it has never heard of. They answer for a
+// family that declares nothing, so no family without atoms is touched.
+/**
+ * \ingroup distrib_core
+ * \brief Number of atoms a distribution declares beyond what its kind implies (0 when it declares none).
+ * \tparam D Distribution type.
+ * \return `D::n_atoms` when the member exists, 0 otherwise.
+ */
+template <class D>
+constexpr int distrib_n_atoms() {
+  if constexpr (requires { D::n_atoms; }) return D::n_atoms;
+  else return 0;
+}
+
+/**
+ * \ingroup distrib_core
+ * \brief Position of the distribution's atom \f$i\f$.
+ * \param d Distribution carrying the atom.
+ * \param i Atom index, \f$0 \le i < \f$ distrib_n_atoms().
+ * \return `d.atom_point(i)`, or quiet NaN when the distribution declares no atom.
+ */
+template <class D>
+LAPLACE_HD double distrib_atom_point(const D& d, int i) {
+  if constexpr (requires { d.atom_point(i); }) return d.atom_point(i);
+  else return (void)d, (void)i, std::numeric_limits<double>::quiet_NaN();
+}
+
+/**
+ * \ingroup distrib_core
+ * \brief Log mass the distribution puts on its atom \f$i\f$.
+ * \param d Distribution carrying the atom.
+ * \param i Atom index, \f$0 \le i < \f$ distrib_n_atoms().
+ * \return `d.atom_log_mass(i)`, or \f$-\infty\f$ when the distribution declares no atom.
+ */
+template <class D>
+LAPLACE_HD double distrib_atom_log_mass(const D& d, int i) {
+  if constexpr (requires { d.atom_log_mass(i); }) return d.atom_log_mass(i);
+  else return (void)d, (void)i, -distrib_infinity;
+}
 
 /**
  * \ingroup distrib_core

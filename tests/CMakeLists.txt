@@ -67,6 +67,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_beta.cpp
   distrib/test_vonmises_scale.cpp
   distrib/test_vonmises.cpp
+  distrib/test_atom_mixture.cpp
   distrib/test_mvgaussian.cpp
   distrib/test_mvgaussian_rank_deficient.cpp
   math/test_chain_pair.cpp

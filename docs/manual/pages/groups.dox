@@ -127,6 +127,12 @@ parent here, in tree order; the module pages define their groups without
 /** \addtogroup distrib_start
 \ingroup distrib_framework */
 
+/** \defgroup distrib_wrapper Wrappers
+\ingroup distrib
+\brief Distributions built from another distribution. */
+/** \addtogroup distrib_atom_mixture
+\ingroup distrib_wrapper */
+
 /** \defgroup distrib_real Continuous on the real line
 \ingroup distrib
 \brief Continuous distributions with support on the whole real line. */

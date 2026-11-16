@@ -9369,3 +9369,103 @@ d = 2000. The degenerate blocks with K >= 1 cost d^3 products per mask
 (unblocked loops: 4 s per tuple at d = 2000), so the table matters there.
 Open: the construction of weighted_sum at d = 2000 (113 s) is the
 structure's, not this module's.
+
+## atom_mixture_distrib: atoms on a parent distribution (2026-11-17)
+
+What: `include/laplace/distrib/core.hpp` gains the atoms of a distribution,
+`n_atoms`, `atom_point(i)` and `atom_log_mass(i)`, read through
+`distrib_n_atoms<D>()`, `distrib_atom_point(d, i)` and
+`distrib_atom_log_mass(d, i)`, which answer for a distribution that declares
+none, so no existing header changed. An atom is a point carrying mass beyond
+what `kind` implies, so a discrete distribution declares none.
+`include/laplace/distrib/atom_mixture.hpp` is new:
+`atom_mixture_distrib<D, M...>` with one `atom_mode` per atom in the type, the
+points as values, the parent held by value, and the factories
+`zero_adjusted` and `zero_one_adjusted`. The plan and the decisions are
+`note/piano_wrapper.md` section 5bis.
+
+How. The wrapper is a draw over K = N + 1 cells, the N atoms and the parent.
+Adjusted and inflated differ in one thing, whether the parent is renormalized
+off that point: with R = 1 - sum over the adjusted points of p(c_k; theta),
+q_j = pi_j adjusted and q_j = pi_j + pi_N p(c_j; theta) / R inflated, and the
+density away from the atoms is pi_N f(y; theta) / R. R is identically one for a
+continuous parent. Inflating a point where the parent has no mass is the same
+model as adjusting it, term by term, so a continuous parent with an inflated
+atom is a static_assert.
+
+The masses are a simplex and not a box, so the declared parameters are the free
+coordinates of the additive log-ratio map with the parent's cell as the
+reference, each on the whole line with an identity link, every point of R^N
+giving a valid distribution. They follow the parent's parameters in theta.
+
+What that buys, and it is the reason the alr road costs no new numerics: with
+S the log-sum-exp of the free coordinates, log pi_c = u_c - S for an atom and
+log pi_N = -S, so every derivative of order two and above is -d^K S, the same
+for every cell, and d^K S is the order K - 1 derivative of pi, which
+`alr_bijector::inverse_dk` supplies. Away from the atoms the log-density is
+log pi_N(u) + log f(y; theta) - log R(theta), a sum of terms each in one block,
+so for a continuous parent every mixed component is exactly zero and the
+order-six tensor is block diagonal at every y; at an adjusted atom the
+log-density is log pi_j(u) alone and every component with a parent index is
+exactly zero. The expected information needs no Leibniz sum for the same
+reason: each parameter sits in one factor, the parent block being
+pi_N I_parent(theta) and the free block the categorical diag(pi) - pi pi'.
+An inflated atom and the cumulative functions have the same shape,
+log(A(u) + pi_N(u) g(theta)), and go through one routine that takes each part's
+derivative as a plain product and turns the sum into its logarithm by the Bell
+relation of `generic_cdf.hpp`, read in the ratios d_T F / F.
+
+Where R is one and no atom is inflated the wrapper carries its own cumulative
+functions to order six on both tails, expected information to order four and
+quantile; otherwise those members are not declared (a `requires` clause) and
+the generic routes answer, which the test checks against a direct sum of the
+masses.
+
+**Measured.** `tests/distrib/test_atom_mixture.cpp`, 15 cases and 3046
+assertions, green on gcc and on CUDA with the same counts. No reference file:
+every quantity has a twin inside the test. The atoms' masses plus the
+quadrature of the density between them add to one to 1e-10, and a discrete
+parent's masses sum to one over the support to 1e-12; the value agrees with
+the cell's log mass plus the parent's to 1e-15 (continuous) and 1e-13
+(discrete); every component of the orders one to six is within 2e-5
+(continuous) and 3e-5 (discrete) of five-point central differences of the order
+below, at the atoms and away from them; the expected information agrees with
+-E[l_ab], taken as the atoms' masses plus a quadrature, to 1e-8, and its
+derivatives to order four with differences to 2e-5; the cumulative functions
+agree with a quadrature plus the masses to 1e-9 and F + (1 - F) = 1 to 1e-12,
+and their derivatives to order six on both tails with differences to 3e-5; the
+quantile inverts the cumulative function to 1e-9; the mixed and the atom-parent
+components come out as exact zeros, not small ones.
+
+The worked case, a Poisson of mean 3.5 with zero inflated and five adjusted at
+pi = (0.20, 0.05, 0.75): the Poisson puts 0.030197 at zero and 0.132168 at
+five, so R = 0.867832, and the law reads 0.226097 at zero, keeping the
+Poisson's renormalized share on top of its own cell, and 0.05 at five, below
+the 0.132168 the Poisson gave there, which is what an inflated atom can never
+do.
+
+**The thread stack on CUDA, which was a conjecture and is now a measurement.**
+`alr_bijector::inverse_dk` asks for 512 doubles of scratch, 4 KB, and the
+cumulative route adds four arrays of 64 doubles, so the kernels looked likely
+to need the 8192-byte per-thread stack that `tests/main.cpp` sets. They do not:
+the same 3046 assertions pass at 8192, 4096, 2048 and at **1024 bytes, the
+CUDA default**, with no stack raised at all, the device memory price falling
+from 588 MB at 8192 to 252 at 4096, 84 at 2048 and nothing at 1024 (RTX 4070
+SUPER). nvcc places those arrays in local memory rather than in the call
+frame. A kernel that calls the generic routes on the wrapper still needs the
+raised stack, for the reason `tests/main.cpp` gives, which is the quadrature's
+own tensors and not this file's.
+
+**Chosen.** As above. A continuous parent takes at most two atoms, which is
+what `y_kinks()` can report so that a quadrature panel splits at each of them,
+a `distrib_kinks` carrying two points; a discrete parent declares no atom and
+takes up to six. `y_regularity` is inherited from a base specialized on the
+kind rather than declared, a discrete parent having none: nvcc instantiates
+every static member of a class eagerly where gcc waits for a use, so declaring
+it unconditionally compiles on one and not on the other.
+
+**Open.** The atom branches of the generic routes, which no distribution of
+this library needs: a continuous wrapper carries its own cumulative route and
+a discrete one declares no atom, so they would serve only a distribution
+written outside this file. The other wrappers of `note/piano_wrapper.md`,
+truncation first.

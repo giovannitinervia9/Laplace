@@ -1,0 +1,117 @@
+/**
+\defgroup distrib_atom_mixture Atom mixture
+\brief Wrapper adding fixed point masses, adjusted or inflated, to a univariate parent distribution.
+
+Defined in `<laplace/distrib/atom_mixture.hpp>` in namespace `laplace::distrib`, this module provides \ref laplace::distrib::atom_mixture_distrib "atom_mixture_distrib\<D, M...\>", the mode enumeration \ref laplace::distrib::atom_mode "atom_mode" with shorthands \ref laplace::distrib::adjusted "adjusted" and \ref laplace::distrib::inflated "inflated", and the factory functions \ref laplace::distrib::zero_adjusted "zero_adjusted()" and \ref laplace::distrib::zero_one_adjusted "zero_one_adjusted()". Every evaluation, derivative, expected-information, cumulative, and quantile member is marked `LAPLACE_HD`, while `start_value()` runs on the host only; see \ref distrib_core for the shared distribution interface and \ref distrib_atoms "the atom descriptors" for how declared atoms interact with quadrature splitting and observation derivatives. In `tests/distrib/test_atom_mixture.cpp`, internal consistency checks on the `gcc` build verify point masses and density integrals to \f$10^{-10}\f$, parameter derivatives to order \f$6\f$ against five-point central differences within \f$3 \times 10^{-5}\f$ relative, cumulative inversion within \f$10^{-9}\f$, and exact zeros in the block-diagonal derivative tensors.
+
+## Model and atom modes
+
+The mixture represents a two-step draw over \f$K = N + 1\f$ cells, consisting of \f$N\f$ atoms (one or two over a continuous parent, up to six over a discrete one) at fixed points \f$c_0, \dots, c_{N-1}\f$ (`point[j]`) and the parent distribution `D` as cell \f$N\f$:
+
+1. A cell is picked with probabilities \f$\pi_0, \dots, \pi_{N-1}, \pi_N\f$ on the open simplex (\f$\pi_j > 0\f$ and \f$\sum_{j=0}^{N} \pi_j = 1\f$), with cell \f$N\f$ belonging to the parent.
+2. In cell \f$j < N\f$, the observation is the point \f$c_j\f$; in cell \f$N\f$, it is drawn from the parent `D`, renormalized away from the adjusted atoms only.
+
+The two values of `atom_mode` differ in one thing only: whether the parent is renormalized off that point. An `adjusted` atom removes the parent's mass at \f$c_j\f$ and replaces it, whereas an `inflated` atom leaves the parent untouched so that the parent's own mass adds to the atom cell's mass. Let \f$f(y; \theta)\f$ be the parent's density or probability mass function, \f$p(c_k; \theta)\f$ be the parent's point mass at \f$c_k\f$ (identically zero when `D::kind == distrib_kind::continuous`), and \f$\mathcal{A}\f$ be the set of adjusted atom indices. Setting
+\f[
+R(\theta) = 1 - \sum_{k \in \mathcal{A}} p(c_k; \theta),
+\f]
+the mixture's point mass \f$q_j\f$ at atom \f$c_j\f$ and its density or mass \f$f_{\mathrm{mix}}(y; \theta, u)\f$ elsewhere (\f$y \notin \{c_0, \dots, c_{N-1}\}\f$) are
+\f[
+q_j = \begin{cases}
+\pi_j, & j \in \mathcal{A}\text{ (adjusted)}, \\
+\pi_j + \dfrac{\pi_N\, p(c_j; \theta)}{R(\theta)}, & j \notin \mathcal{A}\text{ (inflated)},
+\end{cases}
+\qquad
+f_{\mathrm{mix}}(y; \theta, u) = \frac{\pi_N\, f(y; \theta)}{R(\theta)}.
+\f]
+For every continuous parent, \f$p(c_k; \theta) = 0\f$ and \f$R(\theta) \equiv 1\f$, recorded by `unit_renormalization`. Because inflating a point where the parent has no mass gives the exact same formula term by term as adjusting it, `atom_mixture_distrib` rejects `atom_mode::inflated` on a continuous parent at compile time with a `static_assert` naming `atom_mode::adjusted` and `zero_adjusted()`. Each atom's mode is part of the type `atom_mixture_distrib<D, M...>` and never changes.
+
+The wrapper inherits `kind = D::kind`. It sets `n_atoms = N` when `D::kind == distrib_kind::continuous` and `n_atoms = 0` when `D::kind == distrib_kind::discrete`, because a discrete distribution's `kind` already states that the dominating measure counts its support points (\ref distrib_atoms "the atom descriptors"). Support bounds `support_lower()` and `support_upper()` extend the parent's support endpoints to include all atom positions `point[i]`, while `center()` and `scale()` forward to `parent`. Member `y_kinks()` reports the atom positions with `continuous_order = 0` so that a quadrature panel splits at each of them, which is why a continuous parent takes at most two atoms, a `distrib_kinks` carrying two points, while a discrete parent declares no atom and takes up to six, and `param_kinks(j, y)` forwards to `parent` for parent parameters and returns an empty `distrib_kinks` for the atom coordinates. The factories `zero_adjusted()` and `zero_one_adjusted()` construct one adjusted atom at \f$0\f$ and two adjusted atoms at \f$0\f$ and \f$1\f$.
+
+## Parameters and free coordinates
+
+Because the cell masses \f$(\pi_0, \dots, \pi_N)\f$ lie on the open simplex rather than an open box, they are not the declared parameters. Instead, `atom_alr` stores the \f$N\f$ free coordinates \f$u = (u_0, \dots, u_{N-1}) \in \mathbb{R}^N\f$ of the additive log-ratio map (\ref bijector_coupled "alr_bijector") with the parent's cell as the reference:
+\f[
+u_j = \log\!\left(\frac{\pi_j}{\pi_N}\right), \qquad j = 0, \dots, N - 1,
+\f]
+which equals \f$\log\bigl(\mathbb{P}(Y = c_j) / \mathbb{P}(Y \text{ is not an atom})\bigr)\f$ when all atoms are adjusted. Every \f$u \in \mathbb{R}^N\f$ yields a valid distribution, so each free coordinate has natural domain \f$(-\infty, \infty)\f$ (`-distrib_infinity` to `distrib_infinity`), `circular = false`, `regularity = infinitely_smooth`, `cdf_regularity = infinitely_smooth`, and `moves_support = false`.
+
+In `params`, the \f$Q =\f$ `D::n_params` descriptors of the parent come first, followed by the \f$N\f$ free coordinates named `"atom_alr1"` through `"atom_alr6"`. Thus `n_params = D::n_params + N`, keeping the parent's derivative tensor as a leading block. Member `cell_map()` returns `alr_bijector(N + 1)` and `log_cells(lpi)` evaluates \f$\log \pi_0, \dots, \log \pi_N\f$.
+
+## Shape of the derivatives
+
+Away from the atoms (\f$y \notin \{c_0, \dots, c_{N-1}\}\f$), the log-value \f$\ell(y) = \log f_{\mathrm{mix}}(y; \theta, u)\f$ splits as
+\f[
+\ell(y) = \log \pi_N(u) + \log f(y; \theta) - \log R(\theta),
+\f]
+a sum of terms each depending on only one block of parameters. Consequently, **every mixed component** with at least one parent index and at least one free-coordinate index **is identically zero**, and the order-\f$K\f$ derivative tensor (`logpdf_dk<K>` or `logpmf_dk<K>`, \f$1 \le K \le 6\f$) is block diagonal at every non-atom \f$y\f$. At an adjusted atom \f$y = c_j\f$, \f$\ell(c_j) = \log \pi_j(u)\f$ depends only on \f$u\f$, so every component with a parent index vanishes identically there as well. When \f$R(\theta) \ne 1\f$ (a discrete parent with adjusted atoms), the parameter derivatives of \f$\log R(\theta)\f$ are computed from the parent's log-mass derivatives at the adjusted points via the ratio and Bell relation of \ref distrib_generic "the generic routes" and subtracted from the parent block.
+
+The derivatives in the free coordinates \f$u\f$ require no new numerical code. With \f$S(u) = \log\bigl(1 + \sum_{b=0}^{N-1} e^{u_b}\bigr)\f$, we have \f$\log \pi_c = u_c - S\f$ for an atom \f$c < N\f$ and \f$\log \pi_N = -S\f$, so every derivative of order \f$K \ge 2\f$ equals \f$-\partial^K S\f$ for every cell, while order \f$1\f$ alone carries the Kronecker delta \f$\delta_{c, a} - \pi_a\f$. Since \f$\partial S / \partial u_a = \pi_a\f$,
+\f[
+\frac{\partial^K S}{\partial u_{a_1} \cdots \partial u_{a_K}} = \frac{\partial^{K-1} \pi_{a_1}}{\partial u_{a_2} \cdots \partial u_{a_K}},
+\f]
+which `alr_bijector::inverse_dk<K - 1>()` supplies (\ref bijector_coupled "coupled bijectors").
+
+An inflated atom \f$y = c_j\f$ is the single case where \f$\ell(c_j) = \log\bigl(\pi_j(u) + \pi_N(u)\, g(\theta)\bigr)\f$ with \f$g(\theta) = p(c_j; \theta) / R(\theta)\f$ is the logarithm of a two-term sum rather than a sum of logarithms. It has the same algebraic form \f$\log(A(u) + \pi_N(u)\, g(\theta))\f$ as the cumulative tail functions below, where each part is a product of factors in disjoint parameter blocks. Both go through `log_two_part_dk<K>()`, which forms the sub-multiset derivatives of each part as a plain product and converts the sum to its logarithm by the Bell relation read in the ratios \f$\partial_T F / F\f$ of \ref distrib_generic "the generic routes".
+
+## Closed routes and generic dispatch
+
+When `closed_routes` is `true` (`unit_renormalization && !any_inflated`, meaning a continuous parent with only adjusted atoms), the wrapper declares its own closed routes via `requires(closed_routes)`:
+
+- Cumulative functions `log_cdf(y)`, `log_ccdf(y)`, `cdf(y)`, `ccdf(y)`, and parameter derivatives `log_cdf_d1()` through `log_cdf_d6()`, `log_ccdf_d1()` through `log_ccdf_d6()`, and `log_cdf_tail_dk<K>(y, upper)` to order \f$6\f$. Each tail is \f$A(u) + \pi_N(u)\, F_p(y; \theta)\f$, where \f$A(u)\f$ sums \f$\pi_i\f$ over atoms \f$c_i \le y\f$ for the lower tail or \f$c_i > y\f$ for the upper tail and \f$F_p\f$ is the parent's corresponding tail, summed on the log scale and differentiated via `log_two_part_dk<K>()`.
+- Expected Fisher information `expected_info()` and its derivatives `expected_info_dk<K>()` (`expected_info_d1()` through `expected_info_d4()`, \f$1 \le K \le 4\f$). Because the parent's score is zero at every atom, the parent block is \f$\pi_N(u)\, I_{\mathrm{parent}}(\theta)\f$; the free-coordinate block is the categorical information \f$\operatorname{diag}(\pi) - \pi\pi^\top\f$ (over the \f$N\f$ atom probabilities) regardless of which cell the observation falls in; and the cross block between them is identically zero. Because each parameter sits in only one factor, any derivative component with indices in both blocks is a plain product of the two factors' derivatives with no Leibniz sum.
+- Quantile `quantile(p)`: returns `support_lower()` at \f$p = 0\f$, `support_upper()` at \f$p = 1\f$, and quiet `NaN` outside \f$[0, 1]\f$. For \f$p \in (0, 1)\f$, it sorts the atoms by position and walks them in ascending order, accumulating passed atom mass `acc`: at atom \f$i\f$, the cumulative probability just below the jump is \f$\mathrm{acc} + \pi_N F_p(c_i)\f$; if \f$p\f$ does not exceed that value, it returns `distrib_quantile(parent, (p - acc) / pi[N])`; if \f$p\f$ falls within the jump of height \f$\pi_i\f$, it returns \f$c_i\f$; otherwise it adds \f$\pi_i\f$ to `acc` and continues.
+
+When `closed_routes` is `false` (a discrete parent or any inflated atom), those cumulative, expected-information, and quantile members are not declared, and the generic routes of \ref distrib_generic "the generic routes" answer using the log-value and parameter derivatives supplied by the wrapper.
+
+The starting value `start_value(const std::vector<double>& y)` is always declared on the host. It partitions `y` into atom counts and non-atom observations, delegates the non-atom observations to `distrib_start_value(parent, rest)`, and sets each cell probability from its sample frequency floored at half an observation (\f$0.5 / n\f$ for sample size \f$n\f$) so that empty cells start strictly inside the open simplex. This is the sample-taking overload dispatched by \ref distrib_start "distrib_start_value(prototype, y)".
+
+## Accuracy, checks, and worked example
+
+`tests/distrib/test_atom_mixture.cpp` runs \f$13\f$ test cases and \f$2998\f$ assertions on the `gcc` build with no external reference file, checking every quantity against an internal mathematical twin.
+
+As a worked example from that test suite, consider `poisson_distrib{3.5}` with \f$0\f$ `inflated` and \f$5\f$ `adjusted` at cell probabilities \f$\pi = (0.20, 0.05, 0.75)\f$ (`atom_alr = {-1.3217558400, -2.7080502011}`). The Poisson parent puts \f$0.030197\f$ at \f$0\f$ and \f$0.132168\f$ at \f$5\f$, so \f$R = 1 - 0.132168 = 0.867832\f$ because only the adjusted atom is removed from the parent. At \f$y = 0\f$ (inflated), the law reads \f$0.226097\f$, keeping the Poisson's renormalized share \f$0.75 \times 0.030197 / 0.867832\f$ on top of its own cell mass \f$0.20\f$; at \f$y = 5\f$ (adjusted), it reads \f$0.05\f$, replacing the Poisson's mass \f$0.132168\f$ with a smaller value.
+
+| Check in `tests/distrib/test_atom_mixture.cpp` | Scope | Test tolerance |
+|---|---|---|
+| Cell probabilities sum to \f$1\f$ | Continuous parents (`gamma2`, `gaussian1`) | \f$10^{-15}\f$ |
+| Atom masses plus `panels_quad()` integral | Continuous parents (`gamma2`), on \f$(10^{-12}, \infty)\f$ | \f$10^{-10}\f$ |
+| Discrete masses sum to \f$1\f$ | Poisson with zero inflated and five adjusted (\f$0 \le k \le 200\f$) | \f$10^{-12}\f$ |
+| `logpdf()` / `logpmf()` vs cell and parent formula | Continuous (\f$10^{-15}\f$) and discrete (\f$10^{-13}\f$); `exp(log_renorm())` vs \f$R\f$ (\f$10^{-14}\f$) | \f$10^{-15}\f$ to \f$10^{-13}\f$ |
+| `logpdf_dk<1..6>()` and `logpmf_dk<1..6>()` vs five-point differences | At atoms and away from atoms, relative to order scale | \f$2 \times 10^{-5}\f$ (cont.), \f$3 \times 10^{-5}\f$ (disc.) |
+| `expected_info()` vs \f$-\mathbb{E}[\ell_{ab}]\f$ (atoms plus `panels_quad()`) | Zero-adjusted `gamma2`, relative to order-2 scale | \f$10^{-8}\f$ |
+| `expected_info_dk<1..4>()` vs five-point differences | Zero-adjusted `gamma2`, relative to order scale | \f$2 \times 10^{-5}\f$ |
+| `cdf()`, `ccdf()`, `log_cdf()` vs atoms plus `panels_quad()` | Continuous parents (`cdf` \f$10^{-9}\f$, `F + (1 - F)` \f$10^{-12}\f$, `log_cdf` \f$10^{-13}\f$) | \f$10^{-9}\f$ to \f$10^{-13}\f$ |
+| Generic `distrib_cdf()` and `distrib_ccdf()` vs direct sum | Poisson with zero inflated and five adjusted | \f$10^{-11}\f$ |
+| `log_cdf_dk<1..6>()` and `log_ccdf_dk<1..6>()` vs five-point differences | Zero-adjusted `gamma2`, both tails, relative to order scale | \f$3 \times 10^{-5}\f$ |
+| `quantile(p)` inverts `cdf(q)` (exact \f$0\f$ inside jump) | Zero-adjusted `gamma2` and zero-one-adjusted `gaussian1` | \f$10^{-9}\f$ |
+| `start_value(y)` recovers frequencies and parent mean | Zero-adjusted `gamma2`; empty cell starts in \f$(0, 0.02)\f$ | \f$10^{-12}\f$ |
+| Block-diagonal tensor structure | Zero-one-adjusted `gaussian1`, mixed and atom-parent entries | Exact (\f$0.0\f$) |
+
+## Kokkos usage
+
+The following kernel constructs a zero-adjusted gamma distribution and evaluates its log-density, score, and cumulative distribution in parallel:
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/atom_mixture.hpp>
+#include <laplace/distrib/gamma2.hpp>
+
+void eval_zero_adjusted_gamma(Kokkos::View<const double*> y, Kokkos::View<double*> out,
+                              double mu, double sigma2, double atom_alr) {
+  const auto d = laplace::distrib::zero_adjusted(laplace::distrib::gamma2_distrib{mu, sigma2}, atom_alr);
+  Kokkos::parallel_for("eval_zag", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0] + d.cdf(y(i));
+  });
+}
+```
+
+## Members
+
+Namespace `laplace::distrib` provides:
+
+- \ref laplace::distrib::atom_mode "atom_mode" — enumeration with values `adjusted` and `inflated`, plus constexpr shorthands \ref laplace::distrib::adjusted "adjusted" and \ref laplace::distrib::inflated "inflated".
+- \ref laplace::distrib::atom_mixture_distrib "atom_mixture_distrib\<D, M...\>" — distribution wrapper with fields `parent`, `atom_alr`, and `point`, static descriptors `n_atom_points`, `any_inflated`, `unit_renormalization`, `closed_routes`, `kind`, `n_params`, `n_atoms`, `params`, and `y_regularity`, cell queries `cell_map()`, `log_cells()`, `atom_point()`, `atom_log_mass()`, `atom_at()`, `parent_log_value()`, and `log_renorm()`, core evaluators `support_lower()`, `support_upper()`, `center()`, `scale()`, `y_kinks()`, `param_kinks()`, `log_value()`, `log_value_dk()`, `log_two_part_dk()`, `logpdf()`, `logpdf_d1()`..`logpdf_d6()`, `logpdf_dk()`, `logpmf()`, `logpmf_d1()`..`logpmf_d6()`, and `logpmf_dk()`, closed routes (when `closed_routes` is `true`) `expected_info()`, `expected_info_d1()`..`expected_info_d4()`, `expected_info_dk()`, `log_cdf_tail()`, `log_cdf_tail_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `log_cdf_d1()`..`log_cdf_d6()`, `log_ccdf_d1()`..`log_ccdf_d6()`, and `quantile()`, and host starting value `start_value()`.
+- \ref laplace::distrib::zero_adjusted "zero_adjusted()" — constructs `atom_mixture_distrib\<D, adjusted\>` with one adjusted atom at \f$0\f$.
+- \ref laplace::distrib::zero_one_adjusted "zero_one_adjusted()" — constructs `atom_mixture_distrib\<D, adjusted, adjusted\>` with adjusted atoms at \f$0\f$ and \f$1\f$.
+*/
