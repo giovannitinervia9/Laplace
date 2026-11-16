@@ -3633,8 +3633,8 @@ log-Jacobian of theta -> M with its derivatives (`log_jacobian`,
   Y = L^-1 by forward substitution; along a tuple of K positions, with Y[S]
   the derivative along the positions in the mask S,
   Y[S] = -Y[0] sum_(T nonempty in S) L[T] Y[S \ T] (from L Y = I), then
-  M^-1[F] = sum_(T in F) Y[T]^T Y[F \ T] by Leibniz; one call of
-  `cholesky_dK` per sub-tuple, about 3^K p^3/6 + 2^K p^3/3 operations, and a
+  M^-1[F] = sum_(T in F) Y[T]^T Y[F \ T] by Leibniz; about
+  3^K p^3/6 + 2^K p^3/3 operations for K distinct positions, and a
   derivative is zero by structure when every product has a zero factor.
   Scratch 64 p^2 + 64 p(p+1)/2 + p^2 doubles before the structure's own.
 - Why L and not M. The first version ran the same recursion on M,
@@ -3679,29 +3679,45 @@ their tolerance (1e-6 of the largest entries).
 
 ns per call (`benchmarks/pdmat_unstructured.cpp`, u_k = 0.1 x + 0.05 k, x
 uniform in [-3, 3]; one gcc thread / 8 OpenMP threads / CUDA), M^-1 at
+- Equal sub-tuples are computed once. Two masks that select the same
+  multiset of indices give the same L[T] and Y[T], so `cholesky_dK` is
+  called and Y[T] computed only for the canonical mask of each class (the
+  lowest positions of each group of equal indices,
+  `detail/tuple_classes.hpp`), and every other mask reads it: prod (m_v + 1) - 1
+  sub-tuples instead of 2^K - 1, with m_v the number of times index v occurs
+  in the tuple (6 instead of 63 for the pure tuple of order 6, unchanged for
+  K distinct indices). The sums still run over every subset, so the result
+  is rounded exactly as without the merging: the error maxima of the
+  references are the same, on gcc and CUDA. Summing over the classes
+  instead, with binomial weights prod_g C(c_g, a_g), was 2 to 5 times faster
+  again at order 6 but moved the errors (log_cholesky order 4 from 28.2 to
+  34.7 ulpN, order 5 from 19.2 to 25.6) and was not taken (decided with
+  Giovanni on 2026-11-16).
 order 0, and order 6 along the pure tuple (0, ..., 0) and along six distinct
-coordinates:
+coordinates (the order-6 columns of log_cholesky and partial_corr measured on
+2026-11-16 with the merging of equal sub-tuples; before it, the pure tuple
+cost 16100 / 2560 / 782 ns at p = 3 and 26582 / 3970 / 1379 ns at p = 4 for
+log_cholesky):
 
 | B, p | M^-1, K = 0 | M^-1, K = 6, pure | M^-1, K = 6, distinct | log det, K = 0 |
 |---|---|---|---|---|
-| log_cholesky, 3 | 46 / 15 / 2.1 | 16100 / 2560 / 782 | 6130 / 1136 / 232 | 2.3 / 3.5 / 1.0 |
-| log_cholesky, 4 | 105 / 27 / 2.8 | 26582 / 3970 / 1379 | 9982 / 1702 / 456 | 2.5 / 3.0 / 1.1 |
-| partial_corr, 3 | 104 / 26 / 2.7 | 18677 / 3483 / 756 | (q = 3) | 83 / 14 / 2.1 |
-| partial_corr, 4 | 185 / 39 / 4.2 | 29347 / 5003 / 1402 | 13710 / 2531 / 616 | 171 / 27 / 3.4 |
+| log_cholesky, 3 | 46 / 15 / 2.1 | 3698 / 547 / 114 | 6558 / 1172 / 222 | 2.3 / 3.5 / 1.0 |
+| log_cholesky, 4 | 105 / 27 / 2.8 | 5635 / 779 / 215 | 8580 / 1194 / 461 | 2.5 / 3.0 / 1.1 |
+| partial_corr, 3 | 104 / 26 / 2.7 | 3872 / 577 / 127 | (q = 3) | 83 / 14 / 2.1 |
+| partial_corr, 4 | 185 / 39 / 4.2 | 5740 / 820 / 240 | 11644 / 1646 / 608 | 171 / 27 / 3.4 |
 | matrix_log, 3 | 474 / 111 / 55 | 9493 / 1832 / 1469 | 169617 / 35381 / 29282 | 4.6 / 26 / 9.0 |
 | matrix_log, 4 | 1123 / 166 / 127 | 11915 / 2937 / 3308 | 296256 / 64124 / 61653 | 3.0 / 32 / 10 |
 
 The pure tuple is the dear one for the generic route: every one of its 63
 sub-tuples is a nonzero derivative of L (for log_cholesky the diagonal
 coordinate (0, 0) moves the whole column 0), while six distinct coordinates
-leave most L[T] structurally zero. Equal sub-tuples are computed again (64
-calls where prod (m_v + 1) = 7 would do for the pure tuple); merging them is
-the known ceiling, marked in the code. For matrix_log the order of cost is
+leave most L[T] structurally zero; with the merging of equal sub-tuples the
+pure tuple costs about what the distinct one does (table above). For matrix_log the order of cost is
 reversed (the bijector's Taylor arithmetic grows with the number of distinct
 coordinates). log det costs 1-171 ns, partial_corr's being the q
 logarithms of cosh.
 
-**Open.** The sub-tuple merging above; the generic route needs the
+**Open.** The generic route needs the
 Cholesky factor (`closed_factor`): a structure with neither M^-1 nor L in
 closed form would need the factor computed from M first.
 

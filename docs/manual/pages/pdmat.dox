@@ -52,7 +52,7 @@ The template \ref laplace::pdmat::unstructured_pdmat "unstructured_pdmat\<B\>" w
 L[\emptyset]\,Y[S] = -\sum_{\emptyset \ne T \subseteq S} L[T]\,Y[S \setminus T], \qquad
 M^{-1}[S] = \sum_{T \subseteq S} Y[T]^\top Y[S \setminus T],
 \f]
-in roughly \f$3^K p^3/6 + 2^K p^3/3\f$ operations, and differentiate \f$\log\det M\f$ from \f$L\f$ (directly for `partial_corr_bijector`). `log_jacobian()` returns `B`'s inverse \f$\log\lvert\det J\rvert\f$; `scratch_size()` adds \f$S_B\f$ (`B::scratch_size()`, about 25000 doubles for matrix logarithm at \f$p = 4\f$).
+in roughly \f$3^K p^3/6 + 2^K p^3/3\f$ operations for \f$K\f$ distinct indices. When a tuple repeats an index, sub-masks \f$T\f$ and \f$T'\f$ selecting the same multiset give \f$L[T] = L[T']\f$ and \f$Y[T] = Y[T']\f$, so \f$L[T]\f$ (one `cholesky_dK` call) and \f$Y[T]\f$ are computed once on one representative per class and read by every other sub-mask in the class. For multiplicities \f$m_v\f$ of index \f$v\f$, this evaluates \f$\prod_v (m_v + 1) - 1\f$ distinct sub-tuples instead of \f$2^K - 1\f$, namely 6 instead of 63 for the pure tuple \f$(i, \dots, i)\f$ of order 6 and \f$2^K - 1\f$ when all \f$K\f$ indices are distinct; the sums in both formulas still run over every sub-mask, so the result and its rounding are those of the plain recursion. Generic structures differentiate \f$\log\det M\f$ from \f$L\f$ (directly for `partial_corr_bijector`). `log_jacobian()` returns `B`'s inverse \f$\log\lvert\det J\rvert\f$; `scratch_size()` adds \f$S_B\f$ (`B::scratch_size()`, about 25000 doubles for matrix logarithm at \f$p = 4\f$).
 
 ### Toeplitz structure
 

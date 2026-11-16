@@ -6,6 +6,8 @@
 // space (OpenMP or CUDA). Each call has its own row of a scratch View in the
 // space's memory, as a caller on the device would provide. M, L and the
 // log-Jacobian are the bijector's (benchmarks/bijector_coupled.cpp).
+// With the argument "merge": M^-1 at orders 4-6 along pure, grouped
+// (0, ..., 0, 1, ..., 1) and distinct tuples, p = 3, 5, 10 (merge_grid).
 #include "measure.hpp"
 
 #include <laplace/pdmat/unstructured.hpp>
@@ -14,26 +16,31 @@
 #include <chrono>
 #include <cstdio>
 #include <random>
+#include <string>
 #include <vector>
 
 namespace {
 
 namespace lp = laplace::pdmat;
 namespace lb = laplace::bijector;
-constexpr int max_n = 10;  // free size at p = 4
+constexpr int max_n = 55;  // free size at p = 10
 constexpr int calls = 20000;
 
-// q: 0 M^-1, 1 log det; mixed: the tuple (0, 1, ..., K-1), else (0, ..., 0)
+// q: 0 M^-1, 1 log det; mixed: the tuple (0, 1, ..., K-1), else (0, ..., 0);
+// grouped (mixed ignored): two groups, (0, ..., 0, 1, ..., 1) with K/2 ones
 template <class S, int K>
 struct Bench {
   S s;
   int q;
   bool mixed;
+  bool grouped = false;
   KOKKOS_INLINE_FUNCTION double operator()(double x, double* w) const {
     double u[max_n], out[max_n] = {};
     int idx[K > 0 ? K : 1] = {};
     for (int k = 0; k < max_n; ++k) u[k] = 0.1 * x + 0.05 * k;
-    if (mixed)
+    if (grouped)
+      for (int k = 0; k < K; ++k) idx[k] = k >= K - K / 2 ? 1 : 0;
+    else if (mixed)
       for (int k = 0; k < K; ++k) idx[k] = k;
     if constexpr (K == 0) {
       if (q == 0) s.inverse(u, out, w);
@@ -83,6 +90,31 @@ void one(const char* name, int p, int q, bool mixed, const std::vector<double>& 
               K, K == 0 ? "" : (mixed ? "mixed" : "pure"), h, d, bench::Exec::name());
 }
 
+// the grid of the sub-tuple merging: orders 4-6, pure / grouped / distinct
+// tuples, p = 3, 5, 10, M^-1 only; fewer calls as p grows
+template <class S, int K>
+void merge_one(const char* name, int p, int tuple, const std::vector<double>& xs) {
+  const S s(p);
+  if (tuple == 2 && K > s.n_params()) return;
+  const int n = p == 3 ? 4000 : p == 5 ? 1000 : 100;
+  const std::vector<double> few(xs.begin(), xs.begin() + n);
+  const Bench<S, K> f{s, 0, tuple == 2, tuple == 1};
+  const double h = time_calls<bench::HostOne>(f, few, s.scratch_size(), 3);
+  const double d = time_calls<bench::Exec>(f, few, s.scratch_size(), 5);
+  std::printf("%-13s p=%-2d K=%d %-8s %12.1f ns (1 thread) %11.1f ns (%s)\n", name, p, K,
+              tuple == 0 ? "pure" : tuple == 1 ? "grouped" : "distinct", h, d, bench::Exec::name());
+}
+
+template <class S>
+void merge_grid(const char* name, const std::vector<double>& xs) {
+  for (int p : {3, 5, 10})
+    for (int tuple : {0, 1, 2}) {
+      merge_one<S, 4>(name, p, tuple, xs);
+      merge_one<S, 5>(name, p, tuple, xs);
+      merge_one<S, 6>(name, p, tuple, xs);
+    }
+}
+
 template <class S>
 void all(const char* name, const std::vector<double>& xs) {
   for (int p : {3, 4}) {
@@ -106,6 +138,13 @@ int main(int argc, char** argv) {
     std::uniform_real_distribution<double> u(-3.0, 3.0);
     std::vector<double> xs(calls);
     for (double& x : xs) x = u(rng);
+    if (argc > 1 && std::string(argv[1]) == "merge") {
+      merge_grid<lp::unstructured_pdmat<lb::log_cholesky_bijector>>("log_cholesky", xs);
+      merge_grid<lp::unstructured_corr_pdmat>("partial_corr", xs);
+      merge_grid<lp::unstructured_pdmat<lb::matrix_log_bijector>>("matrix_log", xs);
+      Kokkos::finalize();
+      return 0;
+    }
     all<lp::unstructured_pdmat<lb::log_cholesky_bijector>>("log_cholesky", xs);
     all<lp::unstructured_corr_pdmat>("partial_corr", xs);
     // matrix_log: about 25000 doubles of scratch a call, so fewer calls

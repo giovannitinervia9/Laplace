@@ -48,6 +48,7 @@
 #include <laplace/math/elementary.hpp>
 #include <laplace/math/faa_di_bruno.hpp>
 #include <laplace/bijector/scalar.hpp>
+#include <laplace/pdmat/detail/tuple_classes.hpp>
 
 #include <concepts>
 
@@ -598,20 +599,30 @@ LAPLACE_HD void generic_inverse(const S& s, const double* t, double* m, double* 
   add_gram(p, Y, Y, m);
 }
 
-// ponytail: a tuple with repeated indices recomputes equal sub-tuples (up to
-// 2^K calls where prod (m_v + 1) would do); merge them by multiset if the cost
-// matters.
+// Equal indices of the tuple are interchangeable (detail/tuple_classes.hpp):
+// equal sub-tuples have the same L[T] and Y[Q], so cholesky_dK is called and
+// Y[Q] computed for the canonical mask of each class only, prod (m_v + 1) - 1
+// times instead of 2^K - 1 (6 instead of 63 for a pure tuple of order 6), m_v
+// the multiplicities; the others read it through rep. The sums still run over
+// every subset: summing over the classes with binomial weights was 2 to 5 times
+// faster again but moved the errors (log_cholesky order 4 from 28 to 35 ulpN),
+// and this way the error maxima of the references are those of the version
+// without merging (measured on 2026-11-16).
 template <int K, class S>
 LAPLACE_HD bool generic_inverse_dk(const S& s, const double* t, const int (&idx)[K], double* out, double* w) {
-  constexpr int NM = 1 << K;
+  constexpr int NM = 1 << K, F = NM - 1;
   const int p = s.dim, pp = p * p, np = packed_size(p);
-  double* Y = w;                         // Y[Q] for each mask Q, NM full p x p matrices
-  double* LT = Y + generic_masks * pp;   // L[T], NM packed matrices
+  double* Y = w;                         // Y[Q] for each canonical mask Q, full p x p matrices
+  double* LT = Y + generic_masks * pp;   // L[T] for each canonical mask T, packed
   double* acc = LT + generic_masks * np;  // the sum of products
   double* ws = w + generic_inverse_scratch(p);
-  bool lz[NM], yz[NM];  // nonzero by structure
+  const tuple_classes<K> cl(idx);
+  const unsigned char* rep = cl.rep;
+  bool lz[NM], yz[NM];  // nonzero by structure, at the canonical masks
   s.cholesky(t, LT, ws);
+  lz[0] = true;
   for (int T = 1; T < NM; ++T) {
+    if (rep[T] != T) continue;
     int sub[K], k = 0;
     for (int q = 0; q < K; ++q)
       if (T & (1 << q)) sub[k++] = idx[q];
@@ -620,13 +631,14 @@ LAPLACE_HD bool generic_inverse_dk(const S& s, const double* t, const int (&idx)
   lower_inverse(p, LT, Y);
   yz[0] = true;
   for (int Q = 1; Q < NM; ++Q) {
+    if (rep[Q] != Q) continue;
     yz[Q] = false;
     for (int e = 0; e < pp; ++e) acc[e] = 0.0;
     for (int T = Q; T != 0; T = (T - 1) & Q) {
-      const int R = Q ^ T;
-      if (!lz[T] || !yz[R]) continue;
+      const int R = rep[Q ^ T];
+      if (!lz[rep[T]] || !yz[R]) continue;
       yz[Q] = true;
-      const double* L = LT + T * np;
+      const double* L = LT + rep[T] * np;
       const double* YR = Y + R * pp;
       for (int i = 0; i < p; ++i)
         for (int k = 0; k <= i; ++k) {
@@ -644,11 +656,11 @@ LAPLACE_HD bool generic_inverse_dk(const S& s, const double* t, const int (&idx)
       }
   }
   bool nz = false;
-  for (int T = 0; T < NM; ++T) nz = nz || (yz[T] && yz[(NM - 1) ^ T]);
+  for (int T = 0; T < NM; ++T) nz = nz || (yz[rep[T]] && yz[rep[F ^ T]]);
   if (!nz) return false;
   for (int k = 0; k < np; ++k) out[k] = 0.0;
   for (int T = 0; T < NM; ++T)
-    if (yz[T] && yz[(NM - 1) ^ T]) add_gram(p, Y + T * pp, Y + ((NM - 1) ^ T) * pp, out);
+    if (yz[rep[T]] && yz[rep[F ^ T]]) add_gram(p, Y + rep[T] * pp, Y + rep[F ^ T] * pp, out);
   return true;
 }
 
