@@ -168,7 +168,7 @@ template <class S>
 concept constant_null_space_psdmat = pdmat::psdmat_structure<S> && S::constant_null_space && S::supplies_null_space;
 
 /**
- * \ingroup distrib_multivariate
+ * \ingroup distrib_mvgaussian1
  * \brief Precomputed state of a rank-deficient multivariate Gaussian at fixed \f$\theta\f$.
  *
  * Written by `theta_state()` (and, for the improper specialization of
@@ -183,47 +183,47 @@ concept constant_null_space_psdmat = pdmat::psdmat_structure<S> && S::constant_n
  */
 struct mvgaussian_rank_deficient_state {
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian1
    * \brief Pointer to caller-owned matrix structure parameter vector \f$\theta\f$ of length `n_params()`.
    */
   const double* theta;
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian1
    * \brief Log pseudo-determinant \f$\log\lvert M(\theta)\rvert_+\f$ (logarithm of the product of the \f$\rho\f$ nonzero eigenvalues).
    */
   double log_det;
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian1
    * \brief Pointer into caller workspace holding the packed lower-triangular matrix of the quadratic form: \f$\Sigma^+\f$ (degenerate) or \f$Q\f$ (improper).
    */
   const double* quadratic;
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian1
    * \brief Pointer into caller workspace holding the packed lower Cholesky factor \f$L\f$ of \f$M + cP\f$, or `nullptr` when produced by `theta_state()` of the improper class.
    */
   const double* factor = nullptr;
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian1
    * \brief Pointer into caller workspace holding packed \f$(M + cP)^{-1}\f$, or `nullptr` when produced by `theta_state()` of the improper class.
    */
   const double* shifted_inverse = nullptr;
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian1
    * \brief Fixed shift \f$c = \operatorname{tr} M / \rho\f$ evaluated at `theta` (`1.0` if \f$\rho = 0\f$ or \f$\operatorname{tr} M \le 0\f$).
    */
   double shift = 1.0;
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian1
    * \brief Pointer into caller workspace holding the structure's evaluated log pseudo-determinant state (read by `log_pdet_dk_at()`), or `nullptr`.
    */
   double* pdet = nullptr;
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian1
    * \brief Pointer to the precomputed \f$\theta\f$-derivative table attached by `with_theta_table()`, or `nullptr` if none.
    */
   const double* table = nullptr;
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian1
    * \brief Largest \f$\theta\f$-derivative order covered by `table` (`0` if none).
    */
   int table_order = 0;

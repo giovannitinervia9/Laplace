@@ -238,6 +238,13 @@ parent here, in tree order; the module pages define their groups without
 
 /** \addtogroup distrib_multivariate
 \ingroup distrib */
+/** \defgroup distrib_mvgaussian Multivariate Gaussian
+\ingroup distrib_multivariate
+\brief The multivariate Gaussian distribution in two parametrizations. */
+/** \addtogroup distrib_mvgaussian1
+\ingroup distrib_mvgaussian */
+/** \addtogroup distrib_mvgaussian2
+\ingroup distrib_mvgaussian */
 
 /** \defgroup optimizers Optimizers
 \brief Objectives, stopping rules, line searches and the dense curvature solver for unconstrained minimization on the host. */

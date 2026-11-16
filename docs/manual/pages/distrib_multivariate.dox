@@ -1,0 +1,63 @@
+/**
+\defgroup distrib_multivariate Multivariate
+\brief The interface shared by the multivariate distributions: one vector parameter that varies by unit, and the parameters of a matrix structure.
+
+Include `<laplace/distrib/multivariate_core.hpp>` for the shared interface. Every type and function on this page lives in namespace `laplace::distrib`. The distributions themselves are documented on their own pages: the multivariate Gaussian in the covariance parametrization (\ref distrib_mvgaussian1 "mvgaussian1") and in the precision parametrization (\ref distrib_mvgaussian2 "mvgaussian2").
+
+## The interface
+
+A multivariate distribution models the concept \ref laplace::distrib::multivariate_distrib "multivariate_distrib". It has one vector parameter \f$\mu \in \mathbb{R}^d\f$, which varies by unit, and the parameter vector \f$\theta \in \mathbb{R}^q\f$ of a matrix structure \f$M(\theta)\f$ modeling \ref laplace::pdmat::pdmat_structure "pdmat_structure" (see \ref pdmat "Positive definite structures"). The distribution holds its structure by value in the public member `structure`, so that it can be copied into Kokkos kernels.
+
+| Member | Meaning |
+|---|---|
+| `normalization` | Static \ref laplace::distrib::distrib_normalization "distrib_normalization" constant (see below) |
+| `state_type` | Type of the precomputed state returned by `theta_state()` |
+| `structure` | Matrix structure \f$M(\theta)\f$, held by value |
+| `dim()` | Dimension \f$d\f$ of the observation \f$y\f$ and of the vector parameter \f$\mu\f$ |
+| `n_params()` | Number \f$q\f$ of structure parameters |
+| `state_size()` | Doubles that hold the state |
+| `scratch_size()` | Doubles of working scratch for `theta_state()` and the derivative blocks |
+| `theta_state(theta, w)` | Precomputes into `w` what depends on \f$\theta\f$ only |
+| `logpdf(state, y, mu)` | Log-density of the unit \f$y\f$ at the vector parameter \f$\mu\f$ |
+| `logpdf_dmu_dk<A, K>(state, y, mu, idx, out, w)` | Block with \f$A\f$ derivatives in \f$\mu\f$ and \f$K\f$ in \f$\theta\f$, \f$A + K \le 6\f$ |
+| `logpdf_dy_dk<J, K>(state, y, mu, idx, out, w)` | Block with \f$J\f$ derivatives in \f$y\f$ and \f$K\f$ in \f$\theta\f$, \f$J + K \le 6\f$ |
+
+The concept requires `normalization`, `state_type`, `dim()`, `n_params()`, `state_size()`, `scratch_size()`, `theta_state()`, `logpdf()` and the first-order blocks `logpdf_dmu_dk<1, 0>` and `logpdf_dmu_dk<0, 1>`. Each distribution page lists the further members it provides (expected information, draws, moments, starting values).
+
+## State and scratch
+
+The work is split between a state, which depends on \f$\theta\f$ only, and the evaluations of the units. Calling `theta_state(theta, w)` writes the state into `w[0, state_size())`, using `w[state_size(), state_size() + scratch_size())` as working scratch, and returns a small state object that points into `w` and at `theta`. Both `w` and `theta` must remain alive while the state is used. When \f$\theta\f$ is shared by the units, `theta_state()` runs once; when \f$\theta\f$ varies by unit, each unit builds its own state with the same calls.
+
+## Derivative blocks
+
+`logpdf_dmu_dk<A, K>(state, y, mu, idx, out, w)` writes the derivative of the log-density of order \f$A\f$ in \f$\mu\f$ and order \f$K\f$ in \f$\theta\f$ along the sorted index tuple `idx` (ignored when \f$K = 0\f$), for \f$A + K \le 6\f$; `w` holds `scratch_size()` doubles. The output `out` is a scalar when \f$A = 0\f$, a \f$d\f$-vector when \f$A = 1\f$, a packed symmetric \f$d \times d\f$ matrix when \f$A = 2\f$, and a \ref laplace::distrib::sym_tensor "sym_tensor" over \f$d\f$ components when \f$A \ge 3\f$. When a block vanishes identically by structure, the call returns `false` and leaves `out` untouched. `logpdf_dy_dk<J, K>` gives the same blocks in the observation \f$y\f$, equal to \f$(-1)^J\f$ times the \f$\mu\f$ block with \f$A = J\f$.
+
+Symmetric \f$d \times d\f$ matrices are stored packed by rows of the lower triangle, with entry \f$(i, j)\f$, \f$0 \le j \le i < d\f$, at index \f$i(i + 1)/2 + j\f$ (see \ref laplace::pdmat::packed_index "packed_index()"). Tensors of order 3 or higher use the `sym_tensor` order, the sorted tuples in lexicographic order (see \ref distrib_core "The structure of a distribution"); the two orders already differ at order 2.
+
+## Expected information blocks
+
+The expected Fisher information of a multivariate distribution is split into three blocks, selected by \ref laplace::distrib::distrib_mv_info_block "distrib_mv_info_block": `vector_vector`, the \f$(\mu, \mu)\f$ block; `vector_rest`, the cross block \f$(\mu, \theta)\f$; and `rest_rest`, the \f$(\theta, \theta)\f$ block.
+
+## Normalization classes
+
+The static constant `normalization`, of type `distrib_normalization`, states what the matrix parameter allows:
+
+- `proper`: a positive definite matrix, as covariance or as precision.
+- `degenerate`: a singular covariance \f$\Sigma\f$; the distribution is a proper law on the affine subspace \f$\mu + \operatorname{col}(\Sigma)\f$.
+- `improper`: a singular precision \f$Q\f$; the density is flat along the null space of \f$Q\f$.
+
+The two singular classes exist over a positive semidefinite structure `S` modeling \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat": a \ref laplace::pdmat::psdmat_structure "psdmat_structure" (see \ref psdmat "Positive semidefinite structures") with `S::constant_null_space` and `S::supplies_null_space` both `true`. Its null space does not depend on \f$\theta\f$, and `null_space_basis()` supplies an orthonormal basis of it, so the range is the same for every \f$\theta\f$. The library provides one such structure, \ref laplace::pdmat::weighted_sum_psdmat "weighted_sum_psdmat"; \ref laplace::pdmat::reduced_rank_psdmat "reduced_rank_psdmat", whose null space moves with \f$\theta\f$, is excluded at compile time.
+
+## Sample summary
+
+On the host, \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample(y, n, d)" reads \f$n\f$ contiguous \f$d\f$-vectors (unit \f$i\f$ at `y[i * d]` to `y[i * d + d - 1]`) and returns a \ref laplace::distrib::distrib_mv_sample_summary "distrib_mv_sample_summary" with `count`, `dim`, the sample `mean` and the packed sample `covariance` with divisor \f$n\f$, computed in two passes (all zero when \f$n = 0\f$). The `start_value()` members of the distributions read this summary.
+
+## Module types and functions
+
+- \ref laplace::distrib::multivariate_distrib "multivariate_distrib" — concept of a multivariate distribution
+- \ref laplace::distrib::distrib_normalization "distrib_normalization" — normalization class of the matrix parameter (`proper`, `degenerate`, `improper`)
+- \ref laplace::distrib::distrib_mv_info_block "distrib_mv_info_block" — block selector for the expected information (`vector_vector`, `vector_rest`, `rest_rest`)
+- \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat" — concept of a positive semidefinite structure with a constant, supplied null space
+- \ref laplace::distrib::distrib_mv_sample_summary "distrib_mv_sample_summary" — sample count, dimension, mean and packed covariance
+- \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample()" — computes the summary from \f$n\f$ observation vectors on the host
+*/

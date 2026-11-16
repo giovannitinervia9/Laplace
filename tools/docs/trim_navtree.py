@@ -8,7 +8,8 @@ Doxygen lists every member of a group (functions, variables, typedefs, and the
 members of each struct) in the navigation tree, which buries the modules under
 hundreds of entries. This rewrites each group__*.js so that a group keeps only
 its subgroups and its classes, structs and concepts, without their members;
-a group that has subgroups keeps only its subgroups. The pages still
+a group that has subgroups keeps only its subgroups, and the group of a
+distribution keeps only its X_distrib type (not its state). The pages still
 document every member.
 """
 import json
@@ -41,6 +42,10 @@ for p in sorted(out.glob("group__*.js")):
         if href and kind.match(href):
             # a subgroup's child is the name of its own file; a type's members are dropped
             kept.append([title, href, child if isinstance(child, str) else None])
+    # a distribution's group shows the distribution only, not its state or helper types
+    if any(re.match(r"\w+_distrib\b", title) for title, _, _ in kept):
+        # one entry per distribution, also when a partial specialization (a singular class) has its own page
+        kept = [e for i, e in enumerate(kept) if re.match(r"\w+_distrib\b", e[0]) and e[0] not in [k[0] for k in kept[:i]]]
     if count(kept) == count(items):
         continue
     n_removed += count(items) - count(kept)

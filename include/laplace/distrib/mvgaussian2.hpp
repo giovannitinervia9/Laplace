@@ -17,7 +17,7 @@
 namespace laplace::distrib {
 
 /**
- * \ingroup distrib_multivariate
+ * \ingroup distrib_mvgaussian2
  * \brief Precomputed state for \c mvgaussian2_distrib at fixed matrix parameters \f$\theta\f$.
  *
  * Holds the parameter pointer together with \f$\log\det Q(\theta)\f$ and
@@ -34,19 +34,19 @@ struct mvgaussian2_state {
   /// Packed lower-triangular Cholesky factor \f$L\f$ with \f$Q = L L^\top\f$.
   const double* factor;      // L with Q = L L', packed
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Pointer to the precomputed \f$\theta\f$-derivative table attached by `with_theta_table()`, or `nullptr` if none.
    */
   const double* table = nullptr;  // the theta table (with_theta_table), or none
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Largest derivative order covered by the attached \f$\theta\f$-derivative table (0 if none).
    */
   int table_order = 0;            // its largest order
 };
 
 /**
- * \ingroup distrib_multivariate
+ * \ingroup distrib_mvgaussian2
  * \brief Multivariate Gaussian distribution in the precision parametrization \f$Q = M(\theta)\f$.
  *
  * Two partial specializations: the proper class, for a positive definite structure
@@ -59,7 +59,7 @@ template <class S>
 struct mvgaussian2_distrib;
 
 /**
- * \ingroup distrib_multivariate
+ * \ingroup distrib_mvgaussian2
  * \brief Multivariate Gaussian distribution parameterized by precision \f$Q(\theta)\f$.
  *
  * Models \f$Y \sim \mathcal{N}_d(\mu, Q(\theta)^{-1})\f$ with
@@ -107,7 +107,7 @@ struct mvgaussian2_distrib<S> {
    */
   LAPLACE_HD int scratch_size() const { return 2 * pdmat::packed_size(structure.dim) + structure.scratch_size(); }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return workspace doubles needed in `w` for `expected_info_dk()`.
    *
    * \return `2 * pdmat::packed_size(structure.dim) + structure.scratch_size()`.
@@ -199,7 +199,7 @@ struct mvgaussian2_distrib<S> {
     return detail_mvgaussian::expected_info_dk<true, K>(structure, st, block, ab, idx, out, w);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return the number of entries in a \f$\theta\f$-derivative table of orders 1 to `k_max`.
    *
    * Equals \f$\sum_{j=1}^{k_{\max}} \binom{q + j - 1}{j}\f$ for \f$k_{\max} \ge 1\f$
@@ -218,7 +218,7 @@ struct mvgaussian2_distrib<S> {
     return detail_mvgaussian::table_offset(structure.n_params(), k_max + 1);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return the number of `double` elements required for a \f$\theta\f$-derivative table of orders 1 to `k_max`.
    *
    * Each entry stores `pdmat::packed_size(dim()) + 2` doubles: a structural-nonzero
@@ -232,7 +232,7 @@ struct mvgaussian2_distrib<S> {
     return theta_table_entries(k_max) * detail_mvgaussian::table_entry_size(structure);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Fill one entry of a precomputed \f$\theta\f$-derivative table.
    *
    * Writes the structural-nonzero flag, \f$\partial_T \log\det Q\f$, and
@@ -252,7 +252,7 @@ struct mvgaussian2_distrib<S> {
     detail_mvgaussian::fill_theta_table_entry<true>(structure, st, k_max, entry, table, w);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return a copy of `st` with a filled \f$\theta\f$-derivative table attached.
    *
    * Sets `table` and `table_order` on the returned state so that `logpdf_dmu_dk()`,
@@ -321,7 +321,7 @@ struct mvgaussian2_distrib<S> {
 };
 
 /**
- * \ingroup distrib_multivariate
+ * \ingroup distrib_mvgaussian2
  * \brief Improper (intrinsic) multivariate Gaussian distribution parameterized by a singular precision \f$Q(\theta)\f$ with constant null space.
  *
  * Models an improper density flat along the null space of \f$Q(\theta)\f$ of rank \f$\rho\f$,
@@ -341,63 +341,63 @@ struct mvgaussian2_distrib<S> {
   /// \name Improper class: singular precision with a constant null space
   ///@{
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Positive semidefinite matrix structure parameterizing the precision \f$Q(\theta)\f$.
    */
   S structure;
 
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Normalization regime (`distrib_normalization::improper`: singular precision).
    */
   static constexpr distrib_normalization normalization = distrib_normalization::improper;
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Precomputed state type returned by `theta_state()` and `constrained_state()`.
    */
   using state_type = mvgaussian_rank_deficient_state;
 
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Construct from a positive semidefinite matrix structure instance.
    * \param s Matrix structure defining \f$Q(\theta)\f$.
    */
   explicit mvgaussian2_distrib(const S& s) : structure(s) {}
 
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return the observation and location dimension \f$d\f$.
    * \return Dimension `structure.dim`.
    */
   int dim() const { return structure.dim; }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return the number of precision parameters in \f$\theta\f$.
    * \return Parameter count `structure.n_params()`.
    */
   int n_params() const { return structure.n_params(); }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return the constant rank \f$\rho\f$ of \f$Q(\theta)\f$.
    * \return Rank `structure.rank()`.
    */
   int rank() const { return structure.rank(); }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return the number of `double` elements stored in `w` for the precomputed state.
    * \return `3 * pdmat::packed_size(dim()) + structure.scratch_size()`.
    * \see theta_state(), constrained_state(), scratch_size(), distrib_multivariate
    */
   int state_size() const { return detail_mvgaussian::rank_deficient_state_size(structure); }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return working scratch doubles required after the state for `theta_state()`, `constrained_state()`, derivative blocks, and table filling.
    * \return `dim() * dim() + structure.scratch_size()` (or `pdmat::packed_size(dim()) + structure.scratch_size()` when larger).
    * \see state_size(), info_scratch_size(), distrib_multivariate
    */
   int scratch_size() const { return detail_mvgaussian::rank_deficient_scratch<true>(structure); }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return workspace doubles required in `w` by `expected_info_dk()`.
    * \return `structure.scratch_size()`.
    * \see expected_info_dk(), scratch_size(), distrib_multivariate
@@ -405,7 +405,7 @@ struct mvgaussian2_distrib<S> {
   int info_scratch_size() const { return detail_mvgaussian::rank_deficient_info_scratch<true>(structure); }
 
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Precompute \f$\log\lvert Q(\theta)\rvert_+\f$ and packed \f$Q(\theta)\f$ without a Cholesky factor.
    *
    * Records \f$\log\lvert Q(\theta)\rvert_+\f$ (via `structure.log_pdet_state()`
@@ -422,7 +422,7 @@ struct mvgaussian2_distrib<S> {
     return detail_mvgaussian::rank_deficient_state<true>(structure, theta, w, false);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Precompute the state of `theta_state()` together with the Cholesky factor of \f$Q + cP\f$ and \f$(Q + cP)^{-1}\f$.
    *
    * Adds the packed lower Cholesky factor \f$L\f$ of \f$Q + cP\f$ and packed
@@ -440,7 +440,7 @@ struct mvgaussian2_distrib<S> {
     return detail_mvgaussian::rank_deficient_state<true>(structure, theta, w, true);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Evaluate the improper Gaussian log-density.
    *
    * \param st Precomputed state from `theta_state()` or `constrained_state()`.
@@ -453,7 +453,7 @@ struct mvgaussian2_distrib<S> {
     return detail_mvgaussian::rank_deficient_logpdf<true>(structure, st, y, mu);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Evaluate partial derivatives of the log-density with respect to \f$\mu\f$ (order `A`) and \f$\theta\f$ (order `K`).
    *
    * Supports \f$A, K \ge 0\f$ with \f$A + K \le 6\f$, following the proper
@@ -484,7 +484,7 @@ struct mvgaussian2_distrib<S> {
     }
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Evaluate partial derivatives of the log-density with respect to \f$y\f$ (order `J`) and \f$\theta\f$ (order `K`).
    *
    * Equal to \f$(-1)^J\f$ times `logpdf_dmu_dk<J, K>()` for \f$J + K \le 6\f$.
@@ -511,7 +511,7 @@ struct mvgaussian2_distrib<S> {
     return true;
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Evaluate the expected Fisher information block of the constrained proper law or its `K`-th derivative in \f$\theta\f$.
    *
    * Supports \f$0 \le K \le 4\f$ for structures satisfying
@@ -539,7 +539,7 @@ struct mvgaussian2_distrib<S> {
     return detail_mvgaussian::rank_deficient_info<true, K>(structure, st, block, ab, idx, out, w);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return the number of entries in a \f$\theta\f$-derivative table of orders 1 to `k_max`.
    * \param k_max Largest derivative order in \f$\theta\f$ stored in the table.
    * \return Total number of sorted tuple entries across orders 1 to `k_max` (`0` if `k_max <= 0`).
@@ -549,7 +549,7 @@ struct mvgaussian2_distrib<S> {
     return detail_mvgaussian::table_offset(structure.n_params(), k_max + 1);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return the number of `double` elements required for a \f$\theta\f$-derivative table of orders 1 to `k_max`.
    * \param k_max Largest derivative order in \f$\theta\f$ stored in the table.
    * \return `theta_table_entries(k_max) * (pdmat::packed_size(dim()) + 2)`.
@@ -559,7 +559,7 @@ struct mvgaussian2_distrib<S> {
     return theta_table_entries(k_max) * detail_mvgaussian::table_entry_size(structure);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Fill one entry of a precomputed \f$\theta\f$-derivative table.
    *
    * Entries must be filled one at a time on the host because they share the
@@ -578,7 +578,7 @@ struct mvgaussian2_distrib<S> {
                                                     k_max, entry, table, w);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Return a copy of `st` with a filled \f$\theta\f$-derivative table attached.
    *
    * The buffer `table` must remain alive while the returned state is used.
@@ -597,7 +597,7 @@ struct mvgaussian2_distrib<S> {
     return t;
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Draw one sample \f$y = \mu + (I - P) L^{-\top} z\f$ from the constrained proper law \f$U_0^\top(y - \mu) = 0\f$.
    *
    * Uses `cst.factor` (\f$Q + cP = L L^\top\f$) and independent standard normal
@@ -618,7 +618,7 @@ struct mvgaussian2_distrib<S> {
     detail_mvgaussian::rank_deficient_rng<true>(structure, cst, mu, seed, unit, y, tmp);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Write the covariance \f$Q^+ = (Q + cP)^{-1} - P/c\f$ of the constrained law in packed lower-triangular order.
    * \param cst Precomputed state from `constrained_state()`.
    * \param out Output packed lower-triangular buffer of length `pdmat::packed_size(dim())`.
@@ -628,7 +628,7 @@ struct mvgaussian2_distrib<S> {
     detail_mvgaussian::rank_deficient_view<S>(structure, cst).inverse(cst.theta, out, nullptr);
   }
   /**
-   * \ingroup distrib_multivariate
+   * \ingroup distrib_mvgaussian2
    * \brief Compute starting matrix parameters `theta` on the host from a sample summary.
    *
    * Projects the sample covariance \f$C\f$ from `summary` onto the range as

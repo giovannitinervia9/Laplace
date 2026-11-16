@@ -13,7 +13,10 @@ Two kinds of check:
 - the sidebar hierarchy: docs/manual/pages/groups.dox alone gives each group
   its parent, in the order of the sidebar. A \\defgroup elsewhere that carries
   its own \\ingroup jumps ahead of that order (or gets a second parent), and a
-  group defined elsewhere that groups.dox does not attach floats to the top.
+  group defined elsewhere that groups.dox does not attach floats to the top;
+- one page per distribution: the struct X_distrib belongs to the group
+  distrib_X and to no shared group, so that the sidebar under Distributions
+  lists distributions only (tools/docs/trim_navtree.py drops the other types).
 Exits with status 1 when a problem is found.
 """
 import html
@@ -88,6 +91,14 @@ for f in sorted((ROOT / "docs" / "manual" / "pages").glob("*.dox")) + headers:
             problems.append(f"{rel}: \\defgroup {d.group(1)} has its own \\ingroup; give its parent in groups.dox only")
         if d.group(1) not in attached | top_level:
             problems.append(f"{rel}: group {d.group(1)} is not attached in groups.dox (\\addtogroup ... \\ingroup)")
+
+distrib_struct = re.compile(r"/\*\*((?:(?!\*/).)*?)\*/\s*(?:template\b[^{;]*?)?struct\s+(\w+)_distrib\b", re.S)
+for f in headers:
+    for m in distrib_struct.finditer(f.read_text(encoding="utf-8", errors="replace")):
+        g = re.search(r"\\ingroup\s+(\w+)", m.group(1))
+        if not g or g.group(1) != "distrib_" + m.group(2):
+            got = g.group(1) if g else "no group"
+            problems.append(f"{f.relative_to(ROOT).as_posix()}: {m.group(2)}_distrib is in {got}; it belongs on its own page, group distrib_{m.group(2)}")
 
 for line in problems:
     print(line)
