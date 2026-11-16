@@ -1,6 +1,7 @@
 // factor_analytic_pdmat (include/laplace/pdmat/factor_analytic.hpp): M, M^-1
 // and log det M with their derivatives to order 6 against the mpmath
-// references (tools/reference/pdmat_factor_analytic.py) and against central
+// references (tools/reference/pdmat_factor_analytic.py, and
+// pdmat_factor_analytic_small_psi.py for psi from e^-2 to e^-8) and against central
 // differences of the derivative one order below, in a Kokkos kernel on the
 // default execution space; on the host, the twins: d = 0 is diagonal_pdmat
 // bit for bit, at d = p M - Psi is the log_cholesky_bijector's M, and the
@@ -135,7 +136,9 @@ const char* qname[] = {"matrix", "inverse", "log_det", "log_det at d = p"};
 // The body sits in a named function with external linkage, never in the body of a
 // TEST_CASE (note/brief_agenti.md: nvcc tags the device lambda with its enclosing function).
 void pdmat_factor_analytic_mpmath_case() {
-  const auto groups = read_groups(std::string(LAPLACE_REFERENCE_DIR) + "/pdmat_factor_analytic.csv");
+  auto groups = read_groups(std::string(LAPLACE_REFERENCE_DIR) + "/pdmat_factor_analytic.csv");
+  for (Group& G : read_groups(std::string(LAPLACE_REFERENCE_DIR) + "/pdmat_factor_analytic_small_psi.csv"))
+    groups.push_back(std::move(G));
   const int ng = int(groups.size());
   REQUIRE(ng > 0);
   int sw = 0;
@@ -238,15 +241,16 @@ void pdmat_factor_analytic_mpmath_case() {
   }
 
   // bounds on ulpN / ulp, [quantity][order]: the larger of the errors measured
-  // on 2026-11-14 on gcc/OpenMP and CUDA, times 1.5, rounded up
-  // The orders 2, 4, 6 of M^-1 come from the spread point at (p, d) = (3, 1),
-  // where a change of one ulp in one theta_k moves the exact derivative by
-  // 1.6e4 ulpN (an inflection along t_2: the even orders are near a zero);
-  // log det at d = p, by the traces on M (2026-11-15), in a row of its own.
+  // on 2026-11-16 on gcc/OpenMP and CUDA over both reference files, times
+  // 1.5, rounded up. The orders 2, 4, 6 of M^-1 come from the spread point at
+  // (p, d) = (3, 1), where a change of one ulp in one theta_k moves the exact
+  // derivative by 1.6e4 ulpN (an inflection along t_2: the even orders are
+  // near a zero); log det at d = p (the traces on the augmented matrix) in a
+  // row of its own.
   const double bound[4][7] = {{2, 1, 1, 1, 1, 1, 1},
-                              {136, 275, 543626, 13123, 545236, 23109, 545993},
-                              {4, 5, 6, 21, 110, 539, 1390},
-                              {5, 2, 5, 44, 53, 359, 1260}};
+                              {561, 2155, 25214, 8198, 27872, 8307, 35027},
+                              {6, 7, 17, 50, 133, 539, 1390},
+                              {53, 1254, 692, 1020, 2197, 6211, 6137}};
   const bool print = std::getenv("LAPLACE_PRINT_ERRORS") != nullptr;
   for (int q = 0; q < 4; ++q)
     for (int K = 0; K <= 6; ++K) {

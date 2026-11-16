@@ -1,11 +1,11 @@
 // Speed of factor_analytic_pdmat (include/laplace/pdmat/factor_analytic.hpp):
 // ns per call of M^-1 at orders 0, 1, 3, 6 by the structure (Woodbury at
-// order 0, the Cholesky factor of M with its derivatives above) against the
-// recursion on M (a Cholesky factorization of M, then X[S] = -X[0] sum M[T]
-// X[S \ T] on the p x p derivatives of M given by matrix_dK), along the pure
-// tuple (0, ..., 0) and along K distinct parameters spread over the rows, and
-// of log det (Woodbury) at orders 0 and 6, for (p, d) in {4, 8, 16} x
-// {1, 2, 4}, at theta_k = 0.1 x + 0.05 sin k with x uniform in [-3, 3]; on one
+// order 0, Cholesky at d = p; the recursion on the augmented matrix above)
+// against the recursion on M (a Cholesky factorization of M, then X[S] =
+// -X[0] sum M[T] X[S \ T] on the p x p derivatives of M given by matrix_dK),
+// along the pure tuple (0, ..., 0) and along K distinct parameters spread over
+// the rows, and of log det at orders 0 and 6, for (p, d) in {4, 8, 16} x
+// {1, 2, 4} and (8, 8), at theta_k = 0.1 x + 0.05 sin k with x uniform in [-3, 3]; on one
 // host thread (Serial) and on the default execution space (OpenMP or CUDA).
 // Each call has its own row of a scratch View in the space's memory.
 #include "measure.hpp"
