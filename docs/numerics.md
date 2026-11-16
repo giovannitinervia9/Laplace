@@ -9064,3 +9064,85 @@ for the information's block (measured 7.68), both passed by gcc and CUDA.
 (-1)^(m+1) m!/alpha^(m+1) when alpha or beta is small, and the mixed components at
 large phi still cancel nearly, not exactly. Neither is rearranged: that needs the
 same treatment of the pole terms, and no family has asked for it yet.
+
+## log K_nu at half-integer orders by the closed form
+
+What: on 2026-11-16 `math/bessel_k.hpp` gained a closed form for nu = n + 1/2,
+0 <= n <= 19, used by `log_bessel_k`, `log_bessel_k_dx1` ... `_dx7`,
+`log_bessel_k_dx_upto` and the scaled pair. At these orders the asymptotic
+series in 1/x terminates and is exact (DLMF 10.47.9, 10.49.1, 10.49.12):
+
+    K_(n+1/2)(x) = sqrt(pi/(2x)) e^-x S(x),  S = sum_(k=0..n) a_k x^-k,
+    a_k = (n + k)! / ((n - k)! k! 2^k).
+
+Before, these orders went through Temme's series (x <= 2) at the reduced order
+mu = -1/2, whose first coefficient cancels near x = 1, and the Riccati identity.
+At nu = 1/2 that cost 26 ulp at orders 2 and 3; nu = +-1/2 is the order the
+Poisson-inverse Gaussian reaches at y = 0 and y = 1.
+
+How. Every a_k is positive and x^m S^(m) = (-1)^m sum_k a_k (k)_m x^-k, so the
+sums themselves do not cancel. The step that turns them into the derivatives of
+log S (L^(m) = (S^(m) - sum_k C(m-1, k-1) L^(k) S^(m-k)) / S) does. In double the
+closed form was measured at 304 ulp at order 2 (n = 38, x = 0.05), 1.3e4 at
+order 3 and 7.3e8 at order 7 (n = 40, x = 1.55), and already 94 ulp at order 7
+for n <= 3. So the terms, the sums and that recursion are in double-double; the value needs
+only the sum and stays in double. The terms are scaled by the term of index 0
+for x >= 1 and by that of index n below, so that every scaled term lies in
+(0, 1] and nothing overflows before the result does. The cost is O(n) per call,
+and the cap n <= 19 keeps the closed form below nu_debye = 20, where it replaces
+only the Temme/Steed and Riccati route.
+
+References: `tools/reference/bessel_k_half.py` writes
+`tests/data/reference/log_bessel_k_half*.csv`, 1528 rows at n = 0..40, 60 per
+cent of them with x in [0.3, 3] and the rest log-uniform on [2^-14, 2^12], from
+mpmath's besselk and diffs at 320 and 448 bits (no row dropped at 2^-110); the
+closed form is not used. On six points they agree with the Riccati identity at
+400 bits to 1e-97 or better.
+
+Accuracy on the half-integer grid, ulp (order 0 in ulpC), gcc and CUDA alike
+except where two figures are given (gcc / CUDA):
+
+| order | before, n <= 19 | after, n <= 19 | n >= 20 (Debye, unchanged) |
+|---|---|---|---|
+| 0 | 4.13 | 1.70 | 2.79 and 3.43 (the two builds) |
+| 1 | 6.76 / 6.21 | 1.07 | 3.00 |
+| 2 | 26.19 (13.2 ulp1) | 1.22 | 3.63 |
+| 3 | 26.34 | 1.58 | 4.40 |
+| 4 | 13.05 / 13.15 | 1.55 | 8.54 / 6.71 |
+| 5 | 6.5 | 2.24 | 7.92 / 6.66 |
+| 6 | 8.8 | 1.83 | 10.56 / 10.25 |
+| 7 | 11.9 | 2.06 | 76.66 |
+
+Before, the worst cases of orders 1 to 4 were all at nu = 1/2, x = 0.64 to 0.9;
+those of orders 6 and 7 at n = 10 to 19.
+The full reference grid of `log_bessel_k*.csv` does not move: its worst cases,
+44.4 ulp (gcc) and 37.4 (CUDA) at order 2, are at nu = 1/4, x = 0.98, which is
+not a half-integer, so the bounds of the general test stay as they were. The
+half-integer grid has a test of its own, with bounds per band (n <= 19 and
+n >= 20). The joint routine agrees with the single-order functions here as
+elsewhere (test "log_bessel_k_dx_upto against the single-order functions, every
+regime and boundary", whose grid holds half-integer orders).
+
+Cost, ns per call, x log-uniform on (1/4, 4), gcc on one thread / CUDA (RTX
+4070 SUPER):
+
+| n | function | before | after |
+|---|---|---|---|
+| 0 | value | 164 / 6.6 | 12.9 / 1.1 |
+| 0 | order 1 | 899 / 74 | 70 / 4.1 |
+| 0 | order 4 | 1018 / 58 | 360 / 9.6 |
+| 0 | order 7 | 1295 / 63 | 731 / 18 |
+| 19 | value | 236 / 6.8 | 80 / 4.0 |
+| 19 | order 1 | 2265 / 196 | 1127 / 17 |
+| 19 | order 4 | 2481 / 227 | 1875 / 91 |
+| 19 | order 7 | 2782 / 171 | 2614 / 41 |
+
+The closed form in double-double is cheaper than the route it replaces at every
+n <= 19 on both builds. Above, it would stay as accurate (2.24 ulp at most at
+n = 20..40, every order) but costs more than the Debye route it would replace:
+order 7 at 3796 against 1241 ns on gcc and 188 against 42 ns on CUDA, order 1 at
+1726 against 158 ns and 33 against 9.6 ns. Debye there reaches 76.66 ulp at order 7
+(nu = 20.5, x = 21.7) and at most 10.6 at the lower orders. Whether to extend
+the cap to trade that cost for that accuracy is open.
+
+No device table was added (`.nv.constant3` unchanged at 46520 bytes).

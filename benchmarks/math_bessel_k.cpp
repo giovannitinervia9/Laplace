@@ -149,6 +149,46 @@ int main(int argc, char* argv[]) {
       bench::report("value", "debye", r0, ValueOwn{}, outdir, t_de);
     }
   }
+  // half-integer orders nu = n + 1/2 (tests/data/reference/log_bessel_k_half*.csv): the closed form
+  // (own, n <= 19), without it (nohalf: Temme or Steed, Riccati, Debye from nu = 20), and with it up to
+  // n = 40 (half40, in place of Debye for n = 20..40); timed at n = 0..19 and at n = 20..40, x in (1/4, 4)
+  {
+    auto th = [&](int n_lo, int n_hi) {
+      return bench::make_time_args(n / 4, [&] {
+        const double nu = std::floor(n_lo + (n_hi - n_lo + 1) * u01(gen)) + 0.5;
+        return bench::Args{nu, std::exp2(-2.0 + 4.0 * u01(gen)), 0.0};
+      });
+    };
+    const auto t_lo = th(0, 19), t_hi = th(20, 40), t_0 = th(0, 0), t_19 = th(19, 19);
+    dk::params off, h40;
+    off.half_max = -1;
+    h40.half_max = 40;
+    static const char* hname[] = {"log_bessel_k_half", "log_bessel_k_half_dx1", "log_bessel_k_half_dx2",
+                                  "log_bessel_k_half_dx3", "log_bessel_k_half_dx4", "log_bessel_k_half_dx5",
+                                  "log_bessel_k_half_dx6", "log_bessel_k_half_dx7"};
+    auto half = [&](const char* impl, const dk::params& p, const bench::TimeArgs& t) {
+      auto one = [&](int m, auto f) {
+        if (!filter.empty() && (std::string(hname[m]) + " " + impl).find(filter) == std::string::npos) return;
+        bench::report(hname[m], impl, bench::read_ref(refdir + "/" + hname[m] + ".csv"), f, outdir, t);
+      };
+      one(0, ValueOwn{p});
+      one(1, DerivOwn<1>{p});
+      one(2, DerivOwn<2>{p});
+      one(3, DerivOwn<3>{p});
+      one(4, DerivOwn<4>{p});
+      one(5, DerivOwn<5>{p});
+      one(6, DerivOwn<6>{p});
+      one(7, DerivOwn<7>{p});
+    };
+    half("own", dk::params{}, t_lo);
+    half("nohalf", off, t_lo);
+    half("own-n0", dk::params{}, t_0);
+    half("nohalf-n0", off, t_0);
+    half("own-n19", dk::params{}, t_19);
+    half("nohalf-n19", off, t_19);
+    half("own-n20+", dk::params{}, t_hi);
+    half("half40-n20+", h40, t_hi);
+  }
   run(dname[2], "ricd", DerivRiccatiDouble<2>{});
   run(dname[4], "ricd", DerivRiccatiDouble<4>{});
   run(dname[7], "ricd", DerivRiccatiDouble<7>{});

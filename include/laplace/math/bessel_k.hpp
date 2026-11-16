@@ -35,6 +35,13 @@
 //   P(t) = sum_k (-1)^k u_k(t) / nu^k,
 // the u_k exact rationals rounded once (tools/reference/bessel_k.py coefs).
 //
+// Half-integer orders nu = n + 1/2, n <= half_max = 19: the closed form
+// K_(n+1/2)(x) = sqrt(pi/(2x)) e^-x sum_(k=0..n) a_k x^-k, a_k = (n+k)!/((n-k)! k! 2^k)
+// (DLMF 10.47.9, 10.49.1 and 10.49.12), for the value (the sum in double) and for every derivative
+// (sums and logarithmic derivatives in double-double; see "half-integer orders"
+// below). It replaces Temme's series there, whose first coefficient cancels near
+// x = 1 at the reduced order -1/2.
+//
 // The derivatives in x, three regimes:
 //   nu >= nu_debye: the Debye form differentiated: d/dx = (1/nu) d/dz; the
 //     derivatives of eta' = h = sqrt(1 + z^2)/z from h h' = -z^-3 by
@@ -147,6 +154,7 @@ struct params {
   double x_hankel = 200.0;  // below nu_debye: asymptotic expansion in 1/x from here
   double x_cf = 1.0;        // the ratio in double-double by Steed's fraction from here
   bool wallis = true;       // that fraction by its convergents (else in Steed's form)
+  int half_max = 19;        // the closed form at nu = n + 1/2 for n <= half_max (-1: never)
 };
 
 LAPLACE_HD_FORCEINLINE double nan() { return laplace::math::detail::quiet_nan(); }
@@ -324,11 +332,110 @@ LAPLACE_HD double log_k_debye(double nu, double x, bool scaled = false) {
   return 0.5 * (log_half_pi - laplace::math::log(nu)) + meta - 0.25 * Kokkos::log1p(z * z) + Kokkos::log1p(pm1);
 }
 
+// ---------------------------------------------------------------- half-integer orders
+//
+// At nu = n + 1/2 the asymptotic series terminates and is exact (DLMF 10.47.9, 10.49.1 and 10.49.12):
+//   K_(n+1/2)(x) = sqrt(pi/(2x)) e^-x S(x),  S = sum_(k=0..n) a_k x^-k,
+//   a_k = (n + k)! / ((n - k)! k! 2^k) > 0.
+// Every term of S and of its derivatives x^m S^(m) = (-1)^m sum_k a_k (k)_m x^-k has one sign, so these sums
+// do not cancel; the recursion that turns them into the derivatives of log S does, by a factor that grows
+// with n and the order (2^30 at n = 40, order 7, measured), so the terms, the sums and the recursion are in
+// double-double. The terms are scaled by W, the term of index 0 for x >= 1 and that of index n below:
+// tau_k = a_k x^-k / W lies in (0, 1] either way, and log W = log a_n - n log x below one.
+
+// n if nu = n + 1/2 with 0 <= n <= p.half_max, else -1
+LAPLACE_HD_FORCEINLINE int half_order(double nu, const params& p) {
+  const double m = nu - 0.5;
+  return (m >= 0.0 && m <= double(p.half_max) && m == Kokkos::floor(m)) ? int(m) : -1;
+}
+
+// a_(k-1) / a_k = 2k / ((n + k)(n - k + 1)), the factors exact integers
+LAPLACE_HD_FORCEINLINE double half_step(int n, int k) { return double((n + k) * (n - k + 1)); }
+
+// log K_(n+1/2)(x) (+ x when scaled), the sum S in double
+LAPLACE_HD double log_k_half(int n, double x, bool scaled) {
+  double s = 1.0, tau = 1.0, logw = 0.0;
+  if (x >= 1.0) {
+    const double u = 1.0 / x;
+    for (int k = 1; k <= n; ++k) {
+      tau = tau * u * half_step(n, k) / (2.0 * k);
+      s += tau;
+    }
+  } else {
+    double an = 1.0;
+    for (int k = n; k >= 1; --k) {
+      tau = tau * x * (2.0 * k) / half_step(n, k);
+      an *= half_step(n, k) / (2.0 * k);
+      s += tau;
+    }
+    if (n > 0) logw = laplace::math::log(an) - n * laplace::math::log(x);
+  }
+  return 0.5 * (log_half_pi - laplace::math::log(x)) - (scaled ? 0.0 : x) + (logw + laplace::math::log(s));
+}
+
+// lam[m] = x^m d^m/dx^m log S, m = 1..N, in double-double, from T_m = x^m S^(m) / W
+template <int N>
+LAPLACE_HD void half_lambda(int n, double x, dd* lam) {
+  dd T[N + 1];
+  for (int m = 0; m <= N; ++m) T[m] = dd(0.0);
+  dd tau(1.0);
+  const dd u = dd(1.0) / dd(x);
+  for (int j = 0; j <= n; ++j) {
+    // k runs up from 0 for x >= 1, down from n below
+    const int k = x >= 1.0 ? j : n - j;
+    if (j > 0) tau = x >= 1.0 ? tau * u * half_step(n, k) / (2.0 * k) : tau * x * (2.0 * (k + 1)) / half_step(n, k + 1);
+    dd g = tau;  // tau_k (k)_m
+    for (int m = 0; m <= N; ++m) {
+      T[m] = (m % 2) ? T[m] - g : T[m] + g;
+      g = g * double(k + m);
+    }
+  }
+  for (int m = 1; m <= N; ++m) {
+    dd s = T[m];
+    double c = 1.0;  // C(m-1, k-1)
+    for (int k = 1; k < m; ++k) {
+      s = s - lam[k] * T[m - k] * c;
+      c = c * double(m - k) / double(k);
+    }
+    lam[m] = s / T[0];
+  }
+}
+
+// d^m/dx^m log K from lam[m]: the derivative of log(pi/2)/2 - log(x)/2 - x plus lam[m] / x^m (the scaled
+// form omits the -1 of order one)
+LAPLACE_HD_FORCEINLINE double half_combine(int m, double x, const dd& lam, bool scaled) {
+  double f = 1.0;  // (m-1)!
+  for (int j = 2; j < m; ++j) f *= j;
+  dd q = lam;  // lam / x^m, by powers of 1/x below one so that it overflows only with the result
+  const dd u = dd(1.0) / dd(x);
+  for (int j = 0; j < m; ++j) q = x >= 1.0 ? q / x : q * u;
+  double xm = 1.0;
+  for (int j = 0; j < m; ++j) xm *= x;
+  double base = (m % 2 ? -0.5 : 0.5) * f / xm;
+  if (m == 1 && !scaled) base -= 1.0;
+  return (q + base).hi;
+}
+
+template <int N>
+LAPLACE_HD double half_deriv(int n, double x) {
+  dd lam[N + 1];
+  half_lambda<N>(n, x, lam);
+  return half_combine(N, x, lam[N], false);
+}
+
+template <int N>
+LAPLACE_HD void half_all(int n, double x, double* out, bool scaled) {
+  dd lam[N + 1];
+  half_lambda<N>(n, x, lam);
+  for (int m = 1; m <= N; ++m) out[m] = half_combine(m, x, lam[m], scaled);
+}
+
 LAPLACE_HD double log_k(double nu, double x, const params& p, bool scaled = false) {
   if (!(x >= 0.0) || nu != nu) return nan();
   nu = Kokkos::fabs(nu);
   if (x == 0.0) return laplace::math::detail::pos_inf();
   if (!(x < 1e308)) return scaled ? 0.0 : -x;
+  if (const int n = half_order(nu, p); n >= 0) return log_k_half(n, x, scaled);
   if (nu >= p.nu_debye) return log_k_debye(nu, x, scaled);
   double r;
   return log_k_rec(nu, x, r, scaled);
@@ -547,6 +654,7 @@ LAPLACE_HD double derivative(double nu, double x, const params& p) {
   if (!(x > 0.0) || nu != nu) return nan();
   nu = Kokkos::fabs(nu);
   if (!(x < 1e308)) return N == 1 ? -1.0 : 0.0;
+  if (const int n = half_order(nu, p); n >= 0) return half_deriv<N>(n, x);
   if (nu >= p.nu_debye) return debye_deriv<N>(nu, x);
   if (x >= p.x_hankel) return hankel<N>(nu, x);
   return riccati<N>(g_dd(nu, x, p), nu, x);
@@ -750,7 +858,8 @@ LAPLACE_HD void derivatives_upto(double nu, double x, const params& p, double* o
     for (int n = 1; n <= N; ++n) out[n] = (n == 1) ? (scaled ? 0.0 : -1.0) : 0.0;
     return;
   }
-  if (nu >= p.nu_debye) debye_all<N>(nu, x, out, scaled);
+  if (const int n = half_order(nu, p); n >= 0) half_all<N>(n, x, out, scaled);
+  else if (nu >= p.nu_debye) debye_all<N>(nu, x, out, scaled);
   else if (x >= p.x_hankel) hankel_all<N>(nu, x, out, scaled);
   else riccati_all<N>(g_dd(nu, x, p), nu, x, out, scaled);
 }

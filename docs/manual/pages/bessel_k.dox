@@ -26,14 +26,19 @@ Every function is defined for \f$x > 0\f$ and \f$\nu \in \mathbb{R}\f$, and nega
 
 ### Function value
 
-Evaluation of \f$\log K_\nu(x)\f$ switches at \f$\nu_{\mathrm{debye}} = 20.0\f$.
+Evaluation of \f$\log K_\nu(x)\f$ checks first for half-integer orders \f$\nu = n + 1/2\f$ with integer \f$0 \le n \le 19\f$, and otherwise switches at \f$\nu_{\mathrm{debye}} = 20.0\f$.
 
-1. **Uniform asymptotic expansion** (\f$\nu \ge 20.0\f$): Using the Debye form (Debye, 1909; DLMF 10.41.4),
+1. **Closed form at half-integer orders** (\f$\nu = n + 1/2\f$ with integer \f$0 \le n \le 19\f$): From DLMF 10.47.9, 10.49.1 and 10.49.12, the asymptotic series in \f$1/x\f$ terminates and gives the exact expression for every \f$x > 0\f$,
+   \f[
+   K_{n+1/2}(x) = \sqrt{\frac{\pi}{2x}}\, e^{-x} S(x), \qquad S(x) = \sum_{k=0}^{n} a_k x^{-k}, \qquad a_k = \frac{(n + k)!}{(n - k)!\,k!\,2^k}.
+   \f]
+   Here \f$n \in \mathbb{Z}_{\ge 0}\f$ is the integer index, \f$S(x)\f$ is the terminating sum in \f$1/x\f$, \f$k\f$ is the summation index, and \f$a_k > 0\f$ are the series coefficients. The sum \f$S(x)\f$ is evaluated in double precision.
+2. **Uniform asymptotic expansion** (\f$\nu \ge 20.0\f$): Using the Debye form (Debye, 1909; DLMF 10.41.4),
    \f[
    \log K_\nu(x) = \frac{1}{2}\log\left(\frac{\pi}{2\nu}\right) - \nu \eta - \frac{1}{4}\log(1 + z^2) + \log P(t),
    \f]
    where \f$z = x / \nu\f$, \f$t = (1 + z^2)^{-1/2} \in (0, 1)\f$, and \f$\eta = \sqrt{1 + z^2} + \log\left(\frac{z}{1 + \sqrt{1 + z^2}}\right)\f$. Here \f$P(t) = \sum_{k=0}^{16} (-1)^k u_k(t) \nu^{-k}\f$, with exact rational polynomials \f$u_k(t)\f$ rounded once; summation stops when a term reaches \f$\le 2^{-60}\f$.
-2. **Temme series and Steed continued fraction** (\f$\nu < 20.0\f$): Write \f$N = \mathrm{round}(\nu) \in \mathbb{Z}_{\ge 0}\f$ and \f$\mu = \nu - N \in [-1/2, 1/2]\f$. For \f$x \le 2.0\f$, \f$K_\mu(x)\f$ and \f$K_{\mu+1}(x)\f$ come from Temme's series (Temme, 1975; adapted from Boost.Math `boost/math/special_functions/detail/bessel_ik.hpp`); for \f$x > 2.0\f$, \f$\log K_\mu(x)\f$ and \f$r_0 = K_{\mu+1}(x)/K_\mu(x)\f$ come from Steed's continued fraction (Barnett and others, 1974) scaled by \f$e^x\f$. Forward recurrence (DLMF §10.29) on \f$r_k = K_{\mu+k+1}(x)/K_{\mu+k}(x)\f$,
+3. **Temme series and Steed continued fraction** (\f$\nu < 20.0\f$): Write \f$N = \mathrm{round}(\nu) \in \mathbb{Z}_{\ge 0}\f$ and \f$\mu = \nu - N \in [-1/2, 1/2]\f$. For \f$x \le 2.0\f$, \f$K_\mu(x)\f$ and \f$K_{\mu+1}(x)\f$ come from Temme's series (Temme, 1975; adapted from Boost.Math `boost/math/special_functions/detail/bessel_ik.hpp`); for \f$x > 2.0\f$, \f$\log K_\mu(x)\f$ and \f$r_0 = K_{\mu+1}(x)/K_\mu(x)\f$ come from Steed's continued fraction (Barnett and others, 1974) scaled by \f$e^x\f$. Forward recurrence (DLMF §10.29) on \f$r_k = K_{\mu+k+1}(x)/K_{\mu+k}(x)\f$,
    \f[
    r_{k+1} = \frac{2(\mu + k + 1)}{x} + \frac{1}{r_k},
    \f]
@@ -41,15 +46,20 @@ Evaluation of \f$\log K_\nu(x)\f$ switches at \f$\nu_{\mathrm{debye}} = 20.0\f$.
 
 ### Derivatives in the argument
 
-The derivatives in \f$x\f$ use three regimes.
+The derivatives in \f$x\f$ use four regimes.
 
-1. **Differentiated Debye expansion** (\f$\nu \ge 20.0\f$): Differentiating in \f$x\f$ uses \f$\frac{\mathrm{d}}{\mathrm{d}x} = \frac{1}{\nu}\frac{\mathrm{d}}{\mathrm{d}z}\f$. Derivatives of \f$\eta' = h = \sqrt{1+z^2}/z\f$ follow from \f$h h' = -z^{-3}\f$ by Leibniz's rule, and those of \f$q = \log(1+z^2)\f$ from \f$(1+z^2)q' = 2z\f$. Derivatives of \f$\log P(t(z))\f$ come from the Taylor series of \f$P\f$ in \f$t\f$, its series logarithm, and the Taylor series of \f$t(z)\f$ via \f$(1+z^2)t' = -z t\f$. Terms of \f$P\f$ stop once the first omitted term is below \f$2^{-60}\f$ of \f$P\f$ on \f$[0, 1]\f$.
-2. **Hankel asymptotic expansion** (\f$\nu < 20.0\f$ and \f$x \ge x_{\mathrm{hankel}} = 200.0\f$): From DLMF 10.40.2,
+1. **Closed form at half-integer orders** (\f$\nu = n + 1/2\f$ with integer \f$0 \le n \le 19\f$): Differentiating \f$S(x)\f$ gives \f$x^m S^{(m)}(x) = (-1)^m \sum_{k=0}^n a_k (k)_m x^{-k}\f$ for derivative order \f$m \in \{1, \dots, 7\}\f$, where \f$(k)_0 = 1\f$ and \f$(k)_m = k(k+1)\cdots(k+m-1)\f$ for \f$m \ge 1\f$. Every term of a given sum has the same sign, so those sums do not cancel. However, the recursion that turns them into \f$\lambda_m = x^m \frac{\mathrm{d}^m}{\mathrm{d}x^m}\log S(x)\f$ cancels, increasingly with \f$n\f$ and \f$m\f$. In plain double precision, the closed form loses up to \f$7.3 \times 10^8\f$ ulp at order 7 with \f$n = 40\f$, and reaches 94 ulp at order 7 already for \f$n \le 3\f$. Therefore the terms, the sums \f$T_m = x^m S^{(m)}(x) / W\f$, and the recursion
+   \f[
+   \lambda_m = \frac{1}{T_0}\left(T_m - \sum_{j=1}^{m-1} \binom{m-1}{j-1} \lambda_j T_{m-j}\right)
+   \f]
+   are evaluated in double-double arithmetic (Dekker, 1971). To prevent overflow, the scaling factor \f$W\f$ is taken as the \f$k = 0\f$ term (\f$W = 1\f$) for \f$x \ge 1\f$ and as the \f$k = n\f$ term (\f$W = a_n x^{-n}\f$) for \f$x < 1\f$, so every scaled term \f$\tau_k = a_k x^{-k} / W\f$ lies in \f$(0, 1]\f$. Dividing \f$\lambda_m\f$ by \f$x^m\f$ and adding the derivatives of \f$\frac{1}{2}\log(\pi/(2x)) - x\f$ yields the result. The cost is \f$O(n)\f$ per call, and the cap \f$n \le 19\f$ keeps the route below \f$\nu = 20.0\f$, where the uniform expansion takes over.
+2. **Differentiated Debye expansion** (\f$\nu \ge 20.0\f$): Differentiating in \f$x\f$ uses \f$\frac{\mathrm{d}}{\mathrm{d}x} = \frac{1}{\nu}\frac{\mathrm{d}}{\mathrm{d}z}\f$. Derivatives of \f$\eta' = h = \sqrt{1+z^2}/z\f$ follow from \f$h h' = -z^{-3}\f$ by Leibniz's rule, and those of \f$q = \log(1+z^2)\f$ from \f$(1+z^2)q' = 2z\f$. Derivatives of \f$\log P(t(z))\f$ come from the Taylor series of \f$P\f$ in \f$t\f$, its series logarithm, and the Taylor series of \f$t(z)\f$ via \f$(1+z^2)t' = -z t\f$. Terms of \f$P\f$ stop once the first omitted term is below \f$2^{-60}\f$ of \f$P\f$ on \f$[0, 1]\f$.
+3. **Hankel asymptotic expansion** (\f$\nu < 20.0\f$ and \f$x \ge x_{\mathrm{hankel}} = 200.0\f$): From DLMF 10.40.2,
    \f[
    K_\nu(x) \sim \sqrt{\frac{\pi}{2x}} e^{-x} S(x), \qquad S(x) = \sum_{k=0}^\infty a_k x^{-k}, \qquad a_k = \prod_{j=1}^k \frac{4\nu^2 - (2j - 1)^2}{8j},
    \f]
    with \f$a_0 = 1\f$. Differentiating \f$S(x)\f$ term by term and applying Faà di Bruno's recursion (Johnson, 2002) yields the derivatives of \f$\log S(x)\f$ without cancellation.
-3. **Riccati identity in double-double arithmetic** (\f$\nu < 20.0\f$ and \f$x < 200.0\f$): From \f$g = \frac{\nu}{x} - \frac{K_{\nu+1}(x)}{K_\nu(x)}\f$, Bessel's differential equation gives the Riccati identity
+4. **Riccati identity in double-double arithmetic** (\f$\nu < 20.0\f$ and \f$x < 200.0\f$): From \f$g = \frac{\nu}{x} - \frac{K_{\nu+1}(x)}{K_\nu(x)}\f$, Bessel's differential equation gives the Riccati identity
    \f[
    g' = 1 + \frac{\nu^2}{x^2} - \frac{g}{x} - g^2.
    \f]
@@ -61,7 +71,7 @@ The derivatives in \f$x\f$ use three regimes.
    \f]
    Evaluating this recurrence in double-double arithmetic (Dekker, 1971) avoids cancellation of roughly \f$\max(\nu, x)\f$ per derivative order. For \f$x \ge x_{\mathrm{cf}} = 1.0\f$, the starting ratio \f$K_{\mu+1}/K_\mu\f$ comes from Steed's continued fraction evaluated forwards by its convergents in double-double. For \f$x < 1.0\f$, it comes from Temme's series in double precision followed by forward recurrence in double-double, which damps error by about \f$\frac{x^2}{4(\mu+k)^2}\f$ per step.
 
-When several orders are needed at one point, \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" with template parameter \f$N \in \{1, \dots, 7\}\f$ writes \f$\log K_\nu(x)\f$ to `out[0]` and \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x)\f$ to `out[n]` for \f$n = 1, \dots, N\f$, where `out` holds at least \f$N + 1\f$ doubles. While `out[0]` is evaluated separately as in \ref laplace::math::own::log_bessel_k "log_bessel_k()", each derivative regime shares its work across orders \f$1\f$ to \f$N\f$. In the differentiated Debye expansion, the derivatives of \f$h\f$ and \f$q\f$ and the Taylor coefficients of \f$\log P\f$ and \f$t(z)\f$ are built once and composed per order. In the Hankel asymptotic expansion, the series \f$S(x)\f$ and its derivatives are summed once and read from one logarithmic-derivative recursion. In the Riccati identity in double-double arithmetic, the starting ratio is evaluated once and every order comes from one pass of the same recurrence.
+When several orders are needed at one point, \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" with template parameter \f$N \in \{1, \dots, 7\}\f$ writes \f$\log K_\nu(x)\f$ to `out[0]` and \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x)\f$ to `out[n]` for \f$n = 1, \dots, N\f$, where `out` holds at least \f$N + 1\f$ doubles. While `out[0]` is evaluated separately as in \ref laplace::math::own::log_bessel_k "log_bessel_k()", each derivative regime shares its work across orders \f$1\f$ to \f$N\f$. In the half-integer closed form, the double-double sums and logarithmic-derivative recursion run once for all orders \f$1\f$ to \f$N\f$. In the differentiated Debye expansion, the derivatives of \f$h\f$ and \f$q\f$ and the Taylor coefficients of \f$\log P\f$ and \f$t(z)\f$ are built once and composed per order. In the Hankel asymptotic expansion, the series \f$S(x)\f$ and its derivatives are summed once and read from one logarithmic-derivative recursion. In the Riccati identity in double-double arithmetic, the starting ratio is evaluated once and every order comes from one pass of the same recurrence.
 
 Over the arguments measured in `docs/numerics.md`, calling \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" is 2.9 to 5.7 times faster than eight separate calls, most at \f$x = \sqrt{2}\f$. Tested across the seven reference grids and the regime boundaries around \f$\nu = 20\f$, \f$x = 200\f$, and \f$x = 1\f$ (146,792 entries), it matches the single-order functions to tolerance \f$0\f$ on the CPU build (0 entries differ on gcc) and to relative tolerance \f$1.8 \times 10^{-15}\f$ on CUDA, where `nvcc` contracts and schedules the two differently (20,744 entries differ by at most \f$1.2 \times 10^{-15}\f$ relative).
 
@@ -71,6 +81,7 @@ Two additional functions evaluate the shifted value and first derivative directl
 
 Rather than subtracting afterwards, each branch writes the shifted entry directly:
 
+- The half-integer closed form omits the \f$-x\f$ term in the value and the \f$-1\f$ term in the first derivative.
 - Steed's continued fraction (the value for \f$x > 2\f$) omits the \f$-x\f$ term that the unshifted branch subtracts.
 - Temme's series (the value for \f$x \le 2\f$) adds \f$x\f$; there the two terms are of comparable size, so the sum loses no digits.
 - The Hankel asymptotic expansion in \f$1/x\f$ omits the \f$-1\f$ term of its first derivative.
@@ -102,11 +113,26 @@ Derivative errors are measured in plain relative ulp.
 | \ref laplace::math::own::log_bessel_k_dx6 "log_bessel_k_dx6()" | 6 | ulp | 21.9 | — | 33.0 |
 | \ref laplace::math::own::log_bessel_k_dx7 "log_bessel_k_dx7()" | 7 | ulp | 31.5 | — | 48.0 |
 
-Across regimes, the double-double Riccati region (\f$x \ge 1.0\f$) stays within 0.5–0.66 ulp at every order, and the \f$1/x\f$ expansion stays within 9.1 ulp. Peak errors for orders 2–3 occur near \f$x = 1\f$ when \f$\nu < 3/2\f$ (up to 44.4 ulp), caused by cancellation in Temme's first coefficient \f$f_0 = \frac{(x/2)^{-\mu}\Gamma(1+\mu) - (x/2)^\mu\Gamma(1-\mu)}{2\mu}\f$. The Debye expansion peaks at \f$\nu = 20.5\f$ and \f$x = 20.0\f$, reaching 31.5 ulp at order 7. See `docs/numerics.md` for full measurements and comparisons.
+Across regimes, the double-double Riccati region (\f$x \ge 1.0\f$) stays within 0.5–0.66 ulp at every order, and the \f$1/x\f$ expansion stays within 9.1 ulp. Peak errors for orders 2–3 occur near \f$x = 1\f$ when \f$\nu < 3/2\f$ (up to 44.4 ulp), caused by cancellation in Temme's first coefficient \f$f_0 = \frac{(x/2)^{-\mu}\Gamma(1+\mu) - (x/2)^\mu\Gamma(1-\mu)}{2\mu}\f$. The Debye expansion peaks at \f$\nu = 20.5\f$ and \f$x = 20.0\f$, reaching 31.5 ulp at order 7.
+
+A separate half-integer reference grid of 1,528 rows covers \f$\nu = n + 1/2\f$ for \f$n = 0, \dots, 40\f$ with \f$x\f$ concentrated in \f$[0.3, 3]\f$, computed using `mpmath`'s `besselk` and `diffs` at 320 and 448 bits agreeing to \f$2^{-110}\f$ relative (mpmath). Without the closed form (the general Temme, Steed and Riccati route, labelled "before" below), the worst errors for orders 1 to 4 lay at \f$\nu = 1/2\f$ near \f$x = 0.64\f$ to \f$0.9\f$, caused by the cancellation in Temme's first coefficient described above. With the closed form (labelled "after"), every order stays within 2.24 ulp for \f$n \le 19\f$ on both gcc and CUDA. The general accuracy table above is unchanged because its worst case sits at \f$\nu = 1/4\f$, which is not a half-integer.
+
+| Order | Metric | Before (\f$n \le 19\f$) | After (\f$n \le 19\f$) | Test bound (\f$n \le 19\f$) |
+|---|---|---|---|---|
+| 0 | ulpC | 4.13 | 1.70 | 2.6 |
+| 1 | ulp | 6.76 (gcc), 6.21 (CUDA) | 1.07 | 1.7 |
+| 2 | ulp | 26.19 | 1.22 | 1.9 |
+| 3 | ulp | 26.34 | 1.58 | 2.4 |
+| 4 | ulp | 13.05 (gcc), 13.15 (CUDA) | 1.55 | 2.4 |
+| 5 | ulp | 6.5 | 2.24 | 3.4 |
+| 6 | ulp | 8.8 | 1.83 | 2.8 |
+| 7 | ulp | 11.9 | 2.06 | 3.1 |
+
+See `docs/numerics.md` for full measurements and comparisons.
 
 ## Timings
 
-Execution speed was measured in nanoseconds per call on one gcc thread, OpenMP with 16 threads, and CUDA on an RTX 4070 SUPER.
+Execution speed was measured in nanoseconds per call on one gcc thread, OpenMP with 16 threads, and CUDA on an RTX 4070 SUPER. The half-integer rows compare the Temme, Steed and Riccati route (before) with the closed form (after) on \f$x\f$ log-uniform on \f$(1/4, 4)\f$.
 
 | Computation | gcc, 1 thread (ns) | OpenMP, 16 threads (ns) | CUDA, RTX 4070 SUPER (ns) |
 |---|---|---|---|
@@ -116,6 +142,8 @@ Execution speed was measured in nanoseconds per call on one gcc thread, OpenMP w
 | Order 4, Temme series (\f$x < 1\f$) | 384 | 31 | 9.4 |
 | Order 4, Debye (\f$\nu \ge 20\f$) | 214 | 23 | 17 |
 | Order 4, asymptotic \f$1/x\f$ (\f$x \ge 200\f$) | 45 | 4.5 | 2.0 |
+| Half-integer, \f$n = 0\f$ (value, orders 1, 4, 7) | before: 164, 899, 1018, 1295; after: 12.9, 70, 360, 731 | — | before: 6.6, 74, 58, 63; after: 1.1, 4.1, 9.6, 18 |
+| Half-integer, \f$n = 19\f$ (value, orders 1, 4, 7) | before: 236, 2265, 2481, 2782; after: 80, 1127, 1875, 2614 | — | before: 6.8, 196, 227, 171; after: 4.0, 17, 91, 41 |
 
 ## Example
 
@@ -169,5 +197,7 @@ Functions in this module are called as `laplace::math::NAME`.
 - NIST Digital Library of Mathematical Functions, §10.32 Integral Representations (Modified Bessel Functions), https://dlmf.nist.gov/10.32
 - NIST Digital Library of Mathematical Functions, §10.40 Asymptotic Expansions for Large Argument (Modified Bessel Functions), https://dlmf.nist.gov/10.40
 - NIST Digital Library of Mathematical Functions, §10.41 Asymptotic Expansions for Large Order (Modified Bessel Functions), https://dlmf.nist.gov/10.41
+- NIST Digital Library of Mathematical Functions, §10.47 Definitions and Basic Properties (Spherical Bessel Functions), https://dlmf.nist.gov/10.47
+- NIST Digital Library of Mathematical Functions, §10.49 Explicit Formulas (Spherical Bessel Functions), https://dlmf.nist.gov/10.49
 - N. Temme (1975), On the numerical evaluation of the modified bessel function of the third kind, Journal of Computational Physics, 19(3), 324–337. https://doi.org/10.1016/0021-9991(75)90082-0
 */

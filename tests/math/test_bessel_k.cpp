@@ -79,6 +79,39 @@ TEST_CASE("derivatives of log K_nu(x) in x against mpmath") {
   }
 }
 
+// Half-integer orders nu = n + 1/2 (log_bessel_k_half*.csv, mpmath besselk and diffs): n <= 19 takes the
+// closed form, n = 20..40 the Debye route; each band against its own bound (order 0 in ulpC as above).
+// Measured on 2026-11-16, the larger of gcc and CUDA, orders 0..7: n <= 19 1.70, 1.07, 1.22, 1.58, 1.55,
+// 2.24, 1.83, 2.06; n >= 20 3.43, 3.00, 3.63, 4.40, 8.54, 7.92, 10.56, 76.66; bounds about half again
+TEST_CASE("log K_(n+1/2)(x) and its derivatives against mpmath") {
+  const double bound_lo[8] = {2.6, 1.7, 1.9, 2.4, 2.4, 3.4, 2.8, 3.1};
+  const double bound_hi[8] = {5.2, 4.5, 5.5, 6.6, 13.0, 12.0, 16.0, 115.0};
+  const auto g = bench::read_ref(refdir + "/log_bessel_k_half_dx1.csv");
+  for (int m = 0; m <= 7; ++m) {
+    const std::string name = m == 0 ? std::string("log_bessel_k_half") : "log_bessel_k_half_dx" + std::to_string(m);
+    const auto r = bench::read_ref(refdir + "/" + name + ".csv");
+    const auto y = bench::eval_kernel(r.x, LogK{m});
+    double worst[2] = {0, 0}, wnu[2] = {0, 0}, wx[2] = {0, 0};
+    std::size_t bad = 0;
+    for (std::size_t i = 0; i < y.size(); ++i) {
+      if (!std::isfinite(y[i])) {
+        ++bad;
+        continue;
+      }
+      double scale = std::fabs(r.hi[i]);
+      if (m == 0) scale = std::max({scale, std::fabs(r.x[i][1] * g.hi[i]), 1.0});
+      const double e = std::fabs((y[i] - r.hi[i]) - r.lo[i]) / bench::ulp_of(scale);
+      const int b = r.x[i][0] <= 19.5 ? 0 : 1;
+      if (e > worst[b]) worst[b] = e, wnu[b] = r.x[i][0], wx[b] = r.x[i][1];
+    }
+    INFO(name, ": n <= 19 max ", worst[0], " at nu = ", wnu[0], ", x = ", wx[0], "; n >= 20 max ", worst[1],
+         " at nu = ", wnu[1], ", x = ", wx[1]);
+    CHECK(bad == 0);
+    CHECK(worst[0] <= bound_lo[m]);
+    CHECK(worst[1] <= bound_hi[m]);
+  }
+}
+
 TEST_CASE("special arguments of log K") {
   CHECK(std::isnan(lm::log_bessel_k(1.0, -1.0)));
   CHECK(std::isnan(lm::log_bessel_k_dx3(1.0, -1.0)));
