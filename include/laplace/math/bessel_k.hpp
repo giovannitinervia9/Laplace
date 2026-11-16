@@ -5,6 +5,15 @@
 //   log_bessel_k_dx1 ... _dx7  d^n/dx^n log K_nu(x), n = 1..7
 //   log_bessel_k_dx_upto<N>(nu, x, out)  out[0] = log K, out[n] = the derivative of order n, n = 1..N,
 //                              from one evaluation of the shared work (same numbers as the above)
+//   log_bessel_k_scaled(nu, x)           log K_nu(x) + x
+//   log_bessel_k_scaled_dx_upto<N>(nu, x, out)  out[0] = log K + x, out[1] = the first derivative + 1,
+//                              out[n] = the derivative of order n for n >= 2
+//
+// The scaled pair is for the callers whose own quantity is log K + x or (log K)' + 1, which the plain
+// functions would hand them as a difference of numbers of size x and of size one: each regime writes
+// the shifted entry directly instead (Steed omits the -x it subtracts, the asymptotic expansion omits
+// the -1, the Riccati regime adds one to g in double-double, and the Debye form uses
+// -nu eta + x = -nu^2 / (nu s + x) - nu log(z / (1 + s)) and 1 - s/z = -1/(z (s + z))).
 //
 // The pseudo-Huber distributions use K_0 ... K_4 at x = sqrt(nu_ph), the
 // Poisson-inverse Gaussian log K_(y - 1/2)(alpha) with derivatives in alpha;
@@ -175,7 +184,7 @@ LAPLACE_HD void temme(double v, double x, double& K, double& K1) {
 
 // log K_v(x) and K_(v+1)/K_v by Steed's algorithm, |v| <= 1/2, x > 2 (in the
 // scaled form: no e^-x is formed)
-LAPLACE_HD void steed(double v, double x, double& logK, double& ratio) {
+LAPLACE_HD void steed(double v, double x, double& logK, double& ratio, bool scaled = false) {
   double a = v * v - 0.25, b = 2.0 * (x + 1.0);
   double D = 1.0 / b, f = D, delta = D;
   double prev = 0.0, cur = 1.0;
@@ -197,7 +206,7 @@ LAPLACE_HD void steed(double v, double x, double& logK, double& ratio) {
     }
     if (Kokkos::fabs(Q * delta) <= eps * Kokkos::fabs(S)) break;
   }
-  logK = 0.5 * (log_half_pi - laplace::math::log(x)) - x - laplace::math::log(S);
+  logK = 0.5 * (log_half_pi - laplace::math::log(x)) - (scaled ? 0.0 : x) - laplace::math::log(S);
   ratio = (0.5 + v + x + (v * v - 0.25) * f) / x;
 }
 
@@ -265,17 +274,17 @@ LAPLACE_HD dd steed_ratio_dd(double v, double x) {
 // ---------------------------------------------------------------- the value
 
 // log K_nu(x) by Temme or Steed and the forward recurrence; r = K_(nu+1)/K_nu
-LAPLACE_HD double log_k_rec(double nu, double x, double& r) {
+LAPLACE_HD double log_k_rec(double nu, double x, double& r, bool scaled = false) {
   const int n = int(Kokkos::floor(nu + 0.5));
   const double mu = nu - n;
   double lk;
   if (x <= 2.0) {
     double k0, k1;
     temme(mu, x, k0, k1);
-    lk = laplace::math::log(k0);
+    lk = laplace::math::log(k0) + (scaled ? x : 0.0);
     r = k1 / k0;
   } else {
-    steed(mu, x, lk, r);
+    steed(mu, x, lk, r, scaled);
   }
   double prod = 1.0, acc = 0.0;
   for (int k = 1; k <= n; ++k) {
@@ -290,7 +299,7 @@ LAPLACE_HD double log_k_rec(double nu, double x, double& r) {
 }
 
 // the pieces of the Debye form at z = x/nu
-LAPLACE_HD double log_k_debye(double nu, double x) {
+LAPLACE_HD double log_k_debye(double nu, double x, bool scaled = false) {
   const double z = x / nu;
   const double s = Kokkos::sqrt(1.0 + z * z), t = 1.0 / s, t2 = t * t;
   const double eta = s + laplace::math::log(z / (1.0 + s));
@@ -305,17 +314,24 @@ LAPLACE_HD double log_k_debye(double nu, double x) {
     pm1 += term;
     if (Kokkos::fabs(term) <= 0x1p-60) break;
   }
-  return 0.5 * (log_half_pi - laplace::math::log(nu)) - nu * eta - 0.25 * Kokkos::log1p(z * z) + Kokkos::log1p(pm1);
+  // the scaled form adds x without forming the difference: -nu eta + x = -(nu s - x) - nu log(z / (1 + s)),
+  // with nu s - x = sqrt(nu^2 + x^2) - x = nu^2 / (nu s + x). The logarithm needs its own care: for z > 1
+  // its argument is 1 - 1/z + O(1/z^2), so z / (1 + s) = 1 - (1 + 1/(s + z)) / (1 + s) exactly (s - z =
+  // 1 / (s + z)) and log1p of that keeps the digits that nu then multiplies. Below z = 1 the argument is
+  // nowhere near one and the plain logarithm is the accurate form.
+  const double lz = z > 1.0 ? Kokkos::log1p(-(1.0 + 1.0 / (s + z)) / (1.0 + s)) : laplace::math::log(z / (1.0 + s));
+  const double meta = scaled ? -(nu * nu / (nu * s + x)) - nu * lz : -nu * eta;
+  return 0.5 * (log_half_pi - laplace::math::log(nu)) + meta - 0.25 * Kokkos::log1p(z * z) + Kokkos::log1p(pm1);
 }
 
-LAPLACE_HD double log_k(double nu, double x, const params& p) {
+LAPLACE_HD double log_k(double nu, double x, const params& p, bool scaled = false) {
   if (!(x >= 0.0) || nu != nu) return nan();
   nu = Kokkos::fabs(nu);
   if (x == 0.0) return laplace::math::detail::pos_inf();
-  if (!(x < 1e308)) return -x;
-  if (nu >= p.nu_debye) return log_k_debye(nu, x);
+  if (!(x < 1e308)) return scaled ? 0.0 : -x;
+  if (nu >= p.nu_debye) return log_k_debye(nu, x, scaled);
   double r;
-  return log_k_rec(nu, x, r);
+  return log_k_rec(nu, x, r, scaled);
 }
 
 // ---------------------------------------------------------------- derivatives
@@ -564,7 +580,7 @@ LAPLACE_HD_FORCEINLINE void log_derivative_all(const double (&S)[N + 1], double*
 
 // out[n] = d^n/dx^n log K, n = 1..N, by the Riccati identity in double-double from g
 template <int N>
-LAPLACE_HD void riccati_all(const dd& g, double nu, double x, double* out) {
+LAPLACE_HD void riccati_all(const dd& g, double nu, double x, double* out, bool scaled = false) {
   const dd ix = dd(1.0) / dd(x);
   const dd nu2 = ddm::two_prod(nu, nu);
   dd inv[N > 1 ? N - 1 : 1], inv2[N > 1 ? N - 1 : 1];  // (1/x)^(m), (1/x^2)^(m)
@@ -592,11 +608,12 @@ LAPLACE_HD void riccati_all(const dd& g, double nu, double x, double* out) {
     d[n + 1] = (n == 0) ? s + 1.0 : s;
   }
   for (int n = 0; n < N; ++n) out[n + 1] = d[n].hi;
+  if (scaled) out[1] = (d[0] + 1.0).hi;  // g + 1 in double-double, so the order one keeps its digits
 }
 
 // out[n] = d^n/dx^n log K, n = 1..N, from the asymptotic expansion in 1/x
 template <int N>
-LAPLACE_HD void hankel_all(double nu, double x, double* out) {
+LAPLACE_HD void hankel_all(double nu, double x, double* out, bool scaled = false) {
   const double mu4 = 4.0 * nu * nu, u = 1.0 / x;
   double S[N + 1];
   for (int m = 0; m <= N; ++m) S[m] = 0.0;
@@ -626,14 +643,14 @@ LAPLACE_HD void hankel_all(double nu, double x, double* out) {
     double xn = 1.0;
     for (int j = 0; j < n; ++j) xn *= x;
     double base = (n % 2 ? -0.5 : 0.5) * f / xn;
-    if (n == 1) base -= 1.0;
+    if (n == 1 && !scaled) base -= 1.0;  // the scaled form is the one that omits it
     out[n] = base + L[n];
   }
 }
 
 // out[n] = d^n/dx^n log K, n = 1..N, from the Debye form
 template <int N>
-LAPLACE_HD void debye_all(double nu, double x, double* out) {
+LAPLACE_HD void debye_all(double nu, double x, double* out, bool scaled = false) {
   const double z = x / nu, z2 = z * z, opz = 1.0 + z2;
   const double s = Kokkos::sqrt(opz), t0 = 1.0 / s;
   double h[N];
@@ -714,26 +731,28 @@ LAPLACE_HD void debye_all(double nu, double x, double* out) {
   for (int n = 1; n <= N; ++n) {
     fN *= n;
     nuN *= nu;
-    out[n] = (-nu * h[n - 1] - 0.25 * q[n] + fN * comp[n]) / nuN;
+    // the scaled order one is -nu h[0] + nu = -nu / (z (s + z)), since h[0] = s / z and s^2 - z^2 = 1
+    const double hterm = (scaled && n == 1) ? -nu / (z * (s + z)) : -nu * h[n - 1];
+    out[n] = (hterm - 0.25 * q[n] + fN * comp[n]) / nuN;
   }
 }
 
 // out[0] = log K, out[n] = d^n/dx^n log K, n = 1..N
 template <int N>
-LAPLACE_HD void derivatives_upto(double nu, double x, const params& p, double* out) {
-  out[0] = log_k(nu, x, p);
+LAPLACE_HD void derivatives_upto(double nu, double x, const params& p, double* out, bool scaled = false) {
+  out[0] = log_k(nu, x, p, scaled);
   if (!(x > 0.0) || nu != nu) {
     for (int n = 1; n <= N; ++n) out[n] = nan();
     return;
   }
   nu = Kokkos::fabs(nu);
   if (!(x < 1e308)) {
-    for (int n = 1; n <= N; ++n) out[n] = (n == 1) ? -1.0 : 0.0;
+    for (int n = 1; n <= N; ++n) out[n] = (n == 1) ? (scaled ? 0.0 : -1.0) : 0.0;
     return;
   }
-  if (nu >= p.nu_debye) debye_all<N>(nu, x, out);
-  else if (x >= p.x_hankel) hankel_all<N>(nu, x, out);
-  else riccati_all<N>(g_dd(nu, x, p), nu, x, out);
+  if (nu >= p.nu_debye) debye_all<N>(nu, x, out, scaled);
+  else if (x >= p.x_hankel) hankel_all<N>(nu, x, out, scaled);
+  else riccati_all<N>(g_dd(nu, x, p), nu, x, out, scaled);
 }
 
 }  // namespace detail_bessel_k
@@ -939,6 +958,45 @@ LAPLACE_HD void log_bessel_k_dx_upto(double nu, double x, double* out) {
   detail_bessel_k::derivatives_upto<N>(nu, x, detail_bessel_k::params{}, out);
 }
 
+/**
+ * \ingroup bessel_k
+ * \brief The scaled logarithm \f$\log K_\nu(x) + x\f$.
+ *
+ * Evaluates \f$\log\!\left(e^{x} K_\nu(x)\right)\f$ without forming the sum, so that the result keeps
+ * its digits where \f$\log K_\nu(x) \approx -x\f$: Steed's branch omits the \f$-x\f$ it would subtract,
+ * Temme's branch adds \f$x\f$ at \f$x \le 2\f$, where the two terms are of the same size, and the Debye
+ * branch replaces \f$-\nu\eta + x\f$ by \f$-\nu^2/(\nu s + x) - \nu\log(z/(1 + s))\f$ with \f$z = x/\nu\f$
+ * and \f$s = \sqrt{1 + z^2}\f$.
+ * \param nu Real order \f$\nu \in \mathbb{R}\f$.
+ * \param x Positive argument \f$x \in (0, \infty)\f$.
+ * \return The value of \f$\log K_\nu(x) + x\f$, \f$+\infty\f$ at \f$x = 0\f$, \f$0\f$ for \f$x \ge 10^{308}\f$, or quiet NaN for \f$x < 0\f$ or NaN input.
+ * \see bessel_k, log_bessel_k(), log_bessel_k_scaled_dx_upto()
+ */
+LAPLACE_HD double log_bessel_k_scaled(double nu, double x) {
+  return detail_bessel_k::log_k(nu, x, detail_bessel_k::params{}, true);
+}
+
+/**
+ * \ingroup bessel_k
+ * \brief The scaled logarithm and its derivatives: \f$\log K_\nu(x) + x\f$ and \f$\frac{d}{dx}\log K_\nu(x) + 1\f$.
+ *
+ * Fills `out[0]` with \f$\log K_\nu(x) + x\f$, `out[1]` with \f$(\log K_\nu)'(x) + 1\f$ and `out[n]` with
+ * \f$(\log K_\nu)^{(n)}(x)\f$ for \f$n \ge 2\f$, which the shift leaves unchanged, from one evaluation of
+ * the shared work. The two shifted entries are formed without their cancellation: the Riccati regime adds
+ * one to \f$g\f$ in double-double, the asymptotic regime omits the \f$-1\f$ it would subtract, and the
+ * Debye regime writes the order one as \f$-\nu/(z(s + z))\f$ with \f$z = x/\nu\f$ and \f$s = \sqrt{1 + z^2}\f$.
+ * \tparam N Highest derivative order (\f$1 \le N \le 7\f$).
+ * \param nu Real order \f$\nu \in \mathbb{R}\f$.
+ * \param x Positive argument \f$x \in (0, \infty)\f$.
+ * \param out Array of \f$N + 1\f$ doubles.
+ * \see bessel_k, log_bessel_k_scaled(), log_bessel_k_dx_upto()
+ */
+template <int N>
+LAPLACE_HD void log_bessel_k_scaled_dx_upto(double nu, double x, double* out) {
+  static_assert(N >= 1 && N <= 7, "orders 1 to 7");
+  detail_bessel_k::derivatives_upto<N>(nu, x, detail_bessel_k::params{}, out, true);
+}
+
 }  // namespace own
 
 using own::log_bessel_k;
@@ -950,5 +1008,7 @@ using own::log_bessel_k_dx5;
 using own::log_bessel_k_dx6;
 using own::log_bessel_k_dx7;
 using own::log_bessel_k_dx_upto;
+using own::log_bessel_k_scaled;
+using own::log_bessel_k_scaled_dx_upto;
 
 }  // namespace laplace::math

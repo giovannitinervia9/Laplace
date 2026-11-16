@@ -22,7 +22,14 @@
 // The derivatives of h in nu: (1/2) log R through R's derivatives, -(1/2) log nu in closed form,
 // and -log K_1(sqrt nu) through x; so one set of seven Bessel derivatives serves the whole tensor
 // (log K_2 is never formed: log R - log x = log(K_2/K_1) is the same function), and it comes from one
-// call of math::log_bessel_k_dx_upto, which shares Steed's continued fraction between the orders.
+// call of math::log_bessel_k_scaled_dx_upto, which shares Steed's continued fraction between the orders
+// and returns log K_1(x) + x and (log K_1)'(x) + 1 in place of the first two entries.
+//
+// Lambda tends to -x and h to +x as nu grows, while their sum is O(1), so for nu >= 1 the two are
+// carried shifted: Lambda + x from lambda_shift_nu below and h - x from the same h_derivs fed with the
+// scaled Bessel set. Without the shift every order in nu loses a whole factor of nu, eight digits at
+// nu = 1e8. The shift is used where R z^2 <= nu; above that Lambda is nowhere near -x and the two
+// pair as they stand.
 //
 // For nu < small_nu_split = 1 the Bessel route loses about eps/nu (the derivative of order k of R in x is the
 // difference of terms of size x^-k that cancels to size x^(2-k)), and R and h come instead from the
@@ -86,6 +93,13 @@ LAPLACE_HD_FORCEINLINE constexpr int pos3(int a, int b, int c) {
   return pos;
 }
 
+// sum_j C(n, j) a^(j) b^(n-j), Leibniz's rule on two derivative arrays
+LAPLACE_HD_FORCEINLINE double leib(int n, const double* a, const double* b) {
+  double acc = 0.0;
+  for (int j = 0; j <= n; ++j) acc += binomial_coef(n, j) * a[j] * b[n - j];
+  return acc;
+}
+
 // d^n/dnu^n f(g(nu)) for n = 1..6 with f[1..n], g[1..n]
 LAPLACE_HD_FORCEINLINE double chain(int n, const double* f, const double* g) {
   switch (n) {
@@ -105,26 +119,46 @@ LAPLACE_HD_FORCEINLINE double half_fall(int i) {
   return r;
 }
 
-// the nu-derivatives of the Bessel ratio R(nu), orders 0..K, by the exact identity of the header
-// comment and Faa di Bruno through x = sqrt(nu); xd[j] = d^j x / dnu^j, j = 0..K, is also returned,
-// and gx[k] = (log K_1)^(k)(x), k = 1..K + 1, with gx[0] = log K_1(x), from one evaluation of the
-// shared work of the Bessel routine
+// the falling factorial (-1/2)(-1/2 - 1) ... (-1/2 - i + 1)
+LAPLACE_HD_FORCEINLINE double mhalf_fall(int i) {
+  double r = 1.0;
+  for (int k = 0; k < i; ++k) r *= -0.5 - k;
+  return r;
+}
+
+// the nu-derivatives of the Bessel ratio R(nu) and of R(nu) - x, orders 0..K (Rn and Rmn), by the
+// exact identity of the header comment and Faa di Bruno through x = sqrt(nu); xd[j] = d^j x / dnu^j,
+// j = 0..K, is also returned, and gx is the scaled set, gx[0] = log K_1(x) + x,
+// gx[1] = (log K_1)'(x) + 1 and gx[k] = (log K_1)^(k)(x) for k >= 2, from one evaluation of the
+// shared work of the Bessel routine. R - x tends to 3/2 and is a difference of numbers of size x,
+// so it is written as 1 - x gx[1], where the two terms of R = 1 - x (log K_1)' have already been
+// shifted; h - x comes from the same gx through h_derivs.
 template <int K>
-LAPLACE_HD void ratio_derivs(double nu, double* Rn, double* xd, double* gx) {
+LAPLACE_HD void ratio_derivs(double nu, double* Rn, double* xd, double* gx, double* Rmn) {
   const double x = Kokkos::sqrt(nu);
-  math::log_bessel_k_dx_upto<K + 1>(1.0, x, gx);
-  double Rx[K + 1];
-  Rx[0] = 1.0 - x * gx[1];
-  for (int k = 1; k <= K; ++k) Rx[k] = -(x * gx[k + 1] + k * gx[k]);
+  math::log_bessel_k_scaled_dx_upto<K + 1>(1.0, x, gx);
+  double Rx[K + 1], Rmx[K + 1];
+  Rmx[0] = 1.0 - x * gx[1];
+  Rx[0] = Rmx[0] + x;
+  if constexpr (K >= 1) {
+    Rmx[1] = -(x * gx[2] + gx[1]);  // d(R - x)/dx = -(x (log K_1)'' + ((log K_1)' + 1))
+    Rx[1] = Rmx[1] + 1.0;
+  }
+  for (int k = 2; k <= K; ++k) Rx[k] = Rmx[k] = -(x * gx[k + 1] + k * gx[k]);
   xd[0] = x;
   for (int j = 1; j <= K; ++j) xd[j] = xd[j - 1] * (0.5 - (j - 1)) / nu;
   Rn[0] = Rx[0];
-  for (int k = 1; k <= K; ++k) Rn[k] = chain(k, Rx, xd);
+  Rmn[0] = Rmx[0];
+  for (int k = 1; k <= K; ++k) {
+    Rn[k] = chain(k, Rx, xd);
+    Rmn[k] = chain(k, Rmx, xd);
+  }
 }
 
 // the nu-derivatives of h(nu) = (1/2) log R - (1/2) log nu - log K_1(sqrt nu), orders 1..K, from those of R
 // (Rn), of x = sqrt(nu) (xd) and of log K_1 (gx, with gx[0] = log K_1(x)) already formed by ratio_derivs.
-// hd[0] is the value.
+// hd[0] is the value. Called with the scaled gx of ratio_derivs it returns h - x instead, the same
+// expression with log K_1(x) + x in place of log K_1(x), which is how the nu >= 1 branch uses it.
 template <int K>
 LAPLACE_HD void h_derivs(double nu, const double* Rn, const double* xd, const double* gx, double* hd) {
   const double R = Rn[0];
@@ -265,6 +299,74 @@ LAPLACE_HD void small_nu_derivs(double nu, double* Rn, double* hd) {
   }
 }
 
+// d^K/dnu^K (Lambda + x), x = sqrt(nu), formed without the cancellation of x. Lambda tends to -x and
+// h to +x while Lambda + h is O(1), so the pure-nu component of the log-density is a difference of
+// terms of size nu^(1/2 - K) with a sum of size nu^(-1/2 - K): a whole factor of nu at every order.
+// With rho = sqrt R, q = nu / R, G = sqrt(q + z^2) and Rm = R - x,
+//
+//   Lambda + x = -rho z^2 / (G + sqrt q) = -(z^2 / 2) (1 + Theta),
+//   Theta = (4 Rm - z^2) / ( [(R + Rm) / rho + G] (G + sqrt q) ),
+//
+// the second form from 2 rho - sqrt q - G = (4 Rm - z^2) / [(R + Rm) / rho + G], which multiplies the
+// difference by its conjugate; Theta is O(nu^(-1/2)) and no quantity on the right is a difference of
+// larger ones. Used where R z^2 <= nu, which keeps 1 + Theta = 2 R / (sqrt(nu + R z^2) + x) away from
+// zero; above that threshold Lambda itself is far from -x and pairs with h as it stands.
+template <int K>
+LAPLACE_HD double lambda_shift_nu(double z, double nu, const double* Rn, const double* Rmn) {
+  const double R = Rn[0], z2 = z * z;
+  double sr[K + 1], u[K + 1], qd[K + 1], sq[K + 1], Gd[K + 1], f[K + 1];
+  double pw = 1.0;  // R^-k
+  sr[0] = 1.0 / Kokkos::sqrt(R);
+  u[0] = 1.0 / R;
+  for (int k = 1; k <= K; ++k) {
+    pw /= R;
+    f[k] = mhalf_fall(k) * sr[0] * pw;
+  }
+  for (int k = 1; k <= K; ++k) sr[k] = chain(k, f, Rn);
+  pw = 1.0;
+  for (int k = 1; k <= K; ++k) {
+    pw /= R;
+    f[k] = sign_of_power(k) * fact(k) * u[0] * pw;
+  }
+  for (int k = 1; k <= K; ++k) u[k] = chain(k, f, Rn);
+  qd[0] = nu * u[0];
+  for (int k = 1; k <= K; ++k) qd[k] = nu * u[k] + k * u[k - 1];
+  const double q = qd[0], a2 = q + z2;
+  sq[0] = Kokkos::sqrt(q);
+  pw = 1.0;
+  for (int k = 1; k <= K; ++k) {
+    pw /= q;
+    f[k] = half_fall(k) * sq[0] * pw;
+  }
+  for (int k = 1; k <= K; ++k) sq[k] = chain(k, f, qd);
+  Gd[0] = Kokkos::sqrt(a2);
+  pw = 1.0;
+  for (int k = 1; k <= K; ++k) {
+    pw /= a2;
+    f[k] = half_fall(k) * Gd[0] * pw;
+  }
+  for (int k = 1; k <= K; ++k) Gd[k] = chain(k, f, qd);
+  double A[K + 1], B[K + 1], w[K + 1];
+  for (int k = 0; k <= K; ++k) {
+    A[k] = leib(k, Rn, sr) + leib(k, Rmn, sr) + Gd[k];
+    B[k] = Gd[k] + sq[k];
+  }
+  for (int k = 0; k <= K; ++k) w[k] = leib(k, A, B);
+  double iw[K + 1];
+  iw[0] = 1.0 / w[0];
+  pw = 1.0;
+  for (int k = 1; k <= K; ++k) {
+    pw /= w[0];
+    f[k] = sign_of_power(k) * fact(k) * iw[0] * pw;
+  }
+  for (int k = 1; k <= K; ++k) iw[k] = chain(k, f, w);
+  double N[K + 1];
+  N[0] = 4.0 * Rmn[0] - z2;
+  for (int k = 1; k <= K; ++k) N[k] = 4.0 * Rmn[k];
+  const double th = leib(K, N, iw);
+  return -0.5 * z2 * (K == 0 ? 1.0 + th : th);
+}
+
 // D[c * (K + 1) + j] = d^c/dnu^c d^j/dz^j Lambda(z, nu), c + j <= K, Lambda = -sqrt(nu + R z^2)
 // (the entries with c + j > K are not written, and j = 0 only at c = K, which mixed_shape_dk reads)
 template <int K>
@@ -389,25 +491,30 @@ struct pseudohuber_distrib {
    *
    * Computes \f$\ell = -\sqrt{\nu + R(\nu) z^2} + h(\nu) - \log 2 - \log\sigma\f$ with
    * \f$z = (y - \mu)/\sigma\f$ and \f$h(\nu) = \frac{1}{2}\log R(\nu) - \frac{1}{2}\log\nu - \log K_1(\sqrt{\nu})\f$,
-   * using the small-argument series for \f$\nu < 1\f$ and bessel_ratio() with
-   * log_bessel_k() for \f$\nu \ge 1\f$.
+   * using the small-argument series for \f$\nu < 1\f$ and log_bessel_k_scaled_dx_upto() for
+   * \f$\nu \ge 1\f$, where \f$\Lambda + x\f$ and \f$h - x\f$ are formed apart so that the
+   * cancellation of \f$x = \sqrt{\nu}\f$ between them does not happen.
    * \param y Observation point \f$y \in (-\infty, \infty)\f$.
    * \return Log-density value (\f$-\infty\f$ as \f$|y| \to \infty\f$, quiet NaN on NaN input).
    * \see distrib_pseudohuber, logpdf_dk(), bessel_ratio()
    */
   LAPLACE_HD double logpdf(double y) const {
     const double z = (y - mu) / sigma;
-    double R, h;
     if (nu < detail_pseudohuber::small_nu_split) {
       double Rn[1], hd[1];
       detail_pseudohuber::small_nu_derivs<0>(nu, Rn, hd);
-      R = Rn[0];
-      h = hd[0];
-    } else {
-      R = bessel_ratio();
-      h = 0.5 * math::log(R) - 0.5 * math::log(nu) - math::log_bessel_k(1.0, Kokkos::sqrt(nu));
+      return -Kokkos::sqrt(nu + Rn[0] * z * z) + hd[0] - math::log(2.0 * sigma);
     }
-    return -Kokkos::sqrt(nu + R * z * z) + h - math::log(2.0 * sigma);
+    const double x = Kokkos::sqrt(nu);
+    double gs[2];
+    math::log_bessel_k_scaled_dx_upto<1>(1.0, x, gs);
+    const double Rm = 1.0 - x * gs[1], R = Rm + x;
+    const double hx = 0.5 * math::log(R) - math::log(x) - gs[0];  // h - x
+    if (R * z * z <= nu) {
+      const double Rn[1] = {R}, Rmn[1] = {Rm};
+      return detail_pseudohuber::lambda_shift_nu<0>(z, nu, Rn, Rmn) + hx - math::log(2.0 * sigma);
+    }
+    return -Kokkos::sqrt(nu + R * z * z) + (x + hx) - math::log(2.0 * sigma);
   }
 
   /**
@@ -416,7 +523,7 @@ struct pseudohuber_distrib {
    * in \f$(\mu, \sigma, \nu)\f$.
    *
    * Evaluates \f$R(\nu)\f$ and \f$h(\nu)\f$ and their \f$\nu\f$-derivatives from the small-argument
-   * series for \f$\nu < 1\f$ or from one call to log_bessel_k_dx_upto() for \f$\nu \ge 1\f$,
+   * series for \f$\nu < 1\f$ or from one call to log_bessel_k_scaled_dx_upto() for \f$\nu \ge 1\f$,
    * assembles the mixed \f$(z, \nu)\f$ derivative table of \f$\Lambda(z, \nu) = -\sqrt{\nu + R(\nu) z^2}\f$,
    * maps it to \f$(\mu, \sigma, \nu)\f$, and adds \f$h^{(K)}(\nu)\f$ and
    * \f$(-1)^K (K - 1)! \sigma^{-K}\f$ to the pure \f$\nu\f$ and \f$\sigma\f$ components.
@@ -430,14 +537,22 @@ struct pseudohuber_distrib {
     const double z = (y - mu) / sigma;
     // R and h: the series below small_nu_split, one set of Bessel derivatives above it
     double Rn[K + 1], D[(K + 1) * (K + 1)], hd[K + 1];
-    if (nu < detail_pseudohuber::small_nu_split) {
+    double xd[K + 1], Rmn[K + 1];
+    const bool series = nu < detail_pseudohuber::small_nu_split;
+    if (series) {
       detail_pseudohuber::small_nu_derivs<K>(nu, Rn, hd);
     } else {
-      double xd[K + 1], gx[K + 2];
-      detail_pseudohuber::ratio_derivs<K>(nu, Rn, xd, gx);
-      detail_pseudohuber::h_derivs<K>(nu, Rn, xd, gx, hd);
+      double gx[K + 2];
+      detail_pseudohuber::ratio_derivs<K>(nu, Rn, xd, gx, Rmn);
+      detail_pseudohuber::h_derivs<K>(nu, Rn, xd, gx, hd);  // the scaled gx, so hd is h - x
     }
     detail_pseudohuber::lambda_table<K>(z, nu, Rn, D);
+    // the pure-nu component is the one pair that cancels: below the threshold it is taken as
+    // (Lambda + x) + (h - x), above it Lambda is far from -x and h is restored by adding x back
+    if (!series) {
+      if (Rn[0] * z * z <= nu) D[K * (K + 1)] = detail_pseudohuber::lambda_shift_nu<K>(z, nu, Rn, Rmn);
+      else hd[K] += xd[K];
+    }
     sym_tensor<3, K> t = detail_location_scale::mixed_shape_dk<K>(D, z, sigma);
     t[detail_pseudohuber::pos3(0, 0, K)] += hd[K];
     double isk = 1.0;

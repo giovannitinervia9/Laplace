@@ -1080,6 +1080,49 @@ there (nu = 0..4, x = sqrt(nu_ph)).
 
 **Scaling in the recurrences.** The running product of the value is kept in a single double precision accumulator and rescaled when it exceeds 1e280, to prevent overflow. In the derivatives in the argument, the recurrence of 2n + 4 steps (n being the step count, in double precision) is rescaled by 2^-500 when |Q_1| > 2^500.
 
+**The scaled pair.** `log_bessel_k_scaled(nu, x)` is log K_nu(x) + x and
+`log_bessel_k_scaled_dx_upto<N>(nu, x, out)` fills out[0] with it, out[1] with
+(log K_nu)'(x) + 1 and out[n] with the plain derivative of order n for n >= 2,
+which the shift leaves alone. They exist because a caller whose own quantity is
+one of the two shifted entries would otherwise receive a difference of numbers
+of size x, or of size one, and lose about log2(x) bits of it: the pseudo-Huber
+families need log K_1(x) + x and (log K_1)'(x) + 1 to carry their normalizer and
+their Bessel ratio apart from sqrt(nu). Nothing is recomputed for them. Each
+regime writes the shifted entry instead of the plain one: Steed's branch omits
+the -x it would subtract and Temme's branch, used only for x <= 2 where the two
+terms are of a size, adds it; the asymptotic expansion in 1/x omits the -1 of its
+order one; the Riccati regime adds one to g in double-double, so the order one is
+exact to the double; and the Debye form uses
+-nu eta + x = -nu^2/(nu s + x) - nu log(z/(1 + s)) and 1 - s/z = -1/(z(s + z)),
+with z = x/nu and s = sqrt(1 + z^2). The plain functions are untouched, and at
+x = +inf the scaled value and its order one are 0 where the plain ones are -inf
+and -1.
+
+The Debye branch needed one step beyond the shift. Its second term is
+-nu log(z/(1 + s)), whose argument is 1 - 1/z + O(1/z^2) for large z, so nu
+multiplies the rounding of a logarithm near one: at nu = 3.1e4, x = 6.2e7 that
+alone put the scaled value 8693 ulp out. Written as
+nu log1p(-(1 + 1/(s + z))/(1 + s)), which is exact because s - z = 1/(s + z), it
+is 101. Below z = 1 the argument is nowhere near one and the plain logarithm is
+the accurate form, so the branch keeps both.
+
+Measured against the module's own reference grids, the reference pair (hi, lo)
+plus the shift summed without error in the test (one two_sum, the shift being
+exact as a double), so that what is measured is the scaled routine and not a
+difference formed in the test: the first derivative is at or below 1.17 ulp of
+its own size in every regime, in units of one ulp plus four eps of (log K)',
+the irreducible error where the shifted quantity crosses zero near x = 1. The
+value is 0.49 ulp for x <= 2, in units of one ulp plus eight eps of log K, which
+is the accuracy the plain value itself is measured to; above x = 2 it carries no
+floor and reaches 35.2 ulp at nu = 4, x = 9.5 (the continued fraction) and 101
+ulp at nu = 248, x = 7635 (Debye), because there the scaled value is what remains
+of a sum of terms of the expansion that can be tens of times larger than it, so
+it is accurate to about 1e-13 absolute and not to its own last place. The orders
+the distributions ask for are far below that: the pseudo-Huber uses nu = 1 only,
+and its own grid reads 3.71 ulp on the value at nu_ph = 1e8. The orders two and
+up are the plain ones to the bit, on every reference grid and regime boundary.
+Tested in `tests/math/test_bessel_k.cpp` on both builds, bounds 160 and 2.
+
 ## Faa di Bruno's formula and the partial Bell polynomials to order 7
 
 **What.** `include/laplace/math/faa_di_bruno.hpp`: `bell_partial(n, k, g)`, the
@@ -7417,9 +7460,22 @@ three parameters are the three moments by quadrature, the reflection in the
 sign of gamma, the derivatives of log F against differences of its own log F,
 and the family inside a Kokkos kernel (host and device within 6.4e-13).
 
-**Open.** A series in cc of W for |cc| < 0.05, whose coefficients start at
-cc^3 He_3, would repair the score and the orders two and three near zero; it is
-not written. The descriptors say `infinitely_smooth` with no non-smooth points,
+**Open.** A series in cc of W near zero skewness was examined and not
+written, and the reason is measured rather than guessed. The expansion of W in
+powers of cc, taken with SymPy and with log Phi left as an unknown function L,
+has no cc^1 and no cc^2 term at all: the first vanishes because
+L'(0) = b = sqrt(2/pi) is exactly the factor the quadratic part contributes,
+the second because L''(0) = -2/pi, and the cc^3 coefficient is
+(1 - kappa) He_3(z)/6 = gamma He_3(z)/6, which is the score the family already
+writes in closed form at gamma = 0. A series would therefore have to remove two
+orders of cancellation and not one, and it cannot be short: the natural
+variable is u = alpha t, about cc z / b, and the Taylor series of log Phi at
+zero has radius about 1.7, the nearest complex zero of Phi, so at |cc| = 0.05
+and the |z| = 12 of the reference grid about forty terms are needed for the last
+bit. What it would buy is small beside that: the score in gamma keeps seven
+digits at |gamma| = 1e-12 and ten at 1e-8, which a fit can use, and the orders
+two and above diverge like gamma^(-2/3) because the law is only C^1 in gamma at
+zero, so there is nothing there to be accurate about. The descriptors say `infinitely_smooth` with no non-smooth points,
 while the law is only C^1 in gamma at zero: declaring a non-smooth point there
 with `continuous_order` 1 would be truthful, and would make the generic
 information NaN for the components with two or more indices in gamma although
@@ -7584,6 +7640,28 @@ each of size exp(-x) is never formed. The normalizer h(nu) takes its nu-derivati
 set of Bessel derivatives, log R - log x being the same function as log K_2 - log K_1, so the
 whole family needs one evaluation of log_bessel_k and of its orders one to seven a tensor.
 
+Above the split Lambda and h are carried shifted by x = sqrt(nu), because Lambda tends to -x and h
+to +x while their sum is O(1): their pure-nu derivatives are O(nu^(1/2 - c)) and the sum is
+O(nu^(-1/2 - c)), so the one component that holds them both used to lose a whole factor of nu.
+With Rm = R - x,
+
+    Lambda + x = -rho z^2 / (G + sqrt q) = -(z^2/2) (1 + Theta),
+    Theta = (4 Rm - z^2) / ( [(R + Rm)/rho + G] (G + sqrt q) ),
+    h - x = (1/2) log R - log x - gs(x),   gs(x) = log K_1(x) + x,
+    Rm = 1 - x gs'(x),   gs'(x) = (log K_1)'(x) + 1,
+
+the second form of Lambda + x from 2 rho - sqrt q - G = (4 Rm - z^2)/[(R + Rm)/rho + G], which
+multiplies the difference by its conjugate. Theta is O(nu^(-1/2)) and Rm tends to 3/2, and no
+quantity on the right is a difference of larger ones. The shift is taken where R z^2 <= nu, which
+keeps 1 + Theta = 2 R/(sqrt(nu + R z^2) + x) away from zero; above that Lambda is nowhere near -x
+and the two pair as they stand, h being restored by adding the derivatives of x back. The two
+scaled Bessel pieces are `math::log_bessel_k_scaled` and `log_bessel_k_scaled_dx_upto`, which cost
+nothing beyond the plain ones: Steed's branch omits the -x it would subtract, the asymptotic
+expansion omits the -1, the Riccati regime adds one to g in double-double, and the Debye form uses
+-nu eta + x = -nu^2/(nu s + x) - nu log(z/(1 + s)) and 1 - s/z = -1/(z(s + z)). h - x is the same
+h_derivs fed with the scaled set, and the only entry of the (nu, z) table that changes is the one
+at c = K, j = 0, which is where mixed_shape_dk reads the pure-nu derivative.
+
 Lambda = -sqrt(nu + R z^2) is written as -rho(nu) G(q(nu), z) with rho = sqrt(R), q = nu/R and
 G = sqrt(q + z^2); the table D[c][j] of its mixed (nu, z) derivatives feeds
 `detail_location_scale::mixed_shape_dk`. The z-derivatives of (q + z^2)^p come from a recurrence
@@ -7598,13 +7676,21 @@ sigma from 2^-20 to 2^20. The three regions have different causes, so they have 
 
 | order | nu < 1 | 1 <= nu < 1e4 | nu >= 1e4 |
 |---|---|---|---|
-| value | 1.61 | 41.5 | 1.6e4 |
-| 1 | 29.2 | 1.5e3 | 1.2e4 |
-| 2 | 4.67 | 747 | 1.0e4 |
-| 3 | 5.49 | 1.0e3 | 5.3e3 |
-| 4 | 8.19 | 339 | 5.4e3 |
-| 5 | 13.5 | 869 | 8.6e3 |
-| 6 | 9.08 | 1.4e3 | 9.1e3 |
+| value | 1.61 | 4.51 | 7.02 |
+| 1 | 29.2 | 33.2 | 6.55 |
+| 2 | 4.67 | 19.9 | 84.8 |
+| 3 | 5.49 | 53.7 | 71.5 |
+| 4 | 8.19 | 86.6 | 129 |
+| 5 | 13.5 | 79.7 | 37.1 |
+| 6 | 9.08 | 278 | 24.8 |
+
+The two columns above one are what the shift of Lambda and h by x bought: before it they read 41.5,
+1.5e3, 747, 1.0e3, 339, 869 and 1.4e3, and 1.6e4, 1.2e4, 1.0e4, 5.3e3, 5.4e3, 8.6e3 and 9.1e3, so
+the value and the first order at nu >= 1e4 improve by 2300 and 1800 times and no order anywhere is
+worse. At nu = 1e8 every order now sits between 0.61 and 3.7 ulp, and the worst point of the whole
+grid is the order six at nu = 1 (278 ulp), where the shift also took away most of what used to be
+1.4e3. The two builds agree to the digit on every entry of the table. The split at nu = 1 and the
+series below it are unchanged, and the first column is bit for bit what it was.
 
 The first column is the small-shape region after the series below, which replaced the Bessel
 route there: before it the same column read 9.4 on the value and 1.8e4, 1.8e6, 6.8e6, 1.4e7,
@@ -7643,7 +7729,9 @@ The generic information costs 3 ms (nu = 0.05) to 16 ms (nu = 2.5) at order zero
 160 ms at order four, the score form being 1.5 to 2 times faster than the hessian form.
 
 **Chosen.** As above, with the bounds of `tests/distrib/test_pseudohuber.cpp` (15 cases, 21033
-assertions) at about 1.5 times the worst of the two builds, per region of nu and per order. The
+assertions) at about 1.5 times the worst of the two builds, per region of nu and per order; the
+symmetry of the generic quantile, q(p) + q(1 - p) - 2 mu, moved from 1.1e-15 to 1.9e-15 when the
+density changed in its last bits and the root stopped elsewhere (1.27e-15 on both builds). The
 closed forms are checked against SymPy by
 `python -I tools/reference/distrib_pseudohuber.py forms` (the R identity, the recurrence for
 (q + z^2)^p, the identity at p = 1/2 and the whole table D, worst 1.4e-51 relative at five
@@ -7682,12 +7770,12 @@ this family sits. It agrees with the single-order functions bit for bit on gcc (
 differ, every regime and both sides of nu = 20, x = 200 and x = 1) and to 1.2e-15 relative on
 CUDA, where nvcc contracts and schedules the two differently.
 
-**Open.** Two corners.
-- nu >= 1e4: the value and the first order reach 1.6e4 and 1.2e4 ulp, because log f is a
-  difference of numbers of size sqrt(nu); at nu = 1e8 the value carries an absolute error of
-  about 1e-12.
-- nu = 1 at order six: 1.4e3 ulp, which the series does not explain (using it at nu = 1 still
-  leaves 746), so it comes from the assembly of Lambda. Not chased.
+**Open.** One corner, the other having been repaired by the shift of Lambda and h by x: nu = 1 at
+order six, 278 ulp and the worst point of the grid, down from 1.4e3 before the shift and still not
+chased. It is where the series and the Bessel route meet, and before the shift the series was not
+the explanation either (using it at nu = 1 left 746 ulp of the 1.4e3). For the record, what the
+shift replaced: the value and the first order at nu >= 1e4 used to reach 1.6e4 and 1.2e4 ulp, an
+absolute error of about 1e-12 on the value at nu = 1e8.
 
 ## skewt, Azzalini's skew t
 

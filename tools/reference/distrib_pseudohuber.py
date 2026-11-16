@@ -395,6 +395,40 @@ def check_forms():
                     print("table D", c, j, zv, nv, float(err))
         print("table D at z =", zv, "nu =", nv, "worst relative", float(worst))
 
+    # (3b) the shifted forms of the nu >= 1 branch: Lambda + x as -(z^2/2)(1 + Theta). Both are proved
+    # as identities in (nu, z, R), so every nu-derivative of the two agrees by construction, and the
+    # point of the form is that Theta is O(nu^(-1/2)) and no quantity in it is a difference of larger ones.
+    nus, zs, Rs_ = sp.symbols("nu z R", positive=True)
+    xs = sp.sqrt(nus)
+    Rms = Rs_ - xs
+    rhos = sp.sqrt(Rs_)
+    qs = nus / Rs_
+    Gs = sp.sqrt(qs + zs ** 2)
+    lam_x = -sp.sqrt(nus + Rs_ * zs ** 2) + xs
+    theta = (4 * Rms - zs ** 2) / (((Rs_ + Rms) / rhos + Gs) * (Gs + sp.sqrt(qs)))
+    for name, form in (("-rho z^2 / (G + sqrt q)", -rhos * zs ** 2 / (Gs + sp.sqrt(qs))),
+                       ("-(z^2/2)(1 + Theta)", -(zs ** 2 / 2) * (1 + theta))):
+        if sp.simplify(sp.radsimp(lam_x - form)) != 0:
+            bad += 1
+            print("Lambda + x against", name, "does not simplify to zero")
+    print("Lambda + x shifted forms checked")
+    # Theta and R - x numerically, with R from the definition: the sizes the form relies on
+    for nuv in [mpmath.mpf(1), mpmath.mpf(100), mpmath.mpf("1e4"), mpmath.mpf("1e8")]:
+        xv = mpmath.sqrt(nuv)
+        Rv = Rdef(nuv)
+        for zv in [mpmath.mpf(0), mpmath.mpf(1), mpmath.mpf(2)]:
+            if Rv * zv ** 2 > nuv:
+                continue
+            Gv = mpmath.sqrt(nuv / Rv + zv ** 2)
+            thv = (4 * (Rv - xv) - zv ** 2) / (((Rv + (Rv - xv)) / mpmath.sqrt(Rv) + Gv) * (Gv + mpmath.sqrt(nuv / Rv)))
+            exact = -mpmath.sqrt(nuv + Rv * zv ** 2) + xv
+            rel = abs(exact + (zv ** 2 / 2) * (1 + thv)) / max(abs(exact), mpmath.mpf(10) ** -30)
+            if rel > mpmath.mpf(10) ** -40:
+                bad += 1
+                print("Lambda + x numerically", float(nuv), float(zv), float(rel))
+            if zv == 0:
+                print("nu", float(nuv), "R - x", mpmath.nstr(Rv - xv, 10), "Theta", mpmath.nstr(thv, 6))
+
     # (4) the limits of the normalizer: the density integrates to one and has variance sigma^2
     for nuv in [mpmath.mpf("1e-8"), mpmath.mpf("1e-3"), mpmath.mpf(1), mpmath.mpf(50), mpmath.mpf("1e8")]:
         R = Rdef(nuv)

@@ -65,6 +65,22 @@ When several orders are needed at one point, \ref laplace::math::own::log_bessel
 
 Over the arguments measured in `docs/numerics.md`, calling \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" is 2.9 to 5.7 times faster than eight separate calls, most at \f$x = \sqrt{2}\f$. Tested across the seven reference grids and the regime boundaries around \f$\nu = 20\f$, \f$x = 200\f$, and \f$x = 1\f$ (146,792 entries), it matches the single-order functions to tolerance \f$0\f$ on the CPU build (0 entries differ on gcc) and to relative tolerance \f$1.8 \times 10^{-15}\f$ on CUDA, where `nvcc` contracts and schedules the two differently (20,744 entries differ by at most \f$1.2 \times 10^{-15}\f$ relative).
 
+### The scaled pair
+
+Two additional functions evaluate the shifted value and first derivative directly. The function \ref laplace::math::own::log_bessel_k_scaled "log_bessel_k_scaled()" returns \f$\log K_\nu(x) + x\f$. With template parameter \f$N \in \{1, \dots, 7\}\f$, \ref laplace::math::own::log_bessel_k_scaled_dx_upto "log_bessel_k_scaled_dx_upto()" fills `out[0]` with \f$\log K_\nu(x) + x\f$, `out[1]` with \f$(\log K_\nu)'(x) + 1\f$, and `out[n]` with \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x)\f$ for \f$n = 2, \dots, N\f$. It computes all orders from one evaluation of the shared work, as \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" does. For large \f$x\f$, \f$\log K_\nu(x)\f$ is about \f$-x\f$ and \f$(\log K_\nu)'(x)\f$ is about \f$-1\f$. A caller forming \f$\log K_\nu(x) + x\f$ or \f$(\log K_\nu)'(x) + 1\f$ from the unshifted outputs would subtract numbers of size \f$x\f$ or \f$1\f$ and lose about \f$\log_2 x\f$ bits.
+
+Rather than subtracting afterwards, each branch writes the shifted entry directly:
+
+- Steed's continued fraction (the value for \f$x > 2\f$) omits the \f$-x\f$ term that the unshifted branch subtracts.
+- Temme's series (the value for \f$x \le 2\f$) adds \f$x\f$; there the two terms are of comparable size, so the sum loses no digits.
+- The Hankel asymptotic expansion in \f$1/x\f$ omits the \f$-1\f$ term of its first derivative.
+- The Riccati regime carries \f$g = (\log K_\nu)'(x)\f$ in double-double arithmetic, so adding \f$1\f$ there gives the first derivative exact to double precision.
+- The Debye form writes \f$-\nu \eta + x = -\frac{\nu^2}{\nu v + x} - \nu \log\left(\frac{z}{1 + v}\right)\f$ and, for the first derivative, \f$1 - \frac{v}{z} = -\frac{1}{z(v + z)}\f$, with \f$z = x / \nu\f$ and \f$v = \sqrt{1 + z^2}\f$; both identities follow from \f$\nu v = \sqrt{\nu^2 + x^2}\f$ and \f$v^2 - z^2 = 1\f$. For \f$z > 1\f$ the logarithm is itself taken near one, where \f$\nu\f$ multiplies its rounding, so it is written as \f$\operatorname{log1p}\bigl(-(1 + 1/(v + z))/(1 + v)\bigr)\f$, exact because \f$v - z = 1/(v + z)\f$; below \f$z = 1\f$ the argument is nowhere near one and the plain logarithm is the accurate form.
+
+For \f$x \ge 10^{308}\f$, both the scaled value and its first derivative return \f$0\f$ (where the unshifted functions return \f$-x\f$ and \f$-1\f$), and higher derivatives return \f$0\f$. At \f$x = 0\f$, the scaled value is \f$+\infty\f$ as for \f$\log K_\nu(0)\f$, while the derivatives return quiet NaN. For \f$x < 0\f$ or any NaN input, every output is quiet NaN, and negative orders are replaced by \f$|\nu|\f$ by symmetry.
+
+Measured against the reference grids with the reference pair plus the shift summed without error, the first derivative stays at or below \f$1.17\f$ ulp of its own size in every branch, in units of one ulp plus \f$4\varepsilon\f$ of \f$(\log K_\nu)'\f$, the irreducible error where the shifted quantity crosses zero near \f$x = 1\f$. The value is \f$0.49\f$ ulp for \f$x \le 2\f$, in units of one ulp plus \f$8\varepsilon\f$ of \f$\log K_\nu\f$, the accuracy the unshifted value is itself measured to; above \f$x = 2\f$ it carries no floor and reaches \f$35.2\f$ ulp at \f$\nu = 4\f$, \f$x = 9.5\f$ and \f$101\f$ ulp at \f$\nu = 248\f$, \f$x = 7635\f$, because what the scaled value leaves is a sum of expansion terms that can be tens of times larger than it, so there it is accurate to about \f$10^{-13}\f$ absolute rather than to its own last place. Orders two and above are the unshifted ones to the bit on every reference grid and regime boundary.
+
 ## Measured accuracy
 
 See \ref accuracy "How accuracy is measured" for error metrics and test bounds. Because `mpmath`'s `besselk` fails near \f$\nu = 10^6\f$ (mpmath), reference values on 2,607 points (with \f$\nu \le 2^{40}\f$ and \f$x \in [2^{-30}, 2^{30}]\f$) are computed from the integral representation. With weight \f$w(\tau) = e^{-x \cosh \tau} \cosh(\nu \tau)\f$, the derivatives satisfy \f$\frac{\mathrm{d}^n}{\mathrm{d}x^n}\log K_\nu(x) = (-1)^n \kappa_n\f$, where \f$\kappa_n\f$ is the \f$n\f$-th cumulant of \f$\cosh T\f$ under the density proportional to \f$w\f$.
@@ -138,6 +154,8 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::own::log_bessel_k_dx6 "log_bessel_k_dx6()" — \f$\frac{\mathrm{d}^6}{\mathrm{d}x^6}\log K_\nu(x)\f$
 - \ref laplace::math::own::log_bessel_k_dx7 "log_bessel_k_dx7()" — \f$\frac{\mathrm{d}^7}{\mathrm{d}x^7}\log K_\nu(x)\f$
 - \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" — \f$\log K_\nu(x)\f$ and its derivatives of orders \f$1\f$ to \f$N\f$ in \f$x\f$ from one evaluation
+- \ref laplace::math::own::log_bessel_k_scaled "log_bessel_k_scaled()" — \f$\log K_\nu(x) + x\f$
+- \ref laplace::math::own::log_bessel_k_scaled_dx_upto "log_bessel_k_scaled_dx_upto()" — \f$\log K_\nu(x) + x\f$, \f$(\log K_\nu)'(x) + 1\f$, and derivatives of orders \f$2\f$ to \f$N\f$ in \f$x\f$ from one evaluation
 
 ## References
 

@@ -173,17 +173,17 @@ std::vector<ref_row> read_reference(const char* name) {
 
 double ulp_of(double v) { return std::ldexp(1.0, std::ilogb(v) - 52); }
 
-// The bound is the worst scaled error measured on 2026-11-15 on the gcc build and on the CUDA build
-// (RTX 4070 SUPER), times about one and a half, in ulp of the largest component of the order at that point.
-// The row of K = 0 is the value itself, in ulp of the value.
+// The bound is the worst scaled error measured on 2026-11-16 on the gcc build and on the CUDA build
+// (RTX 4070 SUPER), which agree here to the digit, times about one and a half, in ulp of the largest component
+// of the order at that point. The row of K = 0 is the value itself, in ulp of the value.
 // Three regions of nu, where the errors have different causes: nu < 1 (the series in nu for R and h, which does
 // not cancel: tens of ulp at most; before it, the Bessel route lost about eps/nu and reached 1.7e7 ulp at
-// nu = 1e-6), 1 <= nu < 1e4 (x up to 100: the Bessel derivatives of the double-double route and the cancellation
-// of -x + h(x)), and nu >= 1e4 (the value is a difference of two numbers of size sqrt(nu), and the information in
-// the derivatives is in the last digits of the Bessel derivatives).
+// nu = 1e-6), 1 <= nu < 1e4 and nu >= 1e4 (above one the Bessel derivatives of the double-double route set the
+// scale; the cancellation of Lambda = -x against h = +x, which used to lose a factor of nu at every order and
+// reached 1.6e4 ulp on the value at nu = 1e8, is gone since the two are carried as Lambda + x and h - x).
 const double BOUND_LOGPDF[3][7] = {{2.5, 45.0, 7.5, 8.5, 13.0, 21.0, 14.0},
-                                   {63.0, 2.3e3, 1.2e3, 1.6e3, 5.1e2, 1.3e3, 2.2e3},
-                                   {2.5e4, 1.9e4, 1.6e4, 8.0e3, 8.1e3, 1.3e4, 1.4e4}};
+                                   {6.8, 50.0, 30.0, 81.0, 130.0, 120.0, 420.0},
+                                   {11.0, 10.0, 130.0, 110.0, 200.0, 56.0, 37.0}};
 inline int nu_region(double nu) { return nu < 1.0 ? 0 : (nu >= 1e4 ? 2 : 1); }
 
 }  // namespace
@@ -532,7 +532,7 @@ TEST_CASE("pseudohuber: the generic quantile") {
     std::printf("pseudohuber quantile: cdf(quantile(p)) vs p worst relative %.3g, symmetry q(p) + q(1 - p) = 2 mu worst %.3g\n", worst,
                 worst_sym);
   CHECK(worst <= 3.5e-15);
-  CHECK(worst_sym <= 1.1e-15);
+  CHECK(worst_sym <= 1.9e-15);  // 1.27e-15 on both builds: where the root of the quantile stops
 }
 
 TEST_CASE("pseudohuber: start values") {

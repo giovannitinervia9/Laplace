@@ -3,7 +3,7 @@
 \ingroup distrib
 \brief Continuous real-line distribution with location \f$\mu\f$, standard deviation \f$\sigma > 0\f$, and shape \f$\nu > 0\f$, interpolating between the Laplace and Gaussian laws.
 
-Defined in `<laplace/distrib/pseudohuber.hpp>` as \ref laplace::distrib::pseudohuber_distrib "pseudohuber_distrib", this module evaluates the pseudo-Huber log-density, its parameter derivatives to order \f$6\f$, mixed observation-parameter derivatives, the Bessel ratio `bessel_ratio()`, and host starting values. Every evaluator is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). Cumulative functions, parameter derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$, expected Fisher information and its derivatives, quantiles, and random variates come from \ref distrib_generic "the generic routes". Against high-precision reference values, the log-density and its derivatives stay within \f$29.2\f$ ulp for \f$\nu < 1\f$, \f$1.5 \times 10^3\f$ ulp for \f$1 \le \nu < 10^4\f$, and \f$1.6 \times 10^4\f$ ulp for \f$\nu \ge 10^4\f$.
+Defined in `<laplace/distrib/pseudohuber.hpp>` as \ref laplace::distrib::pseudohuber_distrib "pseudohuber_distrib", this module evaluates the pseudo-Huber log-density, its parameter derivatives to order \f$6\f$, mixed observation-parameter derivatives, the Bessel ratio `bessel_ratio()`, and host starting values. Every evaluator is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). Cumulative functions, parameter derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$, expected Fisher information and its derivatives, quantiles, and random variates come from \ref distrib_generic "the generic routes". Against high-precision reference values, the log-density and its derivatives stay within \f$29.2\f$ ulp for \f$\nu < 1\f$, \f$278\f$ ulp for \f$1 \le \nu < 10^4\f$, and \f$129\f$ ulp for \f$\nu \ge 10^4\f$.
 
 ## Two origins and implemented form
 
@@ -29,7 +29,19 @@ For \f$\nu \ge 1\f$, using \f$K_1'(x) = -K_2(x) + K_1(x)/x\f$ rewrites the Besse
 \f[
 R(\nu) = 1 - x g'(x), \qquad \frac{\mathrm{d}^k R}{\mathrm{d}x^k} = -\bigl(x g^{(k+1)}(x) + k g^{(k)}(x)\bigr) \quad (k \ge 1),
 \f]
-where \f$g(x) = \log K_1(x)\f$ and its argument derivatives come from one call to \ref laplace::math::own::log_bessel_k_dx_upto "log_bessel_k_dx_upto()" (\ref bessel_k "bessel_k") up to order \f$K + 1\f$. Because \f$g'(x) \approx -1 - 1/(2x)\f$, the summed terms share the same sign and no quotient of functions of size \f$e^{-x}\f$ is formed. One Faà di Bruno composition per order through \f$x = \sqrt{\nu}\f$ (\ref faa_di_bruno "faa_di_bruno") gives the \f$\nu\f$-derivatives of \f$R\f$. The normalizer \f$h(\nu)\f$ takes its derivatives from the same single Bessel evaluation, since \f$\log R - \log x = \log(K_2/K_1)\f$ avoids ever computing \f$\log K_2\f$.
+where \f$g(x) = \log K_1(x)\f$ and its argument derivatives come from one call to \ref laplace::math::own::log_bessel_k_scaled_dx_upto "log_bessel_k_scaled_dx_upto()" (\ref bessel_k "bessel_k") up to order \f$K + 1\f$. That call returns the shifted pair \f$g_s(x) = g(x) + x\f$ and \f$g_s'(x) = g'(x) + 1\f$ in place of the first two entries, and \f$g^{(k)}(x)\f$ unchanged for \f$k \ge 2\f$, so the two lowest orders of \f$R\f$ are formed as \f$R = x + (1 - x g_s'(x))\f$ and \f$\mathrm{d}R/\mathrm{d}x = 1 - \bigl(x g''(x) + g_s'(x)\bigr)\f$, and the displayed formula applies as it stands from \f$k = 2\f$ on. Because \f$g'(x) \approx -1 - 1/(2x)\f$, the summed terms share the same sign and no quotient of functions of size \f$e^{-x}\f$ is formed. One Faà di Bruno composition per order through \f$x = \sqrt{\nu}\f$ (\ref faa_di_bruno "faa_di_bruno") gives the \f$\nu\f$-derivatives of \f$R\f$. The normalizer \f$h(\nu)\f$ takes its derivatives from the same single Bessel evaluation, since \f$\log R - \log x = \log(K_2/K_1)\f$ avoids ever computing \f$\log K_2\f$.
+
+As \f$\nu\f$ grows, \f$\Lambda(z, \nu)\f$ tends to \f$-x\f$ and \f$h(\nu)\f$ tends to \f$+x\f$ while their sum is \f$O(1)\f$. Their pure-\f$\nu\f$ derivatives of order \f$c\f$ are \f$O(\nu^{1/2 - c})\f$ while the sum is \f$O(\nu^{-1/2 - c})\f$, so adding them unshifted in the pure-\f$\nu\f$ component of order \f$K\f$ would lose a factor of \f$\nu\f$ (eight digits at \f$\nu = 10^8\f$). Where \f$R z^2 \le \nu\f$ for \f$\nu \ge 1\f$, the two terms are therefore carried shifted by \f$x = \sqrt{\nu}\f$. Writing \f$\rho = \sqrt{R}\f$, \f$q = \nu / R\f$, \f$G = \sqrt{q + z^2}\f$, and \f$R_m = R - x\f$, the shifted exponent is
+\f[
+\Lambda + x = -\frac{\rho z^2}{G + \sqrt{q}} = -\frac{z^2}{2}(1 + \Theta), \qquad
+\Theta = \frac{4 R_m - z^2}{\bigl((R + R_m)/\rho + G\bigr)(G + \sqrt{q})},
+\f]
+and the shifted normalizer and Bessel ratio are
+\f[
+h - x = \frac{1}{2}\log R - \log x - g_s(x), \qquad
+R_m = 1 - x g_s'(x).
+\f]
+The first equality for \f$\Lambda + x\f$ follows by multiplying \f$G - \sqrt{q}\f$ by its conjugate, since \f$(\rho G)^2 - x^2 = R z^2\f$. The second comes from applying the same step to \f$2\rho - \sqrt{q} - G = (4 R_m - z^2) / \bigl((R + R_m)/\rho + G\bigr)\f$. Here \f$\Theta\f$ is \f$O(\nu^{-1/2})\f$ and \f$R_m \to 3/2\f$, so no quantity on the right is a difference of larger ones. Both identities are checked symbolically by `tools/reference/distrib_pseudohuber.py` (`forms`), where each simplifies to zero in \f$(\nu, z, R)\f$. At the threshold itself \f$\Lambda = -x\sqrt{2}\f$, and beyond it \f$\Lambda\f$ is far enough from \f$-x\f$ that the unshifted pair loses nothing, while \f$1 + \Theta = 2R / (\sqrt{\nu + R z^2} + x)\f$ would be the quantity to cancel instead; there the derivatives of \f$x\f$ are added back to \f$h - x\f$ and the two pair as they stand.
 
 Below \f$\nu = 1\f$, the Bessel derivative formula cancels terms of size \f$x^{-k}\f$ down to \f$x^{2-k}\f$ and loses about \f$\varepsilon/\nu\f$. For \f$\nu < 1\f$, \f$R\f$ and \f$h\f$ instead use the 14-term small-argument series of \f$K_0\f$ and \f$K_1\f$ (DLMF §10.31.1) in \f$\nu\f$ and \f$L = \log(x/2)\f$ with no Bessel call: setting \f$A = K_0\f$ and \f$B = x K_1\f$ gives
 \f[
@@ -47,13 +59,15 @@ Against \f$209\f$ parameter-observation points (\f$\nu \in [10^{-6}, 10^8]\f$, \
 
 | Order | \f$\nu < 1\f$: worst (bound) | \f$1 \le \nu < 10^4\f$: worst (bound) | \f$\nu \ge 10^4\f$: worst (bound) |
 | --- | --- | --- | --- |
-| \f$0\f$ (`logpdf`) | \f$1.61\f$ (\f$2.5\f$) | \f$41.5\f$ (\f$63\f$) | \f$1.6 \times 10^4\f$ (\f$2.5 \times 10^4\f$) |
-| \f$1\f$ (`logpdf_d1`) | \f$29.2\f$ (\f$45\f$) | \f$1.5 \times 10^3\f$ (\f$2.3 \times 10^3\f$) | \f$1.2 \times 10^4\f$ (\f$1.9 \times 10^4\f$) |
-| \f$2\f$ (`logpdf_d2`) | \f$4.67\f$ (\f$7.5\f$) | \f$747\f$ (\f$1.2 \times 10^3\f$) | \f$1.0 \times 10^4\f$ (\f$1.6 \times 10^4\f$) |
-| \f$3\f$ (`logpdf_d3`) | \f$5.49\f$ (\f$8.5\f$) | \f$1.0 \times 10^3\f$ (\f$1.6 \times 10^3\f$) | \f$5.3 \times 10^3\f$ (\f$8.0 \times 10^3\f$) |
-| \f$4\f$ (`logpdf_d4`) | \f$8.19\f$ (\f$13\f$) | \f$339\f$ (\f$510\f$) | \f$5.4 \times 10^3\f$ (\f$8.1 \times 10^3\f$) |
-| \f$5\f$ (`logpdf_d5`) | \f$13.5\f$ (\f$21\f$) | \f$869\f$ (\f$1.3 \times 10^3\f$) | \f$8.6 \times 10^3\f$ (\f$1.3 \times 10^4\f$) |
-| \f$6\f$ (`logpdf_d6`) | \f$9.08\f$ (\f$14\f$) | \f$1.4 \times 10^3\f$ (\f$2.2 \times 10^3\f$) | \f$9.1 \times 10^3\f$ (\f$1.4 \times 10^4\f$) |
+| \f$0\f$ (`logpdf`) | \f$1.61\f$ (\f$2.5\f$) | \f$4.51\f$ (\f$6.8\f$) | \f$7.02\f$ (\f$11\f$) |
+| \f$1\f$ (`logpdf_d1`) | \f$29.2\f$ (\f$45\f$) | \f$33.2\f$ (\f$50\f$) | \f$6.55\f$ (\f$10\f$) |
+| \f$2\f$ (`logpdf_d2`) | \f$4.67\f$ (\f$7.5\f$) | \f$19.9\f$ (\f$30\f$) | \f$84.8\f$ (\f$130\f$) |
+| \f$3\f$ (`logpdf_d3`) | \f$5.49\f$ (\f$8.5\f$) | \f$53.7\f$ (\f$81\f$) | \f$71.5\f$ (\f$110\f$) |
+| \f$4\f$ (`logpdf_d4`) | \f$8.19\f$ (\f$13\f$) | \f$86.6\f$ (\f$130\f$) | \f$129\f$ (\f$200\f$) |
+| \f$5\f$ (`logpdf_d5`) | \f$13.5\f$ (\f$21\f$) | \f$79.7\f$ (\f$120\f$) | \f$37.1\f$ (\f$56\f$) |
+| \f$6\f$ (`logpdf_d6`) | \f$9.08\f$ (\f$14\f$) | \f$278\f$ (\f$420\f$) | \f$24.8\f$ (\f$37\f$) |
+
+At \f$\nu = 10^8\f$, every order stays between \f$0.61\f$ and \f$3.7\f$ ulp, and the `gcc` and `CUDA` builds agree to the digit on every entry of the table.
 
 Both limiting distributions hold in `tests/distrib/test_pseudohuber.cpp`. For \f$|z| \ge 1.5\f$, every order \f$1\f$ to \f$6\f$ of the \f$(\mu, \sigma)\f$ block agrees with \ref distrib_laplace1 "laplace1_distrib" (scale \f$\sigma / \sqrt{2}\f$) to \f$3.3 \times 10^{-8}\f$ relative at \f$\nu = 10^{-8}\f$ (bound \f$5 \times 10^{-8}\f$) and \f$2.5 \times 10^{-6}\f$ at \f$\nu = 10^{-6}\f$ (bound \f$3.7 \times 10^{-6}\f$). At \f$\nu = 10^8\f$ and \f$10^{10}\f$, differences against \ref distrib_gaussian1 "gaussian1_distrib" measured in units of the asymptotic scales \f$K!\,(1 + z^2)^{(4+K)/2} / (\sigma^K \sqrt{\nu})\f$ for \f$(\mu, \sigma)\f$ components and \f$K!\,(1 + z^2)^{(4+K)/2} / (\sigma^{K-c} \nu^{c+1/2})\f$ for \f$\nu\f$-components (\f$c \ge 1\f$) reach at most \f$0.75\f$ (bound \f$1.1\f$), \f$0.19\f$ (bound \f$0.28\f$), and \f$0.375\f$ for the value (bound \f$0.56\f$). By numerical quadrature across \f$\nu \in [10^{-4}, 5 \times 10^5]\f$, the density integrates to \f$1\f$ and has variance \f$\sigma^2\f$ within \f$4.5 \times 10^{-14}\f$ relative (bound \f$7 \times 10^{-14}\f$). Inside Kokkos kernels (RTX 4070 SUPER), host and device agree to at most \f$1.3 \times 10^{-15}\f$ at \f$\nu = 3.5\f$ and from \f$6.1 \times 10^{-16}\f$ to \f$1.6 \times 10^{-14}\f$ at \f$\nu = 0.05\f$.
 
@@ -61,7 +75,7 @@ Both limiting distributions hold in `tests/distrib/test_pseudohuber.cpp`. For \f
 
 On the generic quadrature expected information, the score form agrees with the variance of the score to \f$3.5 \times 10^{-16}\f$ relative (bound \f$5.3 \times 10^{-16}\f$), the Hessian form agrees with the score form to \f$7.0 \times 10^{-13}\f$ relative (bound \f$1.1 \times 10^{-12}\f$), and the symmetry zeros \f$I_{\mu\sigma}\f$ and \f$I_{\mu\nu}\f$ stay within \f$6.9 \times 10^{-16}\f$ of the largest entry (bound \f$10^{-15}\f$). Against the Laplace and Gaussian limits, the information agrees to \f$1.57 \times 10^{-4}\f$ at \f$\nu = 10^{-8}\f$ (bound \f$2.4 \times 10^{-4}\f$) and \f$1.5 \times 10^{-4}\f$ at \f$\nu = 10^8\f$ (bound \f$2.3 \times 10^{-4}\f$). Orders \f$1\f$ to \f$4\f$ in both forms match 5-point finite differences within \f$1.2 \times 10^{-11}\f$ to \f$1.0 \times 10^{-10}\f$ relative (bounds \f$1.8 \times 10^{-11}\f$ to \f$1.5 \times 10^{-10}\f$).
 
-For the generic cumulative functions, orders \f$1\f$ to \f$6\f$ of \f$\log F\f$ and \f$\log(1 - F)\f$ match 5-point finite differences within \f$4.2 \times 10^{-12}\f$ at order \f$1\f$ up to \f$9.9 \times 10^{-11}\f$ at order \f$6\f$ (bounds \f$6.4 \times 10^{-12}\f$ to \f$1.5 \times 10^{-10}\f$). Generic quantiles satisfy \f$F(F^{-1}(p)) = p\f$ within \f$2.3 \times 10^{-15}\f$ relative (bound \f$3.5 \times 10^{-15}\f$) and \f$F^{-1}(p) + F^{-1}(1 - p) = 2\mu\f$ within \f$7 \times 10^{-16}\f$ at dyadic \f$p\f$ (bound \f$1.1 \times 10^{-15}\f$). See `docs/numerics.md` for full measurements.
+For the generic cumulative functions, orders \f$1\f$ to \f$6\f$ of \f$\log F\f$ and \f$\log(1 - F)\f$ match 5-point finite differences within \f$4.2 \times 10^{-12}\f$ at order \f$1\f$ up to \f$9.9 \times 10^{-11}\f$ at order \f$6\f$ (bounds \f$6.4 \times 10^{-12}\f$ to \f$1.5 \times 10^{-10}\f$). Generic quantiles satisfy \f$F(F^{-1}(p)) = p\f$ within \f$2.3 \times 10^{-15}\f$ relative (bound \f$3.5 \times 10^{-15}\f$) and \f$F^{-1}(p) + F^{-1}(1 - p) = 2\mu\f$ within \f$1.27 \times 10^{-15}\f$ at dyadic \f$p\f$ (bound \f$1.9 \times 10^{-15}\f$). See `docs/numerics.md` for full measurements.
 
 ## Cost and open corners
 
@@ -74,7 +88,7 @@ On one `gcc` thread, evaluating the full order-\f$6\f$ tensor `logpdf_d6()` take
 | \f$\nu = 100\f$ | \f$6.3\f$ |
 | \f$\nu = 10^4\f$ | \f$6.3\f$ |
 
-Two corners remain open. First, for \f$\nu \ge 10^4\f$, the value (\f$1.6 \times 10^4\f$ ulp) and first order (\f$1.2 \times 10^4\f$ ulp) reflect that \f$\log f\f$ is a difference of numbers of size \f$\sqrt{\nu}\f$ (about \f$10^{-12}\f$ absolute error at \f$\nu = 10^8\f$). Second, at \f$\nu = 1\f$, order \f$6\f$ reaches \f$1.4 \times 10^3\f$ ulp from the assembly of \f$\Lambda\f$.
+One corner remains open: at \f$\nu = 1\f$, order \f$6\f$ reaches \f$278\f$ ulp from the assembly of \f$\Lambda\f$, the worst point on the reference grid.
 
 ## Kokkos usage
 
