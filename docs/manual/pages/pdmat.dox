@@ -130,9 +130,9 @@ comparing exact zeros (or unstructured values below \f$10^{-25}\f$) against diff
 | `ar1_pdmat` | \f$M^{-1}\f$ | 0.52 | 0.58 | 1 |
 | `ar1_pdmat` | \f$L\f$ | 8.22 | 8.22 | 13 |
 | `ar1_pdmat` | \f$\log\det M\f$ | 3.92 | 4.83 | 8 |
-| `toeplitz_pdmat` | \f$M\f$ | 163 | 135 | 244 |
-| `toeplitz_pdmat` | \f$M^{-1}\f$ | 10.0 | 13.9 | 21 |
-| `toeplitz_pdmat` | \f$L\f$ | 10.9 | 10.3 | 17 |
+| `toeplitz_pdmat` | \f$M\f$ | 163 | 162 | 244 |
+| `toeplitz_pdmat` | \f$M^{-1}\f$ | 14.5 | 15.2 | 23 |
+| `toeplitz_pdmat` | \f$L\f$ | 10.9 | 10.9 | 17 |
 | `toeplitz_pdmat` | \f$\log\det M\f$ | 22.8 | 19.9 | 35 |
 | Unstructured log-Cholesky | \f$M^{-1}\f$ | 28.2 | 23.9 | 43 |
 | Unstructured log-Cholesky | \f$\log\det M\f$ | 0.28 | 0.28 | 1 |

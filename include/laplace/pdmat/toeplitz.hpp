@@ -360,7 +360,7 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \brief Evaluates the packed Toeplitz correlation matrix \f$M(\theta)\f$.
    *
    * Computes \f$M_{ij} = m_{|i - j|}\f$ with \f$m_t = L_{t0}\f$ via normalized lattice rotations (\f$M = [1]\f$ for \f$p = 1\f$).
-   * Maximum error over orders 0–6: 163 ulpN on gcc and 135 ulpN on CUDA; test bound 2 ulpN at order 0.
+   * Maximum error over orders 0–6: 163 ulpN on gcc and 162 ulpN on CUDA; test bound 2 ulpN at order 0.
    *
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$ (unused for \f$p = 1\f$).
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
@@ -403,7 +403,7 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    *
    * Evaluates \f$M^{-1} = A^\top V^{-1} A\f$ from Durbin-Levinson coefficients \f$\varphi_{t, j}\f$
    * and \f$1/v_t = \prod_{a < t} \cosh^2\theta_a\f$ (\f$M^{-1} = [1]\f$ for \f$p = 1\f$).
-   * Maximum error over orders 0–6: 10.0 ulpN on gcc and 13.9 ulpN on CUDA; test bound 15 ulpN at order 0.
+   * Maximum error over orders 0–6: 14.5 ulpN on gcc and 15.2 ulpN on CUDA; test bound 15 ulpN at order 0.
    *
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$ (unused for \f$p = 1\f$).
    * \param m Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
@@ -423,7 +423,7 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \brief Evaluates the packed lower Cholesky factor \f$L(\theta)\f$.
    *
    * Evaluates \f$L\f$ satisfying \f$M = L L^\top\f$ column by column via normalized lattice rotations (\f$L = [1]\f$ for \f$p = 1\f$).
-   * Maximum error over orders 0–6: 10.9 ulpN on gcc and 10.3 ulpN on CUDA; test bound 3 ulpN at order 0.
+   * Maximum error over orders 0–6: 10.9 ulpN on gcc and 10.9 ulpN on CUDA; test bound 3 ulpN at order 0.
    *
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$ (unused for \f$p = 1\f$).
    * \param l Output buffer of at least \f$p(p + 1)/2\f$ doubles for packed lower triangle.
@@ -443,7 +443,7 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \brief Partial derivative of \f$M(\theta)\f$ of order \f$K\f$.
    *
    * Differentiates column 0 of the normalized lattice by Leibniz's rule over sub-masks; returns \c false for \f$p = 1\f$.
-   * Maximum error over orders 1–6: 163 ulpN on gcc and 135 ulpN on CUDA; test bounds 12 to 244 ulpN.
+   * Maximum error over orders 1–6: 163 ulpN on gcc and 162 ulpN on CUDA; test bounds 12 to 244 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$.
@@ -487,7 +487,7 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \brief Partial derivative of \f$M^{-1}(\theta)\f$ of order \f$K\f$.
    *
    * Differentiates \f$M^{-1} = A^\top V^{-1} A\f$ over sub-masks; returns \c false for \f$p = 1\f$.
-   * Maximum error over orders 1–6: 10.0 ulpN on gcc and 13.9 ulpN on CUDA; test bounds 14 to 21 ulpN.
+   * Maximum error over orders 1–6: 14.5 ulpN on gcc and 15.2 ulpN on CUDA; test bounds 14 to 23 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$.
@@ -509,7 +509,7 @@ struct toeplitz_pdmat : pdmat_orders<toeplitz_pdmat> {
    * \brief Partial derivative of the Cholesky factor \f$L(\theta)\f$ of order \f$K\f$.
    *
    * Differentiates the normalized lattice column by column over sub-masks; returns \c false for \f$p = 1\f$.
-   * Maximum error over orders 1–6: 10.9 ulpN on gcc and 10.3 ulpN on CUDA; test bounds 7 to 17 ulpN.
+   * Maximum error over orders 1–6: 10.9 ulpN on gcc and 10.9 ulpN on CUDA; test bounds 7 to 17 ulpN.
    *
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param theta Array of \f$p - 1\f$ parameters \f$\theta_0, \dots, \theta_{p-2}\f$.
