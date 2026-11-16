@@ -2,7 +2,8 @@
 // (tests/distrib/test_*.cpp): packing of the symmetric tensors, every derivative
 // order against a 5-point difference of the order below (in the parameters, in y
 // and mixed), the derivatives of the expected information against differences,
-// the derivatives of log F and log(1 - F) against differences, and the variance
+// the derivatives of log F and log(1 - F) against differences, the cumulative quantities
+// of a discrete family against an independent summation, and the variance
 // of the score by quadrature. Written for the pilot (note/distrib.md) and pulled
 // out of tests/distrib/test_pilot.cpp when the second batch was added.
 #pragma once
@@ -10,9 +11,12 @@
 #include <doctest/doctest.h>
 
 #include <laplace/distrib/core.hpp>
+#include <laplace/distrib/generic_cdf.hpp>
 #include <laplace/math/quadrature.hpp>
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <vector>
 
@@ -296,5 +300,107 @@ std::vector<double> score_variance_continuous(const D& d) {
   return r;
 }
 
+
+// The four cumulative quantities of a discrete family against an independent
+// summation inside the test. The library sums the cheaper of the two tails in
+// units of its own first mass, stops when the neighbouring terms fall below
+// 2^-60 of the running sum, and takes the side it did not sum as
+// log1p(-exp(...)) (generic_cdf.hpp). This twin shares none of that: it walks
+// the whole support once in plain probabilities, accumulates the lower side
+// from the bottom and the upper side from the top in two compensated passes, so
+// that neither tail is formed as a difference, and reads every lattice point
+// off those two. The quadrature of generic_cdf.hpp is not a twin here: it is
+// restricted to continuous families, a mass on a lattice being no integral.
+//
+// A walk of an unbounded support runs until the mass itself is below 1e-200, or
+// until the cap, and what it leaves behind is bounded by the geometric bound
+// v r / (1 - r) on the terms not taken, with v the last term and r the last
+// ratio. An upper tail is compared only where that bound is below `rel` of it,
+// so that the twin's own truncation cannot be read as the library's error, and
+// a lower tail only where it has not underflowed. Both guards were measured
+// into place: stopping the walk at 1e-18 of the mass left a truncation that
+// showed as a 5.4e-5 relative difference on an upper tail of 1.4e-14, and a
+// margin of 1e8 over the bound left 9.6e-9 on one of 5.4e-18, where the route
+// under test agrees with the same sum in long double to 2.4e-15.
+// `rel` is relative to the side being checked, and to max(1, |log side|) on the
+// logarithms.
+//
+// The twin costs one walk of the support, but every call of the route under test
+// sums a tail of its own, so checking every lattice point of a long support is
+// quadratic in it: at (mu, alpha) = (3, 0.3) the pig's support runs to 1.6e4
+// terms and the whole suite had not finished in fifteen minutes. The points are
+// therefore taken in a stride that leaves about `points` of them, the last one
+// included, which covers both tails and the mode at a cost linear in the walk.
+template <class D>
+void check_discrete_cdf_twin(const D& d, double rel, int points = 60, long cap = 1L << 16) {
+  static_assert(D::kind == ld::distrib_kind::discrete, "this twin sums a mass");
+  const double lo = d.support_lower(), hi = d.support_upper();
+  std::vector<double> p;
+  double rest = 0.0;  // bound on the mass above the last term taken
+  for (long n = 0; n < cap; ++n) {
+    const double y = lo + double(n);
+    if (y > hi) break;
+    const double v = std::exp(ld::detail_generic::log_density(d, y));
+    p.push_back(v);
+    if (n > 0 && p[n - 1] > 0.0) {
+      const double r = v / p[n - 1];
+      if (v == 0.0) break;
+      if (r < 1.0) {
+        rest = v * r / (1.0 - r);
+        if (v <= 1e-200) break;
+      }
+    }
+  }
+  const int m = (int)p.size();
+  if (lo + double(m - 1) >= hi) rest = 0.0;  // the walk ended at the end of a finite support: nothing is left out
+  // lower sums from the bottom, upper sums from the top, both compensated
+  std::vector<double> F(m), S(m);
+  double s = 0.0, c = 0.0;
+  for (int n = 0; n < m; ++n) {
+    const double y = p[n] - c, t = s + y;
+    c = (t - s) - y;
+    s = t;
+    F[n] = s;
+  }
+  const double total = s;
+  INFO("total mass " << total);
+  CHECK(std::fabs(total - 1.0) <= rel);
+  s = 0.0;
+  c = 0.0;
+  for (int n = m - 1; n >= 0; --n) {
+    S[n] = s;  // the tail strictly above n
+    const double y = p[n] - c, t = s + y;
+    c = (t - s) - y;
+    s = t;
+  }
+  double worst = 0.0, worst_y = 0.0;
+  int checked = 0;
+  const int step = m > points ? m / points : 1;
+  for (int n = 0; n < m; n += step) {
+    if (n + step >= m) n = m - 1;  // the last point of the walk is always one of them
+    const double y = lo + double(n);
+    const double lower = F[n] / total, upper = S[n] / total;
+    if (!(lower > 1e-290) || !(upper > rest / rel + 1e-290)) continue;
+    const double ll = std::log(lower), lu = std::log(upper);
+    const double e[4] = {std::fabs(ld::distrib_cdf(d, y) - lower) / lower,
+                         std::fabs(ld::distrib_ccdf(d, y) - upper) / upper,
+                         std::fabs(ld::distrib_log_cdf(d, y) - ll) / std::fmax(1.0, std::fabs(ll)),
+                         std::fabs(ld::distrib_log_ccdf(d, y) - lu) / std::fmax(1.0, std::fabs(lu))};
+    ++checked;
+    for (double v : e)
+      if (v > worst) {
+        worst = v;
+        worst_y = y;
+      }
+    INFO("y = " << y << ", lower " << lower << ", upper " << upper);
+    CHECK(e[0] <= rel);
+    CHECK(e[1] <= rel);
+    CHECK(e[2] <= rel);
+    CHECK(e[3] <= rel);
+  }
+  if (std::getenv("LAPLACE_PRINT_ERRORS"))
+    std::printf("cdf twin: max %.3g relative at y %.6g, %d of %d points checked, rest bound %.2g\n", worst,
+                worst_y, checked, m, rest);
+}
 
 }  // namespace laplace_distrib_check

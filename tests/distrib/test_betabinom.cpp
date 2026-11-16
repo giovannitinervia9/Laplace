@@ -16,6 +16,7 @@
 
 #include "check_common.hpp"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -281,6 +282,17 @@ TEST_CASE("distrib betabinom: cdf identities") {
     CHECK(ld::distrib_log_ccdf(d, 20.0) == -ld::distrib_infinity);
     CHECK(ld::distrib_log_cdf(d, 20.0) == 0.0);
   }
+}
+
+// The four cumulative quantities against the summation twin of check_common.hpp (the twin is
+// described there). The support is finite here, so the twin sums all of it exactly as written;
+// the points include the two where the mass sits at one end, which are the hard ones for the
+// route under test. The tolerance is the worst measured on gcc and CUDA times about 4.
+TEST_CASE("distrib betabinom: the cumulative quantities against the summation twin") {
+  for (const auto& th : {std::array<double, 3>{0.35, 0.5, 20.0}, std::array<double, 3>{0.02, 0.25, 20.0},
+                         std::array<double, 3>{0.98, 0.25, 20.0}, std::array<double, 3>{0.5, 0.05, 50.0},
+                         std::array<double, 3>{0.4, 5.0, 30.0}})
+    check_discrete_cdf_twin(ld::betabinom_distrib{th[0], th[1], th[2]}, 1.3e-14);
 }
 
 TEST_CASE("distrib betabinom: derivatives of log F and log(1 - F) against differences") {

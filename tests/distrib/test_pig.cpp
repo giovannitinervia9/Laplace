@@ -16,6 +16,7 @@
 
 #include "check_common.hpp"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -215,6 +216,19 @@ TEST_CASE("distrib pig: cdf identities") {
     CHECK(ld::distrib_log_cdf(d, -1.0) == -ld::distrib_infinity);
     CHECK(ld::distrib_log_ccdf(d, -1.0) == 0.0);
   }
+}
+
+// The four cumulative quantities against the summation twin of check_common.hpp, which shares
+// nothing with the route under test: it walks the whole support in plain probabilities and sums
+// each side from its own end, while the library sums the cheaper tail in units of its first mass
+// and takes the other side by log1p(-exp). The points cover both sides of the switch at the mode
+// and the long tail that a small alpha gives (spread 0.0025 at (3, 0.3), where the twin needs
+// 1.6e4 terms). The tolerance is the worst measured on gcc and CUDA times about 4.
+TEST_CASE("distrib pig: the cumulative quantities against the summation twin") {
+  for (const auto& th : {std::array<double, 2>{3.0, 0.3}, std::array<double, 2>{3.0, 10.0},
+                         std::array<double, 2>{1.0, 1.0}, std::array<double, 2>{10.0, 0.5},
+                         std::array<double, 2>{0.5, 2.0}})
+    check_discrete_cdf_twin(ld::pig_distrib{th[0], th[1]}, 8e-9);
 }
 
 TEST_CASE("distrib pig: derivatives of log F and log(1 - F) against differences") {

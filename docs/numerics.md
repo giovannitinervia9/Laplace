@@ -7205,6 +7205,38 @@ and its argument are close (6.5 s for one value at (1e3, 1e3, y = 1e3) against 0
 which is a property of the reference route and not of the library's, whose cost does not depend on
 y at all; the counts in that band are left out of the grid.
 
+**The twin of the cumulative quantities.** What replaces the missing reference tables for these two
+families is a twin inside the tests, `check_discrete_cdf_twin` in `tests/distrib/check_common.hpp`,
+which shares nothing with the route it checks: it walks the whole support once in plain
+probabilities and accumulates the lower side from the bottom and the upper side from the top in two
+compensated passes, so that neither tail is formed as a difference of the other, where the library
+sums the cheaper of the two tails in units of its own first mass, stops when the neighbouring terms
+fall below 2^-60 of the running sum, and takes the side it did not sum as log1p(-exp). The
+quadrature of `generic_cdf.hpp` cannot serve as the twin here: a static_assert restricts it to
+continuous distributions, a mass on a lattice being no integral. All four quantities are compared,
+F, 1 - F, log F and log(1 - F), at five (mu, sigma, n) for betabinom, two of them with the mass at
+one end of the support, and at five (mu, alpha) for the pig, from a tail that decays by a factor of
+2.6 a step to one that decays by 0.25 per cent.
+
+Two properties of the twin had to be measured before it said anything about the library. The cost
+is quadratic in the support if every lattice point is taken, because each call of the route under
+test sums a tail of its own: at (mu, alpha) = (3, 0.3) the pig's walk is 1.6e4 terms and the suite
+had not finished in fifteen minutes, so the points are taken in a stride that leaves about sixty of
+them, the last one included. And the truncation of the walk is not negligible against a small upper
+tail: stopping it where the geometric bound v r / (1 - r) on the terms not taken fell below 1e-18
+showed up as a 5.4e-5 relative difference on an upper tail of 1.4e-14, and a margin of 1e8 over
+that bound left 9.6e-9 on one of 5.4e-18, where the route under test agrees with the same sum
+accumulated in long double to 2.4e-15. The walk now runs until the mass itself is below 1e-200, or
+until its cap of 2^16 terms, and an upper tail is compared only where the bound is below the
+tolerance times the tail. The bound is set to zero on a finite support, where nothing is left out.
+
+What it measures. betabinom: 3.13e-15 relative at worst, the same on gcc and CUDA, over the 140
+points of the five sizes from 20 to 50 (test bound 1.3e-14). The pig: 9.8e-10 on gcc and 2.03e-9 on
+CUDA, both far out in the tail of (mu, alpha) = (10, 0.5), around y = 3.4e4, where the walk stops at
+the cap and the two builds differ by a factor of two; everywhere else 2.9e-11 to 2.8e-10, with the
+two builds equal to the digit (test bound 8e-9, four times the worse of the two). The derivatives of the two cumulative functions keep
+the 5-point differences they had, to order 3.
+
 The error is the library value minus the mpmath value, in ulps of the largest component of the same
 order at the same point, which is how every family with genuine zeros in its tensors is measured.
 Worst ulp over the whole file, per order. betabinom is read per route, because the two fail
