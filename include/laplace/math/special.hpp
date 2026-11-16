@@ -127,4 +127,24 @@ LAPLACE_HD_FORCEINLINE double polygamma(int n, double x) {
   return own::polygamma(n, x);
 }
 
+/**
+ * \ingroup gamma
+ * \brief Polygamma minus its leading asymptotic term, \f$\psi^{(n)}(x) - \mu_n(x)\f$.
+ *
+ * Forwards to own::polygamma_monomial_remainder() at every order, which defines
+ * \f$\mu_n\f$, gives the thresholds of the two routes and states the measured
+ * accuracy. Unlike polygamma(), there is no dispatch to
+ * Boost at \f$n = 0\f$ and \f$n = 1\f$: Boost offers no remainder, and the expansion is
+ * Laplace's own at every order.
+ *
+ * \param n Derivative order \f$n \in \{0, \dots, 6\}\f$.
+ * \param x Positive argument \f$x \in (0, \infty)\f$.
+ * \return The value of \f$\psi^{(n)}(x) - \mu_n(x)\f$.
+ *
+ * \see gamma, polygamma(), own::polygamma_monomial_remainder()
+ */
+LAPLACE_HD_FORCEINLINE double polygamma_monomial_remainder(int n, double x) {
+  return own::polygamma_monomial_remainder(n, x);
+}
+
 }  // namespace laplace::math
