@@ -245,8 +245,13 @@ LAPLACE_HD void alpha_row(const double* H, const double* U, const double* u0, co
 
 // The whole table of the skew t's Lambda(z, alpha, nu) = log t_nu(z) - c(nu)
 // + log T_(nu+1)(w), in the layout mixed_two_shape_dk reads.
+// `skew_z`, when given, receives the pure z-derivatives of the skew factor alone,
+// d^j/dz^j log T_(nu+1)(w) for j = 1..K, taken before the Student part is added. The far tail of the
+// (mu, sigma) block needs the two factors apart: there the Student part is carried by the closed form
+// of detail_student_t1::far_mu_sigma_block, and forming it by subtraction would put back the very
+// cancellation the closed form removes.
 template <int K>
-LAPLACE_HD void lambda_table(double z, double alpha, double nu, double* D) {
+LAPLACE_HD void lambda_table(double z, double alpha, double nu, double* D, double* skew_z = nullptr) {
   double U[n_pair] = {};
   u_table<K>(z, nu, U);
   const double u = u_value(z, nu);
@@ -264,6 +269,8 @@ LAPLACE_HD void lambda_table(double z, double alpha, double nu, double* D) {
     for (int j = 0; j <= n; ++j) u0[pair(n - j, j)] = alpha * U[pair(n - j, j)];
   u1[pair(0, 1)] = 1.0;
   alpha_row<K, K>(H, U, u0, u1, u, D);
+  if (skew_z != nullptr)
+    for (int j = 1; j <= K; ++j) skew_z[j] = D[j];  // (alpha order 0, nu order 0, z order j)
   // the Student part, which carries no alpha
   double S[(K + 1) * (K + 1)] = {};
   detail_student_t1::lambda_table<K>(z, nu, S);
@@ -373,7 +380,8 @@ struct skewt_distrib {
   LAPLACE_HD sym_tensor<4, K> logpdf_dk(double y) const {
     const double z = (y - mu) / sigma;
     double D[(K + 1) * (K + 1) * (K + 1)] = {};
-    detail_skewt::lambda_table<K>(z, alpha, nu, D);
+    double skew_z[K + 1] = {};
+    detail_skewt::lambda_table<K>(z, alpha, nu, D, skew_z);
     sym_tensor<4, K> t = detail_location_scale::mixed_two_shape_dk<K>(D, z, sigma);
     double cp[7];
     math::own::detail_st::cpoly(nu, K, cp);
@@ -382,6 +390,19 @@ struct skewt_distrib {
     for (int k = 0; k < K; ++k) isk /= sigma;
     t[detail_skewt::pos4<K>(0, K, 0, 0)] +=
         detail_student_t1::sign_of_power(K) * detail_skewt::fact(K - 1) * isk;
+    // The components with no derivative in alpha and none in nu are the Student ones plus the skew
+    // factor's, and in the far tail the Student ones are rewritten by the closed form in
+    // Re((y - mu + i sigma sqrt(nu))^-K) (detail_student_t1::far_mu_sigma_block), on the same split
+    // |y - mu| >= sigma sqrt(nu) that student_t1 uses. The closed form carries the whole of
+    // nu log sigma, so it replaces the two terms added above as well, and the skew factor keeps the
+    // ordinary carry of its own z-derivatives. At alpha = 0 the skew factor is a constant and the
+    // block is exactly student_t1's, to the bit, which is what the twin test asks.
+    if (Kokkos::fabs(y - mu) >= sigma * Kokkos::sqrt(nu)) {
+      const sym_tensor<2, K> sk = detail_location_scale::mixed_dk<K>(skew_z, z, sigma);
+      double fb[K + 1];
+      detail_student_t1::far_mu_sigma_block<K>(y, mu, sigma, nu, fb);
+      for (int b = 0; b <= K; ++b) t[detail_skewt::pos4<K>(K - b, b, 0, 0)] = sk[b] + fb[b];
+    }
     return t;
   }
 

@@ -211,6 +211,48 @@ def check_forms():
         d = mpmath.diff(lambda x: mpmath.sqrt((x - 2) / x), nu0, q)
         assert abs(d - rr_[q]) < mpmath.mpf(10) ** -25 * abs(d), q
     print("r(nu) recurrence: ok")
+    check_far_forms()
+
+
+def check_far_forms():
+    """the far-tail (mu, sigma) block of log f against SymPy: the rewrite and the closed component
+
+    log f = c(nu) + ((nu + 1)/2) log nu + nu log sigma - (nu + 1) Re log(u + i sigma sqrt(nu)),
+    u = y - mu, and for K = a + b >= 1
+
+      d^a/dmu^a d^b/dsigma^b log f = -(nu + 1) (-1)^a nu^(b/2) (-1)^(K-1) (K-1)! Re[i^b (u + i w)^-K]
+                                     + [a == 0] nu (-1)^(b-1) (b - 1)! sigma^-b,   w = sigma sqrt(nu).
+    """
+    mu, sg, nu, y = sp.symbols("mu sigma nu y", positive=True)
+    zz = (y - mu) / sg
+    cnu = sp.loggamma((nu + 1) / 2) - sp.loggamma(nu / 2) - sp.log(nu * sp.pi) / 2
+    l = cnu - sp.log(sg) - (nu + 1) / 2 * sp.log(1 + zz ** 2 / nu)
+    u, w = y - mu, sg * sp.sqrt(nu)
+    rewrite = cnu + (nu + 1) / 2 * sp.log(nu) + nu * sp.log(sg) - (nu + 1) * sp.re(sp.log(u + sp.I * w))
+    pts = [(sp.Rational(3, 10), sp.Rational(13, 10), sp.Rational(7, 2), sp.Rational(41, 10)),
+           (sp.Rational(-2), sp.Rational(1, 4), sp.Rational(1, 10), sp.Rational(30))]
+    bad = 0
+    for mm, ss, nn, yy in pts:
+        s = {mu: mm, sg: ss, nu: nn, y: yy}
+        a, b = sp.N(l.subs(s), 30), sp.N(rewrite.subs(s), 30)
+        if abs(a - b) > 1e-25 * (1 + abs(a)):
+            bad += 1
+            print("BAD rewrite", s, a, b)
+    for K in range(1, 7):
+        for bb in range(0, K + 1):
+            aa = K - bb
+            ex = sp.diff(l, mu, aa, sg, bb) if (aa and bb) else (sp.diff(l, mu, aa) if aa else sp.diff(l, sg, bb))
+            closed = (-(nu + 1) * (-1) ** aa * nu ** sp.Rational(bb, 2) * (-1) ** (K - 1) * sp.factorial(K - 1)
+                      * sp.re(sp.I ** bb * (u + sp.I * w) ** (-K)))
+            if aa == 0:
+                closed += nu * (-1) ** (bb - 1) * sp.factorial(bb - 1) / sg ** bb
+            for mm, ss, nn, yy in pts:
+                s = {mu: mm, sg: ss, nu: nn, y: yy}
+                a, b = sp.N(ex.subs(s), 30), sp.N(closed.subs(s), 30)
+                if abs(a - b) > 1e-22 * (1 + abs(a)):
+                    bad += 1
+                    print("BAD far component", K, aa, bb, s, a, b)
+    print("far-tail (mu, sigma) block: %d mismatches" % bad)
 
 
 # ------------------------------------------------------------------ the definitions
@@ -325,17 +367,36 @@ def info_points():
 # ------------------------------------------------------------------ log F
 
 def log_cdf_def(z, nu):
+    """log T_nu(z) from T_nu(-|z|) = I_x(nu/2, 1/2)/2, x = nu/(nu + z^2)
+
+    Only this form of the incomplete beta is used. The complementary one,
+    (1 - I_y(1/2, nu/2))/2 with y = z^2/(nu + z^2), gives the same number and is the usual choice for
+    x > 1/2, but it is a difference against one: its nu-derivatives cancel and mpmath.diff never
+    reaches agreement in them. At z = 30, nu = 1e4 the table of the six orders disagrees by 3e197
+    between 280 and 360 bits and by 3e213 between 440 and 560 in that form, while this one agrees to
+    1.3e-81 at 280 against 360. Taken directly, I_x is small in the tail and about one near the
+    centre, and its nu-derivatives are formed without cancellation in both places. Twenty
+    (point, side) pairs that had no reference at all came from this change alone.
+
+    What this form cannot do is z = 0. It is EVEN in z, so log F is log(t) on one side of zero and
+    log1p(-t) on the other: two functions meeting there, and the stencil differentiates across the
+    join. Measured against the exact f(0)/F(0) = 2 f(0), the first z-derivative at zero comes out
+    wrong by 2.4e-7 at nu = 3.5, 1.9e-6 at nu = 10 and 6.8e-4 at nu = 1e4, and both precisions agree
+    on the wrong value, so no agreement test can see it. The form that is analytic across zero is
+    F(z) = 1/2 + sign(z) I_y(1/2, nu/2)/2, where I_y ~ c|z| makes sign(z) I_y the analytic odd part;
+    it reproduces 2 f(0) exactly and agrees with a quadrature of the density on the mixed (mu, nu)
+    derivative to every digit. It is useless in the tail, where I_y is one to the last bit (at
+    z = 30, nu = 1e4 it returns a flat zero), so the two forms would have to be chosen per point.
+    That was tried and is not in: with the central form in place the library disagrees with the new
+    central references by far more than their own accuracy, which has to be understood before either
+    is believed, and this file's job is to be certain. The z = 0 points therefore have no reference,
+    as before; docs/numerics.md records it with these numbers.
+    """
     half = mpmath.mpf(1) / 2
-    x = nu / (nu + z * z)
-    y = z * z / (nu + z * z)
-    if z < 0:
-        t = mpmath.betainc(nu / 2, half, 0, x, regularized=True) / 2 if x <= 0.5 else (1 - mpmath.betainc(half, nu / 2, 0, y, regularized=True)) / 2
-        return mpmath.log(t)
-    z = -z
-    x = nu / (nu + z * z)
-    y = z * z / (nu + z * z)
-    t = mpmath.betainc(nu / 2, half, 0, x, regularized=True) / 2 if x <= 0.5 else (1 - mpmath.betainc(half, nu / 2, 0, y, regularized=True)) / 2
-    return mpmath.log1p(-t)
+    zz = -z if z > 0 else z
+    x = nu / (nu + zz * zz)
+    t = mpmath.betainc(nu / 2, half, 0, x, regularized=True) / 2
+    return mpmath.log1p(-t) if z > 0 else mpmath.log(t)
 
 
 KEYS = [(i, k - i) for k in range(1, 7) for i in range(k, -1, -1)]

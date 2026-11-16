@@ -672,19 +672,16 @@ void pseudohuber_kernel_case() {
   pseudohuber_kernel_order<4>(0.05, 1.3e-14);
   pseudohuber_kernel_order<5>(0.05, 2.4e-14);
   pseudohuber_kernel_order<6>(0.05, 2.8e-15);
-  // The generic cdf route of a three-parameter family keeps the derivative tensors of the integrand on the stack:
-  // with the default stack of a CUDA thread (1024 bytes) the kernel ends in an illegal memory access (measured:
-  // 3072 bytes fail, 4096 work), so the limit is raised for this launch and restored.
-#if defined(__CUDACC__)
-  size_t stack_before = 0;
-  cudaDeviceGetLimit(&stack_before, cudaLimitStackSize);
-  cudaDeviceSetLimit(cudaLimitStackSize, 4096);
-#endif
+  // The generic cdf route of a three-parameter family keeps the derivative tensors of the integrand on the
+  // stack, and with the default stack of a CUDA thread (1024 bytes) the kernel ends in an illegal memory
+  // access (measured on 2026-11-15: 3072 bytes fail, 4096 work). The stack these launches need is already
+  // there: tests/main.cpp raises the limit to LAPLACE_TEST_CUDA_STACK once, before any case runs. This case
+  // used to set 4096 itself and put the previous value back, which aborted the whole run inside the suite
+  // while passing when the case ran alone (seen on 2026-11-16, SIGABRT, 222 cases never reached):
+  // cudaDeviceSetLimit on the stack reallocates it for every resident thread, which is not something to do
+  // between other cases' launches.
   pseudohuber_kernel_other(3.5);
   pseudohuber_kernel_other(0.05);
-#if defined(__CUDACC__)
-  cudaDeviceSetLimit(cudaLimitStackSize, stack_before);
-#endif
 }
 
 TEST_CASE("pseudohuber: every order inside a kernel") { pseudohuber_kernel_case(); }

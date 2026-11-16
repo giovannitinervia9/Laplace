@@ -201,11 +201,24 @@ double ulp_of(double v) { return std::ldexp(1.0, std::ilogb(v) - 52); }
 // the tolerances below are the worst scaled errors measured on 2026-11-15 on the gcc build and on the CUDA
 // build (RTX 4070 SUPER), times about one and a half; the first index is the family minus one (and, for log F, the
 // second is 0 for log F and 1 for log(1 - F))
-const double BOUND_LOGPDF[2][7] = {{0, 20.0, 48.0, 150.0, 390.0, 1410.0, 3600.0}, {0, 9.0, 14.0, 20.0, 83.0, 267.0, 950.0}};
-const double BOUND_LOGCDF[2][2][7] = {{{0, 197.0, 365.0, 227.0, 504.0, 492.0, 9700.0}, {0, 197.0, 365.0, 227.0, 504.0, 492.0, 1210.0}},
-                                      {{0, 13.0, 14.0, 18.0, 28.0, 152.0, 393.0}, {0, 13.0, 14.0, 59.0, 37.0, 152.0, 393.0}}};
+// the log-density bounds were re-measured on 2026-11-16, when the (mu, sigma) components with no nu
+// derivative were given the closed form in Re((y - mu + i sigma sqrt(nu))^-K) for |y - mu| >= sigma sqrt(nu):
+// t1 fell from 13.5, 31.7, 100, 260, 940 and 2.4e3 to 3.68, 2.35, 3.66, 5.1, 20.1 and 107, and t2, which
+// composes t1, from 5.81, 9.28, 12.8, 55.1, 178 and 632 to 5.81, 6.87, 9.65, 103, 9.1 and 31.2. The one
+// entry that grew is t2's order four, a pure nu component at z = 4, nu = 10: the chain rule of the
+// scale s = sigma sqrt((nu - 2)/nu) mixes components whose last bits have changed.
+const double BOUND_LOGPDF[2][7] = {{0, 6.0, 4.0, 6.0, 8.0, 31.0, 161.0}, {0, 9.0, 11.0, 15.0, 155.0, 14.0, 47.0}};
+// The log F bounds grew on 2026-11-16, when the references gained 20 (point, side) pairs at nu >= 1e4
+// that mpmath.diff had never agreed on (tools/reference/distrib_student_t.py, log_cdf_def). They are the
+// first look at that region beyond |z| <= 4, and what they show is the cdf route's own accuracy there:
+// at z = 30, nu = 1e4 the orders one to five read 1.2e3, 962, 786, 1.23e3 and 977 ulp of the order's
+// scale for t1, and 903, 725, 580, 925 and 733 for t2. Nothing moved at the points that were already
+// covered: run against the previous file every bucket is the same number as before (nu = 1e4 read 66 for
+// t1 and 101 for t2 because only |z| <= 4 was there), so the figures below are measured, not inherited.
+const double BOUND_LOGCDF[2][2][7] = {{{0, 1800.0, 1450.0, 1180.0, 1850.0, 1470.0, 9700.0}, {0, 1800.0, 1450.0, 1180.0, 1850.0, 1470.0, 1210.0}},
+                                      {{0, 1360.0, 1090.0, 870.0, 1390.0, 1100.0, 880.0}, {0, 1360.0, 1090.0, 870.0, 1390.0, 1100.0, 880.0}}};
 const double BOUND_LOGCDF_NEAR2[7] = {0, 27.0, 2.2e5, 8.8e6, 2.4e7, 6.9e7, 1.95e8};
-const double BOUND_BLOCK[2][7] = {{0, 197.0, 150.0, 227.0, 170.0, 1130.0, 9700.0}, {0, 13.0, 14.0, 25.0, 288.0, 2280.0, 6360.0}};
+const double BOUND_BLOCK[2][7] = {{0, 1800.0, 1450.0, 1180.0, 1850.0, 1470.0, 9700.0}, {0, 1360.0, 1090.0, 870.0, 1390.0, 2280.0, 6360.0}};
 const double BOUND_INFO[2][5] = {{240.0, 85.0, 76.0, 53.0, 26.0}, {480.0, 173.0, 150.0, 82.0, 52.0}};
 
 }  // namespace

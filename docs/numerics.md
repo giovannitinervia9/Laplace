@@ -7644,11 +7644,18 @@ and the |z| = 12 of the reference grid about forty terms are needed for the last
 bit. What it would buy is small beside that: the score in gamma keeps seven
 digits at |gamma| = 1e-12 and ten at 1e-8, which a fit can use, and the orders
 two and above diverge like gamma^(-2/3) because the law is only C^1 in gamma at
-zero, so there is nothing there to be accurate about. The descriptors say `infinitely_smooth` with no non-smooth points,
-while the law is only C^1 in gamma at zero: declaring a non-smooth point there
-with `continuous_order` 1 would be truthful, and would make the generic
-information NaN for the components with two or more indices in gamma although
-they are finite — a decision to take rather than to settle silently. The
+zero, so there is nothing there to be accurate about. The non-smooth point at
+gamma = 0 is now declared, in the field the descriptor gained for it: the law is
+only C^1 in gamma there, and `params[2].axis_kinks` says so with one point at
+zero and `continuous_order` 1, while `regularity` stays `infinitely_smooth`
+because that field holds at every value of the parameter and a finite order in
+it would make the generic routes drop the derivatives in gamma everywhere, not
+only at the one point where they do not exist. The two kinds of non-smooth
+point are different things and are declared apart: `param_kinks(j, y)` gives a
+point of theta_j placed by the observation, where l has a kink in y as well
+(the Laplace and the enet at mu = y), and `axis_kinks` gives the points fixed
+on theta_j's own axis. Nothing reads the new field yet, the engine not being
+there, so the declaration changes no result. The
 starting value, now that `distrib_sample_summary` carries the sample skewness
 (added for this family, the standardized third central moment with divisor n),
 is the three sample moments; `start_inside` can still land it at
@@ -7714,6 +7721,50 @@ E2 = 6/((nu + 3)(nu - 2)(nu + 1)) and
 F2 = I_nunu + 2/((nu + 3) nu (nu - 2)^2) - 4/(nu (nu - 2)(nu + 1)(nu + 3)),
 checked with SymPy.
 
+The (mu, sigma) components of log f that carry no nu-derivative are not formed
+from the (z, nu) table where |y - mu| >= sigma sqrt(nu). The carry of
+`mixed_shape_dk` is a sum of monomials c z^m L_j, and in the far tail its terms
+grow like z^(K-1) while the component they build is O(1) or smaller: at
+|z| = 1e8 the order six used to lose three digits of the tensor's largest
+component. With u = y - mu and w = sigma sqrt(nu),
+
+    log f = c(nu) + ((nu + 1)/2) log nu + nu log sigma - (nu + 1) Re log(u + i w),
+
+because log(1 + z^2/nu) = log(u^2 + w^2) - log(nu sigma^2) and
+log(u^2 + w^2) = 2 Re log(u + i w). Since d/dmu = -d/du and
+d/dsigma = sqrt(nu) d/dw, and log(u + i w) has
+d^a/du^a d^b/dw^b log(u + i w) = i^b (-1)^(K-1) (K-1)! (u + i w)^-K for
+K = a + b >= 1,
+
+    d^a/dmu^a d^b/dsigma^b l = -(nu + 1) (-1)^a nu^(b/2) (-1)^(K-1) (K-1)!
+                               Re[i^b (u + i w)^-K]
+                               + [a = 0] nu (-1)^(b-1) (b - 1)! sigma^-b,
+
+the last term being all that nu log sigma contributes. One complex power per
+order, taken from the reciprocal of u + i w by repeated multiplication and
+scaled by max(|u|, w) so that neither u^2 + w^2 nor the power overflows, and
+no quantity on the right is a difference of larger ones. The split is on
+|u| >= w rather than on |z| or on nu: below it the closed form is the bad one,
+because Re[i^b (u + i w)^-K] is then a small difference and nu log sigma a
+large term against a small result, and it reaches 1e12 ulp at nu = 1e12. The
+two forms were measured against each other on the whole reference grid, by
+region of r = |z|/sqrt(nu): at r < 1 the table route is at worst 33 ulp at
+order six and the closed form 1.5e12, at r >= 1 the table route reaches 2.4e3
+and the closed form stays at or below 4.6. `tools/reference/distrib_student_t.py`
+checks the rewrite and the closed component against SymPy at two points.
+
+The skew t carries the same block in its own far tail, on the same split. Its
+table is the Student one plus the skew factor's, so the two are kept apart
+rather than subtracted: `detail_skewt::lambda_table` hands back the skew
+factor's own z-derivatives before the Student part is added, those are carried
+by `mixed_dk` as usual, and the Student half comes from the closed form. Formed
+by subtraction instead, the Student half would carry back the cancellation the
+closed form removes. At alpha = 0 the skew factor is constant and the block is
+student_t1's to the bit, which is what the twin test asks and what it now
+measures: zero ulp at every order, where the closed form in student_t1 alone
+left the two families 2, 3, 5, 15, 103 and 502 ulp apart at the orders one to
+six.
+
 For log F one call of `detail_st::derivs<K>` gives the whole (z, nu) table,
 which feeds `mixed_shape_dk`. For |z| >= 1 on the side where the function tends
 to zero the polynomials of `mixed_dk` cancel, as they do for the Cauchy, so
@@ -7728,16 +7779,25 @@ point, worst of the gcc and the CUDA build; references by mpmath in
 
 | quantity | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|
-| t1 log f | 13.5 | 31.7 | 100 | 260 | 940 | 2400 |
-| t2 log f | 5.8 | 9.3 | 12.8 | 55 | 178 | 632 |
+| t1 log f | 3.68 | 2.35 | 3.66 | 5.1 | 20.1 | 107 |
+| t2 log f | 5.81 | 6.87 | 9.65 | 103 | 9.1 | 31.2 |
 | t1 log F | 131 | 243 | 151 | 336 | 328 | 6450 |
 | t1 log(1 - F) | 131 | 243 | 151 | 336 | 328 | 805 |
 | t2 log F, nu >= 2.5 | 8.5 | 9.2 | 11.7 | 18.4 | 101 | 262 |
 | t2 log(1 - F), nu >= 2.5 | 8.5 | 9.2 | 38.8 | 24.4 | 101 | 262 |
 | t2 log F and log(1 - F), nu = 2 + 1e-6 | 17.9 | 1.5e5 | 5.9e6 | 1.6e7 | 4.6e7 | 1.3e8 |
 
-The worst argument of the density, for both families and at the orders four to
-six, is z = 1e8 (y = 93.37, mu = -2, sigma = 9.5e-7); of t1's log F at order
+The two rows of the density are what the closed form of the far tail bought.
+Before it they read 13.5, 31.7, 100, 260, 940 and 2400 for t1 and 5.8, 9.3,
+12.8, 55, 178 and 632 for t2, so t1 improves at every order, by 22 times at
+order six, and t2 at every order but the fourth, which grows from 55 to 103 at
+a pure nu component at z = 4, nu = 10: t2 is t1 at the scale
+s = sigma sqrt((nu - 2)/nu) composed through `chain_rule_pair_dk`, and the
+chain mixes components whose last bits the closed form has moved. One component
+1.9 times worse against orders five and six 20 times better is the trade that
+was taken. The worst points of the density are now the components with at least
+one nu-derivative, which the closed form does not touch: 107 ulp at order six
+at z = 1e8, nu = 2. The worst argument of t1's log F at order
 six, z = 31.6 with nu = 3.5; of t1's log F and log(1 - F) at the orders two,
 four and five, |z| = 1e8 with nu = 0.01. The density of t2 at nu = 2 + 1e-6
 stays within 39 ulp, so the chain through r(nu) holds there; its log F keeps
@@ -7754,6 +7814,40 @@ grows and the nu-derivatives of order six down to 1e-82 are right; the generic
 quadrature route for the information in its score form, 1.1e-15 of the largest
 component at nu = 3.5, 9 and 30 for both families, and the variance of the
 score 7e-15; the host and the device within 8.7e-15 inside a Kokkos kernel.
+
+The references of log F gained 20 (point, side) pairs that had none, and it
+took one line of `tools/reference/distrib_student_t.py`. Its definition took
+the tail as (1 - I_y(1/2, nu/2))/2 with y = z^2/(nu + z^2) wherever
+x = nu/(nu + z^2) exceeded 1/2, which is the usual choice for the incomplete
+beta but is a difference against one: its nu-derivatives cancel and mpmath.diff
+never reaches the 2^-100 the script demands of two precisions. Holding each
+form fixed and comparing them at the same point says it plainly: at z = 30,
+nu = 1e4 the table of the six orders disagrees by 3e197 between 280 and 360
+bits in that form and by 3e213 between 440 and 560, while I_x(nu/2, 1/2) taken
+directly agrees to 1.3e-81 at the lowest pair; at z = 100, nu = 1e4, where x is
+exactly 1/2, the same. Raising the ladder would also have worked and is not
+needed: 900 against 1200 bits agrees at 3.8 minutes a point and 1400 against
+1800 at 12, where the direct form costs 20 seconds. With the one form the file
+keeps every row it had, to the bit, and adds 1660.
+
+What that form cannot do is z = 0, and the reason is worth writing down because
+no agreement test can see it. I_x is even in z, so log F is log(t) on one side
+of zero and log1p(-t) on the other: two functions meeting there, and the
+stencil differentiates across the join. Against the exact f(0)/F(0) = 2 f(0),
+the first z-derivative at zero comes out wrong by 2.4e-7 at nu = 3.5, 1.9e-6 at
+nu = 10 and 6.8e-4 at nu = 1e4, and both precisions agree on the wrong value.
+The form that is analytic across zero is F(z) = 1/2 + sign(z) I_y(1/2, nu/2)/2,
+where I_y ~ c|z| makes sign(z) I_y the analytic odd part: it gives 2 f(0)
+exactly and agrees to every digit with a quadrature of the density, which uses
+no incomplete beta at all. It is useless in the tail, where I_y is one to the
+last bit and the sum cancels (at z = 30, nu = 1e4 it returns a flat zero), so
+the two forms would have to be chosen per point. That was tried and is not in:
+with the central form in place the library disagrees with the new central
+references by far more than their own accuracy, and which of the two is right
+there has to be settled before either is written to the file. The z = 0 points
+therefore still have no reference, 48 (point, side) pairs in all, of which the
+far ones (|z| of 1e8 with nu = 100, and the like) can never have one, their
+log(1 - F) being of the order of 1e-2000 and below the smallest normal double.
 
 **Chosen.** As above, with the bounds of `tests/distrib/test_student_t.cpp`
 (18 cases, 78391 assertions) at 1.5 times the worst of the two builds. The

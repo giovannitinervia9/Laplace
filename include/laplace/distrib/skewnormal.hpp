@@ -419,17 +419,15 @@ struct skewnormal_distrib {
       // term in gamma^(2/3) and E[l_mu gamma] one in gamma^(4/3), so the
       // derivatives of the information in gamma are infinite at zero.
       //
-      // The descriptor says infinitely_smooth all the same, because
-      // `regularity` and `param_kinks` describe a kink in y whose position
-      // depends on the parameter (the Laplace's and the enet's mu = y), which
-      // this family does not have: for every gamma other than zero the law is
-      // C^inf in all three parameters, and nothing jumps in y. Declaring a
-      // finite regularity here would make the generic information drop the
-      // derivatives in gamma at every gamma, not only at the one point where
-      // they do not exist. A descriptor for a non-smooth point on a parameter's
-      // own axis is what the interface lacks (note/piano_distrib_reali.md).
+      // `regularity` stays infinitely_smooth, because it holds at every value
+      // of the parameter: for every gamma other than zero the law is C^inf in
+      // all three parameters, and a finite order here would make the generic
+      // routes drop the derivatives in gamma everywhere, not only at the one
+      // point where they do not exist. The point itself is declared in
+      // `axis_kinks`, which is what describes a non-smooth point fixed on a
+      // parameter's own axis: one point, at gamma = 0, continuous to order one.
       {"gamma", -detail_skewnormal::g_max, detail_skewnormal::g_max, false, infinitely_smooth, false,
-       infinitely_smooth}};
+       infinitely_smooth, distrib_kinks{1, {0.0, 0.0}, 1}}};
 
   /**
    * \ingroup distrib_skewnormal
@@ -689,8 +687,8 @@ struct skewnormal_distrib {
   LAPLACE_HD double scale() const { return sigma; }
   /// \ingroup distrib_skewnormal
   /// \brief Non-smooth points in the parameters with respect to \f$y\f$ (none).
-  // no kink in y for any parameter; the non-smooth point of gamma at zero is
-  // on its own axis, which this member does not describe (see params above)
+  // no kink in y for any parameter; the non-smooth point of gamma at zero sits
+  // on its own axis and is declared in params[2].axis_kinks instead
   LAPLACE_HD distrib_kinks param_kinks(int /*j*/, double /*y*/) const { return distrib_kinks{}; }
   /// \ingroup distrib_skewnormal
   /// \brief Non-smooth points of \f$\log f\f$ in \f$y\f$ (none).

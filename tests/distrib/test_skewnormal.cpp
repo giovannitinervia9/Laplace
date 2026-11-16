@@ -192,6 +192,13 @@ TEST_CASE("distrib skewnormal: descriptors, the constant g and the kinks") {
   }
   CHECK(SN::params[2].upper == ld::detail_skewnormal::g_max);
   CHECK(SN::params[2].lower == -ld::detail_skewnormal::g_max);
+  // mu and sigma are smooth along their own axes; gamma is not, at zero skewness, where the law is
+  // C^1 in gamma and every order above diverges like gamma^(-2/3)
+  CHECK(SN::params[0].axis_kinks.count == 0);
+  CHECK(SN::params[1].axis_kinks.count == 0);
+  CHECK(SN::params[2].axis_kinks.count == 1);
+  CHECK(SN::params[2].axis_kinks.point[0] == 0.0);
+  CHECK(SN::params[2].axis_kinks.continuous_order == 1);
   const SN d{0.4, 1.3, 0.3};
   for (int j = 0; j < 3; ++j) CHECK(d.param_kinks(j, 1.25).count == 0);
   CHECK(d.y_kinks().count == 0);

@@ -17,7 +17,8 @@
 //   center(), scale()             rough location and spread, for quadratures
 //   start_value(summary)          (host) a starting theta from a distrib_sample_summary
 //                                 (generic_start.hpp), strictly inside the domain
-//   param_kinks(j, y)             points of theta_j at which l is not smooth
+//   param_kinks(j, y)             points of theta_j, placed by y, at which l is not smooth
+//                                 (params[j].axis_kinks holds the ones fixed on theta_j's axis)
 //   y_regularity, y_kinks()       (continuous) regularity of l in y and its non-smooth points
 //   logpdf_dy_dk<J, K>(y)         (continuous) J derivatives in y and the symmetric tensor of
 //                                 order K in theta, computed only when called (J + K <= 6)
@@ -55,12 +56,40 @@ enum class distrib_kind : int { continuous, discrete };
  */
 inline constexpr int infinitely_smooth = 1 << 30;
 
+// Points at which l is not smooth in one parameter (or in y), at most 2, and
+// the order up to which it stays continuous there.
+/**
+ * \ingroup distrib_core
+ * \brief Description of non-smooth points in a parameter or in the observation argument.
+ */
+struct distrib_kinks {
+  /// Number of non-smooth points (at most 2).
+  int count = 0;
+  /// Coordinates of the non-smooth points.
+  double point[2] = {0.0, 0.0};
+  /// Highest derivative order that remains continuous across the kink.
+  int continuous_order = 0;
+};
+
 // The descriptor of a parameter: name, open natural domain (lower, upper) or
 // circular, regularity order of log f, whether the ends of the support move
-// with it, and the regularity order of log F and log(1 - F) (what a censored,
+// with it, the regularity order of log F and log(1 - F) (what a censored,
 // truncated or interval-censored observation contributes; for a location
-// parameter usually one order more than log f). The non-smooth points of log F
-// are those of log f (param_kinks).
+// parameter usually one order more than log f), and the non-smooth points of
+// the parameter's own axis. The non-smooth points of log F in y are those of
+// log f (param_kinks).
+//
+// The two kinds of non-smooth point are different things and are declared
+// apart. param_kinks(j, y) gives a point of theta_j whose position depends on
+// the observation, where l has a kink in y as well (the Laplace and the enet
+// at mu = y); regularity is the order up to which l stays differentiable in
+// theta_j there, and it holds at every value of the parameter. axis_kinks
+// gives the points of theta_j's own axis at which l is not smooth in theta_j
+// while being C^inf everywhere else on that axis and C^inf in y throughout
+// (the skew normal's gamma = 0, where the map to the classic triple runs
+// through a cube root). A finite regularity cannot say this: it would make the
+// generic routes drop the derivatives in that parameter at every value of it,
+// not only at the one point where they do not exist.
 /**
  * \ingroup distrib_core
  * \brief Descriptor of a distribution parameter's domain, smoothness, and support properties.
@@ -80,21 +109,8 @@ struct distrib_param_info {
   bool moves_support;
   /// Differentiability order of the cumulative functions \f$\log F\f$ and \f$\log(1 - F)\f$ in this parameter.
   int cdf_regularity;
-};
-
-// Points at which l is not smooth in one parameter (or in y), at most 2, and
-// the order up to which it stays continuous there.
-/**
- * \ingroup distrib_core
- * \brief Description of non-smooth points in a parameter or in the observation argument.
- */
-struct distrib_kinks {
-  /// Number of non-smooth points (at most 2).
-  int count = 0;
-  /// Coordinates of the non-smooth points.
-  double point[2] = {0.0, 0.0};
-  /// Highest derivative order that remains continuous across the kink.
-  int continuous_order = 0;
+  /// Points of this parameter's own axis at which \f$\log f\f$ is not smooth (none by default).
+  distrib_kinks axis_kinks = {};
 };
 
 /**

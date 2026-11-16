@@ -384,6 +384,62 @@ LAPLACE_HD sym_tensor<3, K> bell_log_one_minus_exp(const double* T, double S) {
   return out;
 }
 
+// ---------------------------------------------------------------- the far tail of the (mu, sigma) block
+
+// For |y - mu| >= sigma sqrt(nu) the z-polynomials of mixed_shape_dk cancel: their terms grow
+// like z^(K-1) while the component they build is O(1) or smaller, and at |z| = 1e8 the order six
+// loses three digits of the tensor's largest component. The components with no nu derivative are
+// closed in one complex power instead. With u = y - mu and w = sigma sqrt(nu),
+//
+//   log f = c(nu) + ((nu + 1)/2) log nu + nu log sigma - (nu + 1) Re log(u + i w),
+//
+// because log(1 + z^2/nu) = log(u^2 + w^2) - log(nu sigma^2) and log(u^2 + w^2) = 2 Re log(u + i w).
+// Since d/dmu = -d/du and d/dsigma = sqrt(nu) d/dw, and log(u + i w) obeys
+// d^a/du^a d^b/dw^b log(u + i w) = i^b (-1)^(K-1) (K-1)! (u + i w)^-K with K = a + b >= 1,
+//
+//   d^a/dmu^a d^b/dsigma^b l = -(nu + 1) (-1)^a nu^(b/2) (-1)^(K-1) (K-1)! Re[i^b (u + i w)^-K]
+//                              + [a == 0] nu (-1)^(b-1) (b - 1)! sigma^-b,
+//
+// the second term being the only one nu log sigma contributes. The power is taken from the
+// reciprocal of u + i w by repeated multiplication, scaled by m = max(|u|, w) so that neither
+// u^2 + w^2 nor the power overflows, and every factor of the scale is spent one at a time.
+// tools/reference/distrib_student_t.py checks the two forms against SymPy.
+template <int K>
+LAPLACE_HD void far_mu_sigma_block(double y, double mu, double sigma, double nu, double* out) {
+  const double u = y - mu, w = sigma * Kokkos::sqrt(nu);
+  const double m = Kokkos::fmax(Kokkos::fabs(u), w);
+  const double us = u / m, ws = w / m;
+  const double r2 = Kokkos::fma(us, us, ws * ws);
+  const double ir = 1.0 / r2;
+  const double cr = us * ir, ci = -ws * ir;  // 1/(u/m + i w/m)
+  double pr = cr, pi = ci;
+  for (int k = 1; k < K; ++k) {
+    const double nr = pr * cr - pi * ci, ni = pr * ci + pi * cr;
+    pr = nr;
+    pi = ni;
+  }
+  const double snu = Kokkos::sqrt(nu);
+  for (int b = 0; b <= K; ++b) {
+    const int a = K - b;
+    double re;
+    switch (b % 4) {
+      case 0: re = pr; break;
+      case 1: re = -pi; break;
+      case 2: re = -pr; break;
+      default: re = pi; break;
+    }
+    double v = -(nu + 1.0) * sign_of_power(a) * sign_of_power(K - 1) * fact(K - 1) * re;
+    for (int i = 0; i < b; ++i) v *= snu / m;
+    for (int i = 0; i < a; ++i) v /= m;
+    if (a == 0) {
+      double s = nu * sign_of_power(b - 1) * fact(b - 1);
+      for (int i = 0; i < b; ++i) s /= sigma;
+      v += s;
+    }
+    out[b] = v;
+  }
+}
+
 }  // namespace detail_student_t1
 
 /**
@@ -461,6 +517,13 @@ struct student_t1_distrib {
     double isk = 1.0;
     for (int k = 0; k < K; ++k) isk /= sigma;
     t[sym_tensor_position<3, K>(idx)] += detail_student_t1::sign_of_power(K) * detail_student_t1::fact(K - 1) * isk;
+    // the components with no nu derivative, rewritten where the z-polynomials cancel; the closed
+    // form carries the whole of nu log sigma, so it replaces the two terms added above as well
+    if (Kokkos::fabs(y - mu) >= sigma * Kokkos::sqrt(nu)) {
+      double far[K + 1];
+      detail_student_t1::far_mu_sigma_block<K>(y, mu, sigma, nu, far);
+      for (int b = 0; b <= K; ++b) t[detail_student_t1::pos3(K - b, b, 0)] = far[b];
+    }
     return t;
   }
   /**
