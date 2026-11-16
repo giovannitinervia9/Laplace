@@ -161,3 +161,7 @@ laplace_kokkos_sources(pdmat_ws_dd.cpp)
 add_executable(pdmat_ws_dd pdmat_ws_dd.cpp)
 target_link_libraries(pdmat_ws_dd PRIVATE Laplace::laplace Laplace::dense)
 target_compile_definitions(pdmat_ws_dd PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
+
+laplace_kokkos_sources(distrib_mvgaussian_rank_deficient.cpp)
+add_executable(distrib_mvgaussian_rank_deficient distrib_mvgaussian_rank_deficient.cpp)
+target_link_libraries(distrib_mvgaussian_rank_deficient PRIVATE Laplace::laplace Laplace::dense)

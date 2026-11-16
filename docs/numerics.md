@@ -9195,3 +9195,105 @@ order 7 at 3796 against 1241 ns on gcc and 188 against 42 ns on CUDA, order 1 at
 the cap to trade that cost for that accuracy is open.
 
 No device table was added (`.nv.constant3` unchanged at 46520 bytes).
+
+## The rank-deficient multivariate Gaussian: degenerate mvgaussian1, improper mvgaussian2 (2026-11-16)
+
+What: `mvgaussian1_distrib<S>` and `mvgaussian2_distrib<S>` over a
+positive semidefinite structure whose null space is constant in theta and
+supplied (`constant_null_space_psdmat`; today `weighted_sum_psdmat`), as
+partial specializations of the same templates
+(`include/laplace/distrib/mvgaussian1.hpp`, `mvgaussian2.hpp`, shared code
+in `distrib/detail/mvgaussian_rank_deficient.hpp`). Host only, as the
+structure. `reduced_rank_psdmat`, whose null space moves with theta, is
+excluded from both. Test `tests/distrib/test_mvgaussian_rank_deficient.cpp`,
+references `tools/reference/distrib_mvgaussian_rank_deficient.py` (5215
+values), bench `benchmarks/distrib_mvgaussian_rank_deficient.cpp`.
+
+How. rho the rank, U0 the orthonormal null-space basis, P = U0 U0', r = y - mu:
+
+    l1 = -rho/2 log 2pi - 1/2 log|Sigma|_+ - 1/2 r' Sigma^+ r   (degenerate)
+    l2 = -rho/2 log 2pi + 1/2 log|Q|_+     - 1/2 r' Q r         (improper)
+
+- log|M|_+ and its derivatives from the structure (`log_pdet_state` once per
+  theta, then `log_pdet_dk_at` for every tuple).
+- Sigma^+ = (Sigma + cP)^-1 - P/c with c = tr(Sigma)/rho fixed at the theta of
+  the state; any fixed c > 0 gives the identity for every theta, so
+  d_T Sigma^+ = d_T (Sigma + cP)^-1, by the recursion
+  A[Q] = -A sum_(0 != T subset Q) M[T] A[Q \ T] over the masks of the tuple.
+- Off the support (degenerate): -inf when ||U0' r|| > 64 d eps ||r||. The
+  derivative blocks are those of the projected density.
+- Blocks: the code of the proper classes through an adapter whose "inverse"
+  is M^+ and whose "log det" is log|M|_+.
+- Expected information, both classes, for structures with
+  d_ab M = delta_ab d_a M (weighted_sum):
+  I_ab = 1/2 tr(B_a B_b) = -1/2 d_ab log|M|_+ + 1/2 delta_ab d_a log|M|_+,
+  derivatives from log_pdet_dk. B_a is the structure's B_a, similar to
+  e^(theta_a) M^+ S_a. The trace route through M^+ (the one of the proper
+  classes) cancelled: 1.8e17 ulp1N (degenerate) and 9.5e11 (improper) at the
+  points with theta components 9 apart; it is not offered.
+- Draws: M + cP = L L'; degenerate y = mu + (I - P) L z, covariance
+  (I - P)(Sigma + cP)(I - P) = Sigma; improper, the constrained law
+  U0' r = 0: `constrained_state` adds the factor, y = mu + (I - P) L^-T z,
+  covariance Q^+ (`constrained_covariance`). The improper `theta_state`
+  computes no factor.
+- start_value: degenerate (I - P) C (I - P), C the sample covariance, no
+  eigenvalue floor; improper its pseudo-inverse; then `params_from_matrix`.
+
+Accuracy against mpmath at 60 digits (the definition: the eigendecomposition
+gives log|M|_+ and M^+; mpmath.diff gives the blocks; the information from
+F = E[-l]). Four structures: d = 4 with D2'D2 (rank 2); d = 5 with D1'D1,
+D2'D2 (rank 4); d = 6 with D1'D1, D2'D2, D3'D3 (rank 5); d = 5 with D2'D2,
+D2' diag(1, 2, 3) D2 (rank 3). At each one, a random point and a spread one
+(theta components 9 apart). Worst ulp1N; gcc 14.2 and the host code of the
+CUDA build (MSVC) give the same numbers.
+
+| | blocks, worst of A = 0, 1, 2 | information |
+|---|---|---|
+| improper, every point | 4 (A = 0), 1 (A = 1, 2) | 1.12 |
+| degenerate, random points | 117 | 1.12 |
+| degenerate, spread, d = 5 two penalties | 4.86e6 | 2.4e-4 |
+| degenerate, spread, d = 6 three penalties | 3.28e12 (A = 0: 1.15e11, A = 1: 7.15e11) | 0.25 |
+
+What it says: the dense (Sigma + cP)^-1 loses in proportion to the condition
+number of Sigma on its range (measured with mpmath: 2.07e5 at the d = 5
+spread point, 6.53e9 at the d = 6 one), here 24 and 500 times cond eps:
+about 7e-4 relative at the worst point. The improper
+blocks never form an inverse and keep 1-4 ulp. Accepted by Giovanni on
+2026-11-16. The upgrade path is the structure's graded factorization
+(Sigma = Q D^1/2 H D^1/2 Q' on the range), when a model needs a degenerate
+covariance with spread lambda. Test bounds: 1.5 times the worst, at least 4,
+and per spread point for the degenerate blocks.
+
+Other checks: -inf at y + 1e-6 u0, finite at y + 1e-15 u0; draws (40000)
+with null component below 1e-12 and covariance within 6 standard errors of
+Sigma or Q^+; Q Q^+ Q = Q within 1e-12 max|Q|, Q^+ U0 = 0; start_value
+recovers theta within 1e-10.
+
+Speed, host, one thread, gcc 14.2, S = (D1'D1, D2'D2, D3'D3), rank d - 1,
+seconds (the median of 5 calls at d = 500, one call at d = 2000):
+
+| | improper d = 500 | degenerate d = 500 | improper d = 2000 | degenerate d = 2000 |
+|---|---|---|---|---|
+| construction of weighted_sum (null space) | 1.04 | | 113 | |
+| log_pdet of the structure | 0.38 | 0.37 | 32.2 | 28.3 |
+| theta_state | 0.39 | 0.41 | 31.7 | 35.4 |
+| constrained_state | 0.42 | | 36.8 | |
+| logpdf | 6.7e-5 | 6.4e-5 | 1.4e-3 | 1.3e-3 |
+| A = 1, K = 0 (W r) | 1.4e-4 | 1.3e-4 | 5.9e-3 | 3.3e-3 |
+| A = 0, K = 1 | 1.2e-4 | 0.040 | 4.0e-3 | 4.1 |
+| A = 0, K = 2 | 1.7e-3 | 0.12 | 0.036 | 13.3 |
+| theta table, orders 1-2 (9 entries) | 0.010 | 0.86 | 0.20 | 78.6 |
+| a block read from the table | < 1e-6 | 6.6e-5 | 6e-7 | 1.3e-3 |
+
+Memory (doubles): the state 7.9e6 at d = 500 and 1.26e8 (1.0 GB) at
+d = 2000, most of it the structure's evaluated log_pdet state; the scratch
+of the degenerate blocks 2.6e8 at d = 2000 (64 packed matrices for the
+inverse recursion to order 6).
+
+What it says: at the penalty scale the improper class costs what the
+structure's log|Q|_+ costs (theta_state), and every block afterwards takes
+milliseconds; the factor of `constrained_state` adds about 5 s at
+d = 2000. The degenerate blocks with K >= 1 cost d^3 products per mask
+(unblocked loops: 4 s per tuple at d = 2000), so the table matters there.
+Open: the construction of weighted_sum at d = 2000 (113 s) is the
+structure's, not this module's.

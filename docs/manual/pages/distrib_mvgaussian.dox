@@ -8,7 +8,7 @@ Include `<laplace/distrib/multivariate_core.hpp>` for the shared multivariate di
 
 A multivariate distribution models \ref laplace::distrib::multivariate_distrib "multivariate_distrib", which requires static `normalization`, `state_type`, `dim()`, `n_params()`, `state_size()`, `scratch_size()`, `theta_state()`, `logpdf()`, and `logpdf_dmu_dk`. Each distribution has one vector parameter \f$\mu \in \mathbb{R}^d\f$ that varies by unit, together with the parameter vector \f$\theta \in \mathbb{R}^q\f$ of a matrix structure \f$M(\theta)\f$ modeling \ref laplace::pdmat::pdmat_structure "pdmat_structure" (see \ref pdmat "Positive definite structures"). The distribution holds its structure by value in the public member `structure`.
 
-The static constant `normalization` has type \ref laplace::distrib::distrib_normalization "distrib_normalization". Both `mvgaussian1_distrib\<S\>` and `mvgaussian2_distrib\<S\>` set `normalization` to `distrib_normalization::proper`, denoting a positive definite matrix in either parametrization. The enumeration also declares `degenerate` (singular covariance, representing a proper law on \f$\mu + \operatorname{col}(\Sigma)\f$) and `improper` (singular precision, flat along its null space).
+The static constant `normalization` has type \ref laplace::distrib::distrib_normalization "distrib_normalization". Over a positive definite structure (`pdmat::pdmat_structure`), both `mvgaussian1_distrib\<S\>` and `mvgaussian2_distrib\<S\>` set `normalization` to `distrib_normalization::proper`. Over a positive semidefinite structure satisfying \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat", `mvgaussian1_distrib\<S\>` sets `normalization` to `distrib_normalization::degenerate` (singular covariance, representing a proper law on \f$\mu + \operatorname{col}(\Sigma)\f$) and `mvgaussian2_distrib\<S\>` sets `normalization` to `distrib_normalization::improper` (singular precision, flat along its null space), as described in the section "Singular matrices: the degenerate and the improper classes" below.
 
 Work is split between a structure state and per-unit evaluations. Calling `theta_state(theta, w)` writes what depends only on \f$\theta\f$ into `w[0, state_size())` using `w[state_size(), scratch_size())` as working scratch, and returns a small state (`mvgaussian1_state` or `mvgaussian2_state`) pointing into `w` and at `theta`. Both `w` and `theta` must remain alive while the state is used. When \f$\theta\f$ is shared across units, `theta_state()` runs once; when \f$\theta\f$ varies by unit, each unit builds its own state with the same calls. For both Gaussian parametrizations, `state_size()` is \f$2 d(d + 1)/2\f$ doubles and `scratch_size()` is \f$2 d(d + 1)/2\f$ plus `structure.scratch_size()` doubles.
 
@@ -114,6 +114,64 @@ For moments, `mean(mu, out)` copies \f$\mu\f$ into `out`, and `covariance(theta,
 
 On the host, \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample(y, n, d)" reads \f$n\f$ contiguous \f$d\f$-vectors and returns a \ref laplace::distrib::distrib_mv_sample_summary "distrib_mv_sample_summary" containing `count`, `dim`, sample `mean`, and packed sample `covariance` with divisor \f$n\f$ (all zero when \f$n = 0\f$). Host member `start_value(summary, theta)` floors the eigenvalues of the sample covariance at \f$10^{-6}\f$ times the largest eigenvalue, inverts the matrix for `mvgaussian2_distrib\<S\>`, and maps it to \f$\theta\f$ via `structure.params_from_matrix()` (see \ref pdmat "Positive definite structures").
 
+## Singular matrices: the degenerate and the improper classes
+
+### Supported structures
+
+The rank-deficient Gaussian classes exist over any positive semidefinite structure `S` modeling \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat", which requires \ref laplace::pdmat::psdmat_structure "psdmat_structure" (see \ref psdmat "Positive semidefinite structures") with `S::constant_null_space` and `S::supplies_null_space` both `true`. Because the null space does not depend on \f$\theta\f$ and `null_space_basis()` supplies an orthonormal basis of it, the range stays fixed across parameters. Today the library provides one such structure, \ref laplace::pdmat::weighted_sum_psdmat "weighted_sum_psdmat". By contrast, \ref laplace::pdmat::reduced_rank_psdmat "reduced_rank_psdmat" has a null space that moves with \f$\theta\f$ and is excluded from both classes at compile time. Both classes run on the host only, like the structure, and are partial specializations of \ref laplace::distrib::mvgaussian1_distrib "mvgaussian1_distrib\<S\>" and \ref laplace::distrib::mvgaussian2_distrib "mvgaussian2_distrib\<S\>" selected by `S`.
+
+### The degenerate class
+
+Over `constant_null_space_psdmat`, the degenerate specialization of \ref laplace::distrib::mvgaussian1_distrib "mvgaussian1_distrib\<S\>" sets `normalization` to `distrib_normalization::degenerate`. It defines a proper law on \f$\mu + \operatorname{col}\Sigma\f$, where \f$\rho\f$ is the rank of \f$M(\theta)\f$ returned by `rank()`, \f$\Sigma = M(\theta)\f$, and \f$r = y - \mu\f$. Writing \f$\lvert\cdot\rvert_+\f$ for the pseudo-determinant (the product of the \f$\rho\f$ nonzero eigenvalues) and \f$M^+\f$ for the Moore-Penrose pseudo-inverse, the log-density on the support is
+\f[
+\ell_1 = -\tfrac{\rho}{2}\log 2\pi - \tfrac{1}{2}\log\lvert\Sigma\rvert_+ - \tfrac{1}{2} r^\top \Sigma^+ r,
+\f]
+and \f$-\infty\f$ off it. Let \f$U_0\f$ be the \f$d \times (d - \rho)\f$ orthonormal basis of the null space. The support test checks \f$\lVert U_0^\top r\rVert > 64\,d\,\varepsilon\,\lVert r\rVert\f$ with \f$\varepsilon = 2^{-52}\f$. Only the value (`logpdf()`, and the block `A = K = 0`) applies this test; all derivative blocks evaluate the derivatives of the density projected on the range.
+
+### The improper class
+
+Over `constant_null_space_psdmat`, the improper specialization of \ref laplace::distrib::mvgaussian2_distrib "mvgaussian2_distrib\<S\>" sets `normalization` to `distrib_normalization::improper`. Parameterized by a singular precision \f$Q = M(\theta)\f$ of rank \f$\rho\f$, it is flat along the null space of \f$Q\f$ with log-density
+\f[
+\ell_2 = -\tfrac{\rho}{2}\log 2\pi + \tfrac{1}{2}\log\lvert Q\rvert_+ - \tfrac{1}{2} r^\top Q r.
+\f]
+The normalizing constant counts only the \f$\rho\f$ range dimensions rather than \f$d\f$. Because the quadratic form uses \f$Q\f$ directly, the improper class never needs a pseudo-inverse for its density.
+
+### Pseudo-inverse and its derivatives
+
+Let \f$P = U_0 U_0^\top\f$ be the orthogonal projector onto the null space. For any fixed scalar \f$c > 0\f$, the Moore-Penrose pseudo-inverse satisfies
+\f[
+\Sigma^+ = (\Sigma + cP)^{-1} - \frac{P}{c}.
+\f]
+The state chooses \f$c = \operatorname{tr}\Sigma / \rho\f$ at its \f$\theta\f$ (defaulting to \f$1\f$ if \f$\rho = 0\f$ or \f$\operatorname{tr}\Sigma \le 0\f$) and keeps \f$c\f$ fixed while differentiating, so \f$\partial_T \Sigma^+ = \partial_T(\Sigma + cP)^{-1}\f$ for every non-empty tuple \f$T\f$. Writing \f$A = (\Sigma + cP)^{-1}\f$, \f$A_Q\f$ for its derivative along subset \f$Q\f$, and \f$M_T\f$ for the structure's derivative along \f$T\f$, the implementation evaluates
+\f[
+A_Q = -A \sum_{\emptyset \ne T \subseteq Q} M_T\,A_{Q \setminus T}
+\f]
+recursively over the sub-tuples of the positions.
+
+### Precomputed state and parameter table
+
+Calling `theta_state(theta, w)` returns a \ref laplace::distrib::mvgaussian_rank_deficient_state "mvgaussian_rank_deficient_state". It records \f$\log\lvert M\rvert_+\f$ (from `structure.log_pdet_state()`, retaining its evaluated state in `w` so every derivative of \f$\log\lvert M\rvert_+\f$ is read with `log_pdet_dk_at()`), the quadratic-form matrix (\f$\Sigma^+\f$ or \f$Q\f$), and for the degenerate class the Cholesky factor of \f$\Sigma + cP\f$ and \f$(\Sigma + cP)^{-1}\f$. For both classes, `state_size()` is \f$3\,d(d + 1)/2\f$ plus `structure.scratch_size()` doubles. The improper `theta_state()` computes no factor; `constrained_state(theta, w)` returns the same state with the factor of \f$Q + cP\f$ and \f$(Q + cP)^{-1}\f$ added, where \f$c = \operatorname{tr} Q / \rho\f$. The \f$\theta\f$ table functions (`fill_theta_table_entry()`, `with_theta_table()`) work as for the proper classes, except that entries are filled one at a time because they share the structure's evaluated state.
+
+### Derivative blocks
+
+The functions `logpdf_dmu_dk<A, K>()` and `logpdf_dy_dk<J, K>()` follow the section "Log-density derivative blocks" above, replacing \f$W\f$ with \f$\Sigma^+\f$ or \f$Q\f$ and \f$\log\det M\f$ with \f$\log\lvert M\rvert_+\f$.
+
+### Expected information
+
+The member template `expected_info_dk<K>()` (\f$K \le 4\f$) exists only for structures satisfying \f$\partial_{ab} M = \delta_{ab}\,\partial_a M\f$, where each term is linear in its own \f$e^{\theta_j}\f$ (currently `weighted_sum_psdmat`). Passing `vector_vector` writes \f$\Sigma^+\f$ or \f$Q\f$ and its \f$\theta\f$-derivatives, and `vector_rest` returns `false`. For `rest_rest`, both classes evaluate
+\f[
+I_{ab} = -\tfrac{1}{2}\,\partial_{ab}\log\lvert M\rvert_+ + \tfrac{1}{2}\,\delta_{ab}\,\partial_a\log\lvert M\rvert_+,
+\f]
+which equals \f$\tfrac{1}{2}\operatorname{tr}(B_a B_b)\f$ with \f$B_a\f$ similar to \f$e^{\theta_a} M^+ S_a\f$ (where \f$S_a\f$ is the structure's \f$a\f$-th component matrix), and obtain its \f$\theta\f$-derivatives by differentiating the right-hand side. For the improper class, this is the information of the constrained law \f$U_0^\top(y - \mu) = 0\f$. The trace formula of the proper class is not offered because evaluating it through \f$M^+\f$ suffers catastrophic cancellation, reaching \f$1.8 \times 10^{17}\f$ ulp1N (degenerate) and \f$9.5 \times 10^{11}\f$ ulp1N (improper) when \f$\theta\f$ components are 9 apart.
+
+### Draws and moments
+
+In the degenerate class, `rng(state, mu, seed, unit, y, tmp)` takes `tmp` of `dim()` doubles and generates \f$y = \mu + (I - P) L z\f$ with \f$\Sigma + cP = L L^\top\f$, whose covariance is \f$(I - P)(\Sigma + cP)(I - P) = \Sigma\f$; the class also provides `mean()` and `covariance()`. The improper class has no `rng()`, `mean()`, or `covariance()`; instead, for the constrained proper law \f$U_0^\top(y - \mu) = 0\f$ with covariance \f$Q^+\f$, it provides `constrained_rng(cstate, mu, seed, unit, y, tmp)` with \f$y = \mu + (I - P) L^{-\top} z\f$ from \f$Q + cP = L L^\top\f$, and `constrained_covariance(cstate, out)` writing \f$Q^+ = (Q + cP)^{-1} - P/c\f$, both taking a state from `constrained_state()`. Standard normal vectors \f$z\f$ are generated as in the section "Draws, moments, and starting values" above.
+
+### Starting values
+
+On the host, `start_value(summary, theta)` projects the sample covariance \f$C\f$ onto the range as \f$C_p = (I - P) C (I - P)\f$, without the eigenvalue floor of the proper class that would put mass on the null space. The degenerate class passes \f$C_p\f$ to `structure.params_from_matrix()`, whereas the improper class passes its pseudo-inverse \f$C_p^+\f$.
+
 ## Accuracy
 
 Methodology is explained on \ref accuracy "How accuracy is measured". Reference values (`tools/reference/distrib_mvgaussian.py`, `tests/data/reference/mvgaussian.csv`) were computed with mpmath (The mpmath development team, 2023) at 60 digits from the definitions (verified against 75 digits to \f$10^{-40}(1 + |v|)\f$) across 5693 evaluations over six structures (`diagonal_pdmat`, `ar1_pdmat`, `compound_symmetry_pdmat`, `unstructured_pdmat\<log_cholesky_bijector\>`, `unit_diagonal_scaled_pdmat\<ar1_pdmat\>`, and `factor_analytic_pdmat` with one factor) at dimensions \f$d \in \{2, 3, 4, 5\}\f$, combining one random point and one hard point per structure. Errors are measured in `ulp1N`, the largest entry error over a block in units of \f$\mathrm{ulp}(\max(S_{\mathrm{block}}, 1))\f$, where \f$S_{\mathrm{block}}\f$ is the largest reference magnitude over every tuple and entry of that point, \f$A\f$, and \f$K\f$ (and at least the largest \f$|I_{ab}|\f$ at that point for expected information).
@@ -127,7 +185,18 @@ Methodology is explained on \ref accuracy "How accuracy is measured". Reference 
 
 In the table, blocks cover \f$A \in \{0, 1, 2\}\f$ up to total order 6 and expected information covers orders 0 to 4; bounds are from `tests/distrib/test_mvgaussian.cpp` on gcc/OpenMP and CUDA (RTX 4070 SUPER). The largest errors occur at hard points: at the `factor_analytic_pdmat` hard point (\f$\psi = e^{-6}\f$), the \f$A = 0\f$, order-5 block of `mvgaussian1_distrib\<S\>`, which goes through `factor_analytic_pdmat::inverse_dk`, reaches 118 ulp1N, while `mvgaussian2_distrib\<S\>`, which uses `matrix_dk`, stays within 1.3 ulp1N there.
 
-For `diagonal_pdmat` and `unstructured_pdmat\<matrix_log_bijector\>`, where \f$M(-\theta) = M(\theta)^{-1}\f$, the tests compare `mvgaussian1_distrib\<S\>` at \f$\theta\f$ with `mvgaussian2_distrib\<S\>` at \f$-\theta\f$: every block and the information agree up to the sign \f$(-1)^K\f$ (measured 0 ulp1N on gcc and 0.7 ulp1N on CUDA, bound 1). The tests also check central differences at orders 5–6 and information orders 1–4 (within \f$10^{-6}\f$ of the scales of orders \f$K\f$ and \f$K - 1\f$, or \f$10^{-5}\f$ for `factor_analytic_pdmat`), \f$2 \times 10^5\f$ device draws (mean, covariance, and score-Hessian checks within 1.2 standard errors, bound 5), and `start_value()` covariance recovery (within \f$10^{-12}\f$ relative for `log_cholesky_bijector`). See `docs/numerics.md` for full error breakdowns.
+For `diagonal_pdmat` and `unstructured_pdmat\<matrix_log_bijector\>`, where \f$M(-\theta) = M(\theta)^{-1}\f$, the tests compare `mvgaussian1_distrib\<S\>` at \f$\theta\f$ with `mvgaussian2_distrib\<S\>` at \f$-\theta\f$: every block and the information agree up to the sign \f$(-1)^K\f$ (measured 0 ulp1N on gcc and 0.7 ulp1N on CUDA, bound 1). The tests also check central differences at orders 5–6 and information orders 1–4 (within \f$10^{-6}\f$ of the scales of orders \f$K\f$ and \f$K - 1\f$, or \f$10^{-5}\f$ for `factor_analytic_pdmat`), \f$2 \times 10^5\f$ device draws (mean, covariance, and score-Hessian checks within 1.2 standard errors, bound 5), and `start_value()` covariance recovery (within \f$10^{-12}\f$ relative for `log_cholesky_bijector`).
+
+For the rank-deficient specializations over `weighted_sum_psdmat`, 5215 reference values (`tools/reference/distrib_mvgaussian_rank_deficient.py`, `tests/data/reference/mvgaussian_rank_deficient.csv`) were computed with mpmath (2023) at 60 digits from the eigendecomposition definition across four difference-penalty structures (\f$d \in \{4, 5, 6\}\f$, one random point and one spread point with \f$\theta\f$ components 9 apart per structure) and checked in `tests/distrib/test_mvgaussian_rank_deficient.cpp` in `ulp1N` (see \ref accuracy "How accuracy is measured"), with identical results on gcc 14.2 and the host code of the CUDA (MSVC) build.
+
+| Class and points | Blocks (\f$A = 0, 1, 2\f$), bound | Information, bound |
+|---|---|---|
+| `mvgaussian2` (improper), all points | 4 (\f$A = 0\f$) / 1 (\f$A = 1, 2\f$), bounds 6 / 4 | 1.12, bound 4 |
+| `mvgaussian1` (degenerate), random points | 117, bound 176 | 1.12, bound 4 |
+| `mvgaussian1` (degenerate), spread (\f$d = 5\f$, two penalties) | \f$4.86 \times 10^6\f$, bound \f$7.3 \times 10^6\f$ | \f$2.4 \times 10^{-4}\f$, bound 4 |
+| `mvgaussian1` (degenerate), spread (\f$d = 6\f$, three penalties) | \f$3.28 \times 10^{12}\f$ (\f$A = 0\f$: \f$1.15 \times 10^{11}\f$, \f$A = 1\f$: \f$7.15 \times 10^{11}\f$), bound \f$4.9 \times 10^{12}\f$ | 0.25, bound 4 |
+
+In the degenerate class, the dense \f$(\Sigma + cP)^{-1}\f$ loses accuracy in proportion to the condition number of \f$\Sigma\f$ on its range, which grows when the weights \f$\lambda_j = e^{\theta_j}\f$ are spread: that number is \f$2.07 \times 10^5\f$ at the \f$d = 5\f$ spread point and \f$6.53 \times 10^9\f$ at the \f$d = 6\f$ one, and the errors are 24 and 500 times it times \f$\varepsilon\f$, about \f$7 \times 10^{-4}\f$ relative at the worst point, whereas the improper blocks never form an inverse and stay within 1 to 4 ulp1N. The tests also check \f$-\infty\f$ off the support, 40,000 draws (null-space component below \f$10^{-12}\f$, covariance within 6 standard errors), \f$Q Q^+ Q = Q\f$ within \f$10^{-12} \max\lvert Q\rvert\f$, and `start_value()` parameter recovery within \f$10^{-10}\f$. See `docs/numerics.md` for full error breakdowns.
 
 ## Speed
 
@@ -166,6 +235,20 @@ The second table reports shared-\f$\theta\f$ unit times when an order-2 \f$\thet
 | `mvgaussian2` | 10 | Shared \f$\theta\f$ (table) | 157 / 35 | 1953 / 245 | 70 / 17 |
 
 For `logpdf()`, sharing \f$\theta\f$ across units costs \f$O(d^2)\f$ per unit whereas computing the state per unit costs \f$O(d^3)\f$ (6 to 14 times slower at \f$d = 10\f$). Without a \f$\theta\f$ table, each block call with \f$K \ge 1\f$ recomputes \f$\partial_T W\f$, so `mvgaussian1_distrib\<S\>` over `log_cholesky_bijector` takes 120 times longer on OpenMP and 265 times longer on CUDA than `mvgaussian2_distrib\<S\>` at \f$d = 10\f$, order 2. With a \f$\theta\f$ table attached, each unit pays only \f$O(d^2)\f$ per tuple to read the precomputed derivatives, bringing `mvgaussian1_distrib\<S\>` within a factor of 2.4 on OpenMP and 4.1 on CUDA of `mvgaussian2_distrib\<S\>` at \f$d = 10\f$, order 2.
+
+For the rank-deficient classes over `weighted_sum_psdmat` with difference-penalty sum \f$(D_1^\top D_1, D_2^\top D_2, D_3^\top D_3)\f$ of rank \f$d - 1\f$, host times in seconds (one thread, gcc 14.2, median of 5 calls at \f$d = 500\f$ and one call at \f$d = 2000\f$) from `benchmarks/distrib_mvgaussian_rank_deficient.cpp` are:
+
+| Operation | Improper, \f$d = 500\f$ (s) | Degenerate, \f$d = 500\f$ (s) | Improper, \f$d = 2000\f$ (s) | Degenerate, \f$d = 2000\f$ (s) |
+|---|---|---|---|---|
+| `theta_state()` | 0.39 | 0.41 | 31.7 | 35.4 |
+| `constrained_state()` | 0.42 | — | 36.8 | — |
+| `logpdf()` | \f$6.7 \times 10^{-5}\f$ | \f$6.4 \times 10^{-5}\f$ | \f$1.4 \times 10^{-3}\f$ | \f$1.3 \times 10^{-3}\f$ |
+| \f$A = 1, K = 0\f$ | \f$1.4 \times 10^{-4}\f$ | \f$1.3 \times 10^{-4}\f$ | \f$5.9 \times 10^{-3}\f$ | \f$3.3 \times 10^{-3}\f$ |
+| \f$A = 0, K = 1\f$ | \f$1.2 \times 10^{-4}\f$ | 0.040 | \f$4.0 \times 10^{-3}\f$ | 4.1 |
+| \f$A = 0, K = 2\f$ | \f$1.7 \times 10^{-3}\f$ | 0.12 | 0.036 | 13.3 |
+| \f$\theta\f$ table, orders 1–2 (9 entries) | 0.010 | 0.86 | 0.20 | 78.6 |
+
+Here `theta_state()` costs about the structure's `log_pdet()` alone (0.38 s and 0.37 s at \f$d = 500\f$, and 32.2 s and 28.3 s at \f$d = 2000\f$).
 
 ## Example
 
@@ -235,6 +318,8 @@ void eval_mvgaussian(const Kokkos::View<const double**>& y,
 - \ref laplace::distrib::mvgaussian1_distrib "mvgaussian1_distrib\<S\>" — multivariate Gaussian in the covariance parametrization \f$\Sigma = M(\theta)\f$
 - \ref laplace::distrib::mvgaussian2_state "mvgaussian2_state" — precomputed \f$\theta\f$-dependent state for the precision parametrization
 - \ref laplace::distrib::mvgaussian2_distrib "mvgaussian2_distrib\<S\>" — multivariate Gaussian in the precision parametrization \f$Q = M(\theta)\f$
+- \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat" — concept for a positive semidefinite structure whose null space is constant in \f$\theta\f$ and supplied
+- \ref laplace::distrib::mvgaussian_rank_deficient_state "mvgaussian_rank_deficient_state" — precomputed \f$\theta\f$-dependent state for the degenerate and improper multivariate Gaussians
 
 ## References
 
