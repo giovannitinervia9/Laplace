@@ -35,9 +35,14 @@ def doc_and_code(text, is_header):
     return "\n".join(doc), [c for c in code if c.strip()]
 
 
+TIMES_TEN = re.compile(r"(\d+(?:\.\d+)?)\s*\\times\s*10\^\{?(-?\d+)\}?")
+
+
 def numbers(text):
     # ignore numbers inside identifiers, hex floats and anchors; keep "0.43", "1e-15", "767";
-    # compared by value, so that "66" and "66.0" are the same number
+    # compared by value, so that "66" and "66.0" are the same number, and
+    # "1.48 \times 10^3" (LaTeX in the pages) is the same number as "1.48e3" (numerics.md)
+    text = TIMES_TEN.sub(lambda m: f"{m.group(1)}e{m.group(2)}", text)
     out = set()
     for s in NUM.findall(text):
         try:
