@@ -8524,12 +8524,12 @@ included (was 1.2e5). Bounds in `tests/distrib/test_mvgaussian.cpp` reset to the
 larger of the two times 1.5. The log_cholesky A = 0, K = 6 block is back at 4.58 /
 5.25 (bound 8), so the open note above is closed.
 
-## Device tables in global memory: incomplete gamma and beta derivatives
+## Device tables in global memory: incomplete gamma and beta derivatives, Bessel I
 
 What: on 2026-11-16 the device tables of `math/incomplete_gamma_deriv.hpp` (nine
 tables, 6688 bytes: the quadrature nodes and weights `d_ee1_*`, `d_ee2_*`, `d_ts_*`,
 and the series coefficients `d_lgam_c`, `d_eta_d`, `d_temme_c`) and of
-`math/incomplete_beta_deriv.hpp` (`map_dev` and `gl_dev`, 5024 bytes) moved from
+`math/incomplete_beta_deriv.hpp` (`map_dev` 5024 and `gl_dev` 1664, 6688 bytes) moved from
 `LAPLACE_DEVICE_TABLE` (`__constant__`) to `LAPLACE_DEVICE_GLOBAL_TABLE`, so that the
 64 KB constant bank shared by the whole -rdc device program has room (decided with
 Giovanni; the count is kept in `note/cuda_constant_budget.md`).
@@ -8555,6 +8555,29 @@ only outlier, 139 against 127 ns, was the first kernel of the first run and did 
 repeat. The values are unchanged (same arithmetic). After the move the linked
 laplace_tests needs 50520 bytes of constant data (.nv.constant3, cuobjdump -elf),
 15016 below the ceiling.
+
+The same day the four tables of `math/bessel_i.hpp` followed (`ratio_series_dev` 26,
+`ratio_asymptotic_dev` 60, `inverse_asymptotic_dev` 270 and `inverse_series_dev` 144
+doubles, 4000 bytes), measured the same way (the bench built twice, the second
+run of each taken, the first having run on a cold card), ns per call on CUDA:
+
+| function, region | global | constant |
+|---|---|---|
+| A, k < 1 | 1.36 | 1.36 |
+| A d6, k in [16, 4096] | 23.49 | 23.48 |
+| log I0, k in [1, 16] | 0.94 | 0.95 |
+| A^-1 d1, k in [16, 4096] | 15.99 | 16.15 |
+| A^-1 d4, k < 1 | 10.00 | 10.02 |
+| A^-1, rho < 0.5 | 19.50 | 19.48 |
+| A^-1, rho in [0.5, 0.95] | 25.62 | 25.49 |
+| A^-1, rho > 0.95 | 33.12 | 34.01 |
+
+Every function and region timed (A at orders 0, 3, 6, log I0, A^-1 at orders 1
+and 4 in four ranges of k, A^-1 in three ranges of rho) agrees within 1 per cent,
+except A^-1 for rho > 0.95, where the global table is 2.6 per cent faster and the
+two runs of the constant one differ by 1.6 per cent. test_bessel passes on gcc
+and CUDA (56 of 56 assertions). After the move .nv.constant3 is 46520 bytes,
+19016 below the ceiling.
 
 ## kappa from the circular standard deviation s, with its six derivatives (2026-11-17)
 
