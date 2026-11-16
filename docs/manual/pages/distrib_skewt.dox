@@ -1,6 +1,5 @@
 /**
 \defgroup distrib_skewt Skew t
-\ingroup distrib
 \brief Continuous real-line distribution with location, scale, shape, and degrees of freedom, log-density derivatives to order 6, and an exact stochastic draw.
 
 Defined in `<laplace/distrib/skewt.hpp>` as \ref laplace::distrib::skewt_distrib "skewt_distrib", this module evaluates Azzalini's skew \f$t\f$ log-density in the direct parametrization, its parameter derivatives to order \f$6\f$, mixed observation-parameter derivatives, random draws from the exact stochastic representation, and host starting values. Every evaluator is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). This family writes no cumulative function, no expected Fisher information, and no quantile; all three come from \ref distrib_generic "the generic routes", where the cumulative function is the quadrature of the density. Against high-precision reference values on the `gcc` build, parameter derivatives of orders \f$1\f$ to \f$6\f$ stay within \f$1.3 \times 10^3\f$ ulp.

@@ -1,6 +1,5 @@
 /**
 \defgroup distrib_pseudohuber Pseudo-Huber
-\ingroup distrib
 \brief Continuous real-line distribution with location \f$\mu\f$, standard deviation \f$\sigma > 0\f$, and shape \f$\nu > 0\f$, interpolating between the Laplace and Gaussian laws.
 
 Defined in `<laplace/distrib/pseudohuber.hpp>` as \ref laplace::distrib::pseudohuber_distrib "pseudohuber_distrib", this module evaluates the pseudo-Huber log-density, its parameter derivatives to order \f$6\f$, mixed observation-parameter derivatives, the Bessel ratio `bessel_ratio()`, and host starting values. Every evaluator is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). Cumulative functions, parameter derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$, expected Fisher information and its derivatives, quantiles, and random variates come from \ref distrib_generic "the generic routes". Against high-precision reference values, the log-density and its derivatives stay within \f$29.2\f$ ulp for \f$\nu < 1\f$, \f$278\f$ ulp for \f$1 \le \nu < 10^4\f$, and \f$129\f$ ulp for \f$\nu \ge 10^4\f$.

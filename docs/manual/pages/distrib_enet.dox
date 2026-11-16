@@ -1,6 +1,5 @@
 /**
 \defgroup distrib_enet Elastic net
-\ingroup distrib
 \brief Continuous real-line distribution with log-density proportional to minus the elastic-net penalty, closed expected information, and Mills-ratio cumulative functions.
 
 Defined in `<laplace/distrib/enet.hpp>` as \ref laplace::distrib::enet_distrib "enet_distrib", this module evaluates the elastic-net log-density, its parameter derivatives to order \f$6\f$, mixed observation-parameter derivatives, the closed expected Fisher information with parameter derivatives to order \f$4\f$, cumulative and complementary cumulative functions with derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$ to order \f$6\f$, quantiles, and starting values. Every evaluator is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). Only random variate generation is inherited from \ref distrib_generic "the generic routes" via \ref laplace::distrib::rng_by_inversion "rng_by_inversion()". Against high-precision reference values, the log-density and its derivatives stay within \f$2030\f$ ulp, quantiles within \f$4.86\f$ ulp, cumulative derivatives up to \f$16500\f$ ulp, and the order-\f$4\f$ expected information derivative reaches \f$7.8 \times 10^5\f$ ulp at a large-scale corner.

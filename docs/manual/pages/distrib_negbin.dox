@@ -1,6 +1,5 @@
 /**
 \defgroup distrib_negbin2 Negative binomial, quadratic variance
-\ingroup distrib
 \brief Discrete count distribution with mean \f$\mu > 0\f$ and variance \f$\mu + \mu^2/\theta\f$, with the log-mass in Loader's saddle-point form and its parameter derivatives to order six.
 
 `laplace::distrib::negbin2_distrib` models an overdispersed count \f$y \in \{0, 1, 2, \dots\}\f$ by its
@@ -142,7 +141,6 @@ void eval_negbin2(Kokkos::View<const double*> y, Kokkos::View<double*> out, doub
 
 /**
 \defgroup distrib_negbin1 Negative binomial, linear variance
-\ingroup distrib
 \brief Discrete count distribution with mean \f$\mu > 0\f$ and variance \f$\mu(1 + \theta)\f$, the same mass as the quadratic parametrization taken in variables that stay regular at its Poisson limit.
 
 `laplace::distrib::negbin1_distrib` is the same distribution as

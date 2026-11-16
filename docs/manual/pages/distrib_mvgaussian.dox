@@ -1,6 +1,5 @@
 /**
 \defgroup distrib_multivariate Multivariate
-\ingroup distrib
 \brief Multivariate probability distributions, shared core interface, and the covariance and precision parametrizations of the multivariate Gaussian.
 
 Include `<laplace/distrib/multivariate_core.hpp>` for the shared multivariate distribution interface, `<laplace/distrib/mvgaussian1.hpp>` for the covariance parametrization \ref laplace::distrib::mvgaussian1_distrib "mvgaussian1_distrib\<S\>", and `<laplace/distrib/mvgaussian2.hpp>` for the precision parametrization \ref laplace::distrib::mvgaussian2_distrib "mvgaussian2_distrib\<S\>". Every type and function in this module lives in namespace `laplace::distrib`; all evaluation, derivative, expected information, moment, and draw members are marked `LAPLACE_HD` for host and Kokkos device kernels, whereas \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample()" and `start_value()` run on the host only. Across derivative blocks of orders 0 to 6 over six matrix structures, `mvgaussian1_distrib\<S\>` matches 60-digit mpmath references within 5.6 to 34 ulp1N except at a near-singular `factor_analytic_pdmat` point (up to 118 ulp1N), and `mvgaussian2_distrib\<S\>` stays within 9.0 ulp1N across all tested structures.

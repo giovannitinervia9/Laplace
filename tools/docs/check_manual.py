@@ -9,7 +9,11 @@ Two kinds of check:
   (\\f$, \\ref, \\see, \\param) and raw LaTeX left in the text;
 - the sources (docs/manual/pages and the documentation comments of
   include/laplace): mathematics in headings, \\text{...} with an underscore
-  (MathJax prints the backslash), formulas or code spans inside bold markup.
+  (MathJax prints the backslash), formulas or code spans inside bold markup;
+- the sidebar hierarchy: docs/manual/pages/groups.dox alone gives each group
+  its parent, in the order of the sidebar. A \\defgroup elsewhere that carries
+  its own \\ingroup jumps ahead of that order (or gets a second parent), and a
+  group defined elsewhere that groups.dox does not attach floats to the top.
 Exits with status 1 when a problem is found.
 """
 import html
@@ -67,6 +71,23 @@ for p in sources + headers:
         pieces = line.split("**")
         if len(pieces) > 2 and any("`" in s or "\\f$" in s for s in pieces[1:-1:2]):
             problems.append(f"{rel}:{i}: formula or code inside bold: {line.strip()[:100]!r}")
+
+groups_dox = ROOT / "docs" / "manual" / "pages" / "groups.dox"
+top_level = set(re.findall(r"\\defgroup\s+(\w+)", groups_dox.read_text(encoding="utf-8")))
+attached = set(re.findall(r"\\addtogroup\s+(\w+)\s*\n\s*\\ingroup", groups_dox.read_text(encoding="utf-8")))
+block = re.compile(r"/\*\*.*?\*/", re.S)
+for f in sorted((ROOT / "docs" / "manual" / "pages").glob("*.dox")) + headers:
+    if f == groups_dox:
+        continue
+    rel = f.relative_to(ROOT).as_posix()
+    for b in block.findall(f.read_text(encoding="utf-8", errors="replace")):
+        d = re.search(r"\\defgroup\s+(\w+)", b)
+        if not d:
+            continue
+        if re.search(r"\\ingroup\b", b):
+            problems.append(f"{rel}: \\defgroup {d.group(1)} has its own \\ingroup; give its parent in groups.dox only")
+        if d.group(1) not in attached | top_level:
+            problems.append(f"{rel}: group {d.group(1)} is not attached in groups.dox (\\addtogroup ... \\ingroup)")
 
 for line in problems:
     print(line)

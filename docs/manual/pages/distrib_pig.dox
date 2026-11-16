@@ -1,6 +1,5 @@
 /**
 \defgroup distrib_pig Poisson-inverse Gaussian
-\ingroup distrib
 \brief Discrete count distribution with mean \f$\mu > 0\f$ and shape \f$\alpha > 0\f$, diagonal expected information, and elementary log-mass evaluation.
 
 Defined in `<laplace/distrib/pig.hpp>` as \ref laplace::distrib::pig_distrib "pig_distrib", this module evaluates the Poisson-inverse Gaussian log-mass, its parameter derivatives to order \f$6\f$, and its closed expected Fisher information blocks with derivatives to order \f$4\f$. Every evaluator is marked `LAPLACE_HD` so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). Cumulative functions, derivatives of \f$\log F\f$ and \f$\log(1 - F)\f$, quantiles, and random numbers come from \ref distrib_generic "the generic routes". Both the value and the derivatives of orders \f$1\f$ to \f$4\f$ of the shape block of the expected information use the generic sweep when `scale()` is at most \f$4\f$ and a cut sum with a closed tail above \f$4\f$. Against high-precision reference values, the log-mass stays within \f$6.24\f$ ulp and derivatives of orders \f$2\f$ to \f$6\f$ stay within \f$201\f$ ulp, with one corner below the \f$\alpha = \mu\f$ split reaching \f$74.4\f$ ulp at order \f$1\f$.

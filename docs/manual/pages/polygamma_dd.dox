@@ -1,6 +1,5 @@
 /**
 \defgroup polygamma_double_double Polygamma functions in double-double
-\ingroup special_gamma
 \brief Double-double polygamma functions, differences, and monomial remainders for orders 0 to 13.
 
 This module evaluates polygamma functions, their differences at a positive shift, and their remainders after the leading asymptotic term for integer orders \f$n = 0, \dots, 13\f$ from `<laplace/math/polygamma_dd.hpp>`. All six public functions are in `laplace::math`, carry `LAPLACE_HD`, and run on the host and inside Kokkos device kernels. Against 300-bit `mpmath` references, worst errors stay within \f$4.47\f$, \f$3.29\f$, and \f$9.05\f$ units of \f$2^{-104}\f$ for the three families on both gcc/OpenMP and CUDA. See \ref gamma "the gamma page" for double-precision polygammas to order \f$6\f$.

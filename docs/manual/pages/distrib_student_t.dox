@@ -1,6 +1,5 @@
 /**
  * \defgroup distrib_student_t1 Student t, scale parametrization
- * \ingroup distrib
  * \brief Univariate Student t distribution parametrized by location, scale, and degrees of freedom.
  *
  * Defined in `<laplace/distrib/student_t1.hpp>` as
@@ -99,7 +98,6 @@
 
 /**
  * \defgroup distrib_student_t2 Student t, standard deviation
- * \ingroup distrib
  * \brief Univariate Student t distribution parametrized by location, standard deviation, and degrees of freedom.
  *
  * Defined in `<laplace/distrib/student_t2.hpp>` as

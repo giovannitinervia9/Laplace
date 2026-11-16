@@ -39,6 +39,8 @@ parent here, in tree order; the module pages define their groups without
 \brief The gamma function and its logarithmic derivatives, Stirling's error and the regularized incomplete gamma function. */
 /** \addtogroup gamma
 \ingroup special_gamma */
+/** \addtogroup polygamma_double_double
+\ingroup special_gamma */
 /** \addtogroup stirling
 \ingroup special_gamma */
 /** \addtogroup incomplete_gamma
@@ -233,6 +235,9 @@ parent here, in tree order; the module pages define their groups without
 \ingroup distrib_discrete */
 /** \addtogroup distrib_pig
 \ingroup distrib_discrete */
+
+/** \addtogroup distrib_multivariate
+\ingroup distrib */
 
 /** \defgroup optimizers Optimizers
 \brief Objectives, stopping rules, line searches and the dense curvature solver for unconstrained minimization on the host. */
