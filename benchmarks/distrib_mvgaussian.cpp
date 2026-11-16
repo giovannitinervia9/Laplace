@@ -5,9 +5,11 @@
 //   order 1  the gradient, mu (A = 1, K = 0) and theta (A = 0, K = 1, each j);
 //   order 2  the Hessian, (mu, mu) (A = 2, K = 0), (mu, theta) (A = 1, K = 1,
 //            each j) and (theta, theta) (A = 0, K = 2, each pair);
-// with theta shared by the units (the state computed once, outside the timing)
-// and with theta per unit (each unit computes its own state). The accuracy is
-// measured by tests/distrib/test_mvgaussian.cpp.
+// with theta shared by the units (the state computed once, outside the timing),
+// shared with the theta table of the order timed (filled once by a kernel over
+// its entries; the fill is timed apart, in us), and with theta per unit (each
+// unit computes its own state). The accuracy is measured by
+// tests/distrib/test_mvgaussian.cpp.
 //
 //   distrib_mvgaussian [--kokkos-num-threads=n]
 #include <laplace/distrib/mvgaussian1.hpp>
@@ -59,17 +61,12 @@ KOKKOS_INLINE_FUNCTION double unit_work(const D& g, const typename D::state_type
   return s;
 }
 
-// ns per unit; shared: one state for all units, else each unit its own
-template <class D>
-double time_case(const D& g, const Kokkos::View<double*>& theta, const Mat& thetas, const Mat& y, const Mat& mu,
-                 bool shared, int order) {
-  using St = typename D::state_type;
+// ns per unit over the units, best of four; shared: the state in st() for all
+template <class D, class StView>
+double time_units(const D& g, const StView& st, const Mat& thetas, const Mat& y, const Mat& mu, bool shared,
+                  int order) {
   const int n = int(y.extent(0)), ss = g.state_size(), W = ss + g.scratch_size();
   const int chunk = std::min<long long>(n, (1500LL << 20) / (8LL * W));
-  Kokkos::View<double*> sbuf("sbuf", W);
-  Kokkos::View<St> st("st");
-  Kokkos::parallel_for(
-      "state", Kokkos::RangePolicy<Exec>(0, 1), KOKKOS_LAMBDA(int) { st() = g.theta_state(theta.data(), sbuf.data()); });
   Mat work("work", chunk, W);
   double best = 1e300, sink = 0.0;
   for (int rep = 0; rep < 4; ++rep) {
@@ -100,6 +97,39 @@ double time_case(const D& g, const Kokkos::View<double*>& theta, const Mat& thet
   return best * 1e9 / n;
 }
 
+// mode 0: theta per unit; 1: shared; 2: shared with the theta table of order
+// `order` (fill_us: the best of four fills, in us)
+template <class D>
+double time_case(const D& g, const Kokkos::View<double*>& theta, const Mat& thetas, const Mat& y, const Mat& mu,
+                 int mode, int order, double* fill_us) {
+  using St = typename D::state_type;
+  Kokkos::View<double*> sbuf("sbuf", g.state_size() + g.scratch_size());
+  Kokkos::View<St> st("st");
+  Kokkos::parallel_for(
+      "state", Kokkos::RangePolicy<Exec>(0, 1), KOKKOS_LAMBDA(int) { st() = g.theta_state(theta.data(), sbuf.data()); });
+  Kokkos::View<double*> table("table", mode == 2 && order >= 1 ? g.theta_table_size(order) : 1);
+  *fill_us = 0.0;
+  if (mode == 2 && order >= 1) {
+    const int ne = g.theta_table_entries(order);
+    Mat tw("tw", ne, g.scratch_size() + 1);
+    double best = 1e300;
+    for (int rep = 0; rep < 4; ++rep) {
+      Kokkos::fence();
+      const auto t0 = std::chrono::steady_clock::now();
+      Kokkos::parallel_for(
+          "fill", Kokkos::RangePolicy<Exec>(0, ne),
+          KOKKOS_LAMBDA(int e) { g.fill_theta_table_entry(st(), order, e, table.data(), &tw(e, 0)); });
+      Kokkos::fence();
+      best = std::min(best, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+    }
+    *fill_us = best * 1e6;
+    Kokkos::parallel_for(
+        "attach", Kokkos::RangePolicy<Exec>(0, 1),
+        KOKKOS_LAMBDA(int) { st() = g.with_theta_table(st(), order, table.data()); });
+  }
+  return time_units(g, st, thetas, y, mu, mode >= 1, order);
+}
+
 template <template <class> class G>
 void run(const char* name, int d, int n) {
   const log_chol s(d);
@@ -122,11 +152,15 @@ void run(const char* name, int d, int n) {
   Kokkos::deep_copy(thetas, hts);
   Kokkos::deep_copy(y, hy);
   Kokkos::deep_copy(mu, hm);
-  for (int shared = 1; shared >= 0; --shared) {
-    std::printf("%s log_cholesky d = %2d, q = %2d, theta %-8s |", name, d, q, shared ? "shared" : "per unit");
+  const char* mname[] = {"per unit", "shared", "table"};
+  for (int mode : {1, 2, 0}) {
+    std::printf("%s log_cholesky d = %2d, q = %2d, theta %-8s |", name, d, q, mname[mode]);
+    double fill[3] = {0.0, 0.0, 0.0};
     for (int order = 0; order <= 2; ++order)
-      std::printf(" order %d %10.1f", order, time_case(g, theta, thetas, y, mu, shared, order));
-    std::printf("  ns/unit (%s)\n", Exec::name());
+      std::printf(" order %d %10.1f", order, time_case(g, theta, thetas, y, mu, mode, order, &fill[order]));
+    std::printf("  ns/unit (%s)", Exec::name());
+    if (mode == 2) std::printf("; fill %.1f / %.1f us", fill[1], fill[2]);
+    std::printf("\n");
   }
 }
 

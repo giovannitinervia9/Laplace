@@ -82,10 +82,17 @@ KOKKOS_INLINE_FUNCTION bool block_a(const D& g, const typename D::state_type& st
 }
 template <class D>
 KOKKOS_INLINE_FUNCTION void eval_d(const D& g, int A, int K, const double* th, const double* y, const double* mu,
-                                   const int* idx, const int* ab, double* out, double* w) {
+                                   const int* idx, const int* ab, double* out, double* w, bool table) {
   for (int k = 0; k < max_out; ++k) out[k] = 0.0;
-  const auto st = g.theta_state(th, w);
+  auto st = g.theta_state(th, w);
   double* ws = w + g.state_size();
+  if (table && K >= 1) {
+    // the theta table of order K after the scratch, filled entry by entry
+    const int sc = g.scratch_size() > g.info_scratch_size() ? g.scratch_size() : g.info_scratch_size();
+    double* tab = ws + sc;
+    for (int e = 0; e < g.theta_table_entries(K); ++e) g.fill_theta_table_entry(st, K, e, tab, ws);
+    st = g.with_theta_table(st, K, tab);
+  }
   switch (A) {
     case -1: block_a<D, -1>(g, st, K, y, mu, idx, ab, out, ws); break;
     case 0: block_a<D, 0>(g, st, K, y, mu, idx, ab, out, ws); break;
@@ -95,26 +102,31 @@ KOKKOS_INLINE_FUNCTION void eval_d(const D& g, int A, int K, const double* th, c
 }
 template <class S>
 KOKKOS_INLINE_FUNCTION void eval_s(const S& s, int param, int A, int K, const double* th, const double* y,
-                                   const double* mu, const int* idx, const int* ab, double* out, double* w) {
-  if (param == 1) eval_d(ld::mvgaussian1_distrib<S>(s), A, K, th, y, mu, idx, ab, out, w);
-  else eval_d(ld::mvgaussian2_distrib<S>(s), A, K, th, y, mu, idx, ab, out, w);
+                                   const double* mu, const int* idx, const int* ab, double* out, double* w,
+                                   bool table) {
+  if (param == 1) eval_d(ld::mvgaussian1_distrib<S>(s), A, K, th, y, mu, idx, ab, out, w, table);
+  else eval_d(ld::mvgaussian2_distrib<S>(s), A, K, th, y, mu, idx, ab, out, w, table);
 }
 KOKKOS_INLINE_FUNCTION void eval_any(int structure, int d, int param, int A, int K, const double* th, const double* y,
-                                     const double* mu, const int* idx, const int* ab, double* out, double* w) {
+                                     const double* mu, const int* idx, const int* ab, double* out, double* w,
+                                     bool table = false) {
   switch (structure) {
-    case 0: eval_s(lp::diagonal_pdmat(d), param, A, K, th, y, mu, idx, ab, out, w); break;
-    case 1: eval_s(lp::ar1_pdmat(d), param, A, K, th, y, mu, idx, ab, out, w); break;
-    case 2: eval_s(lp::compound_symmetry_pdmat(d), param, A, K, th, y, mu, idx, ab, out, w); break;
-    case 3: eval_s(log_chol(d), param, A, K, th, y, mu, idx, ab, out, w); break;
-    case 4: eval_s(scaled_ar1(lp::ar1_pdmat(d)), param, A, K, th, y, mu, idx, ab, out, w); break;
-    case 5: eval_s(lp::factor_analytic_pdmat(d, 1), param, A, K, th, y, mu, idx, ab, out, w); break;
-    case 6: eval_s(matrix_log(d), param, A, K, th, y, mu, idx, ab, out, w); break;
+    case 0: eval_s(lp::diagonal_pdmat(d), param, A, K, th, y, mu, idx, ab, out, w, table); break;
+    case 1: eval_s(lp::ar1_pdmat(d), param, A, K, th, y, mu, idx, ab, out, w, table); break;
+    case 2: eval_s(lp::compound_symmetry_pdmat(d), param, A, K, th, y, mu, idx, ab, out, w, table); break;
+    case 3: eval_s(log_chol(d), param, A, K, th, y, mu, idx, ab, out, w, table); break;
+    case 4: eval_s(scaled_ar1(lp::ar1_pdmat(d)), param, A, K, th, y, mu, idx, ab, out, w, table); break;
+    case 5: eval_s(lp::factor_analytic_pdmat(d, 1), param, A, K, th, y, mu, idx, ab, out, w, table); break;
+    case 6: eval_s(matrix_log(d), param, A, K, th, y, mu, idx, ab, out, w, table); break;
   }
 }
 
 template <class S>
 int work_of(const S& s) {
-  return ld::mvgaussian1_distrib<S>(s).state_size() + ld::mvgaussian1_distrib<S>(s).scratch_size();
+  // state, the larger of the two scratches, a theta table of order 3 (the
+  // largest the table check uses)
+  const ld::mvgaussian1_distrib<S> g(s);
+  return g.state_size() + std::max(g.scratch_size(), g.info_scratch_size()) + g.theta_table_size(3);
 }
 int work_any(int structure, int d) {
   switch (structure) {
@@ -245,7 +257,7 @@ DeviceCases upload(const std::vector<Case>& cs) {
 // value and difference of every case; sign: the theta of the call is
 // sign * theta and param is swapped when swap (the twin)
 void evaluate(const DeviceCases& dc, Kokkos::View<double* [max_out]> val, Kokkos::View<double* [max_out]> fd,
-              double sign, bool swap) {
+              double sign, bool swap, bool table = false) {
   const int n = int(dc.meta.extent(0));
   Kokkos::View<double**, Kokkos::LayoutRight> work("work", n, dc.work);
   auto meta = dc.meta;
@@ -264,9 +276,9 @@ void evaluate(const DeviceCases& dc, Kokkos::View<double* [max_out]> val, Kokkos
         for (int k = 0; k < max_d; ++k) y[k] = ys(g, k), mu[k] = mus(g, k);
         for (int k = 0; k < 6; ++k) idx[k] = idxs(g, k);
         double* w = &work(g, 0);
-        eval_any(s, d, param, A, K, th, y, mu, idx, ab, a, w);
+        eval_any(s, d, param, A, K, th, y, mu, idx, ab, a, w, table && K <= 3);
         for (int k = 0; k < max_out; ++k) val(g, k) = a[k];
-        if (K == 0) return;
+        if (K == 0 || table) return;
         const int j = idx[K - 1];
         const double x = th[j], h = 1e-5 * (x < 1.0 && x > -1.0 ? 1.0 : (x < 0 ? -x : x));
         th[j] = x + h;
@@ -335,28 +347,27 @@ void mvgaussian_mpmath_case() {
     }
   }
   // bounds on ulp1N: the larger of the errors measured on gcc/OpenMP and CUDA
-  // on 2026-11-16, times 1.5, rounded up to two digits. The large ones are at
-  // the hard points: the information of mvgaussian1 near a singular Sigma
-  // (ar1 at rho = tanh 3.5, compound symmetry at theta = 8), where the traces
-  // tr(d_U Sigma d_(ab, T minus U) Sigma^-1) cancel; and factor_analytic at
-  // psi = e^-6 for mvgaussian1, where the structure's inverse_dk loses up to
-  // 3.1e6 ulp1N while one ulp of theta moves the exact blocks by at most 10.5.
+  // on 2026-11-16, times 1.5, rounded up to two digits. The information of
+  // mvgaussian1 over the structures with closed_factor takes the factor form
+  // (bounds of 2026-11-16, 07:20). factor_analytic was measured again at 09:50,
+  // after its inverse_dk moved to the augmented matrix; the largest left is
+  // mvgaussian1, A = 0, K = 5 at psi = e^-6 (118 on gcc, 78.9 on CUDA).
   // [param - 1][structure][A + 1][K], A + 1 = 0 the information in theta
   const double bound[2][6][4][7] = {
    {
-      {{2, 1, 1, 1, 1, 0, 0}, {1, 1, 1, 1, 1, 1, 1}, {1, 1, 1, 1, 1, 1, 0}, {1, 1, 1, 1, 1, 0, 0}},  // diagonal
-      {{770, 1800, 3100, 6900, 13000, 0, 0}, {51, 52, 38, 47, 38, 47, 38}, {6, 5, 6, 5, 6, 5, 0}, {1, 1, 1, 1, 1, 0, 0}},  // ar1
-      {{1000, 1700, 1000, 1700, 990, 0, 0}, {2, 1, 1, 1, 1, 1, 2}, {1, 1, 1, 1, 1, 1, 0}, {1, 1, 1, 1, 1, 0, 0}},  // compound_symmetry
-      {{5, 5, 18, 90, 430, 0, 0}, {3, 5, 3, 5, 3, 4, 8}, {4, 3, 2, 3, 5, 9, 0}, {3, 3, 4, 2, 8, 0, 0}},  // log_cholesky
-      {{7, 6, 3, 11, 110, 0, 0}, {3, 8, 3, 2, 2, 1, 2}, {2, 5, 3, 1, 2, 1, 0}, {1, 1, 1, 1, 1, 0, 0}},  // scaled_ar1
-      {{630000, 3500, 380000, 390000, 1600000, 0, 0}, {2, 1700, 790000, 1900000, 1600000, 5900, 3000000}, {5, 2300, 480000, 1400000, 3900000, 130000, 0}, {1, 1500, 590000, 3500000, 4700000, 0, 0}}},  // factor_analytic
+      {{1, 1, 1, 1, 1, 0, 0}, {1, 1, 1, 1, 1, 1, 1}, {1, 1, 1, 1, 1, 1, 0}, {1, 1, 1, 1, 1, 0, 0}},  // diagonal
+      {{2, 3, 2, 9, 25, 0, 0}, {51, 52, 38, 47, 38, 47, 38}, {6, 5, 6, 5, 6, 5, 0}, {1, 1, 1, 1, 1, 0, 0}},  // ar1
+      {{3, 1, 1, 2, 2, 0, 0}, {2, 1, 1, 1, 1, 1, 2}, {1, 1, 1, 1, 1, 1, 0}, {1, 1, 1, 1, 1, 0, 0}},  // compound_symmetry
+      {{2, 2, 2, 2, 2, 0, 0}, {3, 5, 3, 5, 3, 4, 8}, {4, 3, 2, 3, 5, 9, 0}, {3, 3, 4, 2, 8, 0, 0}},  // log_cholesky
+      {{3, 4, 4, 7, 18, 0, 0}, {3, 8, 3, 2, 2, 1, 2}, {2, 5, 3, 1, 2, 1, 0}, {1, 1, 1, 1, 1, 0, 0}},  // scaled_ar1
+      {{3, 6, 5, 19, 50, 0, 0}, {2, 8, 3, 7, 9, 180, 3}, {5, 2, 2, 3, 6, 24, 0}, {1, 3, 2, 5, 5, 0, 0}}},  // factor_analytic
    {
       {{2, 0, 1, 1, 1, 0, 0}, {1, 2, 2, 2, 2, 2, 2}, {1, 1, 1, 1, 1, 1, 0}, {1, 1, 1, 1, 1, 0, 0}},  // diagonal
       {{1, 4, 11, 34, 200, 0, 0}, {2, 5, 6, 3, 7, 12, 4}, {2, 2, 5, 1, 5, 14, 0}, {2, 2, 3, 2, 5, 0, 0}},  // ar1
       {{3, 1, 2, 2, 5, 0, 0}, {1, 1, 1, 1, 1, 1, 2}, {1, 1, 1, 1, 1, 1, 0}, {1, 1, 1, 1, 1, 0, 0}},  // compound_symmetry
       {{2, 2, 1, 1, 1, 0, 0}, {2, 4, 3, 1, 1, 4, 1}, {3, 2, 2, 3, 1, 2, 0}, {3, 3, 3, 3, 1, 0, 0}},  // log_cholesky
       {{3, 2, 1, 4, 6, 0, 0}, {1, 1, 1, 3, 2, 4, 1}, {2, 1, 6, 2, 1, 4, 0}, {2, 1, 3, 2, 8, 0, 0}},  // scaled_ar1
-      {{3, 450, 120000, 360, 1, 0, 0}, {1, 1, 1, 2, 2, 2, 2}, {1, 1, 1, 1, 1, 1, 0}, {1, 1, 1, 1, 1, 0, 0}}}};  // factor_analytic
+      {{3, 1, 1, 1, 1, 0, 0}, {1, 1, 1, 2, 2, 2, 2}, {1, 1, 1, 1, 1, 1, 0}, {1, 1, 1, 1, 1, 0, 0}}}};  // factor_analytic
   const bool print = std::getenv("LAPLACE_PRINT_ERRORS") != nullptr;
   for (int p = 0; p < 2; ++p)
     for (int s = 0; s < 6; ++s)
@@ -431,6 +442,32 @@ void mvgaussian_twin_case() {
 }
 
 
+// The theta table: every block of orders 1 to 3 read from a table filled
+// once per point must equal, to the bit, the block computed directly (the
+// same arithmetic; the information in theta does not read the table).
+void mvgaussian_table_case() {
+  const auto cases = read_cases(std::string(LAPLACE_REFERENCE_DIR) + "/mvgaussian.csv");
+  const int n = int(cases.size());
+  const DeviceCases dc = upload(cases);
+  Kokkos::View<double* [max_out]> v0("v0", n), v1("v1", n), fd("fd", n);
+  evaluate(dc, v0, fd, 1.0, false, false);
+  evaluate(dc, v1, fd, 1.0, false, true);
+  auto h0 = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), v0);
+  auto h1 = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), v1);
+  int checked = 0, differ = 0;
+  for (int g = 0; g < n; ++g) {
+    if (cases[g].K < 1 || cases[g].K > 3) continue;
+    ++checked;
+    for (int k = 0; k < max_out; ++k)
+      if (h0(g, k) != h1(g, k)) {
+        ++differ;
+        break;
+      }
+  }
+  CHECK(checked > 0);
+  CHECK_MESSAGE(differ == 0, differ << " of " << checked << " blocks differ with the theta table");
+}
+
 // Draws: n units from one theta, shared by all (its state computed once on the
 // device). The sample mean and covariance (summarize_mv_sample) against mu and
 // the covariance, and the mean over the draws of -d^2 l in (theta, theta) and
@@ -442,7 +479,7 @@ void mvgaussian_draws_check(const D& g, const std::vector<double>& theta_h, cons
   using St = typename D::state_type;
   const int d = g.dim(), q = g.n_params(), np = lp::packed_size(d), nq = lp::packed_size(q);
   const int n = 200000, chunk = 20000, nv = d + nq + d * q;
-  Kokkos::View<double*> theta("theta", q), mu("mu", d), state("state", g.state_size() + g.scratch_size());
+  Kokkos::View<double*> theta("theta", q), mu("mu", d), state("state", g.state_size() + std::max(g.scratch_size(), g.info_scratch_size()));
   Kokkos::View<St> st("st");
   auto ht = Kokkos::create_mirror_view(theta);
   auto hm = Kokkos::create_mirror_view(mu);
@@ -559,6 +596,9 @@ TEST_CASE("mvgaussian1, mvgaussian2: blocks and expected information against mpm
 }
 TEST_CASE("mvgaussian1 at theta against mvgaussian2 at -theta (diagonal, matrix_log)") {
   mvgaussian_test::mvgaussian_twin_case();
+}
+TEST_CASE("mvgaussian1, mvgaussian2: the theta table gives the blocks to the bit") {
+  mvgaussian_test::mvgaussian_table_case();
 }
 TEST_CASE("mvgaussian1, mvgaussian2: draws, and the expected information against Monte Carlo") {
   mvgaussian_test::mvgaussian_draws_case();

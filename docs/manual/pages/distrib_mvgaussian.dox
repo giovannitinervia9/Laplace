@@ -3,7 +3,7 @@
 \ingroup distrib
 \brief Multivariate probability distributions, shared core interface, and the covariance and precision parametrizations of the multivariate Gaussian.
 
-Include `<laplace/distrib/multivariate_core.hpp>` for the shared multivariate distribution interface, `<laplace/distrib/mvgaussian1.hpp>` for the covariance parametrization \ref laplace::distrib::mvgaussian1_distrib "mvgaussian1_distrib\<S\>", and `<laplace/distrib/mvgaussian2.hpp>` for the precision parametrization \ref laplace::distrib::mvgaussian2_distrib "mvgaussian2_distrib\<S\>". Every type and function in this module lives in namespace `laplace::distrib`; all evaluation, derivative, expected information, moment, and draw members are marked `LAPLACE_HD` for host and Kokkos device kernels, whereas \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample()" and `start_value()` run on the host only. Across derivative blocks of orders 0 to 6 over six matrix structures, `mvgaussian1_distrib\<S\>` matches 60-digit mpmath references within 5.6 to 34 ulp1N except at a near-singular `factor_analytic_pdmat` point (up to \f$3.1 \times 10^6\f$ ulp1N from structure inversion), and `mvgaussian2_distrib\<S\>` stays within 9.0 ulp1N across all tested structures.
+Include `<laplace/distrib/multivariate_core.hpp>` for the shared multivariate distribution interface, `<laplace/distrib/mvgaussian1.hpp>` for the covariance parametrization \ref laplace::distrib::mvgaussian1_distrib "mvgaussian1_distrib\<S\>", and `<laplace/distrib/mvgaussian2.hpp>` for the precision parametrization \ref laplace::distrib::mvgaussian2_distrib "mvgaussian2_distrib\<S\>". Every type and function in this module lives in namespace `laplace::distrib`; all evaluation, derivative, expected information, moment, and draw members are marked `LAPLACE_HD` for host and Kokkos device kernels, whereas \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample()" and `start_value()` run on the host only. Across derivative blocks of orders 0 to 6 over six matrix structures, `mvgaussian1_distrib\<S\>` matches 60-digit mpmath references within 5.6 to 34 ulp1N except at a near-singular `factor_analytic_pdmat` point (up to 118 ulp1N), and `mvgaussian2_distrib\<S\>` stays within 9.0 ulp1N across all tested structures.
 
 ## Multivariate distribution interface
 
@@ -66,18 +66,46 @@ where \f$\partial_T W\f$ is obtained from `structure.inverse_dk<K>()` for `mvgau
 
 Mixed derivatives in the observation vector \f$y\f$ and \f$\theta\f$ are provided by `logpdf_dy_dk<J, K>(state, y, mu, idx, out, w)` for \f$J + K \le 6\f$, which equals \f$(-1)^J\f$ times the corresponding \f$\mu\f$ block with \f$A = J\f$.
 
+## The theta table
+
+When \f$\theta\f$ is shared across units, its matrix derivatives can be precomputed once into a table and attached to the state. Each table entry holds `pdmat::packed_size(d) + 2` doubles: a structural-nonzero flag (\f$1\f$ when \f$\partial_T W\f$ is not identically zero by structure, \f$0\f$ otherwise), \f$\partial_T \log\det M\f$, and \f$\partial_T W\f$ in packed lower-triangular order. Entries cover orders \f$k = 1\f$ through \f$k_{\max}\f$ consecutively, and within each order \f$k\f$ the \f$\binom{q + k - 1}{k}\f$ sorted \f$k\f$-tuples of \f$\{0, \dots, q - 1\}\f$ (\f$q\f$ = `n_params()`) appear in lexicographic order. Calling `theta_table_entries(k_max)` returns the entry count, and `theta_table_size(k_max)` returns the total buffer size in doubles.
+
+Calling `fill_theta_table_entry(st, k_max, entry, table, w)` fills one entry (`0 <= entry < theta_table_entries(k_max)`) using `scratch_size()` doubles in `w`, so a Kokkos kernel can populate all entries in parallel across threads once per \f$\theta\f$. Calling `with_theta_table(st, k_max, table)` returns a copy of `st` with `table` and `table_order` set to `k_max`; the buffer `table` must remain alive while the returned state is used.
+
+The unit functions `logpdf_dmu_dk()`, `logpdf_dy_dk()`, and the `vector_vector` block of `expected_info_dk()` read \f$\partial_T \log\det M\f$ and \f$\partial_T W\f$ from the attached table whenever the requested \f$\theta\f$-derivative order \f$K\f$ satisfies \f$1 \le K \le k_{\max}\f$. When no table is attached or when \f$K\f$ exceeds `table_order` (and for `rest_rest` in `expected_info_dk()`), those functions compute directly from `structure` as before. The tests in `tests/distrib/test_mvgaussian.cpp` verify across all reference blocks of orders 1 to 3 that the outputs read from a table equal, to the bit, the blocks computed directly on both gcc/OpenMP and CUDA.
+
 ## Expected Fisher information
 
-The member template `expected_info_dk<K>(state, block, ab, idx, out, w)` evaluates the order-\f$K\f$ derivative (\f$0 \le K \le 4\f$) of the expected Fisher information block selected by `block` of type \ref laplace::distrib::distrib_mv_info_block "distrib_mv_info_block". Passing `vector_vector` writes the packed \f$d \times d\f$ matrix \f$\partial_T W\f$ (\f$W\f$ when \f$K = 0\f$). Passing `vector_rest` corresponds to the \f$(\mu, \theta)\f$ cross block, which vanishes identically by symmetry, so the call returns `false` without touching `out`.
+The member template `expected_info_dk<K>(state, block, ab, idx, out, w)` evaluates the order-\f$K\f$ derivative (\f$0 \le K \le 4\f$) of the expected Fisher information block selected by `block` of type \ref laplace::distrib::distrib_mv_info_block "distrib_mv_info_block", using a caller workspace `w` of at least `info_scratch_size()` doubles. Passing `vector_vector` writes the packed \f$d \times d\f$ matrix \f$\partial_T W\f$ (\f$W\f$ when \f$K = 0\f$). Passing `vector_rest` corresponds to the \f$(\mu, \theta)\f$ cross block, which vanishes identically by symmetry, so the call returns `false` without touching `out`.
 
-Passing `rest_rest` writes the scalar \f$\partial_T I_{ab}\f$ for the parameter pair `ab` = \f$(a, b)\f$. With covariance \f$V = W^{-1}\f$ (\f$\Sigma\f$ for `mvgaussian1_distrib\<S\>` and \f$Q^{-1}\f$ for `mvgaussian2_distrib\<S\>`), the entries and their \f$\theta\f$-derivatives are evaluated by Leibniz's rule on the trace:
+Passing `rest_rest` writes the scalar \f$\partial_T I_{ab}\f$ for the parameter pair `ab` = \f$(a, b)\f$. For `mvgaussian1_distrib\<S\>` over a structure with `S::closed_factor`, `rest_rest` evaluates the factor form
+\f[
+I_{ab} = \tfrac{1}{2}\operatorname{tr}(B_a B_b), \qquad
+B_a = G_a + G_a^\top, \qquad
+G_a = L^{-1}\partial_a L,
+\f]
+\f[
+\partial_T I_{ab} = \tfrac{1}{2}\sum_{U \subseteq T}\operatorname{tr}\!\big(\partial_U B_a\,\partial_{T \setminus U} B_b\big),
+\f]
+where \f$L\f$ is the lower-triangular Cholesky factor and \f$U\f$ runs over the subsets of the positions of \f$T\f$. Let \f$L[m]\f$ be the derivative of \f$L\f$ along the parameter indices selected by a mask \f$m\f$ (from `structure.cholesky_dk`), and let \f$Y = L^{-1}\f$. For each non-empty mask \f$m\f$ over the positions of \f$(a, b, T)\f$ not containing both \f$a\f$ and \f$b\f$, forward substitution solves \f$L\,H[m] = L[m]\f$ to form the whitened lower-triangular matrix \f$H[m] = L^{-1} L[m]\f$. For disjoint masks \f$S\f$ and \f$R\f$ over the positions of \f$T\f$, the whitened product \f$X[S, R] = Y[S]\,L[R]\f$ (with \f$Y[S]\f$ the \f$S\f$-derivative of \f$Y\f$) is given recursively by
+\f[
+X[\emptyset, R] = H[R], \qquad
+X[S, R] = -\sum_{\emptyset \neq P \subseteq S} H[P]\,X[S \setminus P, R],
+\f]
+and the \f$S\f$-derivative of \f$G_a\f$ is
+\f[
+\partial_S G_a = \sum_{S_1 \subseteq S} X[S_1, \{a\} + (S \setminus S_1)],
+\f]
+where \f$\{a\} + (S \setminus S_1)\f$ adjoins position \f$a\f$ to \f$S \setminus S_1\f$. Because every \f$\partial_U G_a\f$ is lower triangular, each trace evaluates to \f$\tfrac{1}{2}\operatorname{tr}(B^{(1)} B^{(2)}) = \sum_i G^{(1)}_{ii} G^{(2)}_{ii} + \sum_{j \le i} G^{(1)}_{ij} G^{(2)}_{ij}\f$. Every derivative of \f$G_a\f$ is formed solely from products of whitened lower-triangular matrices \f$L^{-1}\partial_m L\f$, so no large matrix is formed and nothing cancels near a singular \f$\Sigma\f$.
+
+For `mvgaussian2_distrib\<S\>` and for `mvgaussian1_distrib\<S\>` over structures without `closed_factor` (such as `factor_analytic_pdmat` and `unstructured_pdmat\<matrix_log_bijector\>`), `rest_rest` uses Leibniz's rule on the trace with covariance \f$V = W^{-1}\f$ (\f$\Sigma\f$ for `mvgaussian1_distrib\<S\>` and \f$Q^{-1}\f$ for `mvgaussian2_distrib\<S\>`):
 \f[
 I_{ab} = -c\,\partial_{ab}\log\det M + \tfrac{1}{2}\operatorname{tr}\!\big(V\,\partial_{ab}W\big),
 \f]
 \f[
 \partial_T I_{ab} = -c\,\partial_{abT}\log\det M + \tfrac{1}{2}\sum_{U \subseteq T}\operatorname{tr}\!\big(\partial_U V\;\partial_{ab,\,T\setminus U}W\big),
 \f]
-where \f$U\f$ runs over the sub-tuples of the positions of \f$T\f$. No product of the form \f$V(\partial_a W)V(\partial_b W)\f$ is formed.
+where \f$U\f$ runs over the sub-tuples of the positions of \f$T\f$. No product of the form \f$V(\partial_a W)V(\partial_b W)\f$ is formed. In this trace route, `info_scratch_size()` is \f$2 d(d + 1)/2\f$ plus `structure.scratch_size()` doubles; in the factor form, it is the larger of that size and \f$113 d^2 + d(d + 1)/2\f$ plus `structure.scratch_size()` doubles.
 
 ## Draws, moments, and starting values
 
@@ -93,43 +121,56 @@ Methodology is explained on \ref accuracy "How accuracy is measured". Reference 
 
 | Parametrization and structures | Blocks gcc (CUDA), bound | Information gcc (CUDA), bound |
 |---|---|---|
-| `mvgaussian1`: diagonal, CS, log-Cholesky, scaled AR(1) | 5.6 (5.6), 1–9 | 286 (238; CS 1080), 2–1700 |
-| `mvgaussian1`: `ar1_pdmat` | 34 (22), 52 | 4560 (8150), 13000 |
-| `mvgaussian1`: `factor_analytic_pdmat` | \f$3.1 \times 10^6\f$ (\f$1.4 \times 10^6\f$), \f$4.7 \times 10^6\f$ | \f$1.0 \times 10^6\f$ (\f$2.8 \times 10^5\f$), \f$1.6 \times 10^6\f$ |
-| `mvgaussian2`: all six structures | 9.0 (4.0), 1–14 | \f$7.7 \times 10^4\f$ FA / 1030 AR(1) / \f$< 100\f$ rest, \f$1.2 \times 10^5\f$ FA / 200 AR(1) / 1–6 rest |
+| `mvgaussian1`: diagonal, CS, log-Cholesky, scaled AR(1) | 5.6 (5.6), 1–9 | 0 (0) diag. / 1.25 (1.25) log-Chol. / 1.35 (1.35) CS / 11.6 (11.6) scaled AR(1), bounds 1 / 2 / 1–3 / 3–18 |
+| `mvgaussian1`: `ar1_pdmat` | 34 (22), 52 | 16.4 (16.3), 2–25 |
+| `mvgaussian1`: `factor_analytic_pdmat` | 118 (78.9), 1–180 | 33.1 (12.1), 3–50 |
+| `mvgaussian2`: all six structures | 9.0 (4.0), 1–14 | 129 (33.2) AR(1) / 3.98 rest, 1–200 AR(1) / 1–6 rest |
 
-In the table, blocks cover \f$A \in \{0, 1, 2\}\f$ up to total order 6 and expected information covers orders 0 to 4; bounds are from `tests/distrib/test_mvgaussian.cpp` on gcc/OpenMP and CUDA (RTX 4070 SUPER). All large errors occur at hard points: at the `factor_analytic_pdmat` hard point (\f$\psi = e^{-6}\f$), `mvgaussian1_distrib\<S\>` inherits the inversion loss of `factor_analytic_pdmat::inverse_dk` while 1 ulp in \f$\theta\f$ moves the exact \f$A = 0\f$ order-3 blocks by at most 10.5 ulp (whereas `mvgaussian2_distrib\<S\>` uses `matrix_dk` and stays within 1.3 ulp there). In `mvgaussian1_distrib\<S\>`, expected information near a singular \f$\Sigma\f$ (`ar1_pdmat` at \f$\rho = \tanh 3.5\f$, `compound_symmetry_pdmat` at \f$\theta = 8\f$) cancels in the trace products and loses up to about \f$\operatorname{cond}(\Sigma)\varepsilon\f$ relative to the largest entry.
+In the table, blocks cover \f$A \in \{0, 1, 2\}\f$ up to total order 6 and expected information covers orders 0 to 4; bounds are from `tests/distrib/test_mvgaussian.cpp` on gcc/OpenMP and CUDA (RTX 4070 SUPER). The largest errors occur at hard points: at the `factor_analytic_pdmat` hard point (\f$\psi = e^{-6}\f$), the \f$A = 0\f$, order-5 block of `mvgaussian1_distrib\<S\>`, which goes through `factor_analytic_pdmat::inverse_dk`, reaches 118 ulp1N, while `mvgaussian2_distrib\<S\>`, which uses `matrix_dk`, stays within 1.3 ulp1N there.
 
 For `diagonal_pdmat` and `unstructured_pdmat\<matrix_log_bijector\>`, where \f$M(-\theta) = M(\theta)^{-1}\f$, the tests compare `mvgaussian1_distrib\<S\>` at \f$\theta\f$ with `mvgaussian2_distrib\<S\>` at \f$-\theta\f$: every block and the information agree up to the sign \f$(-1)^K\f$ (measured 0 ulp1N on gcc and 0.7 ulp1N on CUDA, bound 1). The tests also check central differences at orders 5–6 and information orders 1–4 (within \f$10^{-6}\f$ of the scales of orders \f$K\f$ and \f$K - 1\f$, or \f$10^{-5}\f$ for `factor_analytic_pdmat`), \f$2 \times 10^5\f$ device draws (mean, covariance, and score-Hessian checks within 1.2 standard errors, bound 5), and `start_value()` covariance recovery (within \f$10^{-12}\f$ relative for `log_cholesky_bijector`). See `docs/numerics.md` for full error breakdowns.
 
 ## Speed
 
-Execution times in `benchmarks/distrib_mvgaussian.cpp` were measured over \f$n = 10^5\f$ units with `unstructured_pdmat\<log_cholesky_bijector\>` in nanoseconds per unit, reporting order 0 (`logpdf()`), order 1 (full gradient in \f$\mu\f$ and all \f$\theta_j\f$), and order 2 (all order-2 blocks) on OpenMP (16 threads) and CUDA (RTX 4070 SUPER).
+Execution times in `benchmarks/distrib_mvgaussian.cpp` were measured over \f$n = 10^5\f$ units with `unstructured_pdmat\<log_cholesky_bijector\>` in nanoseconds per unit, reporting order 0 (`logpdf()`), order 1 (full gradient in \f$\mu\f$ and all \f$\theta_j\f$), and order 2 (all order-2 blocks) on OpenMP (16 threads) and CUDA (RTX 4070 SUPER). The first table covers direct evaluation without a \f$\theta\f$ table in shared-\f$\theta\f$ and per-unit-\f$\theta\f$ modes.
 
 | Parametrization | \f$d\f$ | Mode | Backend | Order 0 (ns) | Order 1 (ns) | Order 2 (ns) |
 |---|---|---|---|---|---|---|
-| `mvgaussian1` | 2 | Shared \f$\theta\f$ | OpenMP / CUDA | 1.3 / 0.3 | 28 / 5.3 | 103 / 29 |
-| `mvgaussian1` | 2 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 8.9 / 1.0 | 34 / 6.0 | 113 / 30 |
-| `mvgaussian1` | 3 | Shared \f$\theta\f$ | OpenMP / CUDA | 1.6 / 0.3 | 71 / 23 | 463 / 221 |
-| `mvgaussian1` | 3 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 16 / 2.0 | 81 / 25 | 507 / 223 |
-| `mvgaussian1` | 5 | Shared \f$\theta\f$ | OpenMP / CUDA | 3.2 / 0.6 | 310 / 197 | 5316 / 3989 |
-| `mvgaussian1` | 5 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 33 / 6.1 | 334 / 211 | 5314 / 4118 |
-| `mvgaussian1` | 10 | Shared \f$\theta\f$ | OpenMP / CUDA | 7.6 / 2.0 | 3925 / 3407 | \f$2.38 \times 10^5\f$ / \f$2.37 \times 10^5\f$ |
-| `mvgaussian1` | 10 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 88 / 26 | 4169 / 3351 | \f$2.40 \times 10^5\f$ / \f$2.38 \times 10^5\f$ |
-| `mvgaussian2` | 2 | Shared \f$\theta\f$ | OpenMP / CUDA | 1.4 / 0.3 | 6.4 / 1.0 | 11 / 1.8 |
-| `mvgaussian2` | 2 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 5.6 / 0.8 | 10 / 1.5 | 15 / 2.5 |
-| `mvgaussian2` | 3 | Shared \f$\theta\f$ | OpenMP / CUDA | 2.0 / 0.3 | 15 / 2.8 | 32 / 6.7 |
-| `mvgaussian2` | 3 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 12 / 1.4 | 22 / 3.9 | 37 / 8.0 |
-| `mvgaussian2` | 5 | Shared \f$\theta\f$ | OpenMP / CUDA | 2.3 / 0.6 | 38 / 17 | 137 / 55 |
-| `mvgaussian2` | 5 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 20 / 3.5 | 50 / 20 | 151 / 59 |
-| `mvgaussian2` | 10 | Shared \f$\theta\f$ | OpenMP / CUDA | 7.1 / 2.3 | 248 / 186 | 2021 / 922 |
-| `mvgaussian2` | 10 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 50 / 13 | 287 / 201 | 2118 / 956 |
+| `mvgaussian1` | 2 | Shared \f$\theta\f$ (no table) | OpenMP / CUDA | 1.5 / 0.3 | 32 / 6.8 | 128 / 31 |
+| `mvgaussian1` | 2 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 9.6 / 1.2 | 39 / 7.6 | 135 / 32 |
+| `mvgaussian1` | 3 | Shared \f$\theta\f$ (no table) | OpenMP / CUDA | 1.6 / 0.3 | 77 / 25 | 570 / 210 |
+| `mvgaussian1` | 3 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 17 / 2.1 | 89 / 27 | 592 / 212 |
+| `mvgaussian1` | 5 | Shared \f$\theta\f$ (no table) | OpenMP / CUDA | 3.2 / 0.6 | 342 / 209 | 6217 / 4050 |
+| `mvgaussian1` | 5 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 34 / 7.1 | 367 / 236 | 6316 / 4434 |
+| `mvgaussian1` | 10 | Shared \f$\theta\f$ (no table) | OpenMP / CUDA | 8.8 / 2.0 | 4526 / 3412 | \f$2.50 \times 10^5\f$ / \f$2.40 \times 10^5\f$ |
+| `mvgaussian1` | 10 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 84 / 28 | 4161 / 3489 | \f$2.46 \times 10^5\f$ / \f$2.42 \times 10^5\f$ |
+| `mvgaussian2` | 2 | Shared \f$\theta\f$ (no table) | OpenMP / CUDA | 1.7 / 0.3 | 9.5 / 1.2 | 15 / 2.1 |
+| `mvgaussian2` | 2 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 7.6 / 0.8 | 12 / 1.5 | 18 / 2.5 |
+| `mvgaussian2` | 3 | Shared \f$\theta\f$ (no table) | OpenMP / CUDA | 2.2 / 0.3 | 18 / 3.0 | 41 / 7.2 |
+| `mvgaussian2` | 3 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 12 / 1.3 | 24 / 4.2 | 47 / 8.0 |
+| `mvgaussian2` | 5 | Shared \f$\theta\f$ (no table) | OpenMP / CUDA | 3.8 / 0.5 | 48 / 17 | 163 / 52 |
+| `mvgaussian2` | 5 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 21 / 3.5 | 59 / 20 | 180 / 57 |
+| `mvgaussian2` | 10 | Shared \f$\theta\f$ (no table) | OpenMP / CUDA | 7.6 / 1.9 | 267 / 185 | 2070 / 908 |
+| `mvgaussian2` | 10 | Per-unit \f$\theta\f$ | OpenMP / CUDA | 51 / 12 | 301 / 197 | 2284 / 915 |
 
-For `logpdf()`, sharing \f$\theta\f$ across units costs \f$O(d^2)\f$ per unit whereas computing the state per unit costs \f$O(d^3)\f$ (7 to 13 times slower at \f$d = 10\f$). For \f$K \ge 1\f$, each block call recomputes \f$\partial_T W\f$, so `mvgaussian1_distrib\<S\>` over `log_cholesky_bijector` takes 100 to 250 times longer than `mvgaussian2_distrib\<S\>` at \f$d = 10\f$, order 2.
+The second table reports shared-\f$\theta\f$ unit times when an order-2 \f$\theta\f$ table is attached, together with the order-2 table fill time in microseconds; the fill cost is paid once per \f$\theta\f$.
+
+| Parametrization | \f$d\f$ | Mode | Order 1: OpenMP / CUDA (ns) | Order 2: OpenMP / CUDA (ns) | Order-2 fill: OpenMP / CUDA (\f$\mu\f$s) |
+|---|---|---|---|---|---|
+| `mvgaussian1` | 2 | Shared \f$\theta\f$ (table) | 3.7 / 0.5 | 8.3 / 0.9 | 81 / 35 |
+| `mvgaussian1` | 3 | Shared \f$\theta\f$ (table) | 7.2 / 0.9 | 27 / 3.0 | 71 / 45 |
+| `mvgaussian1` | 5 | Shared \f$\theta\f$ (table) | 27 / 3.7 | 188 / 29 | 96 / 119 |
+| `mvgaussian1` | 10 | Shared \f$\theta\f$ (table) | 158 / 36 | 4775 / 1002 | 414 / 497 |
+| `mvgaussian2` | 2 | Shared \f$\theta\f$ (table) | 3.4 / 0.5 | 7.0 / 0.7 | 90 / 13 |
+| `mvgaussian2` | 3 | Shared \f$\theta\f$ (table) | 7.9 / 1.0 | 21 / 2.0 | 95 / 14 |
+| `mvgaussian2` | 5 | Shared \f$\theta\f$ (table) | 22 / 3.7 | 119 / 12 | 102 / 15 |
+| `mvgaussian2` | 10 | Shared \f$\theta\f$ (table) | 157 / 35 | 1953 / 245 | 70 / 17 |
+
+For `logpdf()`, sharing \f$\theta\f$ across units costs \f$O(d^2)\f$ per unit whereas computing the state per unit costs \f$O(d^3)\f$ (6 to 14 times slower at \f$d = 10\f$). Without a \f$\theta\f$ table, each block call with \f$K \ge 1\f$ recomputes \f$\partial_T W\f$, so `mvgaussian1_distrib\<S\>` over `log_cholesky_bijector` takes 120 times longer on OpenMP and 265 times longer on CUDA than `mvgaussian2_distrib\<S\>` at \f$d = 10\f$, order 2. With a \f$\theta\f$ table attached, each unit pays only \f$O(d^2)\f$ per tuple to read the precomputed derivatives, bringing `mvgaussian1_distrib\<S\>` within a factor of 2.4 on OpenMP and 4.1 on CUDA of `mvgaussian2_distrib\<S\>` at \f$d = 10\f$, order 2.
 
 ## Example
 
-The following example computes a shared precision state once on the device and evaluates `logpdf()` and the \f$\mu\f$-gradient block in parallel over units:
+The following example computes a shared precision state once on the device, fills a \f$\theta\f$ table of order 1 in parallel across its entries, attaches the table to the state, and evaluates `logpdf()` and the first-order derivative blocks over units:
 
 \code{.cpp}
 #include <Kokkos_Core.hpp>
@@ -140,7 +181,8 @@ void eval_mvgaussian(const Kokkos::View<const double**>& y,
                      const Kokkos::View<const double**>& mu,
                      const Kokkos::View<const double*>& theta,
                      Kokkos::View<double*>& log_lik,
-                     Kokkos::View<double**>& grad_mu) {
+                     Kokkos::View<double**>& grad_mu,
+                     Kokkos::View<double**>& grad_theta) {
   constexpr int d = 3;
   const int n = static_cast<int>(y.extent(0));
   const laplace::distrib::mvgaussian2_distrib<laplace::pdmat::ar1_pdmat> dist(laplace::pdmat::ar1_pdmat(d));
@@ -149,6 +191,20 @@ void eval_mvgaussian(const Kokkos::View<const double**>& y,
 
   Kokkos::parallel_for(
       "mv_state", 1, KOKKOS_LAMBDA(int) { state_view() = dist.theta_state(theta.data(), state_buf.data()); });
+
+  const int n_entries = dist.theta_table_entries(1);
+  Kokkos::View<double*> table_buf("table_buf", dist.theta_table_size(1));
+  Kokkos::View<double**, Kokkos::LayoutRight> fill_work("fill_work", n_entries, dist.scratch_size());
+
+  Kokkos::parallel_for(
+      "mv_table", n_entries, KOKKOS_LAMBDA(int e) {
+        dist.fill_theta_table_entry(state_view(), 1, e, table_buf.data(), &fill_work(e, 0));
+      });
+
+  Kokkos::parallel_for(
+      "mv_attach", 1, KOKKOS_LAMBDA(int) {
+        state_view() = dist.with_theta_table(state_view(), 1, table_buf.data());
+      });
 
   Kokkos::parallel_for(
       "mv_eval", n, KOKKOS_LAMBDA(int i) {
@@ -159,6 +215,11 @@ void eval_mvgaussian(const Kokkos::View<const double**>& y,
         log_lik(i) = dist.logpdf(st, &y(i, 0), &mu(i, 0));
         if (dist.template logpdf_dmu_dk<1, 0>(st, &y(i, 0), &mu(i, 0), nullptr, g, w)) {
           for (int k = 0; k < d; ++k) grad_mu(i, k) = g[k];
+        }
+        const int idx[1] = {0};
+        double dth = 0.0;
+        if (dist.template logpdf_dmu_dk<0, 1>(st, &y(i, 0), &mu(i, 0), idx, &dth, w)) {
+          grad_theta(i, 0) = dth;
         }
       });
 }
