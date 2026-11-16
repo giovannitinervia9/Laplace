@@ -106,7 +106,7 @@ On exact model matrices `matrix(theta)`, round-trip parameter recovery errors \f
 
 The tests bound these errors between \f$10^{-15}\f$ and \f$10^{-13}\f$.
 
-For `factor_analytic_pdmat` (\f$p = 8, d = 2\f$), relative matrix error \f$\max \lvert M(\hat{\theta}) - \hat{M} \rvert / \max \lvert \hat{M} \rvert\f$ is \f$1.1 \times 10^{-3}\f$ on its own model matrix (test bound \f$0.05\f$) and \f$0.17\f$ on a generic SPD matrix. A rank-one target with a zero diagonal entry and a target whose correlations all equal 1 give finite parameters inside the guards.
+For `factor_analytic_pdmat` (\f$p = 8, d = 2\f$), relative matrix error \f$\max \lvert M(\hat{\theta}) - \hat{M} \rvert / \max \lvert \hat{M} \rvert\f$ is \f$1.1 \times 10^{-3}\f$ on its own model matrix (test bound \f$0.05\f$) and \f$0.17\f$ on a generic SPD matrix. These errors are expected: the result is a starting value for the optimizer, which refines it, and not a fit of the factor model to \f$\hat{M}\f$. A rank-one target with a zero diagonal entry and a target whose correlations all equal 1 give finite parameters inside the guards.
 
 ## Measured accuracy
 

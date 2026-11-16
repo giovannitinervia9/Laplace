@@ -146,7 +146,7 @@ struct factor_analytic_pdmat : pdmat_orders<factor_analytic_pdmat> {
    * \param m_hat Target symmetric \f$p \times p\f$ matrix in packed lower-triangular storage.
    * \param theta Output array of \c n_params() doubles inside the domain.
    *
-   * Accuracy: on \f$(p, d) = (8, 2)\f$, relative matrix distance \f$\max|M(\hat\theta) - \hat{M}|/\max|\hat{M}|\f$ reaches \f$1.1 \times 10^{-3}\f$ on a matrix of its own structure (test bound 0.05) and 0.17 on a generic positive definite matrix on gcc 14.2/OpenMP.
+   * Accuracy: on \f$(p, d) = (8, 2)\f$, relative matrix distance \f$\max|M(\hat\theta) - \hat{M}|/\max|\hat{M}|\f$ reaches \f$1.1 \times 10^{-3}\f$ on a matrix of its own structure (test bound 0.05) and 0.17 on a generic positive definite matrix on gcc 14.2/OpenMP. These errors are expected: the result is a starting value for the optimizer, which refines it, and not a fit of the factor model to \f$\hat{M}\f$.
    *
    * \see matrix(), start_fa_iterations, pdmat
    */
