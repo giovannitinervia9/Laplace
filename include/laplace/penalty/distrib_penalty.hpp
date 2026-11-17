@@ -42,7 +42,7 @@ class weighted_sum_psdmat;
 namespace laplace::penalty {
 
 /**
- * \ingroup penalty
+ * \ingroup penalty_distrib_penalty
  * \brief Descriptors of the penalty of a multivariate distribution `M`, other than its normalization.
  *
  * Undefined for a general `M`: it is specialized for each law that has a
@@ -58,7 +58,7 @@ template <class M>
 struct distrib_penalty_traits;
 
 /**
- * \ingroup penalty
+ * \ingroup penalty_distrib_penalty
  * \brief Descriptors of the penalty of `distrib::mvgaussian2_distrib<S>`.
  * \tparam S Matrix structure.
  */
@@ -83,7 +83,7 @@ struct distrib_penalty_traits<distrib::mvgaussian2_distrib<S>> {
 };
 
 /**
- * \ingroup penalty
+ * \ingroup penalty_distrib_penalty
  * \brief The penalty \f$-\log p_M(\beta \mid \mu_0, \theta)\f$ of a multivariate distribution `M`.
  *
  * \f$\beta\f$ plays the role of \f$y\f$, \f$\mu_0\f$ is a fixed prior location

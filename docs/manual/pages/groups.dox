@@ -95,7 +95,7 @@ parent here, in tree order; the module pages define their groups without
 /** \addtogroup basis_tensor
 \ingroup basis_multivariate */
 
-/** \defgroup basis_penalties Penalties and transforms
+/** \defgroup basis_penalties Penalty matrices and transforms
 \ingroup basis
 \brief Penalty matrices of differential operators and linear transforms of a basis's coefficients. */
 /** \addtogroup basis_operator
@@ -261,6 +261,14 @@ parent here, in tree order; the module pages define their groups without
 
 /** \defgroup penalty Penalties
 \brief Penalty concept, compile-time descriptors, and adapters from multivariate distributions. */
+/** \defgroup penalty_framework Framework
+\ingroup penalty
+\brief The penalty concept, the normalization classes and the compile-time descriptors of a penalty. */
+/** \defgroup penalty_from_distrib From distributions
+\ingroup penalty
+\brief Penalties defined as minus the log density of a distribution. */
+/** \addtogroup penalty_distrib_penalty
+\ingroup penalty_from_distrib */
 
 /** \defgroup optimizers Optimizers
 \brief Objectives, stopping rules, line searches and the dense curvature solver for unconstrained minimization on the host. */

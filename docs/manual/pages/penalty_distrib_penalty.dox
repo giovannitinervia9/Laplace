@@ -1,37 +1,10 @@
 /**
-\addtogroup penalty
+\defgroup penalty_distrib_penalty Distribution penalty
+\brief The adapter from a multivariate distribution to a penalty, with its descriptor traits.
 
-Include `<laplace/penalty/core.hpp>` for the \ref laplace::penalty::penalty "penalty" concept and its descriptor enumerations, and `<laplace/penalty/distrib_penalty.hpp>` for \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>". Everything in this module lives in namespace `laplace::penalty`. A penalty is a function \f$\mathrm{pen}(\beta; \theta)\f$ of a coefficient vector \f$\beta \in \mathbb{R}^d\f$ and hyperparameters \f$\theta \in \mathbb{R}^q\f$. A *proper* penalty is minus the logarithm of a prior density with its normalizing constant included; for a proper penalty the same object is that prior. Members of `distrib_penalty<M>` are marked `LAPLACE_HD` and run on the device when `M` does, staying on the host when `M` is host-only. In tests over \ref distrib_mvgaussian2 "mvgaussian2", `distrib_penalty<M>` matches \f$-\log p_M\f$ to the bit, its derivative blocks agree with central differences within \f$10^{-6}\f$, and \f$\exp(-\mathrm{pen})\f$ integrates to \f$1\f$ within \f$10^{-9}\f$.
+Include `<laplace/penalty/distrib_penalty.hpp>` for \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>", which lives in namespace `laplace::penalty`. The penalty concept, the normalization classes and the descriptors are on the page \ref penalty_framework "Framework". Members of `distrib_penalty<M>` are marked `LAPLACE_HD` and run on the device when `M` does, staying on the host when `M` is host-only. In tests over \ref distrib_mvgaussian2 "mvgaussian2", `distrib_penalty<M>` matches \f$-\log p_M\f$ to the bit, its derivative blocks agree with central differences within \f$10^{-6}\f$, and \f$\exp(-\mathrm{pen})\f$ integrates to \f$1\f$ within \f$10^{-9}\f$.
 
-## Normalization classes
-
-The enumeration \ref laplace::penalty::penalty_normalization "penalty_normalization" classifies a penalty by the integrability of \f$\exp(-\mathrm{pen}(\beta; \theta))\f$ in \f$\beta\f$:
-
-- `proper`: \f$\int_{\mathbb{R}^d} \exp(-\mathrm{pen}(\beta; \theta))\,\mathrm{d}\beta\f$ is finite, and the normalizing constant is part of the value.
-- `intrinsic`: a singular quadratic form with a constant null space in \f$\theta\f$. For a precision matrix \f$Q(\theta) \in \mathbb{R}^{d \times d}\f$ of constant rank \f$\rho\f$ and a fixed location \f$\mu_0 \in \mathbb{R}^d\f$, the log-normalizing constant on the range space counts only the \f$\rho\f$ nonzero dimensions, \f$-\frac{\rho}{2}\log 2\pi + \frac{1}{2}\log\lvert Q\rvert_+\f$, where \f$\lvert Q\rvert_+\f$ is the pseudo-determinant, the product of the \f$\rho\f$ nonzero eigenvalues. The penalty value is
-\f[
-\mathrm{pen}(\beta; \theta) = \frac{\rho}{2}\log 2\pi - \frac{1}{2}\log\lvert Q\rvert_+ + \frac{1}{2}(\beta - \mu_0)^\top Q(\beta - \mu_0),
-\f]
-which is flat along the null space of \f$Q\f$.
-- `unnormalizable`: the integral \f$\int_{\mathbb{R}^d} \exp(-\mathrm{pen}(\beta; \theta))\,\mathrm{d}\beta\f$ is infinite for every \f$\theta\f$.
-
-## Properties and the penalty concept
-
-A type modeling \ref laplace::penalty::penalty "penalty" declares eight compile-time static descriptors, the dimension queries `dim()` returning \f$d\f$ and `n_params()` returning \f$q\f$, and `weak_convexity(theta)`.
-
-| Member | Type | Meaning |
-|---|---|---|
-| `normalization` | `penalty_normalization` | `proper`, `intrinsic`, or `unnormalizable` |
-| `beta_regularity` | `int` | Continuity order \f$r\f$ of \f$C^r\f$ in \f$\beta\f$, or \ref laplace::distrib::infinitely_smooth "infinitely_smooth" for \f$C^\infty\f$ |
-| `kinks` | `penalty_kink_geometry` | Non-smooth geometry in \f$\beta\f$: `none` (smooth), `per_coordinate` (\f$\beta_j = c\f$), `radial` (\f$\lVert \beta_g \rVert = 0\f$), or `linear_map` (\f$D\beta = 0\f$) |
-| `prox` | `penalty_prox_kind` | Proximal operator availability: `none`, `closed_form`, or `iterative` |
-| `structure` | `penalty_structure` | Coordinate coupling: `separable` (sum over coordinates), `grouped` (sum over independent blocks), or `coupled` (interaction through a matrix or map) |
-| `theta_regularity` | `int` | Continuity order \f$r\f$ of \f$C^r\f$ in \f$\theta\f$, or `infinitely_smooth` for \f$C^\infty\f$ |
-| `q_linear_in_theta` | `bool` | `true` when the precision of a quadratic penalty has the form \f$Q = \sum_k \lambda_k S_k\f$ |
-| `scale_mixture` | `penalty_scale_mixture` | Variance law of \f$\tau\f$ in a scale mixture \f$\beta \mid \tau \sim \mathcal{N}(0, \tau)\f$: `none`, `inverse_gamma_variance`, or `exponential_variance` |
-| `weak_convexity(theta)` | `double` | Weak-convexity constant \f$\sup(-\mathrm{pen}'')\f$ at `theta`: \f$0\f$ for a convex penalty, \f$+\infty\f$ when \f$\mathrm{pen}''\f$ is unbounded below |
-
-## Distribution penalties
+## The adapter
 
 The adapter \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>" wraps a type `M` satisfying \ref laplace::distrib::multivariate_distrib "multivariate_distrib" (see \ref distrib_multivariate "Multivariate") into the penalty
 \f[
@@ -100,12 +73,6 @@ double penalty_example(double (&grad)[5]) {
 
 ## Module types
 
-- \ref laplace::penalty::penalty "penalty" — concept satisfied by penalty types
-- \ref laplace::penalty::penalty_normalization "penalty_normalization" — normalization class (`proper`, `intrinsic`, `unnormalizable`)
-- \ref laplace::penalty::penalty_kink_geometry "penalty_kink_geometry" — geometry of non-smooth points in \f$\beta\f$
-- \ref laplace::penalty::penalty_prox_kind "penalty_prox_kind" — availability of a proximal operator
-- \ref laplace::penalty::penalty_structure "penalty_structure" — coordinate coupling structure
-- \ref laplace::penalty::penalty_scale_mixture "penalty_scale_mixture" — variance law of a scale-mixture representation
 - \ref laplace::penalty::distrib_penalty_traits "distrib_penalty_traits\<M\>" — descriptor traits of a distribution penalty
 - \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>" — adapter from a multivariate distribution to a penalty
 */

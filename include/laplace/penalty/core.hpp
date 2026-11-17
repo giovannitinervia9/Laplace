@@ -31,7 +31,7 @@
 namespace laplace::penalty {
 
 /**
- * \ingroup penalty
+ * \ingroup penalty_framework
  * \brief Class of a penalty by normalizability of \f$\exp(-\mathrm{pen})\f$ in \f$\beta\f$.
  *
  * - `proper`: \f$\int \exp(-\mathrm{pen})\,\mathrm{d}\beta\f$ is finite and the
@@ -44,7 +44,7 @@ namespace laplace::penalty {
 enum class penalty_normalization : int { proper, intrinsic, unnormalizable };
 
 /**
- * \ingroup penalty
+ * \ingroup penalty_framework
  * \brief Geometry of the points at which a penalty is not smooth in \f$\beta\f$.
  *
  * - `none`: smooth.
@@ -55,7 +55,7 @@ enum class penalty_normalization : int { proper, intrinsic, unnormalizable };
 enum class penalty_kink_geometry : int { none, per_coordinate, radial, linear_map };
 
 /**
- * \ingroup penalty
+ * \ingroup penalty_framework
  * \brief Availability of the proximal operator of a penalty.
  *
  * - `none`: no proximal operator is offered.
@@ -65,7 +65,7 @@ enum class penalty_kink_geometry : int { none, per_coordinate, radial, linear_ma
 enum class penalty_prox_kind : int { none, closed_form, iterative };
 
 /**
- * \ingroup penalty
+ * \ingroup penalty_framework
  * \brief Coupling between the coordinates of \f$\beta\f$ in a penalty.
  *
  * - `separable`: a sum over coordinates.
@@ -75,7 +75,7 @@ enum class penalty_prox_kind : int { none, closed_form, iterative };
 enum class penalty_structure : int { separable, grouped, coupled };
 
 /**
- * \ingroup penalty
+ * \ingroup penalty_framework
  * \brief Law of the variance when a penalty is a scale mixture of normals.
  *
  * Named by the law of the variance \f$\tau\f$ in \f$\beta \mid \tau \sim
@@ -85,7 +85,7 @@ enum class penalty_structure : int { separable, grouped, coupled };
 enum class penalty_scale_mixture : int { none, inverse_gamma_variance, exponential_variance };
 
 /**
- * \ingroup penalty
+ * \ingroup penalty_framework
  * \brief Concept satisfied by penalty types in \c laplace::penalty.
  *
  * Requires the compile-time descriptors `normalization`, `beta_regularity`,
