@@ -9634,8 +9634,11 @@ mass and move to g(c); `logpdf` at an atom's image is read at c itself, so that
 rounding in h(g(c)) does not move it off the atom. `start_value` maps the
 sample back point by point. The ends of the support are taken from the
 bijector's image bounds where the parent's end is an end of the map's domain:
-`yeo_johnson` inverted returns NaN at plus and minus infinity rather than its
-limit, and an infinite support end would otherwise become NaN.
+`yeo_johnson` inverted returned NaN at plus and minus infinity rather than its
+limit, and an infinite support end would otherwise have become NaN. The
+bijector was repaired the same day (the section "The yeo_johnson bijector at
+the ends of its two domains"), and the wrapper still reads the bounds, which
+costs it nothing.
 
 Measured (`tests/distrib/test_transformed.cpp`, gcc and CUDA, the same numbers on both; worst error, bound in
 brackets):
@@ -9820,152 +9823,796 @@ the direct sum of its two masses (error 0, bound 4e-15). The derivative check
 in [1, 1.01] now also runs at its middle, y = 1.005, and the device kernel
 evaluates a window of width 1e-8.
 
-## The improper multivariate Student t: mvstudent_t2 over a singular Q (2026-11-17)
+**The quantile, the starting value and an atom on the upper bound
+(2026-11-17, later).**
 
-What. The improper (intrinsic) class of `mvstudent_t2_distrib<S>` for a positive
-semidefinite structure with a constant null space (`weighted_sum_psdmat`), the
-t counterpart of the improper `mvgaussian2`: Q = M(theta) of rank rho < d, r = y - mu,
-delta = r' Q r,
+Quantile in a narrow window. The quantile inverted the parent at the target
+F(a-) + pZ (or at log(S(b) + (1 - p)Z) on the upper tail), a difference that is
+never summed, so y missed by about eps F(a) / f(y), which is eps F(a) / Z of the
+window's width. Measured against mpmath at 300 bits (bisection on the
+definition) on the Gaussian above, windows [a, a + w] with w from 1e-2 to
+1e-12, p in {1e-6, 0.1, 0.3, 0.5, 0.7, 0.9, 1 - 1e-6}, largest error in ulps of
+y:
 
-    l = c_rho(nu) + 1/2 log|Q|_+ - (nu + rho)/2 log1p(delta/nu),
-
-defined for every y. Writing r = U a + U0 b (U, U0 orthonormal bases of the range and
-of the null space of Q), delta depends on a only, so the law is the rho-dimensional
-proper t of a times Lebesgue measure on b; it is also the scale mixture, over
-w ~ Gamma(nu/2, rate nu/2), of the improper Gaussian with precision w Q and its
-range-only constant. Use: a t penalty on a smooth, Q = lambda S.
-
-How. The blocks are the degenerate mvstudent_t1's kernels with W = Q and the sign
-+1/2 of the log pseudo-determinant (the far-tail double-double route included);
-no support test. The state holds no factor; `constrained_state` adds the factor of
-Q + cP for the constrained law U0'(y - mu) = 0: `constrained_rng`
-(y = mu + (I - P) L^-T z / sqrt(w)), `constrained_mean` (mu for nu > 1, NaN otherwise),
-`constrained_covariance` (nu/(nu - 2) Q^+ for nu > 2, NaN otherwise). The expected
-information is that of the constrained law: mu block kappa Q, theta-theta
-kappa I^G_ab - t_a t_b/(2 (nu + rho + 2)) with I^G from log|Q|_+ (structures with
-d_ab Q = delta_ab d_a Q), theta-nu and nu-nu as the proper t with rho.
-The improper `mvgaussian2` gained `constrained_mean` (mu) for symmetry.
-
-One matrix. With a single penalty (one theta) the theta-theta entry is
-kappa rho/2 - rho^2/(2 (nu + rho + 2)) = nu rho/(2 (nu + rho + 2)), formed by a
-cancellation that loses about (nu + rho)/nu: with exact inputs (mpmath at 50 digits)
-1.5-29 ulp at nu = 1 for rho = 8-98, 81 ulp at rho = 498, 4.9e3 ulp at nu = 0.01,
-rho = 98. Ttilde = 0 exactly there, so the traceless form with H = 0,
-nu t^2/(2 rho (nu + rho + 2)), is used instead, in the route shared with the
-degenerate mvstudent_t1: measured 0 ulp against nu rho/(2 (nu + rho + 2)) at
-nu = 1e-3 to 30, both classes. Several penalties keep the direct form.
-
-Measured (tests/distrib/test_mvstudent_t_improper.cpp, references
-tools/reference/distrib_mvstudent_t_improper.py, mpmath at 60 digits from the
-definition, 3866 values; weighted_sum structures d = 4..6, m = 1..3; host only, the
-CUDA build compiles and runs the host tests; gcc and MSVC host tables identical
-except one cell), worst ulp1N over A + K <= 6 and the information to order 4:
-
-| point | blocks | information |
+| a | before | after |
 |---|---|---|
-| random, m = 1, 2, 3, two D2 | 4.2 | 3.0 |
-| m = 1, nu = 0.05 | 2.1 | 1.9 |
-| m = 1, nu = 1e6 | 0.79 | 0.18 |
-| two penalties 9 apart | 23 | 0.67 |
-| large residual | 2.1 | 0.56 |
+| 1, 4, -3, 0.4 | 0.1 to 12 | 0.1 to 0.5 |
+| -1e-3 | 1.3e3 to 3.1e5 | 0.4 to 0.5; 1.9e3 at w = 1e-2 |
+| 0 | 5.4e7 to 8.1e15 | 3.9 to 24 |
 
-The spread point (theta 9 apart) is the worst, as in the degenerate class, but
-small: the improper blocks use Q itself, never the dense (Sigma + cP)^-1. A shift
-of y along the null space (+0.75 times the constant vector) changes no block beyond
-65.3 ulp1N, the rounding of the shifted y. Constrained draws (d = 5, rho = 4, nu = 7,
-2e5 draws): null component 1.7e-15 relative, mean 0.0022 sd, covariance 0.0028 of
-its largest entry; the constrained covariance equals nu/(nu - 2) times the improper
-Gaussian's Q^+ to 1e-14.
+Where |y| is of the order of F(a) / f(a) the error was already near the ulp of
+y, which is the best a double holds; near zero it was not, and at a = 0,
+w = 1e-12 the quantile missed by 2e-4 of the window. The repair (decided with
+Giovanni): where Z is summed, the result takes one Newton step on the summed
+mass below it, M(a, y) / Z - p over the density, or on the mass above it for
+p > 1/2. The summed mass has a relative error, so the step lands within a few
+ulps; a second step measured no better. At a = 0 the remaining 4 to 24 ulps are
+at most 1.6e-15 of the window, and the 1.9e3 ulps at a = -1e-3, w = 1e-2 are
+1.3e-16 of the window at a y that crosses zero: the rounding of the residual
+against a y much smaller than the bounds. A discrete parent's window holds at most 64
+integers there, and the quantile is the first whose summed mass from the lower
+bound reaches pZ. The test checks |F(y) - p| <= 1e-13 + 8e-16 |y| / w on 15
+windows and five p (the unrepaired quantile fails it by 2e-4 at a = 0), and a
+Poisson(1000) on [1000, 1001].
 
-Open. statmodels7 has no improper t (its mvstudent_t refuses a rank-deficient
-matrix): no frozen references. No bench: the kernels are the degenerate t's.
+Quantile of a parent with atoms, upper tail. The upper tail went to the linear
+scale through -expm1(t) whenever the parent had atoms, because the generic
+root could not invert a cumulative function with jumps; since the generic
+quantile handles atoms (the section on the generic cumulative routes of a law
+that carries atoms), the log-scale route serves every parent. Measured on a
+Gaussian(0.4, 1.3) with adjusted atoms at 0 and 1 (alr -1, -2) truncated to
+[0, 8] and [0, 20], p = 1 - 10^-k for k = 1 to 16, against mpmath: the linear
+route reached 8.2e-3 relative error at 1 - p = 1.1e-16 (1.3e-3 at 1e-15,
+7e-7 at 1e-12); the log route stays within 1.9e-16. The test checks 1 - F(y)
+against 1 - p to 1e-12 at 1 - p = 1e-5, 1e-10 and 1e-15.
 
-## The bound distances of the scalar bijectors at an infinite bound (2026-11-17)
+Starting value. `start_value` passes the whole sample to the parent's own
+start, which estimates the untruncated law. Measured on samples drawn from the
+truncated law (n = 200 and 5000) of a Gaussian(0.4, 1.3) on [-0.5, 2], [1.5, inf),
+[3, inf), (-inf, -1] and [0, 0.5] and of a gamma2(2, 0.5) on [3, inf) and [0, 1]:
+the start's scale is about half the truncated MLE's and its location is pulled
+into the window; the log-likelihood falls short of the MLE's by 10 to 30 at
+n = 200 and 270 to 900 at n = 5000. A damped Newton from it reached the MLE in
+9 to 21 steps in 13 of the 14 cases; on [0, 0.5] with n = 200, where the
+likelihood is flat in sigma, it stopped at another point. Chosen with Giovanni:
+the start stays as it is and the manual says what it is.
 
-**What was wrong.** `scalar_bijector::inverse_distance_upper` and
-`inverse_distance_lower` return the distance of `h(u)` to the two bounds of the
-range of `h`, which is the domain of `g`. Six maps compute that distance
-directly, to avoid the cancellation of a difference near a finite bound, and
-seven more return `+inf` for a bound that is infinite; everything else went
-through the generic difference, `dom_hi - h(u)` and `h(u) - dom_lo` for a plain
-bijector and `forward_domain_upper() - inverse(u)` and
-`inverse(u) - forward_domain_lower()` for an inverted one. Wherever the bound
-is infinite and `h(u)` has reached it, that difference is `inf - inf` and gave
-NaN. The defect was found by the session that wrote `transformed_distrib`,
-which reads the ends of the support of `g(X)` from the bijector.
+An atom on the upper bound. A test with a Gaussian(0.4, 1.3) carrying an
+adjusted atom at 2 (alr -1), truncated to [0, 2], and a Poisson(3.5) inflated at
+9 truncated to [2, 9], found nothing to repair: F(b) holds the atom's jump and
+1 - F(b) does not, so both tails of Z count it (each agrees with the direct
+difference to 1e-14); the mass is 1 to 1e-10 (the Poisson's 1 to 1e-14);
+F(b) = 1 and 1 - F(b) = 0 exactly; 1 - F just below the bound (2 - 1e-3 and
+2 - 1e-9) equals the atom plus the continuous mass in closed form to 1e-12; the
+quantile returns the bound for every p inside the jump and inverts F below it
+to 1e-9; the derivatives at the bound, inside, and of both tails agree with
+five-point differences to 2e-5 and 3e-5; a window [2 - 1e-8, 2] gives log Z to
+1e-14. The tests now have 17 cases and 4048 assertions, green on gcc and on
+CUDA (RTX 4070 SUPER) with the same counts; the device kernel also evaluates
+the quantile of the window [1, 1 + 1e-8]. In that CUDA build no #20013 warning
+names `distrib_atom_point` (which returns `quiet_NaN_v` since the narrow-window
+repair) or any function of `truncated.hpp`.
 
-Measured over the twenty maps in twenty-seven parameter settings, both
-directions of each (plain and inverted), at both ends of the closed domain of
-`h`, for both distances: 108 cells, of which 58 were NaN.
+## The yeo_johnson bijector at the ends of its two domains (2026-11-17)
 
-| where | cells | before | after |
+**What was wrong.** `scalar_bijector::yeo_johnson` returned NaN at an infinite
+argument, in both directions, where the limit exists and is either finite or an
+infinity of a definite sign. Every closed form of
+`include/laplace/bijector/detail/scalar_yeo_johnson.hpp` is written from
+`exprel` or `log1prel`, so that lambda = 0 and lambda = 2 need no branch of
+their own; at an infinite argument those two primitives are themselves
+evaluated at an infinite argument, where each of them is inf/inf. The defect
+was found by the session that wrote `transformed_distrib`, which reads the ends
+of the support of g(X) from g at the ends of R and had to read the bounds of
+the image instead.
+
+Measured at the ends of the domain of h (the image of g) and at both ends of
+the domain of g (which is R), over lambda in {-3/2, -1/2, 0, 1/6, 1/5, 1/4,
+1/3, 1/2, 1, 3/2, 5/3, 7/4, 9/5, 11/6, 2, 5/2, 4}:
+
+| quantity | where | before | after |
 |---|---|---|---|
-| plain bijector, the generic difference | 8 | NaN | `+inf` |
-| inverted bijector, the generic difference | 45 | NaN | `+inf` |
-| `h(u)` itself NaN at the end, `power` | 1 | NaN | the value's limit |
-| `h(u)` itself NaN at the end, `box_cox` | 4 | NaN | the value's limit |
-| every other cell | 50 | the limit | unchanged |
+| h, and h' to h^(6) | an infinite end of the domain of h | NaN | the limits below |
+| log of h' | an infinite end | NaN | an infinity, or 0 at lambda = 1 |
+| its 1st to 6th derivatives | u = +inf at lambda = 0, u = -inf at lambda = 2 | NaN | 1 and -1 at order 1, 0 above |
+| its 1st to 6th derivatives | any other infinite end | 0 | 0 |
+| g | v = +inf at lambda <= 0, v = -inf at lambda >= 2 | NaN | -1/lambda and 1/(2 - lambda), an infinity at lambda = 0 and 2 |
+| g' to g^(6) | v = +-inf | the limit | unchanged |
+| log of g' | v = +-inf at lambda = 1 | NaN | 0 |
+| its 1st to 6th derivatives | v = +-inf | 0 | 0 |
+| every quantity | the finite end of the image, where there is one | the limit | unchanged |
 
-The eight cells of the plain direction are `identity` at both ends, `log` and
-`sqrt` and `asinh` at `u = +inf`, `asinh` at `u = -inf`, and `inverse` and
-`inverse_sq` at `u = 0`, where `h(u) = +inf`. The forty-five of the inverted
-direction are every end of every map whose image, which is the range of `h`
-there, has an infinite bound. That set is not confined to an infinite argument:
-inverted `logit`, `probit`, `cauchit`, `cloglog` and `loglog` failed at the
-finite ends `u = 0` and `u = 1`, inverted `atanh` at `u = -1` and `u = 1`, and
-inverted `bounded(-2, 3)` at `u = -2` and `u = 3`. The defect is that the value
-has reached an infinite bound, not that the argument is infinite.
+**The limits.** The argument enters every closed form only through a power of
+1 + v, 1 - v, 1 + lambda u or 1 - c u, c = 2 - lambda, so the sign of that
+power's exponent decides each limit. For the inverse, with
+P_n = prod_(k=1..n-1) (1 - k lambda) and Q_n = prod_(k=1..n-1) (k c - 1),
 
-**The convention, decided with Giovanni on 2026-11-17: the distance to an
-infinite bound is `+inf` at every point of the closed domain, the bound itself
-included.** With `V = (v_min, v_max)` the range of `h`, the upper distance is
-`d(u) = v_max - h(u)`. When `v_max` is finite, `h(u) -> v_max` as `u` runs to
-the end of its domain and the limit of `d` is 0, which is what the functions
-already returned. When `v_max = +inf`, every `h(u)` of the interior is finite
-and `d(u) = +inf` identically: `d` is the constant `+inf` on the whole
-interior, so `+inf` is also its limit at the end, and the rule of the module,
-that a closed bound gives the limit, decides the value without a further
-choice. The alternative put to Giovanni was 0, read as the distance of the
-bound from itself, which is a value assigned to `inf - inf` by decree rather
-than a limit; it would also have meant rewriting the seven per-map functions
-that today return `+inf` ignoring `u`. The two conventions differ in those 53
-cells and nowhere else.
+    h^(n)(u) = P_n (1 + lambda u)^(1/lambda - n)   u > 0
+    h^(n)(u) = Q_n (1 - c u)^(1/c - n)             u < 0
 
-The repair is two helpers in `detail_scalar` of
-`include/laplace/bijector/scalar.hpp`, `to_upper_bound(hi, value)` and
-`to_lower_bound(lo, value)`, which return `+inf` for an infinite bound and the
-difference otherwise, and NaN wherever the value is NaN, which is how a point
-outside the closed domain and an invalid parameter arrive there. They replace
-the generic difference in the two `default:` branches of `inv_to_upper` and
-`inv_to_lower` and in the `inverted` branch of the two members. No per-map
-function needed a change, and no caller was touched.
+and 1 - n lambda has the sign of 1/lambda - n, as 1 - n c has that of
+1/c - n. Above zero the power runs to +inf and the prefactor gives the sign,
+being positive (P_n) or of sign (-1)^(n-1) (Q_n) and vanishing in neither case;
+at zero, that is at lambda = 1/n or c = 1/n, the power is 1 and the prefactor
+is the whole limit; below zero the power dies and the limit is 0. The value h
+itself runs to an infinity of the sign of u, the range of h being R, at the
+finite end of its domain as well as at the infinite one. For the forward map
+g^(n)(v) is prod_(k=1..n-1) (lambda - k) (1 + v)^(lambda - n) above and
+(-1)^(n-1) prod_(k=1..n-1) (c - k) (1 - v)^(c - n) below, with the same three
+cases and the prefactor (-1)^(n-1) (n-1)! on the edge, while g(+inf) and
+g(-inf) are the two ends of the image: -1/lambda for lambda < 0,
+1/(2 - lambda) for lambda > 2 and an infinity otherwise. The log-Jacobians are
+(lambda - 1) log(1 + v) and (1 - lambda) log(1 - v) for g, and
+(1/lambda - 1) log(1 + lambda u) and (1/c - 1) log(1 - c u) for h: each runs to
+an infinity of the sign of its own coefficient and is 0 at lambda = 1, where
+both maps are the identity. Every argument-derivative of a log-Jacobian carries
+a negative power and dies, except that log of h' is u at lambda = 0 above and
+-u at lambda = 2 below, whose first derivatives are 1 and -1.
 
-**A second defect, in `power`, repaired here.** `power_offset(e, x)` forms the
-small exponent correction `1 + e log x`, the term that carries the part of the
-exponent lost to rounding when `1/lambda` is not representable. Its guard
-skipped the term at `x = 0`, where `log x` is infinite, and not at an infinite
-`x`, where it is infinite as well: with `e` of the order of 1e-17 the term came
-out as an infinity of the sign of `e` and multiplied the power instead of
-correcting it. So `h(+inf)` was NaN for `power(-3)` and `power(-2.5)`, where the
-power is 0 and the correction `-inf`, and `-inf` for `power(2.5)`, where the
-power is `+inf` and the correction again negative; the true limits are 0 and
-`+inf`. The guard now skips any non-finite `x`, at which the sign of the whole
-exponent is carried by its leading part, the one that `power_scaled` raises
-directly. Finite arguments are untouched, the condition being `!isfinite(x)`.
-The four `box_cox` cells of the table were repaired in `scalar_box_cox.hpp` by
-the session that owns that file, on the same day.
+Each of the 896 limits was compared with SymPy's own limit of the definition
+(`tools/reference/bijector_yeo_johnson_forms.py`, `check_limits`), the script
+that also writes the header. The C++ never forms the exponent: it vanishes
+exactly where a product of lambda with a small integer equals 1, so the product
+is compared with 1 rather than subtracted from it. A subtraction is what nvcc
+contracts into an FMA, and the exact product of 3 with the double nearest 1/3
+is 1 - 2^-54 and not 1, so the edge would be taken on one platform and not on
+the other. The edge is therefore reached wherever lambda is the double nearest
+1/n, n = 1 to 6, and on the negative branch only where 2 - lambda is exactly
+the double 1/n, which holds for 1/n dyadic (lambda = 1, 3/2, 7/4) and not for
+1/3, 1/5 or 1/6; at those lambda the limit returned is the infinity or the zero
+that this very double carries.
 
-**The test** is in `tests/bijector/test_scalar.cpp`, the case "bijector scalar:
-the distances at the ends of every domain": thirty settings covering the twenty
-maps, each plain and inverted, in a kernel on the default execution space (a
-named function with external linkage, never a lambda inside a `TEST_CASE`). For
-each of the two ends of the closed domain of `h` it checks that neither
-distance is NaN and that neither is negative; that the distance to an infinite
-bound is exactly `+inf`; that the distance to a finite bound equals the
-difference, except where `h(u)` has run off to the opposite infinite bound and
-the distance is `+inf` there too; and that both distances are NaN for the two
-invalid settings, `affine(1, 0)` and `bounded(3, 1)`. 688 assertions, green on
-gcc; the CUDA build gives the same counts.
+Found while writing the test: one ulp from an edge the limit is right and out
+of reach. At lambda = 5/3, where c = 2 - lambda is the double below 1/3, the
+exponent 1/c - 3 is 6.7e-16 while the logarithm of 1 - c u reaches 138 at the
+largest double, so the power stays 1 and h''' sits on the plateau 2/9 over the
+whole representable range; its limit is nonetheless +inf, and that is what the
+function returns at u = -inf. The same happens at lambda = 9/5 for the fifth
+derivative (plateau 0.0384, limit +inf) and at lambda = 11/6 for the sixth
+(plateau -0.0154, limit 0). The test tells a plateau from an approach by the
+two large arguments giving the same value, and on a plateau checks only that it
+is finite and carries the sign of the limit.
+
+**The test** is in `tests/bijector/test_yeo_johnson.cpp`, in a kernel on the
+default execution space: for each lambda above, the fourteen quantities (the
+map and its log-Jacobian, orders 0 to 6) at the four ends, checked first
+against the function's own approach to the end, where an infinite limit grows
+past 1 in its own sign between the arguments 1e30 and 1e60, a zero limit falls
+below 1e-6 and a finite limit is reached to 1e-12, and then against the
+written-out values of the edges, of the signs of the infinities and of the
+log-Jacobians. gcc and CUDA give the same counts.
+
+**The finite end on CUDA, found on 2026-11-17 by the first CUDA run.** At the finite end
+of the domain of h the quantity w = 1 + lambda u (1 - c u on the negative branch) vanishes, and
+log|h'| with its u-derivatives carries negative powers of it, so the limit is an infinity. The
+host produces that infinity by itself: lambda times the rounded -1/lambda rounds back to -1, w
+is exactly 0, and 0^(-n) is +inf. nvcc contracts 1 + lambda * u into an FMA, which multiplies
+lambda by that rounded reciprocal exactly instead of rounding the product, so the cancellation
+does not complete, w survives at about 3.7e-17, and the infinity comes out finite: measured
+4.5036e16, 1.21694e33, 6.57676e49, 5.33143e66, 5.76256e83 and 7.78567e100 for the orders one to
+six, each about 1/w times the one before. The value and its u-derivatives escaped only because
+their own form reaches the end through a product that does round back to -1. Both now take the
+limit from a guard at that end (`yj_inv_at_edge`, `yj_inv_lj_at_edge`) rather than from the
+arithmetic, and gcc is unchanged, the limit being what it already produced. The general shape is
+worth stating: an assertion that holds on gcc because an intermediate is exactly zero is a CUDA
+failure in waiting, and it does not present as a tolerance problem but as an infinity turning
+into a large finite number.
+
+**Left open by this repair.** The parameter derivatives (the `*_partials`
+functions, and so `forward_partials_dK` and the rest) were NaN at every
+infinite end, and so were the mixed entries of the log-Jacobian's partials at
+the finite end of the image. They are repaired in the section "The yeo_johnson
+bijector: the parameter partials at the ends" below, which was written on the
+same day. `inverse_distance_upper` and `inverse_distance_lower` of an inverted
+bijector are NaN where the bound and the value are both infinite; those two go
+through the generic difference `forward_domain_upper() - inverse(u)` of
+`scalar.hpp`, which every map shares, and not through anything of
+yeo_johnson's own.
+
+**box_cox** has the same hole, and wider. It is NaN at both infinite ends of
+the domain of h, and also at the finite ends of either domain wherever a
+vanishing prefactor meets an infinite power: g''(0) at lambda = 1, whose limit
+is 0 because g is then affine, h'(-1) at lambda = 1, whose limit is 1 for the
+same reason, and h''(-2) at lambda = 1/2, whose limit is 1/2. Its header states
+that a value on a bound gives its limit, which is therefore not true of it
+today. Not repaired.
+
+## The generic cumulative routes of a law that carries atoms
+
+A law may put mass on points that its kind does not account for: a gamma with a
+point mass at zero is neither continuous nor discrete in the usual reading, and
+`distrib/core.hpp` calls such a point an atom. A family declares `n_atoms`,
+`atom_point(i)` and `atom_log_mass(i)` and nothing else, `logpdf(y)` returning
+the log mass at an atom point, so the derivatives of that mass to order six are
+`logpdf_dk<K>` evaluated there.
+
+**What the generic routes did before.** `generic_expectation.hpp` added
+`sum_i pi_i h(c_i)` after its quadrature, so expectations and the expected
+information built on them counted the atoms. The three other generic routes did
+not mention atoms at all: `generic_cdf.hpp` integrated the density and nothing
+else, so `F` at an atom point came out as the integral alone (zero, at an atom
+sitting on the lower end of the support); `generic_quantile.hpp` looked for a
+root of a function that has jumps, and its Newton step divided by
+`exp(logpdf(y))`, which at an atom is a mass and not a density; and
+`generic_start.hpp` summarized a sample with the observations on the atoms still
+in it. Nothing was wrong in practice, because no type with atoms reached those
+routes: `atom_mixture_distrib` over a continuous parent always has
+`closed_routes`, so its cdf, its log-cdf derivatives, its quantile and its
+starting value are closed forms of its own; over a discrete parent it declares
+no atom at all, the mass being part of the pmf; and `truncated_distrib` and
+`transformed_distrib` own their cumulative routes and read the atoms
+explicitly. That is a set of coincidences and not a design, so the generic
+routes were made right instead (Giovanni, 2026-11-17, who chose this over a
+`static_assert` forbidding the composition).
+
+**What they do now.** The whole addition sits behind
+`if constexpr (distrib_n_atoms<D>() > 0)`, so a family without atoms compiles to
+what it compiled to before.
+
+*The cdf.* `F(y)` is the integral of the density over the support up to `y` plus
+the masses at or below `y` (F is right-continuous, so an atom at `y` counts),
+and the complement is the integral above `y` plus the masses strictly above it.
+The sum is a log-sum-exp against the log integral, so a small probability keeps
+its accuracy. The side of `y` that does not hold `center()` is the one
+integrated, as before; the other is now the complement against the mass the law
+spreads over Lebesgue measure, `C = 1 - sum_i pi_i`, and no longer against one.
+
+*The derivatives.* The side asked for is `G = S + A`, the integral over it plus
+the atoms on it, and the two are combined in ratio space: with `w_j` the weight
+of a term in `G`, `d_T G / G = sum_j w_j d_T X_j / X_j`, and the derivatives of
+`log G` follow from the Bell relation solved for them (`log_sum_ratios` in
+`generic_cdf.hpp`, the arithmetic of `detail_truncated::combine_order` written
+one component at a time, which is how that file is indexed). The derivatives of
+an atom's log mass are `logpdf_dk<K>` at its point, as the descriptor says, and
+`C` carries derivatives of its own, so the complement of the integrated side is
+`C - I` and not `1 - I`.
+
+*The quantile.* With atoms `F` has jumps and the quantile is
+`inf{y : F(y) >= p}`, which is the atom point `c_i` whenever `p` lies in
+`(F(c_i-), F(c_i)]`; there no root exists. Both ends of the jump come from the
+cumulative function at `c_i` itself, which already counts the atoms at or below
+it, so the atom points need not be sorted and nothing is asked of a family
+beyond the three descriptors. Outside a jump the root-finder works as it did:
+`d/dy log F(y) = f(y)/F(y)` still holds, the mass at or below `y` being locally
+constant, so no mass has to be subtracted. At an atom point the density is
+taken as zero, which sends the step to the bisection fallback; the final Newton
+step on the linear scale is skipped there as well.
+
+*The starting value.* The observations sitting on an atom point are dropped
+before the summaries, so the moments and the quartiles describe the part of the
+law spread over Lebesgue measure: a gamma with a third of its mass at zero would
+otherwise start from a mean two thirds of its own. What the mass of each atom
+starts at is not lifted and cannot be: an atom declares its point and its mass
+and nothing that says which parameter carries it, so a family with atom
+parameters supplies its own `start_value` over the sample, as
+`atom_mixture_distrib` does.
+
+**The quadrature never reads a mass as a density.** `logpdf(y)` is one log
+density with respect to Lebesgue measure plus a counting measure on the atoms,
+so a quadrature node landing exactly on an atom point would read a mass where a
+density belongs, and an atom usually sits at the lower end of the support or at
+a panel boundary. `core.hpp` states the rule that stops it: a declared atom is
+also reported by `y_kinks()`, which the panel routines split on. Measured here,
+the rule is not sufficient by itself. `panels_quad` cuts the interval at the
+points it is given, and each panel is integrated by `tanh_sinh_quad`, whose node
+function returns the code 2 for a node whose `x` has rounded onto an end
+although its distance is not zero, and `de_sum` evaluates the integrand at that
+`x` all the same. A cut therefore makes the atom a panel end, which is exactly
+where a node can land. An atom at the lower end of the support is not even a
+cut, `panels_quad` keeping only the kinks strictly inside the interval.
+
+That test is an exact equality, and it is sound on the device for a reason worth
+stating, since an exact comparison is usually a CUDA failure waiting to happen.
+It compares a STORED atom point with the point being evaluated, and it is the
+same comparison that decides what `logpdf` means there (`atom_at` in
+`atom_mixture.hpp` tests `y == point[i]`), so the guard and the switch of meaning
+agree bit for bit on any backend: nothing is required to cancel, and no
+intermediate has to come out exactly zero. Where a node merely lands NEAR an
+atom the guard does not fire, which is right, the density being what belongs
+there. The exact comparisons elsewhere in these routes are of the same harmless
+kind or are opportunistic early exits (`gx == 0.0` in the root-finder, `t == 0.0`
+in a tail sum), which cost an iteration and not an answer when the value misses
+zero by an ulp.
+
+Every quadrature of the density now tests the node instead:
+`detail_generic::at_an_atom` (in `generic_expectation.hpp`, the lowest of these
+headers, so that all of them see it) says whether a point is an atom point, and
+the integrand returns zero there. That holds for the two of `generic_cdf.hpp`,
+through `detail_generic::density_off_atoms`, and for the two continuous
+integrands of `generic_expectation.hpp`, where a node on an atom would have
+counted the mass a second time on top of the explicit
+`sum_i pi_i h(c_i)`. None of it depends on where the nodes fall.
+
+**The cut budget.** `panels_quad` keeps the centre plus at most 8 interior cuts
+in a `double cut[10]`. The cuts are now the kinks of `log f` in `y`, at most 2
+(`distrib_kinks::point` holds two), followed by the atom points, at most 6
+(`core.hpp`), with duplicates dropped for a family that already reports its
+atoms as kinks: 8 at most, exactly the rule's budget, and 9 of the 10 slots used
+with the centre. The two-atom ceiling that `atom_mixture_distrib` imposes on a
+continuous parent was there because `y_kinks()` was the only way to tell the
+quadrature about an atom; the generic cdf no longer depends on that, so the
+ceiling is now a property of `atom_mixture` alone and not of the quadrature. The
+ceiling was not changed.
+
+**Measured, gcc, host.** The generic routes against the closed forms they are
+meant to reproduce, over the atom point itself, the floating-point neighbours on
+both sides, the window and both tails.
+
+| what | object | oracle | worst |
+| --- | --- | --- | --- |
+| `cdf` | gamma, fixed mass 0.3 at 0 | `pi + (1 - pi) F_gamma`, closed | 2 ulp |
+| `ccdf` | the same | closed | 21 ulp |
+| `log_cdf` | the same | closed | 3.9e-16 absolute |
+| `quantile` | the same | closed inverse | 1.3e-11 relative |
+| `cdf` | zero-adjusted gamma, mass a parameter | `atom_mixture_distrib::cdf` | 3 ulp |
+| `ccdf` | the same | `atom_mixture_distrib::ccdf` | 16 ulp |
+| `log_cdf` | the same | closed | 4.4e-16 absolute |
+| `log_ccdf` | the same | closed | 5.7e-14 absolute |
+| `log_cdf_dk<1>` | the same | `log_cdf_d1` | 1.2e-15 relative |
+| `log_cdf_dk<2>` | the same | `log_cdf_d2` | 1.4e-15 relative |
+| `log_cdf_dk<3>` | the same | `log_cdf_d3` | 2.7e-15 relative |
+| `log_ccdf_dk<1>` | the same | `log_ccdf_d1` | 8.9e-16 relative |
+| `log_ccdf_dk<2>` | the same | `log_ccdf_d2` | 5.7e-16 relative |
+| `quantile` | the same | `atom_mixture_distrib::quantile` | 1.1e-13 relative |
+| `cdf` | zero-adjusted gamma truncated to [0, 3] | `truncated_distrib::cdf` | 1 ulp |
+| `ccdf` | the same | `truncated_distrib::ccdf` | 7 ulp |
+
+The relative figures are against the largest component of the tensor. The ulp
+measure is not reported for the logarithms: `log F` passes through zero in the
+far upper tail, where an ulp of it is a denormal and says nothing; the absolute
+error is the figure that means something there.
+
+One frozen figure, kept so that a dropped mass fails loudly: a gamma with shape
+2 and rate 1 carrying mass 0.3 at zero, truncated to [0, 3], has
+`F_gamma(3) = 1 - e^-3 (1 + 3) = 0.80085172652854423`, hence
+`Z = 0.3 + 0.7 F_gamma(3) = 0.86059620856998096` and a cdf at zero of
+`0.3 / Z = 0.34859553994375395` (mpmath at 40 digits). An atom-blind route
+returns zero there.
+
+**A defect the atoms uncovered, repaired.** When the integral over the
+integrated side came out empty, `log_cdf_side_by_integral` returned minus
+infinity whichever side had been asked for. The side integrated is empty there,
+but the other one holds the whole of the continuous mass, so `log(1 - F)` just
+above a finite lower end came out as minus infinity where it is `log C` (0 for a
+law without atoms). A window of denormal width is where the quadrature reaches
+that case: `log(1 - F)` of a gamma at the smallest positive double was minus
+infinity. The empty integral is now carried into the complement instead of
+short-circuiting it.
+
+**The mixture's kinks in y, repaired.** `atom_mixture_distrib::y_kinks()` built a
+fresh `distrib_kinks` from its own atom points and never consulted the parent,
+so an atom mixture over `laplace1` or `enet`, each of which declares a real kink
+of `log f` at `mu`, lost it. It now forwards the parent's kinks, `continuous_order`
+included: the continuous part of the mixture is the parent's density times one
+constant, so it has exactly the parent's kinks and the parent's regularity in
+`y`, and an atom is not one of them, the integrands skipping the atom points
+themselves and the panel routines being given those points separately.
+
+One consequence outside this file, found by the full suite. `transformed()`
+refuses a law whose non-smooth points in `y`, the parent's carried through the
+map plus the map's own, number more than two, a `distrib_kinks` declaring at
+most two. An atom mixture's atoms used to count towards that number, so a
+zero-one-adjusted parent through Yeo-Johnson made three and was refused; with
+the atoms no longer reported as kinks the count is one and the law is accepted,
+which is right, an atom being no kink of the continuous part. The refusal still
+fires on three real kinks, and the case in `tests/distrib/test_transformed.cpp`
+that exercised it was rebuilt on three of those.
+
+What the repair is worth, measured. On `laplace1` nothing: the generic cdf
+against the mixture's own closed cdf is 2.9e-16 relative at worst either way,
+because `panels_quad` always cuts at `center()` and both families that declare a
+kink today put it at `mu` with `center()` at `mu` as well, so the dropped kink
+was a cut in any case. The cost appears as soon as a parent's kink is not at its
+centre, which `center()` being a rough location makes legitimate: with the
+centre moved 2.3 off `mu`, the old behaviour returns NaN at 2 of 10 points
+across the window, the quadrature not converging across an uncut kink, where the
+repaired one gives 1.2e-16. So the defect was latent and would have appeared on
+the first family or wrapper whose kink sits away from its centre.
+
+**The cut budget, and the two-atom limit.** `density_cuts` writes the parent's
+kinks first and then the atom points, at most 8 in all, which is what
+`panels_quad` keeps (the centre plus 8 interior cuts, in a `double cut[10]`).
+A `distrib_kinks` holds two points and no more, so the kinks can never be more
+than 2, and the room left for atom points is therefore 6 whatever the parent is
+— exactly the six that `core.hpp` allows an atom declaration. The
+`static_assert` in `atom_mixture.hpp` that limits a continuous parent to two
+atoms gave as its reason "which is what `y_kinks()` can report"; that reason is
+gone, the atom points no longer travelling through `y_kinks()`. The limit and
+its message were left as they are, the change being a convention and not a
+repair. Should the limit be raised, 6 is the bound, and overflowing the 8 cuts
+would cost accuracy and not correctness: an atom point dropped from the cuts is
+still skipped by the integrand.
+
+**The continuous-parent atom limit raised from two to six** (Giovanni,
+2026-11-17), the same number a discrete parent already took, bounded now only by
+the `n_atom_points >= 1 && n_atom_points <= 6` assert that both kinds share. The
+reason for two had been that a declared atom must be a panel boundary and
+`y_kinks()` carries two points, which no longer holds.
+
+Measured rather than assumed, by counting what `detail_generic::density_cuts`
+writes and what `panels_quad` keeps:
+
+| what | measured |
+| --- | --- |
+| `distrib_kinks::point` capacity | 2, and it is a fixed array |
+| `density_cuts`, 6 atoms and 2 kinks | 8 cuts, the kinks first |
+| `density_cuts`, 6 atoms and no kink | 6 cuts |
+| `panels_quad` with those 8 cuts and a centre inside | converged, and the integral of e^-x over (0, infinity) came to 1 within 1 ulp, 1534 evaluations |
+| `panels_quad` offered 9 cuts | reads 8 of them, still converged |
+
+So six fits exactly: `panels_quad` reads at most 8 interior cuts, and uses 9 of
+its `cut[10]` and 11 of its `ends[12]` once the centre is added. A cut dropped
+for want of room would cost accuracy and not correctness, the integrand skipping
+the atom points whether or not they are cuts. Six is therefore the largest sound
+value and the limit was set there, not capped lower.
+
+The other ceilings, checked on the way. `detail_atom_mixture::alr_names` holds
+exactly six names, `atom_alr1` to `atom_alr6`, and `params_of<D, N>` and the
+`cnt[6]` of `start_value` take six. `fill_log_renorm`'s scratch
+`flat_tensors<Q, K> pv[6]` is dimensioned on the PARENT's parameter count, and is
+instantiated only for a discrete parent, so six atoms do not grow it. What six
+atoms do cost is the parameter count, and with it the tensors: a parent with P
+parameters gives P + 6, and the order-6 tensor has binomial(P + 11, 6)
+components, which is 924 at P = 1, 1716 at P = 2, 3003 at P = 3 and 5005 at
+P = 4. That is the user's to pay.
+
+One practical ceiling, worth knowing before a GPU run: the generic derivative
+route of the log cdf keeps one set of log-density partials per atom on the stack,
+so a six-atom law over a two-parameter parent needs six times 3002 doubles, about
+144 kB, at order six. The tests set the CUDA per-thread stack to 8192 bytes, so
+that combination needs a raised `cudaLimitStackSize`. It is not reached by an
+atom mixture over a continuous parent, which has its own closed cumulative
+routes; it would be reached by a law that declares six atoms and owns none.
+
+Tested: `tests/distrib/test_generic_atoms.cpp`, "more than two atoms over a
+continuous parent". Three atoms over `gamma1` (five parameters): the three
+masses come out at 0.1 each, the masses plus the quadrature of the density make
+one within 1e-10, `density_cuts` writes the three atom points and nothing else,
+the generic cdf matches the wrapper's closed one to 4.0e-16 relative at worst
+over eleven points at and around every atom, and all five components of the
+first derivatives of the log cdf match to 1e-10 of the tensor's scale. Six atoms
+over `gamma1` (eight parameters): six cuts, total mass one, the generic cdf
+against the closed one at eight points, and the six descriptor names. Host only
+and at low order, for the stack reason above.
+
+**On CUDA.** The same chained job built gcc and then CUDA from one snapshot:
+`build-ga2` gives 667 cases and 1187615 assertions with nothing failing, and
+`build-cuda-ga2` gives 667 cases and 1187648 assertions (the device adds a few
+of its own) with 3 cases failing, all of them in `test_box_cox.cpp` and
+`test_yeo_johnson.cpp` and none in the atom work. Execution space Cuda, per
+thread stack 8192 bytes.
+
+The atom figures are the same on both, to the digits that matter:
+
+| what | gcc | CUDA |
+| --- | --- | --- |
+| fixed mass, `cdf` | 2 ulp | 2 ulp |
+| fixed mass, `ccdf` | 21 ulp | 21 ulp |
+| fixed mass, `log_cdf` | 3.9e-16 abs | 3.9e-16 abs |
+| fixed mass, `quantile` | 1.28e-11 rel | 1.28e-11 rel |
+| atom mixture, `cdf` | 3 ulp | 3 ulp |
+| atom mixture, `ccdf` | 16 ulp | 16 ulp |
+| atom mixture, `log_cdf` | 4.4e-16 abs | 4.4e-16 abs |
+| atom mixture, `log_ccdf` | 5.7e-14 abs | 5.7e-14 abs |
+| atom mixture, `log_cdf_dk<1>` | 1.2e-15 rel | 3.7e-15 rel |
+| atom mixture, `log_cdf_dk<2>` | 1.4e-15 rel | 1.6e-15 rel |
+| atom mixture, `log_cdf_dk<3>` | 2.7e-15 rel | 3.1e-15 rel |
+| atom mixture, `quantile` | 1.06e-13 rel | 1.06e-13 rel |
+| truncated, `cdf` | 1 ulp | 2 ulp |
+| truncated, `ccdf` | 7 ulp | 7 ulp |
+| laplace1 parent, `cdf` | 2.9e-16 rel | 2.9e-16 rel |
+| three atoms, `cdf` | 4.0e-16 rel | 4.0e-16 rel |
+
+The derivative rows are the only ones that move, by a factor of three at order
+one and less above it, which is the FMA contraction of the device against the
+host; the bounds of the tests were set from the larger of the two and hold on
+both builds.
+
+## The yeo_johnson bijector: the parameter partials at the ends (2026-11-17)
+
+**What was wrong.** The repair above left the parameter partials alone, and they were NaN at
+the ends of both domains. Measured over lambda in {-3/2, -1/2, 0, 1/2, 1, 3/2, 2, 5/2}, at
+every end, for the total orders 1 to 6 and every entry c[n1] of `bijector_partials<K>`, which
+is the mixed derivative in n0 = K - n1 arguments and n1 exponents:
+
+| quantity | where | before | after |
+|---|---|---|---|
+| h | an infinite end of the domain of h | NaN, every K and every n1 | the limits below |
+| log of h' | an infinite end | NaN at n1 = K, and every entry at lambda = 0 above | the limits below |
+| log of h' | the finite end of the image, where there is one | NaN in the mixed entries | an infinity of sign (-1)^n1 above, (-1)^n0 below |
+| g | v = +-inf | NaN wherever the limit is zero or finite | the limits below |
+| log of g' | v = +-inf | already the limit | unchanged |
+| h, log of h' at n1 = 0 or the extreme entries | the finite end | already the limit | unchanged |
+
+**The limits.** A lambda-derivative multiplies a closed form by a logarithm of the argument,
+which loses to a negative power of it and wins against a vanishing exponent, so the sign of the
+exponent decides as it does for the pure derivatives: above zero an infinity, below zero zero,
+and at zero the prefactor for n1 = 0 and an infinity above it. Four cases carry their own form:
+
+- g at an infinite v with n0 = 0 reaches an end of the image, so its pure lambda-derivatives
+  there are those of -1/lambda below lambda = 0 and of 1/(2 - lambda) above lambda = 2, namely
+  (-1)^(n1+1) n1!/lambda^(n1+1) and n1!/(2 - lambda)^(n1+1).
+- log of h' above is Psi = (1 - lambda) log(1 + lambda u)/lambda. For lambda > 0 a u-derivative
+  carries (1 + lambda u)^(-n0) and dies, while a pure lambda-derivative multiplies the logarithm
+  by the n1-th lambda-derivative of (1 - lambda)/lambda, of sign (-1)^n1, and runs to an
+  infinity of that sign. At lambda = 0, Psi is the series (1 - lambda) sum_j (-1)^j u^(j+1)
+  lambda^j/(j + 1), so its n1-th lambda-derivative is a polynomial in u of degree n1 + 1 whose
+  leading coefficient is (-1)^n1 n1!/(n1 + 1): the n0-th u-derivative of that runs to
+  (-1)^n1 infinity below n1 + 1, is the constant (-1)^n1 (n1!)^2 at n0 = n1 + 1, and vanishes
+  above. The same holds at lambda = 2 on the negative branch, with (-1)^n0 for the sign.
+- The inverse's negative branch is its positive branch reflected, h(u) = -h_pos(-u; c) and
+  log of h'(u) = log of h'_pos(-u; c) with c = 2 - lambda, so the mixed derivative carries
+  (-1)^(n0+n1+1) for h and (-1)^(n0+n1) for its log-Jacobian, with c in place of lambda. Every
+  limit of the negative branch is that of the positive one read this way.
+- At the finite end of the domain of h, u = -1/lambda below lambda = 0 and u = 1/(2 - lambda)
+  above lambda = 2, the quantity w = 1 + lambda u (1 - c u below) vanishes and
+  d^n0_u log|h'| = (1 - lambda)(-1)^(n0-1)(n0-1)! lambda^(n0-1) w^(-n0); each lambda-derivative
+  raises the power of 1/w by one and brings a factor -n0 u, so the most singular term is
+  C u^n1 w^(-n0-n1) and the limit is an infinity whose sign, with u at the end itself, is that
+  of (1 - lambda)(-1)^(n0-1) lambda^(n0-1-n1), namely (-1)^n1 above and (-1)^n0 below.
+
+Each of these limits was compared with SymPy's limit of the mixed derivative of the definition
+(`tools/reference/bijector_yeo_johnson_forms.py`, `check_partial_limits` for the infinite ends
+and `check_edge_limits` for the finite one), which also checks that the entry at n1 = 0 is the
+pure limit the functions above already return.
+
+**The test** is the case "the parameter partials at the ends of both domains" in
+`tests/bijector/test_yeo_johnson.cpp`, in a kernel on the default execution space: for each
+lambda the fifty-four entries at each of the four ends, with no NaN, the entry at n1 = 0 equal
+to the pure derivative of the same order, the limit checked against the function's own approach
+to it, and the written-out values of the four special forms above.
+
+Measured: 6 cases on gcc with 11573 assertions and on CUDA with 11096, both green, together
+with the whole suite, green on both (667 cases, 1187615 assertions on gcc and 1187146 on CUDA).
+The two counts differ by design
+and not by a skipped check: the consistency test branches on the value it reads -- a limit
+already attained, a plateau, or an approach -- and which branch a quantity takes differs between
+the platforms wherever FMA contraction moves the last bits, each branch asserting a different
+number of things. Every assertion taken passes on both.
+
+**Found on the way and not repaired.** The partials themselves return NaN at a large finite
+argument: at 1e60, 28 of the 448 order-six entries measured are NaN, while 1e40 and below are
+clean. That is a loss inside the forms at a finite point and not a missing limit at an end, so
+the test compares a limit with the values at 1e20 and 1e40.
+
+## The box_cox bijector at the ends of its two domains (2026-11-17)
+
+**What was wrong.** `scalar_bijector::box_cox` returned NaN at an end of either
+of its domains, where the limit exists and is finite or an infinity of a
+definite sign, although the header stated in its opening comment that a value
+on a bound gives its limit. The hole was the one repaired the same day in
+`yeo_johnson` (the section above) and wider. At an infinite argument the cause
+is the one the closed forms of
+`include/laplace/bijector/detail/scalar_box_cox.hpp` were written for: each of
+them passes through `exprel` or `log1prel` so that lambda = 0 needs no branch of
+its own, and at an infinite argument those two primitives are themselves
+evaluated at an infinite argument, where each is inf/inf. At a finite end the
+cause is different and the point is finite: a prefactor that vanishes meets a
+power that is infinite, which is 0 times inf. The defect was found by the
+session that repaired `yeo_johnson`, which measured box_cox alongside it.
+
+**The ends.** g has domain (0, inf), so they are v = 0 and v = +inf whatever
+lambda is. The domain of h is the image of g: (-1/lambda, inf) for lambda > 0,
+so they are u = -1/lambda and u = +inf; (-inf, -1/lambda) for lambda < 0, so
+u = -inf and u = -1/lambda; the whole line for lambda = 0, which has no finite
+end. Measured on the host, gcc, over lambda in {-3/2, -1, -1/2, -1/3, -1/5, 0,
+1/6, 1/5, 1/4, 1/3, 1/2, 2/3, 7/10, 1, 3/2, 2, 5/2, 3, 4, 5, 6}, which covers
+every regime (below 0, 0, in (0, 1), 1, above 1) and both families of knife
+edges, lambda = 1/n and lambda = n for n = 1 to 6:
+
+| quantity | where | before | after |
+|---|---|---|---|
+| h, and h' to h^(6) | u = +inf, an end for lambda >= 0 | NaN | the limits below |
+| h, and h' to h^(6) | u = -inf, an end for lambda <= 0 | NaN | 0 |
+| log of h' | an infinite end | NaN | an infinity, or 0 at lambda = 1 |
+| its 1st to 6th derivatives | an infinite end at lambda = 0 | NaN | 1 at order 1, 0 above |
+| its 1st to 6th derivatives | any other infinite end | 0 | 0 |
+| h^(n) | u = -1/lambda at lambda = 1/n | NaN | (n-1)!/n^(n-1) |
+| h^(n) | u = -1/lambda at lambda = 1/r, r < n | NaN | 0 |
+| log of h', with every derivative | u = -1/lambda at lambda = 1 | NaN | 0 |
+| h and the rest | u = -1/lambda otherwise | the limit | unchanged |
+| g | v = 0 and v = +inf | the limit | unchanged |
+| g^(m) | v = 0, lambda an integer below m | NaN | 0 |
+| 1st to 6th derivatives of log of g' | v = 0 at lambda = 1 | NaN | 0 |
+| g^(m), m >= 1 | v = 0 or v = +inf otherwise | the limit | unchanged |
+| every `*_partials` component | every end | NaN | unchanged |
+
+**The limits.** The argument enters every closed form only through a power of v
+or of w = 1 + lambda u, so the sign of that power's exponent decides each limit:
+where the base runs to +inf the power runs to +inf for a positive exponent and
+dies for a negative one, where the base goes to 0 from above the two cases
+exchange, and on the knife edge where the exponent vanishes the power is 1 and
+the prefactor is the whole limit.
+
+For the forward map, g^(m) = F_m(lambda) v^(lambda - m) with
+F_m = prod_(k=1..m-1)(lambda - k), and the exponent vanishes exactly at the
+integer lambda = m, where F_m is (m-1)!. Where F_m itself vanishes, that is at
+an integer lambda below m, g is a polynomial of degree lambda and g^(m) is
+identically 0. The value g(0) and g(+inf) are the two ends of the image of g,
+-1/lambda where that end is finite and an infinity otherwise, which is what a
+caller reads the support of a transformed law from. The log-Jacobian is
+(lambda - 1) log v, whose m-th derivative is
+(lambda - 1)(-1)^(m-1)(m-1)! v^(-m): the value runs to an infinity of its own
+sign, each derivative to one at v = 0 and to 0 at v = +inf, and at lambda = 1
+the map is the identity and the whole log-Jacobian is 0.
+
+For the inverse, h^(K) = P_K(lambda) w^(1/lambda - K) with
+P_K = prod_(r=1..K-1)(1 - r lambda), and 1 - K lambda carries the sign of the
+exponent for lambda >= 0. At u = +inf, an end only for lambda >= 0, w runs to
++inf, so the order is +inf below the edge, P_K on it and 0 above it; lambda = 0,
+where h = e^u, falls under the first case with K lambda = 0 and P_K = 1. At
+u = -inf, an end only for lambda <= 0, the exponent is negative and h dies with
+every order of it. At the finite end u = -1/lambda, w goes to 0 from above and
+the same exponent decides the other way round: above 0 the order is 0 below the
+edge, P_K on it, and an infinity of the sign of P_K above it, 0 where P_K itself
+vanishes, since h is then a polynomial of degree 1/lambda; below 0 the exponent
+1/lambda - K is negative whatever K is and P_K is a product of factors above 1,
+so every order runs to +inf, h included, the range of h being (0, inf). On the
+edge lambda = 1/n the limit of h^(n) is P_n = (n-1)!/n^(n-1), which is 1, 1/2,
+2/9, 3/32, 24/625 and 120/7776 for n = 1 to 6. The log-Jacobian is
+(1 - lambda) S with S = log(1 + lambda u)/lambda, which is u itself at
+lambda = 0, and its K-th derivative is
+(1 - lambda)(-1)^(K-1)(K-1)! lambda^(K-1) w^(-K): S runs to +inf at u = +inf and
+to -inf at u = -inf, and at the finite end to -inf above 0 and to +inf below;
+every derivative carries w^(-K) and dies at an infinite u, except at lambda = 0,
+where the log-Jacobian is u and its first derivative is the slope 1, and at a
+finite end each runs to an infinity of the sign of its own coefficient. At
+lambda = 1 the map is the identity and every order is 0.
+
+Each of the 1232 limits was compared with SymPy's own limit of the definition
+(`tools/reference/bijector_box_cox_forms.py`, `check_limits`, the script that
+also checks every closed form of the header against SymPy). The C++ never forms
+the exponent: it vanishes where lambda is a small integer for the forward map
+and where a product of lambda with the order equals 1 for the inverse, so the
+two are compared rather than subtracted. A subtraction is what nvcc contracts
+into an FMA, and the exact product of 3 with the double nearest 1/3 is
+1 - 2^-54, which rounds to 1 in a plain multiplication and stays 1 - 2^-54 in an
+FMA, so the edge would be taken on one platform and not on the other. Measured
+here: the edge is reached at the double nearest 1/n for every n from 1 to 6,
+box_cox comparing lambda itself and not a 2 - lambda as yeo_johnson's negative
+branch does.
+
+**Three NaN inside the domain, of the same kind, repaired with the ends.** The
+test's own approach to each end found them; each is a vanishing prefactor
+meeting a power that has overflowed, and in each case the quantity vanishes
+identically where the prefactor does, so the power is now not formed at all.
+`bc_fwd_any`: g^(m) at an integer lambda below m, where v^(lambda - m)
+overflows for a small enough v (at lambda = 1 and m = 3, below v = 1e-103).
+`bc_fwd_lj_any`: a v-derivative of log|g'| at lambda = 1, where v^(-m)
+overflows (at m = 6, below v = 1e-52); the derivative in lambda is log v and
+does not vanish there, so the guard is on the pure v-derivatives alone.
+`bc_inv_mixed`: h^(K) where P_K vanishes, that is at lambda = 1/r with r below
+K, the exponential exp((1 - K lambda) S) overflowing for a w small enough.
+
+**A fourth defect found and repaired, not about the ends.** `bc_pow_shift`
+computes v^(lambda - m) as v^lambda divided by v m times, so that the exponent
+is not rounded (lambda - m is not a double, and log v magnifies its rounding).
+Where v^lambda itself underflows or overflows the route carries no information
+left: v^lambda is 0 or inf and so is every quotient, although v^(lambda - m) may
+be an ordinary number. Measured: g^(6) at lambda = 6 is exactly 120 for every v,
+and the route returned 0 at v = 1e-60 and 1e-120 and inf at v = 1e60, the
+correct 120 only between about 1e-52 and 1e52; g' at lambda = 6 and v = 1e-60 is
+1e-300 and came out 0. The rounded exponent is now used where the other route
+has nothing left, at a cost of |log v| eps relative, 1.5e-14 at the smallest
+double, which is what a result the division route cannot represent at all is
+worth. The reference rows are unaffected: the fallback runs only where the
+division route gives 0 or inf, and all seven orders keep the bounds measured on
+2026-11-12.
+
+**The test** is in `tests/bijector/test_box_cox.cpp`, in a kernel on the default
+execution space: for each of the 21 values of lambda above, the fourteen
+quantities (the map and its log-Jacobian, orders 0 to 6) at the four ends,
+checked first against the function's own approach to the end and then against
+the written-out values of the edges, of the signs of the infinities and of the
+log-Jacobians. Every end of box_cox has such an approach, the finite ones
+included: there the two arguments are the points where w = 1 + lambda u is 1e-30
+and 1e-60, which lie inside the domain on whichever side of the end it is. An
+infinite limit must grow past 1 in its own sign between the two arguments, a
+zero limit fall below 1e-6, and a finite limit be reached to 1e-8, which is what
+the approach is worth: it is only as good as v^lambda at the nearer argument,
+1e-10 at lambda = 1/6 and v = 1e-60, the slowest of these lambda. One ulp from
+a knife edge the limit would be right and out of reach, the exponent being about
+1e-16 while the logarithm of the argument reaches 745 at most, so the quantity
+sits on the plateau of the edge over the whole range of double; the test tells a
+plateau from an approach by the two arguments giving the same value, as
+yeo_johnson's does, and then checks only that the plateau is finite and carries
+the sign of the limit.
+
+**What was still NaN when the repair above was written, and no longer is.** The
+parameter derivatives (the `*_partials` functions, and so `forward_partials_dK`
+and the rest) were NaN at every end: at v = 0 and v = +inf a derivative in
+lambda brings powers of log v that multiply a power of v which is 0 or inf, and
+at an infinite u the Bell polynomials of the lambda-derivatives of S are built
+from u^(j+1) log1prel^(j)(lambda u), each term inf times NaN. They were left so
+on the reasoning recorded in the next section, which the day then overtook; the
+section after it repairs them. `box_cox_inv_lj_partials` forwards to
+`yeo_johnson_inv_lj_pos_partials`, which the two maps share, and that function
+was not touched: box_cox's guard sits in `box_cox_inv_lj_partials`, before the
+shared branch is reached.
+
+**The partials at the ends: the measurement, and a decision that was overtaken
+the same day.** Asked after the repair above, answered first on the state of
+the sibling map and then again when that state changed; both readings are kept
+here, because the measurement holds either way and only the conclusion moved.
+
+What the measurement said, and still says. Nothing outside the bijector layer
+and its own tests and benches reads a `*_partials` member today:
+`transformed_distrib` holds the map's parameters as fixed values and not as
+coordinates of theta, and reads the ends of its own support from the bound
+functions and not from the map at an end. And most of the limits are not
+numbers a caller could use. Classified with SymPy at the ends, over lambda in
+{-3/2, -1/2, 1/2, 1, 2, 3} and to total order four: of the 84 limits, 48 are
+infinite, 26 finite and 10 zero, so 58 per cent are infinite, and an infinity
+propagates into a criterion exactly as a NaN does. (The run also covered
+lambda = 0, whose 14 rows are an artefact of the script, which substitutes
+lambda = 0 into the definition before differentiating, leaving an expression
+without lambda; the true limits there are those of L^(n+1)/(n+1), L = log v,
+hence infinite. Those rows are excluded from the counts above.)
+
+Every one of those 26 is the same quantity: the pure lambda-derivatives of the
+forward map at the end where the image is finite, which are the
+lambda-derivatives of that very end,
+
+    d^n/dlambda^n (-1/lambda) = (-1)^(n+1) n! / lambda^(n+1),
+
+measured as 4, -16, 96 and -768 at lambda = 1/2 and v = 0, and as 4/9 at
+lambda = -3/2 and v = +inf.
+
+That run covered the forward map, one of its mixed partials and the inverse
+map, and not the log-Jacobians, so it does not say that the bound's derivatives
+are the only finite limits anywhere, and they are not. A second family was
+pointed out by the yeo_johnson session and found here too, in the mixed limits
+of log|h'| at lambda = 0, where log|h'| is affine in u: the limit is the
+constant (-1)^n1 (n1!)^2 wherever the number of argument derivatives is one more
+than the number in lambda, an infinity of sign (-1)^n1 below that and zero above
+it. Read off the SymPy table at lambda = 0: 1 at (n0, n1) = (1, 0) and -1 at
+(2, 1), at u = +inf and at u = -inf alike. Unlike yeo_johnson's, box_cox's two
+infinite ends carry the same sign here, the map having one branch and not a
+negative branch reflected from the positive one.
+
+**The first conclusion, and why it fell.** On that measurement the partials were
+left as they were, on the parity argument that yeo_johnson left its own NaN at
+an infinite end. That ceased to be true within the hour: the yeo_johnson session
+went on to repair all four of its partials families, adding
+`yj_fwd_partials_at_inf`, `yj_inv_partials_at_inf`, `yj_fwd_lj_partials_at_inf`
+and `yj_inv_lj_partials_at_edge` to `scalar_yeo_johnson.hpp`. The parity
+argument therefore now points the other way, and the cost is lower than the
+first estimate: that estimate assumed each limit had to be derived on its own,
+while the sibling's derivation shows one rule covering all of them, that a
+lambda-derivative multiplies a closed form by a logarithm of the argument, which
+loses to a negative power of it and wins against a vanishing exponent, so the
+sign of the exponent decides the mixed limits exactly as it decides the pure
+ones.
+
+What stays true either way, and was not reopened: the derivatives in lambda of
+the four bound functions (`dom_lo`, `dom_hi`, `img_lo`, `img_hi`) are written
+only on the day a bijector parameter becomes modelled and something reads them.
+They are a closed form of the bound and need no limit of a mixed partial, which
+is why they are the route for the caller that wants a moving support bound, and
+not the partials at a limit.
+
+**The partials at a large finite argument, measured because yeo_johnson's lose
+themselves there.** The inverse ones do, and sooner than the sibling's, which
+are clean at 1e40 and lose 28 of 448 entries at 1e60. Counting the NaN among the
+27 components with n2 = 0 over orders 1 to 6, at lambda in {-3/2, -1/2, 0, 1/6,
+1/2, 2/3, 1, 3/2, 2, 3, 6} and with the argument taken on the unbounded side of
+the image: clean at 1e10 and 1e20; 1 entry of the inverse map's at 1e40, at
+lambda = 0 alone; 2 to 3 of the inverse map's and 1 of log|h'|'s at 1e60, for
+every lambda; 4 to 10 and 3 at 1e100; and 6 to 21 and 6 at 1e300. The forward
+map's partials and the forward log-Jacobian's are clean at every argument up to
+1e300. This is a loss inside the forms at a finite point and not a missing limit
+at an end, so it is recorded and not repaired; its consequence for any test of
+the partials is that the arguments that approach an end must stop at 1e20 for
+the inverse, where nothing is lost yet.
+
+One function name, checked because the two are easy to confuse.
+`box_cox_inv_lj_partials` forwards to `yeo_johnson_inv_lj_pos_partials`, the
+inner positive branch the two maps share, and that function was not touched by
+the yeo_johnson repair: its guards went into the public
+`yeo_johnson_inv_lj_partials`, a different function of the same prefix. Every
+hunk of that file's diff is an insertion and none falls inside the shared
+function, so box_cox's inverse log-Jacobian partials did not move with it.
+
 
 **The partials repaired too (Giovanni, the same day, after the measurement
 above).** All six families now return their limits: the forward map's and its
@@ -10096,6 +10743,93 @@ generalizes beyond ScatterView, which `CLAUDE.md` already records from the other
 direction: wherever a kernel takes a pointer into a View and walks one index by
 hand, the layout is named and not left to the default.
 
+## The bound distances of the scalar bijectors at an infinite bound (2026-11-17)
+
+**What was wrong.** `scalar_bijector::inverse_distance_upper` and
+`inverse_distance_lower` return the distance of `h(u)` to the two bounds of the
+range of `h`, which is the domain of `g`. Six maps compute that distance
+directly, to avoid the cancellation of a difference near a finite bound, and
+seven more return `+inf` for a bound that is infinite; everything else went
+through the generic difference, `dom_hi - h(u)` and `h(u) - dom_lo` for a plain
+bijector and `forward_domain_upper() - inverse(u)` and
+`inverse(u) - forward_domain_lower()` for an inverted one. Wherever the bound
+is infinite and `h(u)` has reached it, that difference is `inf - inf` and gave
+NaN. The defect was found by the session that wrote `transformed_distrib`,
+which reads the ends of the support of `g(X)` from the bijector.
+
+Measured over the twenty maps in twenty-seven parameter settings, both
+directions of each (plain and inverted), at both ends of the closed domain of
+`h`, for both distances: 108 cells, of which 58 were NaN.
+
+| where | cells | before | after |
+|---|---|---|---|
+| plain bijector, the generic difference | 8 | NaN | `+inf` |
+| inverted bijector, the generic difference | 45 | NaN | `+inf` |
+| `h(u)` itself NaN at the end, `power` | 1 | NaN | the value's limit |
+| `h(u)` itself NaN at the end, `box_cox` | 4 | NaN | the value's limit |
+| every other cell | 50 | the limit | unchanged |
+
+The eight cells of the plain direction are `identity` at both ends, `log` and
+`sqrt` and `asinh` at `u = +inf`, `asinh` at `u = -inf`, and `inverse` and
+`inverse_sq` at `u = 0`, where `h(u) = +inf`. The forty-five of the inverted
+direction are every end of every map whose image, which is the range of `h`
+there, has an infinite bound. That set is not confined to an infinite argument:
+inverted `logit`, `probit`, `cauchit`, `cloglog` and `loglog` failed at the
+finite ends `u = 0` and `u = 1`, inverted `atanh` at `u = -1` and `u = 1`, and
+inverted `bounded(-2, 3)` at `u = -2` and `u = 3`. The defect is that the value
+has reached an infinite bound, not that the argument is infinite.
+
+**The convention, decided with Giovanni on 2026-11-17: the distance to an
+infinite bound is `+inf` at every point of the closed domain, the bound itself
+included.** With `V = (v_min, v_max)` the range of `h`, the upper distance is
+`d(u) = v_max - h(u)`. When `v_max` is finite, `h(u) -> v_max` as `u` runs to
+the end of its domain and the limit of `d` is 0, which is what the functions
+already returned. When `v_max = +inf`, every `h(u)` of the interior is finite
+and `d(u) = +inf` identically: `d` is the constant `+inf` on the whole
+interior, so `+inf` is also its limit at the end, and the rule of the module,
+that a closed bound gives the limit, decides the value without a further
+choice. The alternative put to Giovanni was 0, read as the distance of the
+bound from itself, which is a value assigned to `inf - inf` by decree rather
+than a limit; it would also have meant rewriting the seven per-map functions
+that today return `+inf` ignoring `u`. The two conventions differ in those 53
+cells and nowhere else.
+
+The repair is two helpers in `detail_scalar` of
+`include/laplace/bijector/scalar.hpp`, `to_upper_bound(hi, value)` and
+`to_lower_bound(lo, value)`, which return `+inf` for an infinite bound and the
+difference otherwise, and NaN wherever the value is NaN, which is how a point
+outside the closed domain and an invalid parameter arrive there. They replace
+the generic difference in the two `default:` branches of `inv_to_upper` and
+`inv_to_lower` and in the `inverted` branch of the two members. No per-map
+function needed a change, and no caller was touched.
+
+**A second defect, in `power`, repaired here.** `power_offset(e, x)` forms the
+small exponent correction `1 + e log x`, the term that carries the part of the
+exponent lost to rounding when `1/lambda` is not representable. Its guard
+skipped the term at `x = 0`, where `log x` is infinite, and not at an infinite
+`x`, where it is infinite as well: with `e` of the order of 1e-17 the term came
+out as an infinity of the sign of `e` and multiplied the power instead of
+correcting it. So `h(+inf)` was NaN for `power(-3)` and `power(-2.5)`, where the
+power is 0 and the correction `-inf`, and `-inf` for `power(2.5)`, where the
+power is `+inf` and the correction again negative; the true limits are 0 and
+`+inf`. The guard now skips any non-finite `x`, at which the sign of the whole
+exponent is carried by its leading part, the one that `power_scaled` raises
+directly. Finite arguments are untouched, the condition being `!isfinite(x)`.
+The four `box_cox` cells of the table were repaired in `scalar_box_cox.hpp` by
+the session that owns that file, on the same day.
+
+**The test** is in `tests/bijector/test_scalar.cpp`, the case "bijector scalar:
+the distances at the ends of every domain": thirty settings covering the twenty
+maps, each plain and inverted, in a kernel on the default execution space (a
+named function with external linkage, never a lambda inside a `TEST_CASE`). For
+each of the two ends of the closed domain of `h` it checks that neither
+distance is NaN and that neither is negative; that the distance to an infinite
+bound is exactly `+inf`; that the distance to a finite bound equals the
+difference, except where `h(u)` has run off to the opposite infinite bound and
+the distance is `+inf` there too; and that both distances are NaN for the two
+invalid settings, `affine(1, 0)` and `bounded(3, 1)`. 688 assertions, green on
+gcc; the CUDA build gives the same counts.
+
 ## The improper multivariate Student t: mvstudent_t2 over a singular Q (2026-11-17)
 
 What. The improper (intrinsic) class of `mvstudent_t2_distrib<S>` for a positive
@@ -10155,6 +10889,7 @@ Gaussian's Q^+ to 1e-14.
 
 Open. statmodels7 has no improper t (its mvstudent_t refuses a rank-deficient
 matrix): no frozen references. No bench: the kernels are the degenerate t's.
+
 
 ## The Dirichlet and the multinomial: dirichlet_distrib and multinomial_distrib (2026-11-17)
 
@@ -10255,3 +10990,29 @@ double-double probabilities in every table cost 5-40 times more on one thread.
 
 Open. independent_product_distrib does not take a component whose unit is constrained
 (y_coord_size() < dim()).
+
+**A rule the two bijector sessions arrived at from opposite directions.** Where a
+quantity's limit at a boundary is an infinity and the code reaches it through a
+guard, the test asserts that infinity EXACTLY. Every weaker check -- that the
+value is not NaN, that it is large, that it is finite or infinite -- passes
+whether the guard fires or not, so it cannot tell a working guard from a missing
+one. The yeo_johnson session states it that way; one refinement belongs with it,
+measured here. The exact assertion distinguishes them only on the DEVICE. With
+the guard removed the forms take over, and at a finite end they obtain the
+infinity by letting w = 1 + lambda u cancel to exactly zero, which the host does
+and CUDA does not: on gcc the forms return the same infinity the guard would
+have, so even `== inf` passes there and nothing in a host run can see the
+difference, while on CUDA the FMA leaves w at about 4e-17 and the infinity comes
+back as a large finite number, which only the exact assertion rejects. So the
+rule has two halves: assert the infinity exactly, and do not believe a host run
+about it.
+
+How both sessions found it, which is why it is a rule and not an anecdote. Each
+had asserted the exact infinities for one half of the partials at the finite end
+and left the other half to a no-NaN check, in opposite halves, an hour apart:
+yeo_johnson for the log-Jacobian's partials and not the map's, box_cox for the
+map's and not the log-Jacobian's. Neither gap was visible in a green run on
+either platform, since the guards were in fact firing; what each gap would have
+hidden is a guard that stopped firing later. The missing assertions are
+`yj_inv_partials_at_edge`'s in `test_yeo_johnson.cpp` and the block (4c) of
+`test_box_cox.cpp`.
