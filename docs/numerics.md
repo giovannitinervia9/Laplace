@@ -10362,9 +10362,8 @@ lambda the fifty-four entries at each of the four ends, with no NaN, the entry a
 to the pure derivative of the same order, the limit checked against the function's own approach
 to it, and the written-out values of the four special forms above.
 
-Measured: 6 cases on gcc with 11573 assertions and on CUDA with 11096, both green, together
-with the whole suite, green on both (667 cases, 1187615 assertions on gcc and 1187146 on CUDA).
-The two counts differ by design
+Measured: 6 cases green on both builds, 11188 assertions on gcc and 11204 on CUDA, with the
+whole suite green on both. The two counts differ by design
 and not by a skipped check: the consistency test branches on the value it reads -- a limit
 already attained, a plateau, or an approach -- and which branch a quantity takes differs between
 the platforms wherever FMA contraction moves the last bits, each branch asserting a different
@@ -10374,6 +10373,28 @@ number of things. Every assertion taken passes on both.
 argument: at 1e60, 28 of the 448 order-six entries measured are NaN, while 1e40 and below are
 clean. That is a loss inside the forms at a finite point and not a missing limit at an end, so
 the test compares a limit with the values at 1e20 and 1e40.
+
+
+**The finite end of the inverse domain, and what a test there has to assert.** The map's own
+parameter partials reached that end through the forms while the pure quantities and the
+log-Jacobian's partials were guarded, which another session noticed from the call sites and
+measured before reporting: they are not NaN there, but "not NaN" is not "the right limit", and
+the unguarded route is the one FMA turns into 1e100. Their limits are infinite throughout --
+h^(n0) = P_n0 w^(1/lambda - n0) with the exponent 1/lambda - K of the total order alone, which
+is strictly negative in both regimes where yeo_johnson has a finite end (below lambda = 0 and,
+through the reflection, above lambda = 2), so it never vanishes and no column is finite there,
+the sign being (-1)^n1 above and (-1)^(n0+1) below. `yj_inv_partials_at_edge` now returns them,
+and `check_edge_limits` covers the map as well as its log-Jacobian: 216 limits against SymPy,
+twice what it checked before.
+
+The test asserts those entries as exact infinities, and the reason is worth stating as a rule,
+because two sessions left the two halves of it to a weaker check an hour apart. A check for
+"not NaN", for "large" or for "finite or infinite" passes whether the guard fires or not, so it
+cannot tell a working guard from a missing one; only the exact comparison can. And the exact
+comparison can do it only on the device: remove the guard and the host's forms return the very
+same infinity, the cancellation being exact there, so the assertion stays green on gcc either
+way. A host run therefore says nothing at all about whether a guard at a finite end is
+exercised.
 
 ## The box_cox bijector at the ends of its two domains (2026-11-17)
 
