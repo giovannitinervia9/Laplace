@@ -69,9 +69,9 @@ using yj_ends_view = Kokkos::View<double* [yj_ends_places][yj_ends_slots][yj_end
 // The parameter partials at the same four places. For the total order K = 1 to 6 the entries
 // c[index(n1, 0)] of bijector_partials<K>, which are d^(K - n1)_x d^n1_lambda for n1 = 0 to K
 // (the map has no second parameter, so n2 is 0 throughout), go at yj_part_offset(K) + n1: 27
-// entries for the map, then 27 for its log-Jacobian. The two large arguments are 1e20 and 1e40
-// and not 1e60, where the partials themselves return NaN at order 6 (a loss at a large finite
-// argument, not at an end).
+// entries for the map, then 27 for its log-Jacobian. The two large arguments are 1e20 and 1e40;
+// 1e60 and beyond have a case of their own at the end of this file, the loss there having nothing
+// to do with an end of the domain.
 constexpr int yj_part_count = 27;
 constexpr int yj_parts_quantities = 2 * yj_part_count;
 using yj_parts_view =
@@ -615,4 +615,176 @@ TEST_CASE("bijector yeo_johnson: the parameter partials at the ends of both doma
         CHECK(at(l, 0, K, n1, 1) == (((K - n1) % 2) ? -inf : inf));
       }
   }
+}
+
+// ---------------------------------------------------------------- a large finite argument
+//
+// Above |p1 x| of about 1e3 the generated forms for the parameter-derivatives of the inverse lose
+// their value: each is a polynomial in the derivatives of log1prel multiplied by a power of the
+// argument, and the power overflows while the derivative underflows, so the product is inf * 0.
+// Measured on 2026-11-17: at p1 = 1/2 and x = 1e60 the sixth parameter-derivative came back NaN
+// for a value whose size is 7.4e135. The map and its log-Jacobian take a rescaled route there
+// instead (scalar_yeo_johnson.hpp), and these are the cases that say so.
+//
+// The references are the pure parameter-derivatives of order 1 to 6 at the same places, from the
+// definition of the inverse differentiated symbolically by SymPy and evaluated at 60 digits by
+// mpmath (tools/reference/bijector_yeo_johnson_large.py), so nothing of the C++ went into them.
+// The entries that also carry a derivative in the argument are smaller by a factor
+// (1 + p1 x)^(-1) per order and underflow to zero at these arguments, which leaves nothing to
+// compare; they are checked only for being a number.
+constexpr int yj_large_cases = 4;
+using yj_large_view = Kokkos::View<double* [2][yj_part_count], Kokkos::LayoutRight>;
+
+void yeo_johnson_large_kernel(Kokkos::View<const double*> p1, Kokkos::View<const double*> xs,
+                              yj_large_view out) {
+  Kokkos::parallel_for(
+      "bijector_yeo_johnson_large", p1.extent(0), KOKKOS_LAMBDA(int i) {
+        const auto b = lb::scalar_bijector::yeo_johnson(p1(i));
+        yj_fill_partials(b, 1, xs(i), &out(i, 0, 0));
+        yj_fill_partials(b, 3, xs(i), &out(i, 1, 0));
+      });
+}
+
+TEST_CASE("bijector yeo_johnson: the parameter partials at a large finite argument") {
+  // a pair on each branch at 1e60, one at 1e300, and one whose sixth derivative overflows
+  const double p1_v[yj_large_cases] = {0.5, 0.5, 1.3, 0.3};
+  const double x_v[yj_large_cases] = {1e60, -1e60, 1e300, -1e60};
+  // d^K_p1 of the inverse, K = 1 to 6, one row per case
+  const double ref_map[yj_large_cases][6] = {
+      {-1.3646195839908280e+122, 7.5031312194048345e+124, -4.1552650623562085e+127,
+       2.3176448061380032e+130, -1.3018305683658143e+133, 7.3635921977184855e+135},
+      {-8.0113484847197285e+41, -5.0044104753074661e+43, -3.1918595397974731e+45,
+       -2.0773303418883439e+47, -1.3787431928266879e+49, -9.3269195189995701e+50},
+      {-2.9367416123614587e+233, 1.2036053180620503e+236, -4.9513705829709825e+238,
+       2.0444698029073191e+241, -8.4730735211042176e+243, 3.5244993650430290e+246},
+      {-1.2813475326188393e+37, -6.2548109407359975e+38, -3.1256851274652953e+40,
+       -1.5977758825561322e+42, -8.3484688410836860e+43, -4.4557524858383806e+45}};
+  // and of its log-Jacobian
+  const double ref_lj[yj_large_cases][6] = {
+      {-547.84783359633118, 2179.3913343853247, -13036.348006311948, 104066.78405049559,
+       -1038939.8405049559, 12450382.086059470},
+      {61.804698083444847, 81.665523370519055, 162.63968871634675, 432.52065139173949,
+       1438.8383852975678, 5746.2232256895855},
+      {-409.07567583590603, 628.30031148173072, -1448.7683739981398, 4455.4326130318505,
+       -17129.691077380883, 79036.016477828546},
+      {48.230357726887513, 56.192034940242178, 98.719412241739140, 231.61893147950236,
+       679.81527301629213, 2395.4293081731425}};
+
+  Kokkos::View<double*> p1_d("p1", yj_large_cases), x_d("x", yj_large_cases);
+  auto p1_h = Kokkos::create_mirror_view(p1_d);
+  auto x_h = Kokkos::create_mirror_view(x_d);
+  for (int c = 0; c < yj_large_cases; ++c) p1_h(c) = p1_v[c], x_h(c) = x_v[c];
+  Kokkos::deep_copy(p1_d, p1_h);
+  Kokkos::deep_copy(x_d, x_h);
+  yj_large_view out_d("large", yj_large_cases);
+  yeo_johnson_large_kernel(p1_d, x_d, out_d);
+  auto out = Kokkos::create_mirror_view(out_d);
+  Kokkos::deep_copy(out, out_d);
+
+  // Not an assertion that the entries are merely finite or large: without the rescaled route they
+  // are NaN, so requiring a number of every one of them is what distinguishes the two.
+  for (int c = 0; c < yj_large_cases; ++c)
+    for (int lj = 0; lj < 2; ++lj)
+      for (int K = 1; K <= 6; ++K)
+        for (int n1 = 0; n1 <= K; ++n1) {
+          INFO("case ", c, ", log-Jacobian ", lj, ", K ", K, ", n1 ", n1);
+          CHECK_FALSE(std::isnan(out(c, lj, yj_part_offset(K) + n1)));
+        }
+
+  // The value of the inverse is exp(S) with S = log(1 + p1 x)/p1, so one unit in the last place
+  // of S moves it by a relative |S|, which is 276 at x = 1e60 and 690 at x = 1e300: the bound
+  // allows that amplification, measured at 8.4e-14 at the worst of these places, and cannot be
+  // tightened by any route that computes the value in double. The log-Jacobian is S times a
+  // factor and carries no such amplification: it agrees to one unit in the last place.
+  for (int c = 0; c < yj_large_cases; ++c)
+    for (int K = 1; K <= 6; ++K) {
+      INFO("the inverse, case ", c, ", K ", K);
+      CHECK(out(c, 0, yj_part_offset(K) + K) == doctest::Approx(ref_map[c][K - 1]).epsilon(4e-13));
+      INFO("its log-Jacobian, case ", c, ", K ", K);
+      CHECK(out(c, 1, yj_part_offset(K) + K) == doctest::Approx(ref_lj[c][K - 1]).epsilon(1e-14));
+    }
+}
+
+// ------------------------------------- a huge argument while the parameter times it stays small
+//
+// The other side of the same loss, and the one place the rescaled route above cannot reach:
+// where p1 is so small that p1 x stays small even at a huge x, the forms carry a power of the
+// argument in front of a bracket in the derivatives of log1prel which cancels as the argument of
+// log1prel goes to zero, so the power is infinite, the bracket is zero, and the product is NaN.
+// Measured on 2026-11-17: the log-Jacobian's partials begin to fail from |x| = 1e103 at order
+// six and from 1e154 at orders four and five, and most of the values they lose are FINITE --
+// at x = 1e300 and order six, 0 at n1 = 2 and -3.6e301 at n1 = 3 -- so a guard returning signed
+// infinities would have been wrong. Above |x| = 1e50 those entries come from a third route
+// (scalar_yeo_johnson.hpp), which groups each term so that one power of the argument carries the
+// whole of a bounded sum.
+//
+// At p1 = 0 every entry has a closed form, and these references are SymPy's own limit of the
+// definition as p1 goes to zero (tools/reference/bijector_yeo_johnson_large.py), a third route
+// to them independent both of the forms and of the identity the repair uses. The comparison is
+// exact wherever the value is zero or an infinity, those being the answers at stake, and
+// relative elsewhere.
+//
+// The map needs nothing in this band: at p1 = 0 the inverse is exp(x) - 1, already an infinity
+// for every |x| above about 710, so there is no finite value of its own to lose.
+constexpr int yj_band_cases = 3;
+
+void yeo_johnson_band_kernel(Kokkos::View<const double*> xs,
+                             Kokkos::View<double* [yj_part_count], Kokkos::LayoutRight> out) {
+  Kokkos::parallel_for(
+      "bijector_yeo_johnson_band", xs.extent(0), KOKKOS_LAMBDA(int i) {
+        const auto b = lb::scalar_bijector::yeo_johnson(0.0);
+        yj_fill_partials(b, 3, xs(i), &out(i, 0));
+      });
+}
+
+TEST_CASE("bijector yeo_johnson: the parameter partials at a huge argument with p1 = 0") {
+  const double inf = std::numeric_limits<double>::infinity();
+  const double x_v[yj_band_cases] = {1e103, 1e150, 1e300};
+  // the orders 1 to 6 one after another, entry n1 of order K at yj_part_offset(K) + n1
+  const double ref[yj_band_cases][yj_part_count] = {
+      // x = 1e103
+      {1.0, -5.0e+205, 0.0, -1.0e+103, inf,
+       0.0, -1.0, 2.0e+206, -inf, 0.0,
+       0.0, 4.0e+103, -inf, inf, 0.0,
+       0.0, 4.0, -1.8e+207, inf, -inf,
+       0.0, 0.0, 0.0, -3.6e+104, inf,
+       -inf, inf},
+      // x = 1e150
+      {1.0, -5.0e+299, 0.0, -1.0e+150, inf,
+       0.0, -1.0, 2.0e+300, -inf, 0.0,
+       0.0, 4.0e+150, -inf, inf, 0.0,
+       0.0, 4.0, -1.8e+301, inf, -inf,
+       0.0, 0.0, 0.0, -3.6e+151, inf,
+       -inf, inf},
+      // x = 1e300, where three more of the entries have grown past the largest double
+      {1.0, -inf, 0.0, -1.0e+300, inf,
+       0.0, -1.0, inf, -inf, 0.0,
+       0.0, 4.0e+300, -inf, inf, 0.0,
+       0.0, 4.0, -inf, inf, -inf,
+       0.0, 0.0, 0.0, -3.6e+301, inf,
+       -inf, inf}};
+
+  Kokkos::View<double*> x_d("x", yj_band_cases);
+  auto x_h = Kokkos::create_mirror_view(x_d);
+  for (int c = 0; c < yj_band_cases; ++c) x_h(c) = x_v[c];
+  Kokkos::deep_copy(x_d, x_h);
+  Kokkos::View<double* [yj_part_count], Kokkos::LayoutRight> out_d("band", yj_band_cases);
+  yeo_johnson_band_kernel(x_d, out_d);
+  auto out = Kokkos::create_mirror_view(out_d);
+  Kokkos::deep_copy(out, out_d);
+
+  for (int c = 0; c < yj_band_cases; ++c)
+    for (int K = 1; K <= 6; ++K)
+      for (int n1 = 0; n1 <= K; ++n1) {
+        const int q = yj_part_offset(K) + n1;
+        const double got = out(c, q), want = ref[c][q];
+        INFO("x index ", c, ", K ", K, ", n1 ", n1);
+        if (!std::isfinite(want) || want == 0.0) {
+          // an infinity or an exact zero: compared exactly, since an assertion that merely
+          // asked for a number would pass whether the route fires or not
+          CHECK(got == want);
+        } else {
+          CHECK(got == doctest::Approx(want).epsilon(1e-14));
+        }
+      }
 }

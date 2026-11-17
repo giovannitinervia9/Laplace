@@ -103,6 +103,220 @@ LAPLACE_HD double yj_exprel_d(double y, double X, double a, int k) {
   if constexpr (J == 6) return m::exprel_d6(y);
 }
 
+// ------------------------------------------- a huge argument while lambda u stays small
+//
+// The rescaled route below starts at |lambda u| = 1e3 and cannot reach the other side of the
+// forms' loss: where lambda is so small that lambda u stays small even at a huge u, the forms
+// carry a power of the argument in front of a bracket in the psi^(j)(z) which cancels as z goes
+// to zero, so the power is infinite, the bracket is zero, and the product is NaN again.
+// Measured on 2026-11-17 for the log-Jacobian's partials: at lambda = 0 the entries start to
+// fail from |x| = 1e103 at order six and from 1e154 at orders four and five, and at x = 1e300
+// order six returns NaN where the exact values are 0 at n1 = 2 and -3.6e301 at n1 = 3, order
+// five where it is 4 at n1 = 2. Most of those are finite, so returning signed infinities would
+// be wrong, and the rescaled route cannot serve either, its q_j being a cancelling difference at
+// small z. The band is narrow: for lambda above about 1e-200 nothing fails anywhere, lambda u
+// then reaching 1e3 before a power of u can overflow.
+//
+// What this route uses is that the power of u in each term does not depend on the summation
+// index. Writing S = u psi(lambda u) with psi = log1prel and z = lambda u, Leibniz in u gives
+//
+//   d^n0_u S^(j) = sum_m C(n0, m) [d^(n0-m)_u u^(j+1)] lambda^m psi^(j+m)(z)
+//
+// and u^(j+1-n0+m) lambda^m = u^(j+1-n0) z^m, one power for the whole sum:
+//
+//   d^n0_u S^(j) = u^(j+1-n0) sum_(m=m0..n0) C(n0,m) (j+1)!/(j+1-n0+m)! z^m psi^(j+m)(z)
+//
+// with m0 = max(0, n0 - j - 1), which keeps every factorial's argument non-negative. The sum is
+// bounded at small z, every term being a small power of z times a derivative of psi, so it is
+// taken first and the single power applied once at the end. A sum that is exactly zero returns
+// zero without that multiplication: at z = 0 it is zero exactly when the m = 0 term is absent,
+// and a power of u that has overflowed would otherwise turn an exact zero into NaN. That is the
+// whole of the repair; the identity is checked against SymPy's own derivative for every (j, n0)
+// with j + n0 <= 6 by check_dS_small_z in this file's script.
+//
+// The entries of the log-Jacobian follow from log|h'| = (1 - lambda) S:
+//
+//   d^n0_u d^n1_lambda log|h'| = (1 - lambda) d^n0_u S^(n1) - n1 d^n0_u S^(n1-1).
+//
+// The route is taken for |u| above 1e50, fifty decades below the measured onset and far above
+// any argument a model produces, and below that the forms are kept: over the overlap the two
+// agree to 2.3e-16 relative (measured for lambda from 0 to 1.9 and |x| from 1 to 1e140, every
+// order and every entry). The map's own partials need nothing here: at lambda = 0 the inverse is
+// exp(u) - 1, already an infinity for every |u| above about 710, so the band holds no finite
+// value of theirs to lose (measured 0 of 7 NaN at every place in it).
+
+LAPLACE_HD double yj_fact_small(int n) {
+  double f = 1.0;
+  for (int i = 2; i <= n; ++i) f *= double(i);
+  return f;
+}
+
+// d^n0_u S^(j) by the identity above; lr[k] = psi^(k)(z) for k = 0..j+n0
+LAPLACE_HD double yj_dS_small_z(int j, int n0, double z, double u, const double* lr) {
+  const int m0 = (n0 - j - 1 > 0) ? (n0 - j - 1) : 0;
+  double acc = 0.0;
+  for (int mm = m0; mm <= n0; ++mm) {
+    double zm = 1.0;
+    for (int i = 0; i < mm; ++i) zm *= z;
+    const double cm = yj_fact_small(n0) / (yj_fact_small(mm) * yj_fact_small(n0 - mm));
+    acc += cm * (yj_fact_small(j + 1) / yj_fact_small(j + 1 - n0 + mm)) * zm * lr[j + mm];
+  }
+  if (acc == 0.0) return 0.0;  // exact, and a power of u that has overflowed must not reach it
+  const int e = j + 1 - n0;
+  double p = 1.0;
+  for (int i = 0; i < (e >= 0 ? e : -e); ++i) p *= u;
+  return (e >= 0) ? acc * p : acc / p;
+}
+
+// out[n1] = d^(K-n1)_u d^n1_lambda [(1 - lambda) log(1 + lambda u)/lambda] for n1 = 0..K, valid
+// wherever 1 + lambda u > 0, so for the positive branch of Yeo-Johnson and the whole of Box-Cox.
+// Yeo-Johnson's negative branch is this at (2 - lambda, -u) with every entry times (-1)^K, the
+// sign being (-1)^(n0+n1) and n0 + n1 = K.
+template <int K>
+LAPLACE_HD void yj_inv_lj_partials_small_z(double lam, double u, double* out) {
+  const double z = lam * u;
+  double lr[K + 1];
+  lr[0] = m::log1prel(z);
+  m::detail_log1prel::derivs_upto(K, z, lr);
+  for (int n1 = 0; n1 <= K; ++n1) {
+    const int n0 = K - n1;
+    double v = (1.0 - lam) * yj_dS_small_z(n1, n0, z, u, lr);
+    if (n1 >= 1) v -= double(n1) * yj_dS_small_z(n1 - 1, n0, z, u, lr);
+    out[n1] = v;
+  }
+}
+
+// ---------------------------------------------------------------- a large finite argument
+//
+// The lambda-derivatives of the inverse are written below as a polynomial in the derivatives of
+// log1prel multiplied by a power of the argument, and above |lambda u| of about 1e3 that shape
+// loses the value: psi^(j)(z) decays like j! log(1+z)/z^(j+1) and underflows while the power
+// z^(j+1) in front of it overflows. Measured on 2026-11-17: at lambda = 1/2 and u = 1e60,
+// log1prel_d6 is exactly 0 and z^7 is infinite, so the form returned inf * 0 = NaN for a value
+// whose true size is 7.36e135 (mpmath at 60 digits). Regrouping the polynomial does not fix it,
+// because its terms genuinely span hundreds of orders of magnitude: two attempts that only
+// moved the powers around left more NaN than they removed, not fewer.
+//
+// What works is to compute the whole derivative from its structure, with the dominant scale
+// factored out and every intermediate bounded:
+//
+//   h^(n0) = C_n0(lambda) exp(A_n0),   A_n0 = (1 - n0 lambda) S,   S = log(1 + lambda u)/lambda
+//   d^n1_lambda [C exp(A)] = exp(A) sum_i binom(n1, i) C^(i) Y_(n1-i)(A', ..., A^(n1-i))
+//
+// with Y the complete Bell polynomials, A^(j) = (1 - n0 lambda) S^(j) - n0 j S^(j-1), and
+//
+//   S^(j) = q_j/lambda^(j+1),   q_j = z^(j+1) psi^(j)(z) = (-1)^j j! [log(1+z) - sum_(k=1..j) r^k/k]
+//
+// where r = z/(1+z). That closed form for q_j is proved equal to the derivative by SymPy for
+// j = 0 to 7 (check_scaled_log1prel in this file's script); it is bounded, growing only as a
+// logarithm, so S^(j) and the Bell polynomials stay representable and the only large number is
+// the exp at the end. At lambda = 1/2 and u = 1e60 the chain runs q_6 ~ 1e5, S^(6) ~ 1e7,
+// Y_6 ~ 1e16, exp(A) ~ 1e119, product 7.36e135, which is the value to eight digits.
+//
+// Below |z| = 1e3 the forms are exact and this route is not taken: q_j there is a difference of
+// two nearly equal quantities and would lose about two digits at z = 1. The two agree to 1e-15
+// or better over the whole overlap (measured from u = 1 to u = 1e20).
+
+LAPLACE_HD double yj_binom(int n, int k) {
+  double b = 1.0;
+  for (int i = 0; i < k; ++i) b = b * double(n - i) / double(i + 1);
+  return b;
+}
+
+// q[j] = z^(j+1) psi^(j)(z) for j = 0..n, by the closed form above
+LAPLACE_HD void yj_log1prel_scaled(int n, double z, double* q) {
+  const double L = Kokkos::log1p(z);
+  const double r = z / (1.0 + z);
+  double fact = 1.0, rk = 1.0, sum = 0.0;
+  for (int j = 0; j <= n; ++j) {
+    if (j >= 1) {
+      fact *= double(j);
+      rk *= r;
+      sum += rk / double(j);
+    }
+    q[j] = ((j % 2) ? -fact : fact) * (L - sum);
+  }
+}
+
+// out[n1] = d^(K-n1)_u d^n1_lambda h for n1 = 0..K, on the POSITIVE branch (u >= 0, lambda != 0,
+// which |z| > 1e3 guarantees). Every entry carries at least one derivative, K being 1 or more, so
+// the -1 of h = exp(S) - 1 never appears here and the same routine serves any map whose inverse
+// is exp(S) times a constant: Box-Cox calls it unchanged for its own column. The negative branch is this one reflected, h(u) = -h_pos(-u; c)
+// with c = 2 - lambda, so its entries are these at (-u, c) times (-1)^(K+1), the sign being the
+// same for every n1 since n0 + n1 = K.
+template <int K>
+LAPLACE_HD void yj_inv_partials_rescaled_pos(double lam, double u, double* out) {
+  double q[K + 1];
+  yj_log1prel_scaled(K, lam * u, q);
+  const double S = q[0] / lam;
+  for (int n1 = 0; n1 <= K; ++n1) {
+    const int n0 = K - n1;
+    double Sd[K + 2], Ad[K + 2], Y[K + 2], Cd[K + 2];
+    for (int j = 0; j <= K + 1; ++j) Sd[j] = Ad[j] = Y[j] = Cd[j] = 0.0;
+    double lp = lam;
+    for (int j = 1; j <= n1; ++j) {
+      lp *= lam;
+      Sd[j] = q[j] / lp;
+    }
+    for (int j = 1; j <= n1; ++j)
+      Ad[j] = (1.0 - double(n0) * lam) * Sd[j] - double(n0) * double(j) * (j == 1 ? S : Sd[j - 1]);
+    Y[0] = 1.0;
+    for (int mm = 0; mm < n1; ++mm) {
+      double acc = 0.0;
+      for (int j = 0; j <= mm; ++j) acc += yj_binom(mm, j) * Ad[j + 1] * Y[mm - j];
+      Y[mm + 1] = acc;
+    }
+    // C_n0 = prod_(k=1..n0-1)(1 - k lambda) and its lambda-derivatives, one factor at a time
+    Cd[0] = 1.0;
+    int d = 0;
+    for (int k = 1; k <= n0 - 1; ++k) {
+      const double f = 1.0 - double(k) * lam, fp = -double(k);
+      for (int i = d + 1; i >= 0; --i) {
+        double v = (i <= d) ? Cd[i] * f : 0.0;
+        if (i >= 1 && i - 1 <= d) v += double(i) * Cd[i - 1] * fp;
+        Cd[i] = v;
+      }
+      ++d;
+    }
+    double acc = 0.0;
+    for (int i = 0; i <= n1; ++i) acc += yj_binom(n1, i) * Cd[i] * Y[n1 - i];
+    out[n1] = acc * m::exp((1.0 - double(n0) * lam) * S);
+  }
+}
+
+template <int K>
+LAPLACE_HD void yj_inv_partials_rescaled(double p1, double x, double* out) {
+  if (x >= 0.0) {
+    yj_inv_partials_rescaled_pos<K>(p1, x, out);
+    return;
+  }
+  yj_inv_partials_rescaled_pos<K>(2.0 - p1, -x, out);
+  if ((K + 1) % 2) {
+    for (int n1 = 0; n1 <= K; ++n1) out[n1] = -out[n1];
+  }
+}
+
+// d^K_lambda [(1 - lambda) log(1 + lambda u)/lambda] = (1 - lambda) S^(K) - K S^(K-1): the only
+// entry of the log-Jacobian's partials that loses its value at a large finite argument, every
+// other carrying a power of 1 + lambda u instead of S and staying bounded. It holds wherever
+// 1 + lambda u > 0, so it serves the positive branch of Yeo-Johnson and the whole of Box-Cox;
+// Yeo-Johnson's negative branch calls it at (2 - lambda, -u) and takes (-1)^K.
+template <int K>
+LAPLACE_HD double yj_inv_lj_pure_lambda_rescaled(double lam, double u) {
+  double q[K + 1];
+  yj_log1prel_scaled(K, lam * u, q);
+  double lp = 1.0, sd[K + 2];
+  for (int j = 0; j <= K + 1; ++j) sd[j] = 0.0;
+  for (int j = 0; j <= K; ++j) {
+    lp *= lam;
+    sd[j] = q[j] / lp;  // S^(j)
+  }
+  // d^K_lambda [(1 - lambda) S] = (1 - lambda) S^(K) - K S^(K-1)
+  double v = (1.0 - lam) * sd[K];
+  if (K >= 1) v -= double(K) * sd[K - 1];
+  return v;
+}
+
 // ---------------------------------------------------------------- the limits at an infinite argument
 //
 // Every form above is written from exprel or log1prel, whose argument is itself infinite at an
@@ -837,6 +1051,11 @@ LAPLACE_HD void yeo_johnson_inv_partials(double x, double p1, double p2, double*
     yj_inv_partials_at_inf<K>(x > 0.0, p1, out);
     return;
   }
+  // a large finite argument: the forms lose the value, the rescaled route keeps it
+  if (Kokkos::fabs((x >= 0.0 ? p1 : p1 - 2.0) * x) > 1.0e3) {
+    yj_inv_partials_rescaled<K>(p1, x, out);
+    return;
+  }
   // the finite end of the domain of h, where the forms give a large finite
   // value under FMA contraction instead of the infinity the limit has
   if ((p1 < 0.0 && x == -1.0 / p1) || (p1 > 2.0 && x == 1.0 / (2.0 - p1))) {
@@ -1357,16 +1576,30 @@ template <int K>
 LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out) {
   static_assert(K >= 1 && K <= 6, "order 1 to 6");
   if constexpr (K == 1) {
+    const bool yj_big = Kokkos::fabs(p1 * x) > 1.0e3;
+    const double yj_top =
+        yj_big ? yj_inv_lj_pure_lambda_rescaled<1>(p1, x) : 0.0;
+    if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+      yj_inv_lj_partials_small_z<1>(p1, x, out);
+      return;
+    }
     const double z = (p1 * x);
     double lr[2];
     lr[0] = m::log1prel(z);
     m::detail_log1prel::derivs_upto(1, z, lr);
     const double t0 = (1.0 + (-1.0 * p1));
     out[0] = (t0 * (1.0 / ipow<1>((1.0 + (p1 * x)))));
-    out[1] = ((-1.0 * lr[0] * x) + (lr[1] * t0 * ipow<2>(x)));
+    out[1] = yj_big ? yj_top : (((-1.0 * lr[0] * x) + (lr[1] * t0 * ipow<2>(x))));
     return;
   }
   if constexpr (K == 2) {
+    const bool yj_big = Kokkos::fabs(p1 * x) > 1.0e3;
+    const double yj_top =
+        yj_big ? yj_inv_lj_pure_lambda_rescaled<2>(p1, x) : 0.0;
+    if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+      yj_inv_lj_partials_small_z<2>(p1, x, out);
+      return;
+    }
     const double zs = (p1 * x);
     if (Kokkos::fabs(zs) > 0.5) {
       const double e = 1.0 / (1.0 + zs);
@@ -1376,7 +1609,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out
       const double f0 = (-1.0 + p1);
       out[0] = (f0 * p1 * (1.0 / ipow<2>((1.0 + (p1 * x)))));
       out[1] = (-1.0 * e * (1.0 / ipow<1>(p1)) * (1.0 + (-1.0 * e) + (e * p1)));
-      out[2] = (-1.0 * ipow<2>(x) * ((2.0 * lr[1]) + (f0 * lr[2] * x)));
+      out[2] = yj_big ? yj_top : ((-1.0 * ipow<2>(x) * ((2.0 * lr[1]) + (f0 * lr[2] * x))));
       return;
     }
     const double z = (p1 * x);
@@ -1387,10 +1620,17 @@ LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out
     const double t2 = (1.0 / ipow<2>(t1));
     out[0] = (t0 * t2 * p1);
     out[1] = ((-1.0 * (1.0 / ipow<1>(t1))) + (t0 * t2 * x));
-    out[2] = (-1.0 * ipow<2>(x) * ((2.0 * lr[1]) + (lr[2] * t0 * x)));
+    out[2] = yj_big ? yj_top : ((-1.0 * ipow<2>(x) * ((2.0 * lr[1]) + (lr[2] * t0 * x))));
     return;
   }
   if constexpr (K == 3) {
+    const bool yj_big = Kokkos::fabs(p1 * x) > 1.0e3;
+    const double yj_top =
+        yj_big ? yj_inv_lj_pure_lambda_rescaled<3>(p1, x) : 0.0;
+    if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+      yj_inv_lj_partials_small_z<3>(p1, x, out);
+      return;
+    }
     const double zs = (p1 * x);
     if (Kokkos::fabs(zs) > 0.5) {
       const double e = 1.0 / (1.0 + zs);
@@ -1403,7 +1643,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out
       out[0] = (f0 * (1.0 / ipow<3>((1.0 + (p1 * x)))) * (2.0 + (-1.0 * f1)));
       out[1] = (ipow<2>(e) * (1.0 + (-1.0 * f2) + (e * f1)));
       out[2] = (-1.0 * f2 * (1.0 / ipow<1>(f0)) * (-1.0 + e) * (1.0 + (-1.0 * e) + (e * p1)));
-      out[3] = (-1.0 * ipow<3>(x) * ((3.0 * lr[2]) + (lr[3] * x * (-1.0 + p1))));
+      out[3] = yj_big ? yj_top : ((-1.0 * ipow<3>(x) * ((3.0 * lr[2]) + (lr[3] * x * (-1.0 + p1)))));
       return;
     }
     const double z = (p1 * x);
@@ -1418,10 +1658,17 @@ LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out
     out[0] = (t2 * ipow<2>(p1) * (2.0 + (-2.0 * p1)));
     out[1] = ((t3 * t4) + (t3 * p1) + (-2.0 * t0 * t2 * t4));
     out[2] = (2.0 * t3 * x * (1.0 + (-1.0 * t5 * (1.0 / ipow<1>(t1)))));
-    out[3] = (-1.0 * ipow<3>(x) * ((3.0 * lr[2]) + (lr[3] * t5)));
+    out[3] = yj_big ? yj_top : ((-1.0 * ipow<3>(x) * ((3.0 * lr[2]) + (lr[3] * t5))));
     return;
   }
   if constexpr (K == 4) {
+    const bool yj_big = Kokkos::fabs(p1 * x) > 1.0e3;
+    const double yj_top =
+        yj_big ? yj_inv_lj_pure_lambda_rescaled<4>(p1, x) : 0.0;
+    if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+      yj_inv_lj_partials_small_z<4>(p1, x, out);
+      return;
+    }
     const double zs = (p1 * x);
     if (Kokkos::fabs(zs) > 0.5) {
       const double e = 1.0 / (1.0 + zs);
@@ -1436,7 +1683,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out
       out[1] = (-2.0 * p1 * ipow<3>(e) * (1.0 + (-1.0 * f1) + (f1 * p1)));
       out[2] = (2.0 * f2 * (1.0 / ipow<1>(p1)) * (-1.0 + (-3.0 * f2) + (-2.0 * f3) + (4.0 * e) + (3.0 * f2 * p1)));
       out[3] = (-6.0 * e * (1.0 / ipow<1>(f0)) * ipow<2>((-1.0 + e)) * (1.0 + f3 + (-1.0 * e)));
-      out[4] = (-1.0 * ipow<4>(x) * ((4.0 * lr[3]) + (lr[4] * x * (-1.0 + p1))));
+      out[4] = yj_big ? yj_top : ((-1.0 * ipow<4>(x) * ((4.0 * lr[3]) + (lr[4] * x * (-1.0 + p1)))));
       return;
     }
     const double z = (p1 * x);
@@ -1458,10 +1705,17 @@ LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out
     out[1] = ((-2.0 * t3 * t4) + (2.0 * t4 * t5 * p1) + (-3.0 * t2 * t3 * t5 * x));
     out[2] = (2.0 * t6 * (1.0 + (-2.0 * t10) + (-2.0 * t0 * t7) + (3.0 * t11 * t6 * t8 * p1)));
     out[3] = (6.0 * t11 * t4 * (-1.0 + t10));
-    out[4] = (-1.0 * ipow<4>(x) * ((4.0 * lr[3]) + (lr[4] * t9)));
+    out[4] = yj_big ? yj_top : ((-1.0 * ipow<4>(x) * ((4.0 * lr[3]) + (lr[4] * t9))));
     return;
   }
   if constexpr (K == 5) {
+    const bool yj_big = Kokkos::fabs(p1 * x) > 1.0e3;
+    const double yj_top =
+        yj_big ? yj_inv_lj_pure_lambda_rescaled<5>(p1, x) : 0.0;
+    if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+      yj_inv_lj_partials_small_z<5>(p1, x, out);
+      return;
+    }
     const double zs = (p1 * x);
     if (Kokkos::fabs(zs) > 0.5) {
       const double e = 1.0 / (1.0 + zs);
@@ -1480,7 +1734,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out
       out[2] = (-4.0 * ipow<3>(e) * (-1.0 + (-1.0 * f5) + (-3.0 * f3) + (6.0 * e) + (6.0 * f4 * p1)));
       out[3] = (f5 * f6 * (1.0 / ipow<1>(f1)) * (-1.0 + (-4.0 * f4) + (-2.0 * f3) + (5.0 * e) + (4.0 * f4 * p1)));
       out[4] = (-24.0 * e * (1.0 / ipow<1>(f0)) * ipow<3>(f6) * (1.0 + f3 + (-1.0 * e)));
-      out[5] = (-1.0 * ipow<5>(x) * ((5.0 * lr[4]) + (lr[5] * x * (-1.0 + p1))));
+      out[5] = yj_big ? yj_top : ((-1.0 * ipow<5>(x) * ((5.0 * lr[4]) + (lr[5] * x * (-1.0 + p1)))));
       return;
     }
     const double z = (p1 * x);
@@ -1505,10 +1759,17 @@ LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out
     out[2] = (4.0 * t8 * (1.0 + (-3.0 * p1) + (t0 * t11 * t9) + (t7 * t9 * x) + (-1.0 * t11 * t12 * t6)));
     out[3] = (6.0 * t8 * x * (-2.0 + (-4.0 * t10 * t12 * p1) + (3.0 * t10 * t9 * x) + (3.0 * t9 * p1 * x)));
     out[4] = (24.0 * t4 * ipow<3>(x) * (1.0 + (-1.0 * t13 * t9)));
-    out[5] = (-1.0 * ipow<5>(x) * ((5.0 * lr[4]) + (lr[5] * t13)));
+    out[5] = yj_big ? yj_top : ((-1.0 * ipow<5>(x) * ((5.0 * lr[4]) + (lr[5] * t13))));
     return;
   }
   if constexpr (K == 6) {
+    const bool yj_big = Kokkos::fabs(p1 * x) > 1.0e3;
+    const double yj_top =
+        yj_big ? yj_inv_lj_pure_lambda_rescaled<6>(p1, x) : 0.0;
+    if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+      yj_inv_lj_partials_small_z<6>(p1, x, out);
+      return;
+    }
     const double zs = (p1 * x);
     if (Kokkos::fabs(zs) > 0.5) {
       const double e = 1.0 / (1.0 + zs);
@@ -1530,7 +1791,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out
       out[3] = (-12.0 * f6 * (1.0 / ipow<1>(p1)) * (1.0 + (-1.0 * f7) + (-9.0 * e) + (3.0 * f3) + (18.0 * f4) + (f7 * p1) + (-1.0 * f4 * f5)));
       out[4] = (24.0 * f4 * (1.0 / ipow<1>(f1)) * ipow<2>(f8) * (-1.0 + (-5.0 * f4) + (-2.0 * f3) + (6.0 * e) + (5.0 * f4 * p1)));
       out[5] = (-120.0 * e * (1.0 / ipow<1>(f0)) * ipow<4>(f8) * (1.0 + f3 + (-1.0 * e)));
-      out[6] = (-1.0 * ipow<6>(x) * ((6.0 * lr[5]) + (lr[6] * x * (-1.0 + p1))));
+      out[6] = yj_big ? yj_top : ((-1.0 * ipow<6>(x) * ((6.0 * lr[5]) + (lr[6] * x * (-1.0 + p1)))));
       return;
     }
     const double z = (p1 * x);
@@ -1562,7 +1823,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_pos_partials(double x, double p1, double* out
     out[3] = (12.0 * t15 * (-1.0 + (3.0 * t17) + (6.0 * t11) + (-1.0 * t14 * t19) + (-6.0 * t18 * t7) + (10.0 * t10 * t15 * t7 * ipow<3>(x))));
     out[4] = (24.0 * t12 * t6 * (3.0 + (-4.0 * t17) + (-1.0 * t0 * t9) + (5.0 * t19 * p1)));
     out[5] = (120.0 * t4 * ipow<4>(x) * (-1.0 + t17));
-    out[6] = (-1.0 * ipow<6>(x) * ((6.0 * lr[5]) + (lr[6] * t16)));
+    out[6] = yj_big ? yj_top : ((-1.0 * ipow<6>(x) * ((6.0 * lr[5]) + (lr[6] * t16))));
     return;
   }
 }
@@ -1669,13 +1930,21 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       return;
     }
     {
+      const bool yj_big = Kokkos::fabs((p1 - 2.0) * x) > 1.0e3;
+      const double yj_top =
+          yj_big ? -yj_inv_lj_pure_lambda_rescaled<1>(2.0 - p1, -x) : 0.0;
+      if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+        yj_inv_lj_partials_small_z<1>(2.0 - p1, -x, out);
+        for (int n1 = 0; n1 <= 1; ++n1) out[n1] = -out[n1];
+        return;
+      }
       const double z = (x * (-2.0 + p1));
       double lr[2];
       lr[0] = m::log1prel(z);
       m::detail_log1prel::derivs_upto(1, z, lr);
       const double t0 = (1.0 + (-1.0 * p1));
       out[0] = (t0 * (1.0 / ipow<1>((1.0 + (-1.0 * x * (2.0 + (-1.0 * p1)))))));
-      out[1] = ((-1.0 * lr[0] * x) + (lr[1] * t0 * ipow<2>(x)));
+      out[1] = yj_big ? yj_top : (((-1.0 * lr[0] * x) + (lr[1] * t0 * ipow<2>(x))));
       return;
     }
   }
@@ -1685,6 +1954,13 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       return;
     }
     {
+      const bool yj_big = Kokkos::fabs((p1 - 2.0) * x) > 1.0e3;
+      const double yj_top =
+          yj_big ? yj_inv_lj_pure_lambda_rescaled<2>(2.0 - p1, -x) : 0.0;
+      if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+        yj_inv_lj_partials_small_z<2>(2.0 - p1, -x, out);
+        return;
+      }
       const double zs = (x * (-2.0 + p1));
       if (Kokkos::fabs(zs) > 0.5) {
         const double e = 1.0 / (1.0 + zs);
@@ -1696,7 +1972,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
         const double f2 = (-1.0 * f1);
         out[0] = (-1.0 * f0 * f2 * (1.0 / ipow<2>((1.0 + (-1.0 * f2 * x)))));
         out[1] = (-1.0 * e * (1.0 / ipow<1>(f1)) * (-1.0 + (-1.0 * e) + (e * p1)));
-        out[2] = (-1.0 * ipow<2>(x) * ((2.0 * lr[1]) + (f0 * lr[2] * x)));
+        out[2] = yj_big ? yj_top : ((-1.0 * ipow<2>(x) * ((2.0 * lr[1]) + (f0 * lr[2] * x))));
         return;
       }
       const double z = (x * (-2.0 + p1));
@@ -1708,7 +1984,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       const double t3 = (-1.0 * t2 * (1.0 / ipow<2>(t1)));
       out[0] = (t0 * t3);
       out[1] = ((-1.0 * (1.0 / ipow<1>(t1))) + (-1.0 * t3 * x));
-      out[2] = (-1.0 * ipow<2>(x) * ((2.0 * lr[1]) + (lr[2] * t2 * x)));
+      out[2] = yj_big ? yj_top : ((-1.0 * ipow<2>(x) * ((2.0 * lr[1]) + (lr[2] * t2 * x))));
       return;
     }
   }
@@ -1718,6 +1994,14 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       return;
     }
     {
+      const bool yj_big = Kokkos::fabs((p1 - 2.0) * x) > 1.0e3;
+      const double yj_top =
+          yj_big ? -yj_inv_lj_pure_lambda_rescaled<3>(2.0 - p1, -x) : 0.0;
+      if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+        yj_inv_lj_partials_small_z<3>(2.0 - p1, -x, out);
+        for (int n1 = 0; n1 <= 3; ++n1) out[n1] = -out[n1];
+        return;
+      }
       const double zs = (x * (-2.0 + p1));
       if (Kokkos::fabs(zs) > 0.5) {
         const double e = 1.0 / (1.0 + zs);
@@ -1730,7 +2014,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
         out[0] = (ipow<2>(f1) * (1.0 / ipow<3>((1.0 + (-1.0 * f1 * x)))) * (2.0 + (-2.0 * p1)));
         out[1] = (ipow<2>(e) * (-1.0 + (-1.0 * f2) + (2.0 * e * p1)));
         out[2] = (-1.0 * f2 * (1.0 / ipow<2>(f0)) * (-1.0 + e) * (-1.0 + (-1.0 * e) + (e * p1)));
-        out[3] = (-1.0 * ipow<3>(x) * ((3.0 * lr[2]) + (lr[3] * x * (-1.0 + p1))));
+        out[3] = yj_big ? yj_top : ((-1.0 * ipow<3>(x) * ((3.0 * lr[2]) + (lr[3] * x * (-1.0 + p1)))));
         return;
       }
       const double z = (x * (-2.0 + p1));
@@ -1749,7 +2033,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       out[0] = (t4 * ipow<2>(t1) * (2.0 + (-2.0 * p1)));
       out[1] = ((-1.0 * t1 * t7) + (-1.0 * t6 * t7) + (-2.0 * t2 * t4 * t6));
       out[2] = (2.0 * x * (1.0 / ipow<2>(t8)) * (1.0 + (-1.0 * t9 * (1.0 / ipow<1>(t8)))));
-      out[3] = (-1.0 * ipow<3>(x) * ((3.0 * lr[2]) + (lr[3] * t9)));
+      out[3] = yj_big ? yj_top : ((-1.0 * ipow<3>(x) * ((3.0 * lr[2]) + (lr[3] * t9))));
       return;
     }
   }
@@ -1759,6 +2043,13 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       return;
     }
     {
+      const bool yj_big = Kokkos::fabs((p1 - 2.0) * x) > 1.0e3;
+      const double yj_top =
+          yj_big ? yj_inv_lj_pure_lambda_rescaled<4>(2.0 - p1, -x) : 0.0;
+      if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+        yj_inv_lj_partials_small_z<4>(2.0 - p1, -x, out);
+        return;
+      }
       const double zs = (x * (-2.0 + p1));
       if (Kokkos::fabs(zs) > 0.5) {
         const double e = 1.0 / (1.0 + zs);
@@ -1773,7 +2064,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
         out[1] = (-2.0 * f0 * ipow<3>(e) * (-1.0 + (-3.0 * e) + (3.0 * e * p1)));
         out[2] = (2.0 * f2 * (1.0 / ipow<1>(f0)) * (1.0 + (-1.0 * f3) + (f3 * p1) + (-2.0 * e * p1)));
         out[3] = (-6.0 * e * (1.0 / ipow<3>(f0)) * ipow<2>((-1.0 + e)) * (-1.0 + (-1.0 * e) + (e * p1)));
-        out[4] = (-1.0 * ipow<4>(x) * ((4.0 * lr[3]) + (lr[4] * x * (-1.0 + p1))));
+        out[4] = yj_big ? yj_top : ((-1.0 * ipow<4>(x) * ((4.0 * lr[3]) + (lr[4] * x * (-1.0 + p1)))));
         return;
       }
       const double z = (x * (-2.0 + p1));
@@ -1799,7 +2090,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       out[1] = ((-2.0 * t4 * t5) + (t5 * t7 * (-4.0 + t6)) + (-3.0 * t3 * t4 * t7 * x));
       out[2] = (2.0 * t10 * (1.0 + (-2.0 * t14) + (-2.0 * t11 * t8) + (3.0 * t0 * t10 * t12 * t15)));
       out[3] = (6.0 * t15 * (1.0 / ipow<3>(t9)) * (-1.0 + t14));
-      out[4] = (-1.0 * ipow<4>(x) * ((4.0 * lr[3]) + (lr[4] * t13)));
+      out[4] = yj_big ? yj_top : ((-1.0 * ipow<4>(x) * ((4.0 * lr[3]) + (lr[4] * t13))));
       return;
     }
   }
@@ -1809,6 +2100,14 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       return;
     }
     {
+      const bool yj_big = Kokkos::fabs((p1 - 2.0) * x) > 1.0e3;
+      const double yj_top =
+          yj_big ? -yj_inv_lj_pure_lambda_rescaled<5>(2.0 - p1, -x) : 0.0;
+      if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+        yj_inv_lj_partials_small_z<5>(2.0 - p1, -x, out);
+        for (int n1 = 0; n1 <= 5; ++n1) out[n1] = -out[n1];
+        return;
+      }
       const double zs = (x * (-2.0 + p1));
       if (Kokkos::fabs(zs) > 0.5) {
         const double e = 1.0 / (1.0 + zs);
@@ -1827,7 +2126,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
         out[2] = (-4.0 * ipow<3>(e) * (1.0 + (-1.0 * f5) + (-3.0 * f3) + (f5 * p1)));
         out[3] = (f5 * f6 * (1.0 / ipow<1>(f2)) * ((-1.0 * f6) + (-4.0 * f4) + (-2.0 * f3) + (4.0 * f4 * p1)));
         out[4] = (-24.0 * e * (1.0 / ipow<4>(f0)) * ipow<3>(f6) * (-1.0 + (-1.0 * e) + (e * p1)));
-        out[5] = (-1.0 * ipow<5>(x) * ((5.0 * lr[4]) + (lr[5] * x * (-1.0 + p1))));
+        out[5] = yj_big ? yj_top : ((-1.0 * ipow<5>(x) * ((5.0 * lr[4]) + (lr[5] * x * (-1.0 + p1)))));
         return;
       }
       const double z = (x * (-2.0 + p1));
@@ -1854,7 +2153,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       out[2] = (4.0 * t9 * (5.0 + (-3.0 * p1) + (t11 * t13 * t7) + (-1.0 * t10 * t13 * t14) + (3.0 * t10 * t11 * x)));
       out[3] = (6.0 * t9 * x * (-2.0 + (-4.0 * t0 * t12 * t14) + (3.0 * t0 * t11 * x) + (3.0 * t11 * t12 * x)));
       out[4] = (24.0 * (1.0 / ipow<4>(t8)) * ipow<3>(x) * (1.0 + (-1.0 * t11 * t15)));
-      out[5] = (-1.0 * ipow<5>(x) * ((5.0 * lr[4]) + (lr[5] * t15)));
+      out[5] = yj_big ? yj_top : ((-1.0 * ipow<5>(x) * ((5.0 * lr[4]) + (lr[5] * t15))));
       return;
     }
   }
@@ -1864,6 +2163,13 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       return;
     }
     {
+      const bool yj_big = Kokkos::fabs((p1 - 2.0) * x) > 1.0e3;
+      const double yj_top =
+          yj_big ? yj_inv_lj_pure_lambda_rescaled<6>(2.0 - p1, -x) : 0.0;
+      if (!yj_big && Kokkos::fabs(x) > 1.0e50) {
+        yj_inv_lj_partials_small_z<6>(2.0 - p1, -x, out);
+        return;
+      }
       const double zs = (x * (-2.0 + p1));
       if (Kokkos::fabs(zs) > 0.5) {
         const double e = 1.0 / (1.0 + zs);
@@ -1886,7 +2192,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
         out[3] = (-12.0 * f5 * (1.0 / ipow<1>(f0)) * (-1.0 + f6 + (-1.0 * f7) + (6.0 * f3) + (f6 * p1) + (f7 * p1) + (-12.0 * f3 * p1)));
         out[4] = (24.0 * f3 * (1.0 / ipow<1>(f2)) * ipow<2>(f8) * (1.0 + (-1.0 * f9) + (-5.0 * f3) + (-1.0 * f9 * p1) + (5.0 * f3 * p1)));
         out[5] = (-120.0 * e * (1.0 / ipow<5>(f0)) * ipow<4>(f8) * (-1.0 + (-1.0 * e) + (e * p1)));
-        out[6] = (-1.0 * ipow<6>(x) * ((6.0 * lr[5]) + (lr[6] * x * (-1.0 + p1))));
+        out[6] = yj_big ? yj_top : ((-1.0 * ipow<6>(x) * ((6.0 * lr[5]) + (lr[6] * x * (-1.0 + p1)))));
         return;
       }
       const double z = (x * (-2.0 + p1));
@@ -1921,7 +2227,7 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
       out[3] = (12.0 * t18 * (-1.0 + (3.0 * t20) + (6.0 * t14) + (-1.0 * t17 * t22) + (-6.0 * t10 * t21) + (10.0 * t10 * t13 * t18 * ipow<3>(x))));
       out[4] = (24.0 * t15 * t9 * (3.0 + (-4.0 * t20) + (-1.0 * t12 * t7) + (5.0 * t0 * t22)));
       out[5] = (120.0 * (1.0 / ipow<5>(t8)) * ipow<4>(x) * (-1.0 + t20));
-      out[6] = (-1.0 * ipow<6>(x) * ((6.0 * lr[5]) + (lr[6] * t19)));
+      out[6] = yj_big ? yj_top : ((-1.0 * ipow<6>(x) * ((6.0 * lr[5]) + (lr[6] * t19))));
       return;
     }
   }

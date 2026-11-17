@@ -10396,6 +10396,179 @@ same infinity, the cancellation being exact there, so the assertion stays green 
 way. A host run therefore says nothing at all about whether a guard at a finite end is
 exercised.
 
+## The yeo_johnson bijector: the parameter partials at a large finite argument (2026-11-17)
+
+**What was wrong.** The two repairs above left the parameter partials of the inverse returning
+NaN at a large finite argument, which is not an end of anything: the map, its derivatives in the
+argument and its log-Jacobian are all finite and ordinary there. Measured at lambda = 1/2 and
+x = 1e60, the sixth derivative in lambda came back NaN for a value whose size is 7.4e135 (mpmath
+at 60 digits). At x = 1e60 one entry in seven failed, the one with no derivative in the argument;
+at x = 1e300, six of seven.
+
+**The cause.** Each generated form is a polynomial in the derivatives of `log1prel` multiplied by
+a power of the argument, and the two factors move in opposite directions: psi^(j)(z) decays like
+j! log(1 + z)/z^(j+1) and underflows, while z^(j+1) overflows. At z = 5e59 the sixth derivative
+of `log1prel` is exactly zero and x^7 is infinite, so the form computes inf times 0.
+
+**Two routes that did not work**, both of which only moved the powers around:
+
+| route | what happened |
+|---|---|
+| substitute psi^(j)(z) = q_j/z^(j+1) and let SymPy cancel | NaN appeared at 1e40 and at lambda = 0, the cancellation leaving a division by z |
+| the same substitution per additive monomial, two emitted paths | the cancellation succeeded and the header grew from 1960 to 3263 lines, but the NaN count rose from 151 to 171: a monomial that keeps a positive power of the argument still overflows |
+
+**What works** is to compute the derivative from its structure, with the dominant scale factored
+out, so that every intermediate is representable and the only large number is one exponential at
+the end. Writing S = log(1 + lambda u)/lambda, the n0-th derivative of the inverse in its
+argument is C_n0(lambda) exp(A_n0) with A_n0 = (1 - n0 lambda) S and C_n0 the product of
+(1 - k lambda) for k = 1 to n0 - 1, so
+
+    d^n1_lambda [C exp(A)] = exp(A) sum_i binom(n1, i) C^(i) Y_(n1-i)(A', ..., A^(n1-i))
+
+with Y the complete Bell polynomials and A^(j) = (1 - n0 lambda) S^(j) - n0 j S^(j-1). The
+derivatives of S are the ones that have to be found without forming a power, and they are, by
+
+    S^(j) = q_j/lambda^(j+1),    q_j = z^(j+1) psi^(j)(z) = (-1)^j j! [log(1 + z) - sum_(k=1..j) r^k/k]
+
+with r = z/(1 + z) and z = lambda u. That closed form is proved equal to SymPy's own derivative
+for j = 0 to 7 by `check_scaled_log1prel` in
+`tools/reference/bijector_yeo_johnson_forms.py`; it grows only as a logarithm. At lambda = 1/2
+and u = 1e60 the chain runs q_6 about 1e5, S^(6) about 1e7, Y_6 about 1e16 and exp(A) about
+1e119, for a product of 7.36e135.
+
+The negative branch is the positive one reflected, h(u) = -h_pos(-u; 2 - lambda), whose entries
+pick up (-1)^(n0+n1+1); since n0 + n1 = K the sign is (-1)^(K+1) and does not depend on the
+entry. Of the log-Jacobian's partials only the pure derivative in lambda needs this route, every
+entry with a derivative in the argument carrying a power of 1 + lambda u instead of S and staying
+bounded, and for that one entry the whole expression is
+
+    d^K_lambda [(1 - lambda) S] = (1 - lambda) S^(K) - K S^(K-1).
+
+**Where it is taken.** Above |lambda u| of 1e3, in `yeo_johnson_inv_partials` for the map and in
+`yeo_johnson_inv_lj_pos_partials` and the negative branch of `yeo_johnson_inv_lj_partials` for
+the log-Jacobian. Below the threshold the forms are exact and this route would cancel: q_j is
+there a difference of two nearly equal quantities, and at z = 1/8 it loses six digits. The two
+agree over the whole overlap, measured for every total order 1 to 6, every entry, both branches
+and lambda in {-2/5, 1/4, 1/2, 1, 13/10, 7/4, 13/5}:
+
+| |z| | worst relative difference between the two routes |
+|---|---|
+| 1/8 to 1e8 (the handover region and beyond) | 1.5e-10, and that worst case is at z = 1/8, which the guard never sends |
+| 1e-3 and below (not reachable through the guard) | up to 0.16 at the top order, the cancellation in q_j |
+
+**Against the references.** The pure derivatives in lambda of orders 1 to 6, at four places with
+|z| above the threshold, against the definition of the inverse differentiated symbolically by
+SymPy and evaluated at 60 digits by mpmath
+(`tools/reference/bijector_yeo_johnson_large.py`):
+
+| quantity | worst relative difference |
+|---|---|
+| the inverse | 8.4e-14, at lambda = 13/10 and x = 1e300 |
+| its log-Jacobian | 5.7e-16, one unit in the last place |
+
+The inverse's error is not a property of the route. Its value is exp(S), so one unit in the last
+place of S moves it by a relative |S|, which is 276 at lambda = 1/2 and x = 1e60, and 532 at lambda = 13/10 and x = 1e300; the
+measured 8.4e-14 is that amplification and no route computing the value in double can be better.
+The entry with no derivative in the argument is exp(S) itself, so wherever it is finite S is at
+most the logarithm of the largest double, about 709, and the bound 4e-13 in the test holds
+everywhere the value is a number. The log-Jacobian is S times a factor and
+carries no amplification, which is why its bound is 1e-14.
+
+Reference values no numerical differentiator can supply: the first attempt at them took
+mpmath's own `diff` in the argument at u = 1e60, and it returned entries wrong by two hundred
+orders of magnitude, several of them exactly zero. The references are differentiated
+symbolically for that reason, and the script says so.
+
+**What it cost.** The header grew from 1960 to 2131 lines, the two routines and their comment
+being hand-written in the generator's preamble rather than generated per order; the per-monomial
+route had reached 3263 lines while leaving more NaN than it removed.
+
+**What is open.** Where the true value overflows a double the entry is an infinity, which is
+correct: at lambda = 1/2 and x = 1e300 the sixth derivative is 1.1e620. The entries that carry a
+derivative in the argument underflow to zero at these arguments, by a factor (1 + lambda u)^(-1)
+per order, so there is nothing to check against in them and the test only requires them to be
+numbers. `box_cox` has the same loss in its own map's partials, and its log-Jacobian's partials
+go through `yeo_johnson_inv_lj_pos_partials` and are repaired by this change.
+
+**A second band, on the other side of the loss, repaired by a third route.** The guard above
+starts at |lambda x| = 1e3 and cannot reach the other side: where lambda is so small that
+lambda x stays small even at a huge x, the forms carry a power of the argument in front of a
+bracket in the psi^(j)(z) which cancels as z goes to zero, so the power is infinite, the bracket
+is zero, and the product is NaN again. Found by the box_cox session measuring the repair above
+against its own grid, where it appeared as a hole at lambda = 0. It is a band and not a point:
+measured identically at lambda = 1e-310 and 1e-305 with x = 1e300, while at lambda = 1e-200 and
+above nothing fails, lambda x reaching 1e3 there before a power of x can overflow. The first
+decade of |x| at which an entry fails, by order, measured on the log-Jacobian's partials:
+
+| lambda | K = 1 to 3 | K = 4 | K = 5 | K = 6 |
+|---|---|---|---|---|
+| 0, 1e-310, 1e-300, 1e-200 | none | 1e154 | 1e154 | 1e103 |
+| 1e-100 and above | none | none | none | none |
+
+What the entries lost there is mostly FINITE, which is why neither obvious repair works. At
+lambda = 0 and x = 1e300, order six returned NaN where the exact value is 0 at n1 = 2 and
+-3.6e301 at n1 = 3, and order five where it is 4 at n1 = 2; only two of the entries found are
+genuinely infinite. So signed infinities would have been wrong, and the rescaled route above
+cannot serve either, its q_j being a cancelling difference at small z.
+
+**The route.** The power of the argument in each term does not depend on the summation index.
+With S = u psi(lambda u), psi = log1prel and z = lambda u, Leibniz in u gives
+
+    d^n0_u S^(j) = sum_m C(n0, m) [d^(n0-m)_u u^(j+1)] lambda^m psi^(j+m)(z)
+
+and u^(j+1-n0+m) lambda^m = u^(j+1-n0) z^m, one power for the whole sum:
+
+    d^n0_u S^(j) = u^(j+1-n0) sum_(m=m0..n0) C(n0,m) (j+1)!/(j+1-n0+m)! z^m psi^(j+m)(z)
+
+with m0 = max(0, n0 - j - 1), which keeps every factorial's argument non-negative. The sum is
+bounded at small z, each term being a small power of z times a derivative of psi, so it is taken
+first and the single power applied once at the end; a sum that is exactly zero returns zero
+without that multiplication, since at z = 0 it is zero exactly when the m = 0 term is absent and
+a power of u that has overflowed would otherwise turn an exact zero into NaN. The identity is
+checked against SymPy's own derivative for every (j, n0) with j + n0 <= 6 by `check_dS_small_z`
+in `tools/reference/bijector_yeo_johnson_forms.py`. The log-Jacobian's entries follow from
+log|h'| = (1 - lambda) S as (1 - lambda) d^n0_u S^(n1) - n1 d^n0_u S^(n1-1), and the negative
+branch is the positive one at (2 - lambda, -u) with every entry times (-1)^K.
+
+**Where it is taken, and what it measures.** Above |x| = 1e50 with |lambda x| at most 1e3, fifty
+decades below the measured onset and far above any argument a model produces. Below that the
+forms are kept, and over the overlap the two agree to 2.3e-16 relative (lambda from 0 to 1.9,
+|x| from 1 to 1e140, every order, every entry; the one larger figure, 1.3e-10, is at an entry of
+size 9.6e-299, where a relative measure is meaningless). Against the references, which are
+SymPy's own limit of the definition as lambda goes to zero and so a third route independent both
+of the forms and of the identity:
+
+| what | result |
+|---|---|
+| every finite entry, orders 1 to 6, at x = 1e103, 1e150, 1e200, 1e300 | exact to 1.6e-16 |
+| every entry that is zero or an infinity | exact, including the sign |
+| the whole grid afterwards, lambda from 0 to 2 and |x| from 1 to 1e300, both branches | 0 NaN in the log-Jacobian's partials, 312 cells |
+
+The map needs nothing in this band: at lambda = 0 its inverse is exp(u) - 1, already an infinity
+for every |u| above about 710, so there is no finite value of its own to lose (0 of 7 NaN
+measured at every place in the band). `box_cox` is repaired with it, the route being called from
+`yeo_johnson_inv_lj_pos_partials`, which holds wherever 1 + lambda u > 0.
+
+**What is open after it, measured on a dense grid.** The map's partials still return NaN where
+the value itself overflows: 370 entries over 183 of 1147 cells, for lambda from 1e-30 down to
+1e-310 together with |x| from 1e50 up. Inside the rescaled route the intermediates there run
+past the largest double -- at lambda = 1e-30 and x = 1e60 the first derivative of the exponent
+is about 1e210, so its sixth Bell polynomial would be 1e1260 -- and an inf minus inf or inf
+times 0 appears. **Nothing finite is lost in it**: for each of those 370 entries the exponential
+that carries the value, exp((1 - n0 lambda) S), was checked and is infinite in every one, so the
+true derivative is a determinate infinity and what is returned is NaN in place of an infinity of
+a known sign. A first, coarser grid put this regime at lambda of 1e-100 or below with |x| of
+1e125 or above; that was an artifact of its spacing, which stepped lambda from 1e-20 straight to
+1e-100 and |x| by 25 decades at a time, and it also excluded lambda = 0 on the positive branch,
+which is in the inverse's domain there. The figures here replace it. With lambda = 0 included,
+it turns out to lose nothing at all in this map: the forms take z = 0 cleanly and return
+infinities, so the regime begins only at a lambda small enough to overflow the route's own
+chain. `box_cox` shares this regime, reaching it from lambda = 1e-310 to 1e-50 by its own
+measurement, and has a second one of its own at lambda = 0 exactly, where |lambda u| is zero so
+the rescaled route is never taken and its forms lose entries from u = 1e40; that one is not this
+defect and nothing here is involved in it. Closing this regime means the signs of those
+infinities, which is a fifth piece of work and not this one.
+
 ## The box_cox bijector at the ends of its two domains (2026-11-17)
 
 **What was wrong.** `scalar_bijector::box_cox` returned NaN at an end of either

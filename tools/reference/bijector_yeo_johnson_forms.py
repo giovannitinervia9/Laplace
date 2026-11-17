@@ -681,7 +681,12 @@ def inv_lj_factored(b, K, exprs, indent):
              f"{indent}  const double e = 1.0 / (1.0 + zs);"]
     lines += pre
     lines += [f"{indent}  const double {t.name} = {cxx(v)};" for t, v in reps]
-    lines += [f"{indent}  out[{n1}] = {r};" for n1, r in enumerate(cxx(v) for v in red)]
+    for n1, r in enumerate(cxx(v) for v in red):
+        # the pure derivative in the parameter, which the rescaled route supplies above the switch
+        if n1 == K:
+            lines.append(f"{indent}  out[{n1}] = yj_big ? yj_top : ({r});")
+        else:
+            lines.append(f"{indent}  out[{n1}] = {r};")
     lines += [f"{indent}  return;", f"{indent}}}"]
     return lines
 
@@ -699,6 +704,25 @@ def branch_body(q, b, K, mode, indent):
                 e = sp.diff(e, lam, n1)
             exprs.append(e)
     out = []
+    if q == "inv_lj" and mode == "partials":
+        # Only the pure derivative in the parameter loses its value at a large finite argument:
+        # every entry with a derivative in the argument carries a power of 1 + lambda u rather
+        # than log(1 + lambda u)/lambda and stays bounded. On the negative branch the quantity is
+        # the positive one at (2 - lambda, -u), whose n1 = K entry picks up (-1)^K.
+        zb = "p1 * x" if b == "pos" else "(p1 - 2.0) * x"
+        arg = "p1, x" if b == "pos" else "2.0 - p1, -x"
+        sgn = "" if (b == "pos" or K % 2 == 0) else "-"
+        out.append(f"{indent}const bool yj_big = Kokkos::fabs({zb}) > 1.0e3;")
+        out.append(f"{indent}const double yj_top =")
+        out.append(f"{indent}    yj_big ? {sgn}yj_inv_lj_pure_lambda_rescaled<{K}>({arg}) : 0.0;")
+        # the other side of the loss: a huge argument with lambda u small, where the forms give
+        # NaN for values that are mostly finite
+        out.append(f"{indent}if (!yj_big && Kokkos::fabs(x) > 1.0e50) {{")
+        out.append(f"{indent}  yj_inv_lj_partials_small_z<{K}>({arg}, out);")
+        if b == "neg" and K % 2:
+            out.append(f"{indent}  for (int n1 = 0; n1 <= {K}; ++n1) out[n1] = -out[n1];")
+        out.append(f"{indent}  return;")
+        out.append(f"{indent}}}")
     if q == "inv_lj" and mode == "partials" and K >= 2:
         out += inv_lj_factored(b, K, exprs, indent)
     lines, red = emit(exprs, indent)
@@ -706,7 +730,11 @@ def branch_body(q, b, K, mode, indent):
     if mode == "pure":
         out.append(f"{indent}return {red[0]};")
     else:
-        out += [f"{indent}out[{n1}] = {r};" for n1, r in enumerate(red)]
+        for n1, r in enumerate(red):
+            if q == "inv_lj" and n1 == K:
+                out.append(f"{indent}out[{n1}] = yj_big ? yj_top : ({r});")
+            else:
+                out.append(f"{indent}out[{n1}] = {r};")
         out.append(f"{indent}return;")
     return out
 
@@ -789,6 +817,12 @@ def generate_functions():
         lines.append(f"    {PARTIALS_AT_INF_NAME[q]}<K>(x > 0.0, p1, out);")
         lines.append("    return;")
         lines.append("  }")
+        if q == "inv":
+            lines.append("  // a large finite argument: the forms lose the value, the rescaled route keeps it")
+            lines.append("  if (Kokkos::fabs((x >= 0.0 ? p1 : p1 - 2.0) * x) > 1.0e3) {")
+            lines.append("    yj_inv_partials_rescaled<K>(p1, x, out);")
+            lines.append("    return;")
+            lines.append("  }")
         if q in ("inv", "inv_lj"):
             edge = "yj_inv_partials_at_edge" if q == "inv" else "yj_inv_lj_partials_at_edge"
             lines.append("  // the finite end of the domain of h, where the forms give a large finite")
@@ -909,6 +943,220 @@ LAPLACE_HD double yj_exprel_d(double y, double X, double a, int k) {
   if constexpr (J == 4) return m::exprel_d4(y);
   if constexpr (J == 5) return m::exprel_d5(y);
   if constexpr (J == 6) return m::exprel_d6(y);
+}
+
+// ------------------------------------------- a huge argument while lambda u stays small
+//
+// The rescaled route below starts at |lambda u| = 1e3 and cannot reach the other side of the
+// forms' loss: where lambda is so small that lambda u stays small even at a huge u, the forms
+// carry a power of the argument in front of a bracket in the psi^(j)(z) which cancels as z goes
+// to zero, so the power is infinite, the bracket is zero, and the product is NaN again.
+// Measured on 2026-11-17 for the log-Jacobian's partials: at lambda = 0 the entries start to
+// fail from |x| = 1e103 at order six and from 1e154 at orders four and five, and at x = 1e300
+// order six returns NaN where the exact values are 0 at n1 = 2 and -3.6e301 at n1 = 3, order
+// five where it is 4 at n1 = 2. Most of those are finite, so returning signed infinities would
+// be wrong, and the rescaled route cannot serve either, its q_j being a cancelling difference at
+// small z. The band is narrow: for lambda above about 1e-200 nothing fails anywhere, lambda u
+// then reaching 1e3 before a power of u can overflow.
+//
+// What this route uses is that the power of u in each term does not depend on the summation
+// index. Writing S = u psi(lambda u) with psi = log1prel and z = lambda u, Leibniz in u gives
+//
+//   d^n0_u S^(j) = sum_m C(n0, m) [d^(n0-m)_u u^(j+1)] lambda^m psi^(j+m)(z)
+//
+// and u^(j+1-n0+m) lambda^m = u^(j+1-n0) z^m, one power for the whole sum:
+//
+//   d^n0_u S^(j) = u^(j+1-n0) sum_(m=m0..n0) C(n0,m) (j+1)!/(j+1-n0+m)! z^m psi^(j+m)(z)
+//
+// with m0 = max(0, n0 - j - 1), which keeps every factorial's argument non-negative. The sum is
+// bounded at small z, every term being a small power of z times a derivative of psi, so it is
+// taken first and the single power applied once at the end. A sum that is exactly zero returns
+// zero without that multiplication: at z = 0 it is zero exactly when the m = 0 term is absent,
+// and a power of u that has overflowed would otherwise turn an exact zero into NaN. That is the
+// whole of the repair; the identity is checked against SymPy's own derivative for every (j, n0)
+// with j + n0 <= 6 by check_dS_small_z in this file's script.
+//
+// The entries of the log-Jacobian follow from log|h'| = (1 - lambda) S:
+//
+//   d^n0_u d^n1_lambda log|h'| = (1 - lambda) d^n0_u S^(n1) - n1 d^n0_u S^(n1-1).
+//
+// The route is taken for |u| above 1e50, fifty decades below the measured onset and far above
+// any argument a model produces, and below that the forms are kept: over the overlap the two
+// agree to 2.3e-16 relative (measured for lambda from 0 to 1.9 and |x| from 1 to 1e140, every
+// order and every entry). The map's own partials need nothing here: at lambda = 0 the inverse is
+// exp(u) - 1, already an infinity for every |u| above about 710, so the band holds no finite
+// value of theirs to lose (measured 0 of 7 NaN at every place in it).
+
+LAPLACE_HD double yj_fact_small(int n) {
+  double f = 1.0;
+  for (int i = 2; i <= n; ++i) f *= double(i);
+  return f;
+}
+
+// d^n0_u S^(j) by the identity above; lr[k] = psi^(k)(z) for k = 0..j+n0
+LAPLACE_HD double yj_dS_small_z(int j, int n0, double z, double u, const double* lr) {
+  const int m0 = (n0 - j - 1 > 0) ? (n0 - j - 1) : 0;
+  double acc = 0.0;
+  for (int mm = m0; mm <= n0; ++mm) {
+    double zm = 1.0;
+    for (int i = 0; i < mm; ++i) zm *= z;
+    const double cm = yj_fact_small(n0) / (yj_fact_small(mm) * yj_fact_small(n0 - mm));
+    acc += cm * (yj_fact_small(j + 1) / yj_fact_small(j + 1 - n0 + mm)) * zm * lr[j + mm];
+  }
+  if (acc == 0.0) return 0.0;  // exact, and a power of u that has overflowed must not reach it
+  const int e = j + 1 - n0;
+  double p = 1.0;
+  for (int i = 0; i < (e >= 0 ? e : -e); ++i) p *= u;
+  return (e >= 0) ? acc * p : acc / p;
+}
+
+// out[n1] = d^(K-n1)_u d^n1_lambda [(1 - lambda) log(1 + lambda u)/lambda] for n1 = 0..K, valid
+// wherever 1 + lambda u > 0, so for the positive branch of Yeo-Johnson and the whole of Box-Cox.
+// Yeo-Johnson's negative branch is this at (2 - lambda, -u) with every entry times (-1)^K, the
+// sign being (-1)^(n0+n1) and n0 + n1 = K.
+template <int K>
+LAPLACE_HD void yj_inv_lj_partials_small_z(double lam, double u, double* out) {
+  const double z = lam * u;
+  double lr[K + 1];
+  lr[0] = m::log1prel(z);
+  m::detail_log1prel::derivs_upto(K, z, lr);
+  for (int n1 = 0; n1 <= K; ++n1) {
+    const int n0 = K - n1;
+    double v = (1.0 - lam) * yj_dS_small_z(n1, n0, z, u, lr);
+    if (n1 >= 1) v -= double(n1) * yj_dS_small_z(n1 - 1, n0, z, u, lr);
+    out[n1] = v;
+  }
+}
+
+// ---------------------------------------------------------------- a large finite argument
+//
+// The lambda-derivatives of the inverse are written below as a polynomial in the derivatives of
+// log1prel multiplied by a power of the argument, and above |lambda u| of about 1e3 that shape
+// loses the value: psi^(j)(z) decays like j! log(1+z)/z^(j+1) and underflows while the power
+// z^(j+1) in front of it overflows. Measured on 2026-11-17: at lambda = 1/2 and u = 1e60,
+// log1prel_d6 is exactly 0 and z^7 is infinite, so the form returned inf * 0 = NaN for a value
+// whose true size is 7.36e135 (mpmath at 60 digits). Regrouping the polynomial does not fix it,
+// because its terms genuinely span hundreds of orders of magnitude: two attempts that only
+// moved the powers around left more NaN than they removed, not fewer.
+//
+// What works is to compute the whole derivative from its structure, with the dominant scale
+// factored out and every intermediate bounded:
+//
+//   h^(n0) = C_n0(lambda) exp(A_n0),   A_n0 = (1 - n0 lambda) S,   S = log(1 + lambda u)/lambda
+//   d^n1_lambda [C exp(A)] = exp(A) sum_i binom(n1, i) C^(i) Y_(n1-i)(A', ..., A^(n1-i))
+//
+// with Y the complete Bell polynomials, A^(j) = (1 - n0 lambda) S^(j) - n0 j S^(j-1), and
+//
+//   S^(j) = q_j/lambda^(j+1),   q_j = z^(j+1) psi^(j)(z) = (-1)^j j! [log(1+z) - sum_(k=1..j) r^k/k]
+//
+// where r = z/(1+z). That closed form for q_j is proved equal to the derivative by SymPy for
+// j = 0 to 7 (check_scaled_log1prel in this file's script); it is bounded, growing only as a
+// logarithm, so S^(j) and the Bell polynomials stay representable and the only large number is
+// the exp at the end. At lambda = 1/2 and u = 1e60 the chain runs q_6 ~ 1e5, S^(6) ~ 1e7,
+// Y_6 ~ 1e16, exp(A) ~ 1e119, product 7.36e135, which is the value to eight digits.
+//
+// Below |z| = 1e3 the forms are exact and this route is not taken: q_j there is a difference of
+// two nearly equal quantities and would lose about two digits at z = 1. The two agree to 1e-15
+// or better over the whole overlap (measured from u = 1 to u = 1e20).
+
+LAPLACE_HD double yj_binom(int n, int k) {
+  double b = 1.0;
+  for (int i = 0; i < k; ++i) b = b * double(n - i) / double(i + 1);
+  return b;
+}
+
+// q[j] = z^(j+1) psi^(j)(z) for j = 0..n, by the closed form above
+LAPLACE_HD void yj_log1prel_scaled(int n, double z, double* q) {
+  const double L = Kokkos::log1p(z);
+  const double r = z / (1.0 + z);
+  double fact = 1.0, rk = 1.0, sum = 0.0;
+  for (int j = 0; j <= n; ++j) {
+    if (j >= 1) {
+      fact *= double(j);
+      rk *= r;
+      sum += rk / double(j);
+    }
+    q[j] = ((j % 2) ? -fact : fact) * (L - sum);
+  }
+}
+
+// out[n1] = d^(K-n1)_u d^n1_lambda h for n1 = 0..K, on the POSITIVE branch (u >= 0, lambda != 0,
+// which |z| > 1e3 guarantees). Every entry carries at least one derivative, K being 1 or more, so
+// the -1 of h = exp(S) - 1 never appears here and the same routine serves any map whose inverse
+// is exp(S) times a constant: Box-Cox calls it unchanged for its own column. The negative branch is this one reflected, h(u) = -h_pos(-u; c)
+// with c = 2 - lambda, so its entries are these at (-u, c) times (-1)^(K+1), the sign being the
+// same for every n1 since n0 + n1 = K.
+template <int K>
+LAPLACE_HD void yj_inv_partials_rescaled_pos(double lam, double u, double* out) {
+  double q[K + 1];
+  yj_log1prel_scaled(K, lam * u, q);
+  const double S = q[0] / lam;
+  for (int n1 = 0; n1 <= K; ++n1) {
+    const int n0 = K - n1;
+    double Sd[K + 2], Ad[K + 2], Y[K + 2], Cd[K + 2];
+    for (int j = 0; j <= K + 1; ++j) Sd[j] = Ad[j] = Y[j] = Cd[j] = 0.0;
+    double lp = lam;
+    for (int j = 1; j <= n1; ++j) {
+      lp *= lam;
+      Sd[j] = q[j] / lp;
+    }
+    for (int j = 1; j <= n1; ++j)
+      Ad[j] = (1.0 - double(n0) * lam) * Sd[j] - double(n0) * double(j) * (j == 1 ? S : Sd[j - 1]);
+    Y[0] = 1.0;
+    for (int mm = 0; mm < n1; ++mm) {
+      double acc = 0.0;
+      for (int j = 0; j <= mm; ++j) acc += yj_binom(mm, j) * Ad[j + 1] * Y[mm - j];
+      Y[mm + 1] = acc;
+    }
+    // C_n0 = prod_(k=1..n0-1)(1 - k lambda) and its lambda-derivatives, one factor at a time
+    Cd[0] = 1.0;
+    int d = 0;
+    for (int k = 1; k <= n0 - 1; ++k) {
+      const double f = 1.0 - double(k) * lam, fp = -double(k);
+      for (int i = d + 1; i >= 0; --i) {
+        double v = (i <= d) ? Cd[i] * f : 0.0;
+        if (i >= 1 && i - 1 <= d) v += double(i) * Cd[i - 1] * fp;
+        Cd[i] = v;
+      }
+      ++d;
+    }
+    double acc = 0.0;
+    for (int i = 0; i <= n1; ++i) acc += yj_binom(n1, i) * Cd[i] * Y[n1 - i];
+    out[n1] = acc * m::exp((1.0 - double(n0) * lam) * S);
+  }
+}
+
+template <int K>
+LAPLACE_HD void yj_inv_partials_rescaled(double p1, double x, double* out) {
+  if (x >= 0.0) {
+    yj_inv_partials_rescaled_pos<K>(p1, x, out);
+    return;
+  }
+  yj_inv_partials_rescaled_pos<K>(2.0 - p1, -x, out);
+  if ((K + 1) % 2) {
+    for (int n1 = 0; n1 <= K; ++n1) out[n1] = -out[n1];
+  }
+}
+
+// d^K_lambda [(1 - lambda) log(1 + lambda u)/lambda] = (1 - lambda) S^(K) - K S^(K-1): the only
+// entry of the log-Jacobian's partials that loses its value at a large finite argument, every
+// other carrying a power of 1 + lambda u instead of S and staying bounded. It holds wherever
+// 1 + lambda u > 0, so it serves the positive branch of Yeo-Johnson and the whole of Box-Cox;
+// Yeo-Johnson's negative branch calls it at (2 - lambda, -u) and takes (-1)^K.
+template <int K>
+LAPLACE_HD double yj_inv_lj_pure_lambda_rescaled(double lam, double u) {
+  double q[K + 1];
+  yj_log1prel_scaled(K, lam * u, q);
+  double lp = 1.0, sd[K + 2];
+  for (int j = 0; j <= K + 1; ++j) sd[j] = 0.0;
+  for (int j = 0; j <= K; ++j) {
+    lp *= lam;
+    sd[j] = q[j] / lp;  // S^(j)
+  }
+  // d^K_lambda [(1 - lambda) S] = (1 - lambda) S^(K) - K S^(K-1)
+  double v = (1.0 - lam) * sd[K];
+  if (K >= 1) v -= double(K) * sd[K - 1];
+  return v;
 }
 
 // ---------------------------------------------------------------- the limits at an infinite argument
@@ -1256,12 +1504,61 @@ LAPLACE_HD_FORCEINLINE double yeo_johnson_inv_to_lower(double u, double p1, doub
     print(f"wrote {HEADER} ({text.count(chr(10))} lines)")
 
 
+def check_scaled_log1prel():
+    """The closed form the rescaled route rests on, against SymPy's own derivative:
+
+        z^(j+1) psi^(j)(z) = (-1)^j j! [log(1 + z) - sum_(k=1..j) r^k/k],   r = z/(1 + z)
+
+    with psi(z) = log(1 + z)/z. Both sides are bounded where the two factors on the left are not,
+    which is what lets the parameter-derivatives of the inverse be computed at a large argument.
+    """
+    z = sp.Symbol("z", positive=True)
+    psi = sp.log(1 + z) / z
+    r = z / (1 + z)
+    for j in range(0, 8):
+        left = z ** (j + 1) * sp.diff(psi, z, j)
+        right = (-1) ** j * sp.factorial(j) * (sp.log(1 + z) - sum(r ** k / k for k in range(1, j + 1)))
+        if sp.simplify(sp.expand(sp.together(left - right))) != 0:
+            raise AssertionError(f"the closed form for z^(j+1) psi^(j)(z) fails at j = {j}")
+    print("the closed form for z^(j+1) psi^(j)(z) agrees with the derivative for j = 0 to 7")
+
+
+def check_dS_small_z():
+    """The identity the small-z route rests on, against SymPy's own derivative:
+
+        d^n0_u S^(j) = u^(j+1-n0) sum_(m=m0..n0) C(n0,m) (j+1)!/(j+1-n0+m)! z^m psi^(j+m)(z)
+
+    with S = u psi(lambda u), psi(t) = log(1+t)/t, z = lambda u and m0 = max(0, n0-j-1). The
+    point of the grouping is that one power of u carries the whole sum, so nothing is left
+    factored in front of a bracket that cancels as z goes to zero.
+    """
+    u_, l_ = sp.symbols("u_ l_", positive=True)
+    t = sp.Symbol("t_", positive=True)
+    psi = sp.log(1 + t) / t
+    S = u_ * psi.subs(t, l_ * u_)
+    for K in range(1, KMAX + 1):
+        for n1 in range(0, K + 1):
+            j, n0 = n1, K - n1
+            left = sp.diff(sp.diff(S, l_, j), u_, n0) if j else sp.diff(S, u_, n0)
+            m0 = max(0, n0 - j - 1)
+            right = 0
+            for mm in range(m0, n0 + 1):
+                coef = sp.binomial(n0, mm) * sp.factorial(j + 1) / sp.factorial(j + 1 - n0 + mm)
+                right += coef * (l_ * u_) ** mm * sp.diff(psi, t, j + mm).subs(t, l_ * u_)
+            right *= u_ ** (j + 1 - n0)
+            if sp.simplify(left - right) != 0:
+                raise AssertionError(f"the small-z identity fails at j = {j}, n0 = {n0}")
+    print(f"the small-z identity agrees with the derivative for every (j, n0) with j + n0 <= {KMAX}")
+
+
 if __name__ == "__main__":
     if "--check" in sys.argv:
         check()
         check_limits()
         check_partial_limits()
         check_edge_limits()
+        check_scaled_log1prel()
+        check_dS_small_z()
     elif "--write" in sys.argv:  # the checks above are slow; --write skips them
         write_header()
     else:
@@ -1269,4 +1566,6 @@ if __name__ == "__main__":
         check_limits()
         check_partial_limits()
         check_edge_limits()
+        check_scaled_log1prel()
+        check_dS_small_z()
         write_header()
