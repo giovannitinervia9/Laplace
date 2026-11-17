@@ -16,7 +16,15 @@
 //   NAME_dom_lo/hi(p1, p2), NAME_img_lo/hi(p1, p2)   the closed bounds of the domains of g and h
 //   NAME_inv_to_upper/lower(u, p1, p2)   dom_hi - h(u) and h(u) - dom_lo, computed directly
 // Invalid parameters: every function returns NaN. The arguments have been checked
-// against the domain bounds by the dispatch; a value on a bound gives its limit.
+// against the domain bounds by the dispatch; a value on a bound gives its limit. The forms
+// below give NaN at an end of either domain, so the value and the argument derivatives return
+// that limit instead (bc_fwd_at_end, bc_inv_at_end, bc_fwd_lj_at_end, bc_inv_lj_at_end, with
+// the derivation and the ends in the comment above them). The partial derivatives in lambda, the
+// NAME_*_partials below, return their limits there too (bc_fwd_partials_at_end,
+// bc_fwd_lj_partials_at_end, bc_inv_partials_at_inf, bc_inv_partials_at_edge,
+// bc_inv_lj_partials_at_inf, bc_inv_lj_partials_at_edge): the same exponent decides, a
+// lambda-derivative only bringing a logarithm of the argument, except at the finite end of the
+// image, where it lowers the power of w by one and the exponent becomes 1/lambda - K.
 //
 // Formulas (lambda = p1, L = log v, x = lambda u, w = 1 + x, t = 1/w, S = log h = u psi(x),
 // phi and psi the functions exprel and log1prel of laplace::math; their derivatives are
@@ -176,9 +184,16 @@ LAPLACE_HD double bc_value(double v, double lam) {
 // v^(lambda - m) for integer m >= 0. The exponent lambda - m is not rounded (lambda - 1 rounds
 // with an absolute error of eps, which log v magnifies): v^lambda is taken once and divided by v m
 // times. At v = 0 and v = inf the division would form 0/0 or inf/inf, so the power goes directly.
+// Where v^lambda itself underflows or overflows the division route carries no information left:
+// v^lambda is 0 or inf and so is every quotient, although v^(lambda - m) may be an ordinary number
+// (g^(6) at lambda = 6 is 120 for every v, and the route returned 0 below v = 1e-52 and inf above
+// 1e52). The rounded exponent is then the only route; it costs |log v| eps relative, 1.5e-14 at
+// the smallest double, which is what a result the other route cannot represent at all is worth.
 LAPLACE_HD double bc_pow_shift(double v, double lam, int m) {
   if (v == 0.0 || v == inf()) return pow_pos(v, lam - m);
-  double r = pow_pos(v, lam);
+  const double p = pow_pos(v, lam);
+  if (p == 0.0 || p == inf()) return pow_pos(v, lam - m);
+  double r = p;
   for (int i = 0; i < m; ++i) r /= v;
   return r;
 }
@@ -200,7 +215,14 @@ LAPLACE_HD double bc_fwd_mixed(int m, int n, double v, double lam) {
 // every d^m_v d^n_lambda g, m + n <= 6
 LAPLACE_HD double bc_fwd_any(int m, int n, double v, double lam) {
   if (m == 0 && n == 0) return bc_value(v, lam);
-  if (n == 0) return bc_falling(lam - 1.0, m - 1) * bc_pow_shift(v, lam, m);
+  if (n == 0) {
+    const double f = bc_falling(lam - 1.0, m - 1);
+    // f vanishes exactly at an integer lambda below m, where g is a polynomial of degree lambda
+    // and g^(m) is identically 0. The power is then not formed: it overflows for a small enough v
+    // and the product would be 0 times inf (at lambda = 1 and m = 3, v below 1e-103).
+    if (f == 0.0) return 0.0;
+    return f * bc_pow_shift(v, lam, m);
+  }
   if (m == 0) {
     const double L = m::log(v);
     return bc_pow_int(L, n + 1) * bc_exprel_dk(n, lam * L);
@@ -215,6 +237,11 @@ LAPLACE_HD double bc_fwd_any(int m, int n, double v, double lam) {
 LAPLACE_HD double bc_inv_mixed(int K, int n, double u, double lam) {
   double P[7], A[7];
   bc_PK_jets(K, lam, P);
+  // P_K vanishes exactly at lambda = 1/r with r below K, where h is a polynomial of degree r and
+  // h^(K) is identically 0. The exponential is then not formed: it overflows for a w small enough
+  // and the product would be 0 times inf. Only the pure u-derivative is P_K alone; a derivative in
+  // lambda carries the other P_K^(j) as well.
+  if (n == 0 && P[0] == 0.0) return 0.0;
   bc_bell(n, u, lam, A);
   const double t = 1.0 / (1.0 + lam * u);
   double s = 0.0;
@@ -242,7 +269,11 @@ LAPLACE_HD double bc_inv_any(int K, int n, double u, double lam) {
 // d^m_v d^n_lambda [(lambda - 1) log v], the forward log|g'|
 LAPLACE_HD double bc_fwd_lj_any(int m, int n, double v, double lam) {
   if (n >= 2) return 0.0;
-  if (m == 0) return n == 0 ? (lam == 1.0 ? 0.0 : (lam - 1.0) * m::log(v)) : m::log(v);
+  // at lambda = 1 the map is the identity and log|g'| is identically 0, so no v-derivative of it
+  // is formed: v^(-m) overflows for a small enough v and (lambda - 1) v^(-m) would be 0 times inf
+  // (at m = 6, v below 1e-52). The derivative in lambda is log v and does not vanish there.
+  if (n == 0 && lam == 1.0) return 0.0;
+  if (m == 0) return n == 0 ? (lam - 1.0) * m::log(v) : m::log(v);
   const double d = bc_sgn(m - 1) * bc_fact(m - 1) * pow_pos(v, -m);  // d^m_v log v
   return n == 0 ? (lam - 1.0) * d : d;
 }
@@ -253,26 +284,408 @@ LAPLACE_HD double bc_inv_lj_any(int K, int n, double u, double lam) {
   return (1.0 - lam) * bc_S_jet(K, n, u, lam) - n * bc_S_jet(K, n - 1, u, lam);
 }
 
+// ------------------------------------------- the limits at the ends of the two domains
+//
+// The forms above give NaN at an end of either domain although the limit exists. At an infinite
+// argument the cause is the one the forms were written for: each of them passes through exprel or
+// log1prel so that lambda = 0 needs no branch, and at an infinite argument those two primitives
+// are themselves evaluated at an infinite argument, where each is inf/inf. At a finite end the
+// cause is different and the point is finite: a prefactor that vanishes meets a power that is
+// infinite, which is 0 times inf.
+//
+// The ends. g has domain (0, inf), so they are v = 0 and v = +inf whatever lambda is. The domain
+// of h is the image of g: (-1/lambda, inf) for lambda > 0, so u = -1/lambda and u = +inf;
+// (-inf, -1/lambda) for lambda < 0, so u = -inf and u = -1/lambda; the whole line for lambda = 0,
+// which has no finite end.
+//
+// The rule. The argument enters every closed form only through a power of v or of w = 1 + lambda u,
+// so the sign of that power's exponent decides each limit: where the base runs to +inf the power
+// runs to +inf for a positive exponent and dies for a negative one, where the base goes to 0 from
+// above the two cases exchange, and on the knife edge where the exponent vanishes the power is 1
+// and the prefactor is the whole limit. The exponent is never formed: it vanishes where lambda is
+// a small integer (forward) or where a product of lambda with one equals 1 (inverse), so the two
+// are compared and never subtracted. A subtraction is what nvcc contracts into an FMA, and the
+// exact product of 3 with the double nearest 1/3 is 1 - 2^-54, not 1, so the edge would be taken
+// on one platform and not on the other. Each limit is compared with SymPy's own limit of the
+// definition by tools/reference/bijector_box_cox_forms.py (check_limits).
+
+// pref w^e, with the base running to +inf (grow) or to 0 from above, and e_sign the sign of the
+// exponent. A prefactor vanishes only where the quantity vanishes identically, so it gives 0.
+LAPLACE_HD_FORCEINLINE double bc_limit_power(double pref, bool grow, int e_sign) {
+  if (e_sign == 0) return pref;
+  if (grow ? (e_sign < 0) : (e_sign > 0)) return 0.0;
+  return pref > 0.0 ? inf() : (pref < 0.0 ? -inf() : 0.0);
+}
+
+// g and its v-derivatives at v = 0 and at v = +inf. The value is the end of the image of g,
+// -1/lambda where that end is finite. For m >= 1, g^(m) = F_m(lambda) v^(lambda - m) with
+// F_m = prod_(k=1..m-1)(lambda - k), and the exponent vanishes exactly at lambda = m, where
+// F_m = (m-1)!; where F_m itself vanishes, that is at an integer lambda below m, g is a
+// polynomial of degree lambda and g^(m) is identically 0.
+template <int K>
+LAPLACE_HD double bc_fwd_at_end(bool at_zero, double lam) {
+  if constexpr (K == 0) {
+    return at_zero ? (lam > 0.0 ? -1.0 / lam : -inf()) : (lam < 0.0 ? -1.0 / lam : inf());
+  } else {
+    double pref = 1.0;
+    for (int k = 1; k <= K - 1; ++k) pref *= lam - k;
+    const int es = lam == double(K) ? 0 : (lam > double(K) ? 1 : -1);
+    return bc_limit_power(pref, !at_zero, es);
+  }
+}
+
+// log|g'| = (lambda - 1) log v, whose m-th v-derivative is (lambda - 1)(-1)^(m-1)(m-1)! v^(-m).
+// At lambda = 1 the map is the identity and every order is 0. Otherwise the value runs to an
+// infinity of the sign of (lambda - 1) log v, each derivative to one of the sign of its own
+// coefficient at v = 0, and each derivative dies at v = +inf.
+template <int K>
+LAPLACE_HD double bc_fwd_lj_at_end(bool at_zero, double lam) {
+  if (lam == 1.0) return 0.0;
+  if constexpr (K == 0) {
+    const double s = at_zero ? 1.0 - lam : lam - 1.0;
+    return s > 0.0 ? inf() : -inf();
+  } else {
+    if (!at_zero) return 0.0;
+    const double s = (lam - 1.0) * bc_sgn(K - 1);
+    return s > 0.0 ? inf() : -inf();
+  }
+}
+
+// h and its u-derivatives at an end of the image of g: h^(K) = P_K(lambda) w^(1/lambda - K) with
+// P_K = prod_(r=1..K-1)(1 - r lambda). At u = +inf, an end only for lambda >= 0, w runs to +inf
+// and 1 - K lambda carries the sign of the exponent, zero included; lambda = 0, where h = e^u,
+// falls under its positive case with P_K = 1. At u = -inf, an end only for lambda <= 0, the
+// exponent is negative and h dies with every order of it. At the finite end u = -1/lambda, w goes
+// to 0 from above, so the same exponent decides the other way round; below 0 it is negative
+// whatever K is, and P_K is then a product of factors above 1.
+// end: 1 for u = +inf, -1 for u = -inf, 0 for u = -1/lambda.
+template <int K>
+LAPLACE_HD double bc_inv_at_end(int end, double lam) {
+  if (end < 0) return 0.0;
+  double pref = 1.0;
+  for (int r = 1; r <= K - 1; ++r) pref *= 1.0 - r * lam;
+  if (end == 0 && lam < 0.0) return inf();
+  const double kl = double(K) * lam;  // compared with 1, never subtracted from it
+  const int es = kl == 1.0 ? 0 : (kl < 1.0 ? 1 : -1);
+  return bc_limit_power(pref, end > 0, es);
+}
+
+// log|h'| = (1 - lambda) S, S = log(1 + lambda u)/lambda (u itself at lambda = 0), whose K-th
+// u-derivative is (1 - lambda)(-1)^(K-1)(K-1)! lambda^(K-1) w^(-K). At lambda = 1 the map is the
+// identity and every order is 0. S runs to +inf at u = +inf and to -inf at u = -inf, and at the
+// finite end to -inf for lambda > 0 and to +inf for lambda < 0. Every u-derivative carries w^(-K)
+// and dies at an infinite u, except at lambda = 0, where log|h'| = u and the first derivative is
+// its slope 1; at the finite end each grows to an infinity of the sign of its own coefficient.
+// end as in bc_inv_at_end.
+template <int K>
+LAPLACE_HD double bc_inv_lj_at_end(int end, double lam) {
+  if (lam == 1.0) return 0.0;
+  if constexpr (K == 0) {
+    double s;
+    if (end > 0) s = 1.0 - lam;                           // S runs to +inf
+    else if (end < 0) s = lam - 1.0;                      // S runs to -inf, and 1 - lambda > 0
+    else s = lam > 0.0 ? lam - 1.0 : 1.0 - lam;           // -inf above 0, +inf below
+    return s > 0.0 ? inf() : -inf();
+  } else if constexpr (K == 1) {
+    if (end != 0) return lam == 0.0 ? 1.0 : 0.0;
+    return (1.0 - lam) > 0.0 ? inf() : -inf();
+  } else {
+    if (end != 0) return 0.0;
+    const double s = (1.0 - lam) * bc_sgn(K - 1) * bc_pow_int(lam, K - 1);
+    return s > 0.0 ? inf() : -inf();
+  }
+}
+
+// ------------------------------------- the partials at the ends of the two domains
+//
+// out[n1] is d^(K-n1)_x d^n1_lambda, n1 = 0..K, which are the entries of bijector_partials<K>
+// with n2 = 0, the only ones this map writes: index(n1, 0) == n1. The caller has already zeroed
+// the array, so the entries with n2 >= 1 stay zero.
+//
+// The rule of the pure limits carries over. The argument enters each closed form through one
+// power, and a lambda-derivative multiplies the form by a logarithm of the argument, which loses
+// to a negative power of it and wins against a vanishing exponent: the three-way verdict of the
+// exponent's sign is therefore unchanged, and only the value on the knife edge moves, from the
+// prefactor itself at n1 = 0 to an infinity above it. The exception is the finite end of the image,
+// where the argument is at a finite point and a lambda-derivative brings u/w rather than log w,
+// which raises the power of 1/w by one: there the exponent is 1/lambda - K and depends on the
+// total order alone, not on how it splits between the argument and lambda.
+//
+// Derived with SymPy and checked, each rule against SymPy's own limit of the definition, by
+// tools/reference/bijector_box_cox_forms.py (check_partials_limits).
+
+// g and its mixed derivatives at v = 0 and v = +inf.
+//   d^m_v d^n_lambda g = v^(lambda - m) sum_(p=0..min(m-1,n)) e_(m-1-p)(c) n!/(n-p)! L^(n-p),
+// L = log v and e_k the elementary symmetric polynomials of c_r = lambda - 1 - r, r < m - 1. The
+// dominant term is the one with the smallest p whose coefficient does not vanish, since a smaller p
+// carries a higher power of L; if every coefficient in range vanishes the sum is identically zero.
+// At m = 0 the value tends to an end of the image, whose lambda-derivatives are those of -1/lambda
+// where that end is finite and infinite otherwise.
+template <int K>
+LAPLACE_HD void bc_fwd_partials_at_end(bool at_zero, double lam, double* out) {
+  for (int n1 = 0; n1 <= K; ++n1) {
+    const int n0 = K - n1;
+    if (n0 == 0) {  // the lambda-derivatives of the end of the image
+      const bool finite_end = at_zero ? (lam > 0.0) : (lam < 0.0);
+      const double s = (n1 % 2) ? 1.0 : -1.0;  // (-1)^(n1+1)
+      if (finite_end) out[n1] = s * bc_fact(n1) / bc_pow_int(lam, n1 + 1);
+      else out[n1] = at_zero ? (s > 0.0 ? inf() : -inf()) : inf();
+      continue;
+    }
+    double e[7] = {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    const int j = n0 - 1;
+    for (int r = 0; r < j; ++r) {
+      const double c = lam - 1.0 - r;
+      for (int k = r + 1; k >= 1; --k) e[k] += c * e[k - 1];
+    }
+    int p0 = -1;
+    for (int p = 0; p <= j && p <= n1; ++p)
+      if (e[j - p] != 0.0) {
+        p0 = p;
+        break;
+      }
+    if (p0 < 0) {  // the sum vanishes identically: so does this derivative of g
+      out[n1] = 0.0;
+      continue;
+    }
+    double coef = e[j - p0];
+    for (int i = 0; i < p0; ++i) coef *= double(n1 - i);  // n1!/(n1 - p0)!
+    // at v = 0 the dominant L^(n1-p0) carries (-1)^(n1-p0); at v = +inf it is positive
+    const double sign = (at_zero && ((n1 - p0) % 2)) ? -coef : coef;
+    const int es = lam == double(n0) ? 0 : (lam > double(n0) ? 1 : -1);
+    if (es == 0) {  // the power is 1, and only p0 == n1 leaves no logarithm
+      out[n1] = (p0 == n1) ? coef : (sign > 0.0 ? inf() : -inf());
+      continue;
+    }
+    out[n1] = bc_limit_power(sign, !at_zero, es);
+  }
+}
+
+// log|g'| = (lambda - 1) log v is linear in lambda, so only n1 = 0 and n1 = 1 are not identically
+// zero. At n1 = 0 the quantity is (lambda - 1) d^n0_v log v, which is 0 at lambda = 1 and otherwise
+// runs to an infinity of its own sign at v = 0 while every argument derivative dies at v = +inf; at
+// n1 = 1 it is d^n0_v log v, free of lambda and so not zero at lambda = 1.
+template <int K>
+LAPLACE_HD void bc_fwd_lj_partials_at_end(bool at_zero, double lam, double* out) {
+  for (int n1 = 0; n1 <= K; ++n1) {
+    const int n0 = K - n1;
+    if (n1 >= 2) {
+      out[n1] = 0.0;
+      continue;
+    }
+    if (n1 == 1) {
+      if (n0 == 0) out[n1] = at_zero ? -inf() : inf();          // log v itself
+      else if (!at_zero) out[n1] = 0.0;                         // v^(-n0) dies
+      else out[n1] = ((n0 - 1) % 2) ? -inf() : inf();           // (-1)^(n0-1) v^(-n0)
+      continue;
+    }
+    if (lam == 1.0) {  // the identity: log|g'| is 0 and so is every v-derivative of it
+      out[n1] = 0.0;
+      continue;
+    }
+    if (n0 == 0) {
+      const double s = at_zero ? 1.0 - lam : lam - 1.0;
+      out[n1] = s > 0.0 ? inf() : -inf();
+      continue;
+    }
+    if (!at_zero) {
+      out[n1] = 0.0;
+      continue;
+    }
+    const double s = (lam - 1.0) * bc_sgn(n0 - 1);
+    out[n1] = s > 0.0 ? inf() : -inf();
+  }
+}
+
+// h and its mixed derivatives at an INFINITE end of the image.
+//   d^n0_u h = P_n0(lambda) w^(1/lambda - n0),   P_n0 = prod_(r=1..n0-1)(1 - r lambda),
+// and at an infinite u a lambda-derivative multiplies this by -log w/lambda^2 at leading order, so
+// it carries the sign (-1)^n1 and never changes the verdict of the exponent, whose sign is that of
+// 1 - n0 lambda. At u = -inf, an end only for lambda <= 0, the exponent is negative whatever n0 is
+// and h dies with every derivative of it, pure or mixed. At lambda = 0, where h = e^u, the first
+// case covers it with n0 lambda = 0 and P_n0 = 1.
+template <int K>
+LAPLACE_HD void bc_inv_partials_at_inf(bool upper, double lam, double* out) {
+  for (int n1 = 0; n1 <= K; ++n1) {
+    if (!upper) {  // u = -inf: everything dies with h
+      out[n1] = 0.0;
+      continue;
+    }
+    const int n0 = K - n1;
+    double pref = 1.0;
+    for (int r = 1; r <= n0 - 1; ++r) pref *= 1.0 - r * lam;
+    if (n1 % 2) pref = -pref;                 // (-1)^n1 from the lambda-derivatives
+    const double na = double(n0) * lam;       // compared with 1, never subtracted from it
+    if (na == 1.0 && n1 == 0) {
+      out[n1] = pref;  // the exponent vanishes and no logarithm is left
+      continue;
+    }
+    out[n1] = bc_limit_power(pref, true, na <= 1.0 ? 1 : -1);
+  }
+}
+
+// log|h'| = (1 - lambda) S, S = log w / lambda, and its mixed derivatives at an INFINITE end.
+// Away from lambda = 0 an argument derivative carries w^(-n0) and dies, so only n0 = 0 survives,
+// and there the quantity is c_n1 log w with c_n1 = d^n1_lambda[(1 - lambda)/lambda]: the logarithm
+// runs to +inf at both infinite ends, so the limit is an infinity of the sign of c_n1, which is
+// (1 - lambda)/lambda at n1 = 0 and (-1)^n1 n1!/lambda^(n1+1) above it, and 0 only where c_0
+// vanishes, at lambda = 1.
+// At lambda = 0 the log-Jacobian is the series (1 - lambda) sum_j (-1)^j u^(j+1) lambda^j/(j+1), so
+// d^n1_lambda is a polynomial in u of degree n1 + 1 whose leading coefficient has the sign
+// (-1)^n1: its n0-th argument derivative runs to an infinity below n1 + 1, is the constant
+// (-1)^n1 (n1!)^2 at n0 = n1 + 1, and vanishes above. The degree n1 + 1 - n0 decides the sign at
+// u = -inf, both ends agreeing wherever it is even.
+template <int K>
+LAPLACE_HD void bc_inv_lj_partials_at_inf(bool upper, double lam, double* out) {
+  for (int n1 = 0; n1 <= K; ++n1) {
+    const int n0 = K - n1;
+    if (lam == 0.0) {
+      const int deg = n1 + 1 - n0;
+      if (deg < 0) {
+        out[n1] = 0.0;
+      } else if (deg == 0) {
+        const double f = bc_fact(n1);
+        out[n1] = ((n1 % 2) ? -1.0 : 1.0) * f * f;
+      } else {
+        double s = (n1 % 2) ? -1.0 : 1.0;
+        if (!upper && (deg % 2)) s = -s;
+        out[n1] = s > 0.0 ? inf() : -inf();
+      }
+      continue;
+    }
+    if (n0 >= 1) {  // w^(-n0) dies and a logarithm cannot save it
+      out[n1] = 0.0;
+      continue;
+    }
+    const double c = (n1 == 0) ? (1.0 - lam) / lam
+                               : ((n1 % 2) ? -1.0 : 1.0) * bc_fact(n1) / bc_pow_int(lam, n1 + 1);
+    out[n1] = c > 0.0 ? inf() : (c < 0.0 ? -inf() : 0.0);
+  }
+}
+
+// log|h'| and its mixed derivatives at the FINITE end of the image, u = -1/lambda, where w goes to
+// 0 from above. There a lambda-derivative brings u/w rather than log w, so the most singular term
+// is C u^n1 w^(-n0-n1) and every entry with n1 >= 1 is an infinity; its sign, with u at the end
+// itself, is that of -(1 - lambda)(-1)^n0/lambda^(n1+1-n0). At lambda = 1 the factor 1 - lambda
+// vanishes and the next term takes over, carrying -1/lambda^2 in its place, which leaves (-1)^n0.
+// The column n1 = 0 is the pure log-Jacobian, bc_inv_lj_at_end.
+template <int K>
+LAPLACE_HD void bc_inv_lj_partials_at_edge(double lam, double* out) {
+  for (int n1 = 0; n1 <= K; ++n1) {
+    const int n0 = K - n1;
+    if (n1 == 0) {
+      out[n1] = bc_inv_lj_at_end<K>(0, lam);
+      continue;
+    }
+    if (lam == 1.0) {
+      out[n1] = (n0 % 2) ? -inf() : inf();
+      continue;
+    }
+    // sign((lambda - 1) (-1)^n0) times sign(lambda) to the parity of n1 + 1 - n0
+    double s = (lam - 1.0) * bc_sgn(n0);
+    if (lam < 0.0 && ((n1 + 1 - n0) % 2 != 0)) s = -s;
+    out[n1] = s > 0.0 ? inf() : -inf();
+  }
+}
+
+// h and its mixed derivatives at the FINITE end of the image, u = -1/lambda, where w goes to 0 from
+// above. A lambda-derivative brings u/w rather than log w and so lowers the power of w by one: the
+// exponent is 1/lambda - K and depends on the total order alone. Writing P_n for
+// prod_(r=1..n-1)(1 - r lambda), the most singular term is
+//   P_n0 u^n1 prod_(i=0..n1-1)(1/lambda - n0 - i) w^(1/lambda - K),
+// so above the edge the sign is that of P_n0 (-1)^n1 prod_i (1 - (n0 + i) lambda), each factor
+// compared with 1 and never subtracted from it, and the sign of lambda cancels between u^n1 and the
+// product. Below 0 the exponent is negative whatever K is, every factor of the product is negative
+// and P_n0 is a product of factors above 1, which leaves (-1)^n1.
+//
+// Two degeneracies, both at lambda = 1/M with M an integer below K, and both measured with SymPy:
+// there either P_n0 vanishes (M below n0) or one factor of the product does (M from n0 up), the
+// leading term goes with it and the next takes over. The limit is then 0 at n1 = 0, where h^(K) is
+// identically 0, and an infinity of sign (-1)^(n0+M) above it.
+//
+// On the edge itself, K lambda = 1, the power is 1 and no logarithm is left, so every n1 is finite:
+// the values are P_K(lambda) (-1/lambda^2)^n1, the ratio between consecutive n1 being -1/lambda^2,
+// which is -K^2 there. Measured with SymPy for K = 1 to 6: at K = 6 and lambda = 1/6 the column is
+// 5/324, -5/9, 20, -720, 25920, -933120, 33592320, each 36 times the one before it with the sign
+// reversed.
+template <int K>
+LAPLACE_HD void bc_inv_partials_at_edge(double lam, double* out) {
+  // the exponent 1/lambda - K: negative for every K below 0, and of the sign of 1 - K lambda above
+  int es;
+  if (lam < 0.0) {
+    es = -1;
+  } else {
+    const double kl = double(K) * lam;
+    es = kl == 1.0 ? 0 : (kl < 1.0 ? 1 : -1);
+  }
+  if (es == 0) {  // on the edge: finite for every n1
+    double pk = 1.0;
+    for (int r = 1; r <= K - 1; ++r) pk *= 1.0 - r * lam;
+    const double q = -1.0 / (lam * lam);
+    for (int n1 = 0; n1 <= K; ++n1) out[n1] = pk * bc_pow_int(q, n1);
+    return;
+  }
+  if (es > 0) {  // the power dies
+    for (int n1 = 0; n1 <= K; ++n1) out[n1] = 0.0;
+    return;
+  }
+  int M = 0;  // lambda is 1/M with M an integer below K, if any: the degenerate case
+  for (int r = 1; r <= K - 1; ++r)
+    if (r * lam == 1.0) {
+      M = r;
+      break;
+    }
+  for (int n1 = 0; n1 <= K; ++n1) {
+    const int n0 = K - n1;
+    if (M > 0) {
+      out[n1] = (n1 == 0) ? 0.0 : (((n0 + M) % 2) ? -inf() : inf());
+      continue;
+    }
+    double s = 1.0;
+    for (int r = 1; r <= n0 - 1; ++r) s *= 1.0 - r * lam;  // P_n0, never 0 here
+    if (n1 % 2) s = -s;
+    for (int i = 0; i < n1; ++i)
+      if (double(n0 + i) * lam > 1.0) s = -s;  // the factor 1 - (n0 + i) lambda is negative
+    out[n1] = s > 0.0 ? inf() : -inf();
+  }
+}
+
+// which end of the image of g the argument is, if any: the finite end is compared with -1/lambda,
+// the expression the dispatch itself compared it with, and not with 1 + lambda u, whose rounding
+// is not the bound's
+LAPLACE_HD_FORCEINLINE int bc_inv_end_of(double u, double lam) {
+  if (u == inf()) return 1;
+  if (u == -inf()) return -1;
+  if (lam != 0.0 && u == -1.0 / lam) return 0;
+  return 2;  // inside
+}
+
 // ---------------------------------------------------------------- the maps
 
 template <int K>
 LAPLACE_HD double box_cox_fwd(double v, double lam, double p2) {
   if (!bc_finite(lam)) return nan();
+  if (v == 0.0 || v == inf()) return bc_fwd_at_end<K>(v == 0.0, lam);
   return bc_fwd_any(K, 0, v, lam);
 }
 template <int K>
 LAPLACE_HD double box_cox_inv(double u, double lam, double p2) {
   if (!bc_finite(lam)) return nan();
+  const int end = bc_inv_end_of(u, lam);
+  if (end != 2) return bc_inv_at_end<K>(end, lam);
   return bc_inv_any(K, 0, u, lam);
 }
 template <int K>
 LAPLACE_HD double box_cox_fwd_lj(double v, double lam, double p2) {
   if (!bc_finite(lam)) return nan();
+  if (v == 0.0 || v == inf()) return bc_fwd_lj_at_end<K>(v == 0.0, lam);
   return bc_fwd_lj_any(K, 0, v, lam);
 }
 template <int K>
 LAPLACE_HD double box_cox_inv_lj(double u, double lam, double p2) {
   if (!bc_finite(lam)) return nan();
+  const int end = bc_inv_end_of(u, lam);
+  if (end != 2) return bc_inv_lj_at_end<K>(end, lam);
   return bc_inv_lj_any(K, 0, u, lam);
 }
 
@@ -281,6 +694,14 @@ template <int K>
 LAPLACE_HD void box_cox_fwd_partials(double v, double lam, double p2, double* out) {
   constexpr int size = (K + 1) * (K + 2) / 2;
   for (int i = 0; i < size; ++i) out[i] = 0.0;
+  if (!bc_finite(lam)) {
+    for (int n1 = 0; n1 <= K; ++n1) out[n1] = nan();
+    return;
+  }
+  if (v == 0.0 || v == inf()) {
+    bc_fwd_partials_at_end<K>(v == 0.0, lam, out);
+    return;
+  }
   for (int n1 = 0; n1 <= K; ++n1) out[n1] = bc_fwd_any(K - n1, n1, v, lam);
 }
 // The Bell polynomials A_0..A_K of the lambda-derivatives of S do not depend on the component:
@@ -290,6 +711,18 @@ template <int K>
 LAPLACE_HD void box_cox_inv_partials(double u, double lam, double p2, double* out) {
   constexpr int size = (K + 1) * (K + 2) / 2;
   for (int i = 0; i < size; ++i) out[i] = 0.0;
+  if (!bc_finite(lam)) {
+    for (int n1 = 0; n1 <= K; ++n1) out[n1] = nan();
+    return;
+  }
+  {
+    const int end = bc_inv_end_of(u, lam);
+    if (end != 2) {
+      if (end == 0) bc_inv_partials_at_edge<K>(lam, out);
+      else bc_inv_partials_at_inf<K>(end > 0, lam, out);
+      return;
+    }
+  }
   double A[7];
   bc_bell(K, u, lam, A);
   const double S = bc_S(u, lam);
@@ -321,6 +754,14 @@ template <int K>
 LAPLACE_HD void box_cox_fwd_lj_partials(double v, double lam, double p2, double* out) {
   constexpr int size = (K + 1) * (K + 2) / 2;
   for (int i = 0; i < size; ++i) out[i] = 0.0;
+  if (!bc_finite(lam)) {
+    for (int n1 = 0; n1 <= K; ++n1) out[n1] = nan();
+    return;
+  }
+  if (v == 0.0 || v == inf()) {
+    bc_fwd_lj_partials_at_end<K>(v == 0.0, lam, out);
+    return;
+  }
   for (int n1 = 0; n1 <= K; ++n1) out[n1] = bc_fwd_lj_any(K - n1, n1, v, lam);
 }
 // log|h'| = (1 - lambda) log(1 + lambda u)/lambda is the positive branch of Yeo-Johnson's: its
@@ -331,6 +772,18 @@ template <int K>
 LAPLACE_HD void box_cox_inv_lj_partials(double u, double lam, double p2, double* out) {
   constexpr int size = (K + 1) * (K + 2) / 2;
   for (int i = 0; i < size; ++i) out[i] = 0.0;
+  if (!bc_finite(lam)) {
+    for (int n1 = 0; n1 <= K; ++n1) out[n1] = nan();
+    return;
+  }
+  // the guard sits here, before the shared branch is called, so that
+  // yeo_johnson_inv_lj_pos_partials stays untouched and shared with yeo_johnson
+  const int end = bc_inv_end_of(u, lam);
+  if (end != 2) {
+    if (end == 0) bc_inv_lj_partials_at_edge<K>(lam, out);
+    else bc_inv_lj_partials_at_inf<K>(end > 0, lam, out);
+    return;
+  }
   yeo_johnson_inv_lj_pos_partials<K>(u, lam, out);
 }
 
