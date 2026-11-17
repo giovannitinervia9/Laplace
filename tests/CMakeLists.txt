@@ -75,6 +75,7 @@ set(LAPLACE_TEST_SOURCES
   penalty/test_distrib_penalty.cpp
   penalty/test_independent_product.cpp
   distrib/test_mvstudent_t.cpp
+  distrib/test_mvstudent_t_improper.cpp
   math/test_chain_pair.cpp
   pdmat/test_pilot.cpp
   pdmat/test_unstructured.cpp

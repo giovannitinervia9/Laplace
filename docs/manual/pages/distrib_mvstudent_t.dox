@@ -105,7 +105,7 @@ from \f$I(\nu, 2) = 8/(\nu^2(\nu + 2)(\nu + 4))\f$ for even \f$\rho\f$ and \ref 
 
 Over a structure `S` modeling \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat", `mvstudent_t1_distrib\<S\>` sets `normalization` to `distrib_normalization::degenerate` and runs on the host only. It defines the proper Student t law of rank \f$\rho\f$ (`rank()`) on \f$\mu + \operatorname{col}(\Sigma)\f$, substituting \f$\rho\f$ for \f$d\f$ and \f$\Sigma^+, \log\lvert\Sigma\rvert_+\f$ for \f$\Sigma^{-1}, \log\det\Sigma\f$ (\ref mvgaussian1_degenerate "degenerate Gaussian").
 
-`logpdf()` returns \f$-\infty\f$ off the support using the same null-space test, while higher-order blocks differentiate the law on the range. `expected_info_dk<K>()` (\f$K \le 4\f$) requires \f$\partial_{ab} M = \delta_{ab}\,\partial_a M\f$ (as on the degenerate Gaussian). `theta_state()` returns `mvstudent_t_state\<mvgaussian_rank_deficient_state\>`, and \f$\theta\f$-table entries fill sequentially. `rng(state, mu, seed, unit, y, tmp)` takes `tmp` of `dim()` doubles and writes \f$y = \mu + (I - P) L z / \sqrt{w}\f$ (\f$\Sigma + cP = L L^\top\f$). `mean()`, `covariance()`, and `start_value()` (projecting \f$0.6 C\f$ without an eigenvalue floor and setting \f$\nu = 5\f$) behave as in the proper class.
+`logpdf()` returns \f$-\infty\f$ off the support using the same null-space test, while higher-order blocks differentiate the law on the range. `expected_info_dk<K>()` (\f$K \le 4\f$) requires \f$\partial_{ab} M = \delta_{ab}\,\partial_a M\f$ (as on the degenerate Gaussian); with a single matrix in the structure, the \f$(\theta, \theta)\f$ entry with \f$t = \partial_\theta\log\lvert\Sigma\rvert_+\f$ uses the exact form of \ref mvstudent_t2_improper "the improper class of mvstudent_t2". `theta_state()` returns `mvstudent_t_state\<mvgaussian_rank_deficient_state\>`, and \f$\theta\f$-table entries fill sequentially. `rng(state, mu, seed, unit, y, tmp)` takes `tmp` of `dim()` doubles and writes \f$y = \mu + (I - P) L z / \sqrt{w}\f$ (\f$\Sigma + cP = L L^\top\f$). `mean()`, `covariance()`, and `start_value()` (projecting \f$0.6 C\f$ without an eigenvalue floor and setting \f$\nu = 5\f$) behave as in the proper class.
 
 \anchor mvstudent_t1_accuracy
 ## Accuracy
@@ -218,7 +218,7 @@ void eval_mvstudent_t(const Kokkos::View<const double**>& y,
 \defgroup distrib_mvstudent_t2 mvstudent_t2 (location, inverse scale matrix)
 \brief Multivariate Student t distribution with location vector \f$\mu\f$, inverse scale matrix \f$Q = M(\theta)\f$ given by a matrix structure, and degrees of freedom \f$\nu\f$.
 
-Defined in `<laplace/distrib/mvstudent_t2.hpp>` as \ref laplace::distrib::mvstudent_t2_distrib "mvstudent_t2_distrib\<S\>", in namespace `laplace::distrib`. It follows \ref distrib_multivariate "Multivariate" over a positive definite structure `S` (proper class only). Evaluation, derivative, information, moment and draw members are `LAPLACE_HD`; `start_value()` runs on the host only. Across orders 0 to 6 and information orders 0 to 4 over six structures, it matches 60-digit mpmath references within 13.6 ulp1N on blocks and 8.13 ulp1N on expected information.
+Defined in `<laplace/distrib/mvstudent_t2.hpp>` as \ref laplace::distrib::mvstudent_t2_distrib "mvstudent_t2_distrib\<S\>", in namespace `laplace::distrib`. It follows \ref distrib_multivariate "Multivariate". Over a positive definite structure `S` it is proper; over a positive semidefinite structure modeling \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat" a partial specialization gives the improper class (singular inverse scale). Proper evaluation, derivative, information, moment and draw members are `LAPLACE_HD`; `start_value()` and the improper class run on the host only. Across orders 0 to 6 and information orders 0 to 4 over six proper structures, it matches 60-digit mpmath references within 13.6 ulp1N on blocks and 8.13 ulp1N on expected information; the improper class matches 60-digit references within 23 ulp1N on blocks and 3.0 ulp1N on expected information.
 
 ## Classic form and parametrization
 
@@ -239,7 +239,37 @@ Parameter ordering and the \f$\theta\f$ table (\ref mvstudent_t1_rest "mvstudent
 - In `expected_info_dk<K>()`, the block `(0, 0)` writes \f$\kappa\partial_T Q\f$ and the block `(theta_slot, theta_slot)` uses \f$t_a = -\partial_a\log\det Q\f$; when `S::closed_factor` is `true`, \f$I_{ab}\f$ uses the traceless factor form from the factor of \f$Q\f$, and otherwise the trace route of \ref distrib_mvgaussian2 "mvgaussian2".
 - `rng(state, mu, seed, unit, y)` writes \f$y = \mu + L^{-\top} z / \sqrt{w}\f$ (\ref mvstudent_t1_draws "mvstudent_t1 draws").
 - `covariance(theta, out, w)` writes packed \f$\tfrac{\nu}{\nu - 2}Q^{-1}\f$ for \f$\nu > 2\f$ (quiet NaN otherwise); `start_value(summary, theta)` sets \f$\nu = 5\f$ and maps the floored inverse of \f$0.6 C\f$ to \f$\theta\f$.
-- No improper specialization (singular \f$Q\f$) is provided.
+
+\anchor mvstudent_t2_improper
+## The improper class
+
+Over `S` modeling \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat", `mvstudent_t2_distrib\<S\>` sets `normalization` to `distrib_normalization::improper` and runs on the host only. With singular \f$Q = M(\theta)\f$ of rank \f$\rho < d\f$ (`rank()`) and pseudo-determinant \f$\lvert Q\rvert_+\f$ (product of its \f$\rho\f$ nonzero eigenvalues),
+\f[
+\ell_2 = c_\rho(\nu) + \tfrac{1}{2}\log\lvert Q\rvert_+ - \tfrac{\nu + \rho}{2}\log\!\left(1 + \tfrac{\delta}{\nu}\right),
+\f]
+where \f$r = y - \mu\f$, \f$\delta = r^\top Q r\f$, and \f$c_\rho(\nu)\f$ is \ref mvstudent_t1_constant "the normalizing constant" with \f$\rho\f$ for \f$d\f$; `logpdf()` is finite for all \f$y\f$.
+
+Writing \f$r = U a + U_0 b\f$ in orthonormal bases \f$U, U_0\f$ of the range and null space of \f$Q\f$, \f$\delta = a^\top(U^\top Q U)a\f$ and \f$\det(U^\top Q U) = \lvert Q\rvert_+\f$. The density is thus the \f$\rho\f$-dimensional proper t of \f$a\f$ times \f$1\f$ in \f$b\f$, integrating to infinity over \f$b\f$; it is also the scale mixture, over \f$w \sim \operatorname{Gamma}(\nu/2)\f$ with rate \f$\nu/2\f$, of the \ref distrib_mvgaussian2 "improper Gaussian" of precision \f$w Q\f$. It serves as a Student t penalty on a smooth with \f$Q = \lambda S\f$.
+
+`logpdf_dk<K, A>()` and `logpdf_dy_dk<J, K>()` (\f$A + K \le 6\f$) evaluate the proper formulas with \f$\rho\f$, \f$Q\f$, and \f$\log\lvert Q\rvert_+\f$ via the kernels of \ref mvstudent_t1_blocks "mvstudent_t1", and the \f$\theta\f$ table fills sequentially. There is no `rng()`, `mean()`, or `covariance()`. For the constrained law \f$U_0^\top(y - \mu) = 0\f$, `constrained_rng(cst, mu, seed, unit, y, tmp)` writes \f$y = \mu + (I - P) L^{-\top} z / \sqrt{w}\f$ with \f$z_k\f$ at indices \f$0\f$ to \f$d - 1\f$ and the gamma draw at \f$d\f$; `constrained_mean(theta, mu, out)` writes \f$\mu\f$ for \f$\nu > 1\f$ and quiet NaN otherwise; and `constrained_covariance(cst, out)` writes packed \f$\tfrac{\nu}{\nu - 2}Q^+\f$ for \f$\nu > 2\f$ and quiet NaN otherwise. Here \f$P = U_0 U_0^\top\f$, \f$Q + cP = L L^\top\f$ with \f$c = \operatorname{tr} Q / \rho\f$, and \f$(Q + cP)^{-1} = Q^+ + P/c\f$. `start_value(summary, theta)` projects \f$0.6 C\f$ onto the range, passes its pseudo-inverse to `structure.params_from_matrix()`, and sets \f$\nu = 5\f$.
+
+`theta_state(theta, w)` returns `mvstudent_t_state\<mvgaussian_rank_deficient_state\>` without a factor, and `constrained_state(theta, w)` adds \f$L\f$ and \f$(Q + cP)^{-1}\f$.
+
+For structures with \f$\partial_{ab} Q = \delta_{ab}\,\partial_a Q\f$ (`weighted_sum_psdmat`), `expected_info_dk<K>()` (\f$K \le 4\f$) evaluates the constrained law's information: \f$I_{\mu\mu} = \kappa Q\f$ with \f$\kappa = (\nu + \rho)/(\nu + \rho + 2)\f$, `(0, theta_slot)` returns `false`, \f$(\theta, \nu)\f$ and \f$(\nu, \nu)\f$ match the proper class with \f$\rho\f$, and \f$I_{ab} = \kappa I^G_{ab} - t_a t_b/(2(\nu + \rho + 2))\f$ with \f$I^G\f$ from \f$\log\lvert Q\rvert_+\f$ and \f$t_a = -\partial_a\log\lvert Q\rvert_+\f$. For one matrix, that subtraction loses about \f$(\nu + \rho)/\nu\f$: against 50-digit mpmath it loses \f$1.5\f$ to \f$29\f$ ulp at \f$\nu = 1\f$, \f$\rho = 8\f$ to \f$98\f$, \f$81\f$ ulp at \f$\rho = 498\f$, and \f$4.9 \times 10^3\f$ ulp at \f$\nu = 0.01\f$, \f$\rho = 98\f$. Instead the code evaluates \f$\nu t^2/(2\rho(\nu + \rho + 2))\f$, measuring \f$0\f$ ulp against \f$\nu\rho/(2(\nu + \rho + 2))\f$ for \f$\nu = 10^{-3}\f$ to \f$30\f$ (and on \ref mvstudent_t1_degenerate "degenerate mvstudent_t1").
+
+Host accuracy (`tests/distrib/test_mvstudent_t_improper.cpp`) against 3,866 60-digit mpmath references (The mpmath development team, 2023; `tools/reference/distrib_mvstudent_t_improper.py`) over `weighted_sum_psdmat` (\f$d = 4, 5, 6\f$, \f$m = 1, 2, 3\f$) in `ulp1N`:
+
+| Points | Blocks \f$A + K \le 6\f$, worst | Information \f$K \le 4\f$, worst |
+|---|---|---|
+| Random (\f$m = 1, 2, 3\f$, two \f$D_2\f$) | 4.2 | 3.0 |
+| \f$m = 1\f$, \f$\nu = 0.05\f$ | 2.1 | 1.9 |
+| \f$m = 1\f$, \f$\nu = 10^6\f$ | 0.79 | 0.18 |
+| Spread (\f$\theta\f$ components \f$9\f$ apart) | 23 | 0.67 |
+| Large residual | 2.1 | 0.56 |
+
+The test bounds are these values, per block order, raised by 1 per cent and rounded up to two digits, and at least 1; the host code of the CUDA build gives the same table but for one cell below 1.
+
+Null-space shifts of \f$+0.75\f$ along the constant vector stay within \f$65.3\f$ ulp1N (bound \f$96\f$). Across 200,000 constrained draws (\f$d = 5, \rho = 4, \nu = 7\f$), the null component is \f$1.7 \times 10^{-15}\f$ relative (bound \f$64\varepsilon\f$), the mean error is \f$0.0022\f$ standard deviations (bound \f$0.01\f$), the covariance matches \f$\tfrac{\nu}{\nu - 2}Q^+\f$ within \f$0.0028\f$ of its largest entry (bound \f$0.03\f$), and constrained covariance agrees with \f$\tfrac{\nu}{\nu - 2}Q^+\f$ to \f$10^{-14}\f$. See `docs/numerics.md`.
 
 ## Accuracy
 
@@ -273,5 +303,9 @@ At \f$d = 10\f$, order 2 takes about 19 times as long as `mvgaussian2` (2021 ns)
 
 ## Module types
 
-- \ref laplace::distrib::mvstudent_t2_distrib "mvstudent_t2_distrib\<S\>" — multivariate Student t with location \f$\mu\f$, inverse scale matrix \f$Q = M(\theta)\f$, and degrees of freedom \f$\nu\f$
+- \ref laplace::distrib::mvstudent_t2_distrib "mvstudent_t2_distrib\<S\>" — multivariate Student t with location \f$\mu\f$, inverse scale matrix \f$Q = M(\theta)\f$, and degrees of freedom \f$\nu\f$, and its improper specialization
+
+## References
+
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 */

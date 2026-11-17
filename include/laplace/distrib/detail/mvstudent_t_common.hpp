@@ -485,8 +485,8 @@ LAPLACE_HD void info_theta_parts(const S& s, const St& gs, const int* pair, cons
   } else if constexpr (R == info_route::gauss_proper) {
     hz = mg::expected_info_dk<Prec, KT>(s, gs, theta_slot, theta_slot, pair, tt, &H, w);
   } else {
-    // host only, as the degenerate class
-    KOKKOS_IF_ON_HOST((hz = mg::rank_deficient_info<false, KT>(s.s, gs, theta_slot, theta_slot, pair, tt, &H, w);))
+    // host only, as the degenerate and the improper classes
+    KOKKOS_IF_ON_HOST((hz = mg::rank_deficient_info<Prec, KT>(s.s, gs, theta_slot, theta_slot, pair, tt, &H, w);))
     KOKKOS_IF_ON_DEVICE((hz = false;))
   }
   if (!hz) H = 0.0;
@@ -572,9 +572,14 @@ LAPLACE_HD bool expected_info_dk(const S& s, const mvstudent_t_state<St>& st, in
   double H, P;
   bool hz, pz;
   info_theta_parts_runtime<Prec, R>(s, gs, kt, pair, idx, H, hz, P, pz, w);
+  // One matrix (weighted_sum with m = 1, a single theta): Ttilde = 0 exactly, so
+  // the traceless form with H = 0 replaces kappa I^G - t t/(2 (nu + rho + 2)),
+  // which cancels by (nu + rho)/nu (note/distrib_multivariate.md section 17).
+  const bool one_matrix = R == info_route::gauss_degenerate && q == 1;
+  if (one_matrix) hz = false, H = 0.0;
   if (!hz && !pz) return false;
   double e;  // the nu coefficient of P
-  if constexpr (R == info_route::traceless) {
+  if (R == info_route::traceless || one_matrix) {
     // nu / (2 rho (nu + rho + 2)) = 1/(2 rho) - (rho + 2)/(2 rho) / (nu + rho + 2)
     e = c == 0 ? nu / (2.0 * rho * (nu + rho + 2.0)) : inv_linear_dk(c, -(rho + 2.0) / (2.0 * rho), nu, rho + 2.0);
   } else {

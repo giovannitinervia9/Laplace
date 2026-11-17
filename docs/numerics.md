@@ -9820,3 +9820,62 @@ the direct sum of its two masses (error 0, bound 4e-15). The derivative check
 in [1, 1.01] now also runs at its middle, y = 1.005, and the device kernel
 evaluates a window of width 1e-8.
 
+## The improper multivariate Student t: mvstudent_t2 over a singular Q (2026-11-17)
+
+What. The improper (intrinsic) class of `mvstudent_t2_distrib<S>` for a positive
+semidefinite structure with a constant null space (`weighted_sum_psdmat`), the
+t counterpart of the improper `mvgaussian2`: Q = M(theta) of rank rho < d, r = y - mu,
+delta = r' Q r,
+
+    l = c_rho(nu) + 1/2 log|Q|_+ - (nu + rho)/2 log1p(delta/nu),
+
+defined for every y. Writing r = U a + U0 b (U, U0 orthonormal bases of the range and
+of the null space of Q), delta depends on a only, so the law is the rho-dimensional
+proper t of a times Lebesgue measure on b; it is also the scale mixture, over
+w ~ Gamma(nu/2, rate nu/2), of the improper Gaussian with precision w Q and its
+range-only constant. Use: a t penalty on a smooth, Q = lambda S.
+
+How. The blocks are the degenerate mvstudent_t1's kernels with W = Q and the sign
++1/2 of the log pseudo-determinant (the far-tail double-double route included);
+no support test. The state holds no factor; `constrained_state` adds the factor of
+Q + cP for the constrained law U0'(y - mu) = 0: `constrained_rng`
+(y = mu + (I - P) L^-T z / sqrt(w)), `constrained_mean` (mu for nu > 1, NaN otherwise),
+`constrained_covariance` (nu/(nu - 2) Q^+ for nu > 2, NaN otherwise). The expected
+information is that of the constrained law: mu block kappa Q, theta-theta
+kappa I^G_ab - t_a t_b/(2 (nu + rho + 2)) with I^G from log|Q|_+ (structures with
+d_ab Q = delta_ab d_a Q), theta-nu and nu-nu as the proper t with rho.
+The improper `mvgaussian2` gained `constrained_mean` (mu) for symmetry.
+
+One matrix. With a single penalty (one theta) the theta-theta entry is
+kappa rho/2 - rho^2/(2 (nu + rho + 2)) = nu rho/(2 (nu + rho + 2)), formed by a
+cancellation that loses about (nu + rho)/nu: with exact inputs (mpmath at 50 digits)
+1.5-29 ulp at nu = 1 for rho = 8-98, 81 ulp at rho = 498, 4.9e3 ulp at nu = 0.01,
+rho = 98. Ttilde = 0 exactly there, so the traceless form with H = 0,
+nu t^2/(2 rho (nu + rho + 2)), is used instead, in the route shared with the
+degenerate mvstudent_t1: measured 0 ulp against nu rho/(2 (nu + rho + 2)) at
+nu = 1e-3 to 30, both classes. Several penalties keep the direct form.
+
+Measured (tests/distrib/test_mvstudent_t_improper.cpp, references
+tools/reference/distrib_mvstudent_t_improper.py, mpmath at 60 digits from the
+definition, 3866 values; weighted_sum structures d = 4..6, m = 1..3; host only, the
+CUDA build compiles and runs the host tests; gcc and MSVC host tables identical
+except one cell), worst ulp1N over A + K <= 6 and the information to order 4:
+
+| point | blocks | information |
+|---|---|---|
+| random, m = 1, 2, 3, two D2 | 4.2 | 3.0 |
+| m = 1, nu = 0.05 | 2.1 | 1.9 |
+| m = 1, nu = 1e6 | 0.79 | 0.18 |
+| two penalties 9 apart | 23 | 0.67 |
+| large residual | 2.1 | 0.56 |
+
+The spread point (theta 9 apart) is the worst, as in the degenerate class, but
+small: the improper blocks use Q itself, never the dense (Sigma + cP)^-1. A shift
+of y along the null space (+0.75 times the constant vector) changes no block beyond
+65.3 ulp1N, the rounding of the shifted y. Constrained draws (d = 5, rho = 4, nu = 7,
+2e5 draws): null component 1.7e-15 relative, mean 0.0022 sd, covariance 0.0028 of
+its largest entry; the constrained covariance equals nu/(nu - 2) times the improper
+Gaussian's Q^+ to 1e-14.
+
+Open. statmodels7 has no improper t (its mvstudent_t refuses a rank-deficient
+matrix): no frozen references. No bench: the kernels are the degenerate t's.

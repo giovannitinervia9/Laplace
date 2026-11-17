@@ -676,6 +676,17 @@ struct mvgaussian2_distrib<S> {
   }
   /**
    * \ingroup distrib_mvgaussian2
+   * \brief Write the mean \f$\mu\f$ of the constrained law \f$U_0^\top(y - \mu) = 0\f$ into `out`.
+   *
+   * \param mu Location vector of length `dim()`.
+   * \param out Output mean vector of length `dim()`.
+   * \see constrained_rng(), constrained_covariance(), distrib_mvgaussian2
+   */
+  void constrained_mean(const double* mu, double* out) const {
+    for (int k = 0; k < structure.dim; ++k) out[k] = mu[k];
+  }
+  /**
+   * \ingroup distrib_mvgaussian2
    * \brief Compute starting matrix parameters `theta` on the host from a sample summary.
    *
    * Projects the sample covariance \f$C\f$ from `summary` onto the range as
