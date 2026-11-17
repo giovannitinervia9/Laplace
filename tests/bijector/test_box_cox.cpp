@@ -758,6 +758,19 @@ TEST_CASE("box_cox: the partials at the ends of both domains") {
   CHECK(at(2.0 / 3.0, 0, 2, 2, 1) == -inf_);
   CHECK(at(2.0 / 3.0, 0, 2, 2, 2) == inf_);
 
+  // (4c) the same for the log-Jacobian's partials at the finite end, which is the one path that
+  // reaches yeo_johnson_inv_lj_pos_partials, the branch the two maps share. box_cox's guard sits in
+  // box_cox_inv_lj_partials, above that call, so the shared function never sees a boundary
+  // argument from here; these assertions are what shows the guard firing on the device rather than
+  // leaving the protection to be inferred from the other map's behaviour. Below 0 the coefficient
+  // (1 - lambda)(-1)^n0 lambda^(n1+1-n0) leaves the sign (-1)^n1 for every order.
+  for (double l : {-1.5, -0.5})
+    for (int K = 1; K <= 6; ++K)
+      for (int n1 = 0; n1 <= K; ++n1) {
+        INFO("lambda = ", l, " order ", K, " n1 ", n1);
+        CHECK(at(l, 1, 3, K, n1) == ((n1 % 2) ? -inf_ : inf_));
+      }
+
   // (5) log|h'| at lambda = 0, where it is affine in u: the constant (-1)^n1 (n1!)^2 wherever the
   // argument derivatives number one more than those in lambda, the same at both infinite ends
   for (int p = 0; p <= 1; ++p) {
