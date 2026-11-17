@@ -52,6 +52,8 @@ struct mvstudent_t2_distrib<S> {
 
   /// Normalization regime (`proper`: positive definite inverse scale matrix).
   static constexpr distrib_normalization normalization = distrib_normalization::proper;
+  /// Kind of the law (`continuous`: a density, with derivatives in \f$y\f$).
+  static constexpr distrib_kind kind = distrib_kind::continuous;
   /// Number of parameters: \f$\mu\f$, \f$Q\f$ and \f$\nu\f$.
   static constexpr int n_params = 3;
   /// Descriptors of \f$\mu\f$ (dense), \f$Q\f$ (indexed, the parameters \f$\theta\f$ of its structure) and \f$\nu\f$ (indexed, last in the indexed coordinates).
@@ -75,6 +77,8 @@ struct mvstudent_t2_distrib<S> {
    * \return Dimension `structure.dim`.
    */
   LAPLACE_HD int dim() const { return structure.dim; }
+  /// Number of \f$y\f$ coordinates of the derivatives in \f$y\f$ (`dim()`: the unit is not constrained).
+  LAPLACE_HD int y_coord_size() const { return structure.dim; }
   /**
    * \brief Return the number of coordinates of parameter `j`.
    * \param j Parameter index in `params`.
@@ -191,21 +195,29 @@ struct mvstudent_t2_distrib<S> {
    * and the positive-term recurrence in \f$d\f$ for \f$I_{\nu\nu}\f$.
    *
    * \tparam K Derivative order with respect to \f$(\theta, \nu)\f$ (`0 <= K <= 4`).
+   * \tparam A Derivative orders in the dense parameters (all zero here: any positive order returns `false`).
    * \param st Precomputed state from `theta_state()`.
    * \param slot_a Slot of the row parameter: 0 for \f$\mu\f$ or `theta_slot`.
    * \param slot_b Slot of the column parameter: 0 for \f$\mu\f$ or `theta_slot`.
    * \param ab Two-element index pair `(a, b)` in \f$\{0, \dots, q\}\f$ selecting an entry within `(theta_slot, theta_slot)` (`q = structure.n_params()` for \f$\nu\f$; unused otherwise).
+   * \param x Dense parameters (unused: the information does not depend on \f$\mu\f$).
    * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q\}\f$ (unused when `K == 0`).
    * \param out Output buffer of length `pdmat::packed_size(dim())` (packed lower-triangular) for `(0, 0)`, or length `1` (`out[0]`) for `(theta_slot, theta_slot)`.
    * \param w Caller workspace of at least `info_scratch_size()` doubles.
    * \return `true` if evaluated; `false` for `(0, theta_slot)` or structurally zero derivatives.
    */
-  template <int K>
-  LAPLACE_HD bool expected_info_dk(const state_type& st, int slot_a, int slot_b, const int* ab, const int* idx,
-                                   double* out, double* w) const {
-    constexpr auto R = S::closed_factor ? detail_mvstudent_t::info_route::traceless
-                                        : detail_mvstudent_t::info_route::gauss_proper;
-    return detail_mvstudent_t::expected_info_dk<true, R, K>(structure, st, slot_a, slot_b, ab, idx, out, w);
+  template <int K, int... A>
+  LAPLACE_HD bool expected_info_dk(const state_type& st, int slot_a, int slot_b, const int* ab, const double* x,
+                                   const int* idx, double* out, double* w) const {
+    // the information does not depend on mu: every derivative in it is zero
+    if constexpr ((0 + ... + A) > 0) {
+      return false;
+    } else {
+      (void)x;
+      constexpr auto R = S::closed_factor ? detail_mvstudent_t::info_route::traceless
+                                          : detail_mvstudent_t::info_route::gauss_proper;
+      return detail_mvstudent_t::expected_info_dk<true, R, K>(structure, st, slot_a, slot_b, ab, idx, out, w);
+    }
   }
   /**
    * \brief Return the number of entries in a \f$\theta\f$-derivative table of orders 1 to `k_max`.
@@ -352,6 +364,8 @@ struct mvstudent_t2_distrib<S> {
    * \brief Normalization regime (`distrib_normalization::improper`: singular inverse scale matrix).
    */
   static constexpr distrib_normalization normalization = distrib_normalization::improper;
+  /// Kind of the law (`continuous`: a density, with derivatives in \f$y\f$).
+  static constexpr distrib_kind kind = distrib_kind::continuous;
   /**
    * \ingroup distrib_mvstudent_t2
    * \brief Number of parameters: \f$\mu\f$, \f$Q\f$, and \f$\nu\f$.
@@ -387,6 +401,8 @@ struct mvstudent_t2_distrib<S> {
    * \see rank(), distrib_mvstudent_t2
    */
   int dim() const { return structure.dim; }
+  /// Number of \f$y\f$ coordinates of the derivatives in \f$y\f$ (`dim()`: the unit is not constrained).
+  int y_coord_size() const { return structure.dim; }
   /**
    * \ingroup distrib_mvstudent_t2
    * \brief Return the number of coordinates of parameter `j`.
@@ -562,22 +578,30 @@ struct mvstudent_t2_distrib<S> {
    * \f$\nu t^2 / (2\rho(\nu + \rho + 2))\f$ (\ref mvstudent_t2_improper "the improper class").
    *
    * \tparam K Derivative order with respect to \f$(\theta, \nu)\f$ (\f$0 \le K \le 4\f$).
+   * \tparam A Derivative orders in the dense parameters (all zero here: any positive order returns `false`).
    * \param st Precomputed state from `theta_state()` or `constrained_state()`.
    * \param slot_a Slot of the row parameter: \f$0\f$ for \f$\mu\f$ or `theta_slot`.
    * \param slot_b Slot of the column parameter: \f$0\f$ for \f$\mu\f$ or `theta_slot`.
    * \param ab Two-element index pair `(a, b)` in \f$\{0, \dots, q\}\f$ selecting an entry within `(theta_slot, theta_slot)` (\f$q\f$ = `structure.n_params()` for \f$\nu\f$; unused otherwise).
+   * \param x Dense parameters (unused: the information does not depend on \f$\mu\f$).
    * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q\}\f$ (unused when \f$K = 0\f$).
    * \param out Output buffer of length `pdmat::packed_size(dim())` (`(0, 0)`) or length \f$1\f$ (`(theta_slot, theta_slot)`).
    * \param w Caller workspace of at least `info_scratch_size()` doubles.
    * \return `true` if evaluated; `false` for `(0, theta_slot)` or structurally zero derivatives.
    * \see info_scratch_size(), theta_slot, distrib_mvstudent_t2
    */
-  template <int K>
+  template <int K, int... A>
     requires detail_mvgaussian::exp_linear_structure<S>
-  bool expected_info_dk(const state_type& st, int slot_a, int slot_b, const int* ab, const int* idx,
-                        double* out, double* w) const {
-    return detail_mvstudent_t::expected_info_dk<true, detail_mvstudent_t::info_route::gauss_degenerate, K>(
-        detail_mvgaussian::rank_deficient_view<S>(structure, st.gauss), st, slot_a, slot_b, ab, idx, out, w);
+  bool expected_info_dk(const state_type& st, int slot_a, int slot_b, const int* ab, const double* x,
+                        const int* idx, double* out, double* w) const {
+    // the information does not depend on mu: every derivative in it is zero
+    if constexpr ((0 + ... + A) > 0) {
+      return false;
+    } else {
+      (void)x;
+      return detail_mvstudent_t::expected_info_dk<true, detail_mvstudent_t::info_route::gauss_degenerate, K>(
+          detail_mvgaussian::rank_deficient_view<S>(structure, st.gauss), st, slot_a, slot_b, ab, idx, out, w);
+    }
   }
   /**
    * \ingroup distrib_mvstudent_t2

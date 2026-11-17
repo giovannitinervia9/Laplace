@@ -145,7 +145,7 @@ std::vector<Case> read_cases(const std::string& path) {
 template <class D, int A, int K>
 bool block_ak(const D& g, const typename D::state_type& st, const Case& c, double* out, double* w) {
   if constexpr (A < 0)
-    return g.template expected_info_dk<K>(st, ld::theta_slot, ld::theta_slot, c.ab, c.idx.data(), out, w);
+    return g.template expected_info_dk<K>(st, ld::theta_slot, ld::theta_slot, c.ab, nullptr, c.idx.data(), out, w);
   else return g.template logpdf_dk<K, A>(st, c.y.data(), c.mu.data(), c.idx.data(), out, w);
 }
 template <class D, int A>

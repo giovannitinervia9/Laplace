@@ -66,6 +66,8 @@ struct univariate_as_multivariate {
 
   /// Normalization: `D` is a proper density.
   static constexpr distrib_normalization normalization = distrib_normalization::proper;
+  /// Kind of the law (`continuous`, as `D`).
+  static constexpr distrib_kind kind = distrib_kind::continuous;
   /// Number of typed parameters, those of `D`.
   static constexpr int n_params = D::n_params;
   /// Parameter descriptors: \f$\mu\f$ (vector of size 1), then the scalars of `D`.
@@ -75,6 +77,8 @@ struct univariate_as_multivariate {
 
   /// \return The dimension, 1.
   LAPLACE_HD int dim() const { return 1; }
+  /// Number of \f$y\f$ coordinates of the derivatives in \f$y\f$ (`dim()`: the unit is not constrained).
+  LAPLACE_HD int y_coord_size() const { return 1; }
   /// \param j Parameter index. \return 1, every parameter has one coordinate.
   LAPLACE_HD int param_size(int j) const { return (void)j, 1; }
   /// \param j Parameter index. \return 0 for \f$\mu\f$ (in \f$x\f$), \f$j - 1\f$ in \f$\theta\f$ otherwise.
