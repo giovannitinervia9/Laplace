@@ -589,6 +589,21 @@ struct log_sum_ratios {
 // a kink of l in y, and differentiating the integrand across it would miss a
 // boundary term, so such a component is NaN.
 //
+// The stack this route needs, which a caller launching it in a kernel has to
+// budget for: the frame holds log_density_partials<P, K> for the density at y,
+// the A[] table of integral ratios of the same size, and one more set of
+// partials per atom, so
+//
+//   bytes = (2 + n_atoms) * sizeof(log_density_partials<P, K>),
+//
+// which at order six is 3352 bytes for P = 4 without atoms, 13384 with six
+// atoms, and 48040 for P = 8. The tests set the CUDA per-thread stack to 8192
+// bytes, enough for P up to 4 with at most one atom; above that the host raises
+// cudaLimitStackSize. The limit is not a property of the atoms, the route being
+// over 8192 already at P >= 6 with none, and neither streaming the atoms nor a
+// static_assert closes it (docs/numerics.md, "The stack the generic derivative
+// route needs, and why neither obvious repair closes it").
+//
 // With atoms the side asked for is G = S + A, the integral of the density over
 // it plus the mass of the atoms on it, and the two are combined in ratio space
 // by log_sum_ratios. The derivatives of an atom's log mass are logpdf_dk at its

@@ -12,7 +12,15 @@
 // per-thread allocation, so it is paid in device memory times the number of
 // resident threads; the figure printed below is the measured price on this
 // device. Any host program that launches Laplace kernels with the generic
-// routes has to do the same before its first launch.
+// routes has to do the same before its first launch, and the size it needs is
+//
+//   (2 + n_atoms) * sizeof(detail_generic::log_density_partials<P, K>)
+//
+// for the log-cdf derivative route at order K over P parameters: 3352 bytes at
+// P = 4 without atoms, 13384 with six atoms, 48040 at P = 8. The 8192 below
+// therefore covers P up to 4 with at most one atom, which is every family and
+// wrapper the suite exercises (docs/numerics.md, "The stack the generic
+// derivative route needs, and why neither obvious repair closes it").
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest/doctest.h>
 
