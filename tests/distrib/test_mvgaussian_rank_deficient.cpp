@@ -145,8 +145,8 @@ std::vector<Case> read_cases(const std::string& path) {
 template <class D, int A, int K>
 bool block_ak(const D& g, const typename D::state_type& st, const Case& c, double* out, double* w) {
   if constexpr (A < 0)
-    return g.template expected_info_dk<K>(st, ld::distrib_mv_info_block::rest_rest, c.ab, c.idx.data(), out, w);
-  else return g.template logpdf_dmu_dk<A, K>(st, c.y.data(), c.mu.data(), c.idx.data(), out, w);
+    return g.template expected_info_dk<K>(st, ld::theta_slot, ld::theta_slot, c.ab, c.idx.data(), out, w);
+  else return g.template logpdf_dk<K, A>(st, c.y.data(), c.mu.data(), c.idx.data(), out, w);
 }
 template <class D, int A>
 bool block_a(const D& g, const typename D::state_type& st, const Case& c, double* out, double* w) {
@@ -261,7 +261,7 @@ void check_support() {
   CHECK(g.logpdf(st, y2, mu) == -INFINITY);
   CHECK(std::isfinite(g.logpdf(st, y3, mu)));
   double out[1];
-  CHECK(g.logpdf_dmu_dk<0, 0>(st, y2, mu, nullptr, out, w.data() + g.state_size()));
+  CHECK(g.logpdf_dk<0, 0>(st, y2, mu, nullptr, out, w.data() + g.state_size()));
   CHECK(out[0] == -INFINITY);
 }
 

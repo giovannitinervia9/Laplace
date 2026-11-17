@@ -20,7 +20,7 @@ where `mvgaussian1_distrib\<S\>` sets \f$\Sigma = M(\theta)\f$, the matrix of th
 \anchor mvgaussian1_blocks
 ## Log-density derivative blocks
 
-Let \f$\partial_T\f$ denote the derivative along the sorted index tuple \f$T\f$ of `idx`. The non-trivial blocks of `logpdf_dmu_dk<A, K>()` are
+Let \f$\partial_T\f$ denote the derivative along the sorted index tuple \f$T\f$ of `idx`. The non-trivial blocks of `logpdf_dk<K, A>()` are
 \f[
 A = 0:\quad -\tfrac{1}{2}\,\partial_T\log\det\Sigma - \tfrac{1}{2} r^\top(\partial_T W)r, \qquad
 A = 1:\quad (\partial_T W)r, \qquad
@@ -31,18 +31,18 @@ with \f$\partial_T W\f$ from `structure.inverse_dk<K>()` and \f$\partial_T \log\
 \anchor mvgaussian1_theta_table
 ## The theta table
 
-When \f$\theta\f$ is shared by the units, the derivatives of \f$W\f$ and \f$\log\det M\f$ can be computed once into a table and attached to the state. Each entry holds `pdmat::packed_size(d) + 2` doubles: a flag (\f$1\f$ when \f$\partial_T W\f$ is not identically zero by structure, \f$0\f$ otherwise), \f$\partial_T \log\det M\f$, and \f$\partial_T W\f$ packed. Entries cover the orders \f$k = 1\f$ to \f$k_{\max}\f$ in turn, and within order \f$k\f$ the \f$\binom{q + k - 1}{k}\f$ sorted \f$k\f$-tuples of \f$\{0, \dots, q - 1\}\f$ (\f$q\f$ = `n_params()`) in lexicographic order. `theta_table_entries(k_max)` returns the number of entries and `theta_table_size(k_max)` the size of the table in doubles.
+When \f$\theta\f$ is shared by the units, the derivatives of \f$W\f$ and \f$\log\det M\f$ can be computed once into a table and attached to the state. Each entry holds `pdmat::packed_size(d) + 2` doubles: a flag (\f$1\f$ when \f$\partial_T W\f$ is not identically zero by structure, \f$0\f$ otherwise), \f$\partial_T \log\det M\f$, and \f$\partial_T W\f$ packed. Entries cover the orders \f$k = 1\f$ to \f$k_{\max}\f$ in turn, and within order \f$k\f$ the \f$\binom{q + k - 1}{k}\f$ sorted \f$k\f$-tuples of \f$\{0, \dots, q - 1\}\f$ (\f$q\f$ = `theta_size()`) in lexicographic order. `theta_table_entries(k_max)` returns the number of entries and `theta_table_size(k_max)` the size of the table in doubles.
 
 `fill_theta_table_entry(st, k_max, entry, table, w)` fills one entry (`0 <= entry < theta_table_entries(k_max)`) with `scratch_size()` doubles in `w`, so a Kokkos kernel can fill all entries in parallel once per \f$\theta\f$. `with_theta_table(st, k_max, table)` returns a copy of `st` with `table` attached and `table_order` set to `k_max`; `table` must remain alive while that state is used.
 
-`logpdf_dmu_dk()`, `logpdf_dy_dk()` and the `vector_vector` block of `expected_info_dk()` read \f$\partial_T \log\det M\f$ and \f$\partial_T W\f$ from the table when \f$1 \le K \le k_{\max}\f$; otherwise, and for `rest_rest`, they compute from `structure`. The tests in `tests/distrib/test_mvgaussian.cpp` check, over all reference blocks of orders 1 to 3, that the blocks read from a table equal the blocks computed directly to the bit, on gcc/OpenMP and CUDA.
+`logpdf_dk()`, `logpdf_dy_dk()` and the block `(0, 0)` of `expected_info_dk()` read \f$\partial_T \log\det M\f$ and \f$\partial_T W\f$ from the table when \f$1 \le K \le k_{\max}\f$; otherwise, and for the block `(theta_slot, theta_slot)`, they compute from `structure`. The tests in `tests/distrib/test_mvgaussian.cpp` check, over all reference blocks of orders 1 to 3, that the blocks read from a table equal the blocks computed directly to the bit, on gcc/OpenMP and CUDA.
 
 \anchor mvgaussian1_info
 ## Expected Fisher information
 
-`expected_info_dk<K>(state, block, ab, idx, out, w)` writes the order-\f$K\f$ derivative (\f$0 \le K \le 4\f$) of the information block `block` (see \ref distrib_multivariate "Multivariate"), with a workspace `w` of at least `info_scratch_size()` doubles. `vector_vector` writes the packed matrix \f$\partial_T W\f$ (\f$W\f$ when \f$K = 0\f$). The cross block `vector_rest` vanishes identically by symmetry, and the call returns `false` without touching `out`. `rest_rest` writes the scalar \f$\partial_T I_{ab}\f$ for the parameter pair `ab` = \f$(a, b)\f$, by one of two routes.
+`expected_info_dk<K>(state, slot_a, slot_b, ab, idx, out, w)` writes the order-\f$K\f$ derivative (\f$0 \le K \le 4\f$) of the information block of the slots `slot_a`, `slot_b` (see \ref distrib_multivariate "Multivariate"), with a workspace `w` of at least `info_scratch_size()` doubles. The block `(0, 0)`, \f$(\mu, \mu)\f$, writes the packed matrix \f$\partial_T W\f$ (\f$W\f$ when \f$K = 0\f$). The cross block `(0, theta_slot)`, \f$(\mu, \theta)\f$, vanishes identically by symmetry, and the call returns `false` without touching `out`. The block `(theta_slot, theta_slot)`, \f$(\theta, \theta)\f$, writes the scalar \f$\partial_T I_{ab}\f$ for the parameter pair `ab` = \f$(a, b)\f$, by one of two routes.
 
-Over a structure with `S::closed_factor`, `rest_rest` evaluates the factor form
+Over a structure with `S::closed_factor`, the block `(theta_slot, theta_slot)` evaluates the factor form
 \f[
 I_{ab} = \tfrac{1}{2}\operatorname{tr}(B_a B_b), \qquad
 B_a = G_a + G_a^\top, \qquad
@@ -60,7 +60,7 @@ X[S, R] = -\sum_{\emptyset \neq P \subseteq S} H[P]\,X[S \setminus P, R],
 where \f$\{a\} + (S \setminus S_1)\f$ adjoins the position of \f$a\f$ to \f$S \setminus S_1\f$. Every \f$\partial_U G_a\f$ is lower triangular, so each trace is \f$\tfrac{1}{2}\operatorname{tr}(B^{(1)} B^{(2)}) = \sum_i G^{(1)}_{ii} G^{(2)}_{ii} + \sum_{j \le i} G^{(1)}_{ij} G^{(2)}_{ij}\f$. Only products of whitened triangular matrices are formed, so nothing cancels near a singular \f$\Sigma\f$.
 
 \anchor mvgaussian1_trace_route
-Over structures without `closed_factor` (such as `factor_analytic_pdmat` and `unstructured_pdmat\<matrix_log_bijector\>`), `rest_rest` applies Leibniz's rule to the trace form, with \f$V = W^{-1} = \Sigma\f$:
+Over structures without `closed_factor` (such as `factor_analytic_pdmat` and `unstructured_pdmat\<matrix_log_bijector\>`), the block `(theta_slot, theta_slot)` applies Leibniz's rule to the trace form, with \f$V = W^{-1} = \Sigma\f$:
 \f[
 I_{ab} = \tfrac{1}{2}\,\partial_{ab}\log\det\Sigma + \tfrac{1}{2}\operatorname{tr}\!\big(V\,\partial_{ab}W\big),
 \qquad
@@ -103,9 +103,9 @@ A_Q = -A \sum_{\emptyset \ne T \subseteq Q} M_T\,A_{Q \setminus T}.
 
 `theta_state(theta, w)` returns an \ref laplace::distrib::mvgaussian_rank_deficient_state "mvgaussian_rank_deficient_state", the state of both singular classes (this one and the improper class of \ref distrib_mvgaussian2 "mvgaussian2"). It records \f$\log\lvert M\rvert_+\f$ from `structure.log_pdet_state()`, keeping the structure's evaluated state in `w` so that every derivative of \f$\log\lvert M\rvert_+\f$ is read with `log_pdet_dk_at()`; the matrix of the quadratic form; and, for this class, the Cholesky factor of \f$\Sigma + cP\f$ and \f$(\Sigma + cP)^{-1}\f$. `state_size()` is \f$3\,d(d + 1)/2\f$ plus `structure.scratch_size()` doubles. The \f$\theta\f$ table works as in the proper class, except that entries are filled one at a time, because they share the structure's evaluated state.
 
-`logpdf_dmu_dk<A, K>()` and `logpdf_dy_dk<J, K>()` are the blocks of the proper class with \f$\Sigma^+\f$ in place of \f$W\f$ and \f$\log\lvert\Sigma\rvert_+\f$ in place of \f$\log\det\Sigma\f$.
+`logpdf_dk<K, A>()` and `logpdf_dy_dk<J, K>()` are the blocks of the proper class with \f$\Sigma^+\f$ in place of \f$W\f$ and \f$\log\lvert\Sigma\rvert_+\f$ in place of \f$\log\det\Sigma\f$.
 
-`expected_info_dk<K>()` (\f$K \le 4\f$) exists only for structures with \f$\partial_{ab} M = \delta_{ab}\,\partial_a M\f$, in which each term is linear in its own \f$e^{\theta_j}\f$ (today `weighted_sum_psdmat`). `vector_vector` writes \f$\Sigma^+\f$ and its \f$\theta\f$-derivatives, and `vector_rest` returns `false`. `rest_rest` evaluates
+`expected_info_dk<K>()` (\f$K \le 4\f$) exists only for structures with \f$\partial_{ab} M = \delta_{ab}\,\partial_a M\f$, in which each term is linear in its own \f$e^{\theta_j}\f$ (today `weighted_sum_psdmat`). The block `(0, 0)` writes \f$\Sigma^+\f$ and its \f$\theta\f$-derivatives, and the block `(0, theta_slot)` returns `false`. The block `(theta_slot, theta_slot)` evaluates
 \f[
 I_{ab} = -\tfrac{1}{2}\,\partial_{ab}\log\lvert M\rvert_+ + \tfrac{1}{2}\,\delta_{ab}\,\partial_a\log\lvert M\rvert_+,
 \f]
@@ -216,7 +216,7 @@ with \f$r = y - \mu\f$. The quadratic form uses \f$M(\theta)\f$ directly, so no 
 
 ## Log-density derivative blocks
 
-The non-trivial blocks of `logpdf_dmu_dk<A, K>()` are
+The non-trivial blocks of `logpdf_dk<K, A>()` are
 \f[
 A = 0:\quad \tfrac{1}{2}\,\partial_T\log\det Q - \tfrac{1}{2} r^\top(\partial_T Q)r, \qquad
 A = 1:\quad (\partial_T Q)r, \qquad
@@ -226,7 +226,7 @@ with \f$\partial_T Q\f$ from `structure.matrix_dk<K>()` and \f$\partial_T \log\d
 
 ## Expected Fisher information
 
-`expected_info_dk<K>()` (\f$K \le 4\f$) has the blocks described on \ref mvgaussian1_info "mvgaussian1": `vector_vector` writes \f$\partial_T Q\f$ (\f$Q\f$ when \f$K = 0\f$) and `vector_rest` returns `false`. `rest_rest` always takes the trace route (\ref mvgaussian1_trace_route "Leibniz's rule on the trace"), with \f$V = Q^{-1}\f$:
+`expected_info_dk<K>()` (\f$K \le 4\f$) has the blocks described on \ref mvgaussian1_info "mvgaussian1": the block `(0, 0)` writes \f$\partial_T Q\f$ (\f$Q\f$ when \f$K = 0\f$) and the block `(0, theta_slot)` returns `false`. The block `(theta_slot, theta_slot)` always takes the trace route (\ref mvgaussian1_trace_route "Leibniz's rule on the trace"), with \f$V = Q^{-1}\f$:
 \f[
 I_{ab} = -\tfrac{1}{2}\,\partial_{ab}\log\det Q + \tfrac{1}{2}\operatorname{tr}\!\big(V\,\partial_{ab}Q\big),
 \qquad
@@ -248,7 +248,7 @@ The normalizing constant counts only the \f$\rho\f$ dimensions of the range. The
 
 `theta_state(theta, w)` returns the \ref mvgaussian1_rank_deficient_state "mvgaussian_rank_deficient_state" of the singular classes, without a factor. `constrained_state(theta, w)` returns the same state with the Cholesky factor of \f$Q + cP\f$ and \f$(Q + cP)^{-1}\f$ added, where \f$P\f$ is the projector onto the null space and \f$c = \operatorname{tr} Q / \rho\f$ (see \ref mvgaussian1_pseudo_inverse "the pseudo-inverse on mvgaussian1"). The derivative blocks are those of the proper class with \f$\log\lvert Q\rvert_+\f$ in place of \f$\log\det Q\f$, and the \f$\theta\f$ table is filled one entry at a time.
 
-`expected_info_dk<K>()` exists for the same structures and with the same `rest_rest` formula as the \ref mvgaussian1_rank_deficient_state "degenerate class" (`vector_vector` writes \f$Q\f$ and its derivatives). For this class it is the information of the constrained law \f$U_0^\top(y - \mu) = 0\f$, with \f$U_0\f$ an orthonormal basis of the null space. The trace form of the proper class, evaluated through \f$M^+\f$, would reach \f$9.5 \times 10^{11}\f$ ulp1N when the components of \f$\theta\f$ are 9 apart, and is not offered.
+`expected_info_dk<K>()` exists for the same structures and with the same `(theta_slot, theta_slot)` formula as the \ref mvgaussian1_rank_deficient_state "degenerate class" (the block `(0, 0)` writes \f$Q\f$ and its derivatives). For this class it is the information of the constrained law \f$U_0^\top(y - \mu) = 0\f$, with \f$U_0\f$ an orthonormal basis of the null space. The trace form of the proper class, evaluated through \f$M^+\f$, would reach \f$9.5 \times 10^{11}\f$ ulp1N when the components of \f$\theta\f$ are 9 apart, and is not offered.
 
 The class has no `rng()`, `mean()` or `covariance()`. For the constrained proper law \f$U_0^\top(y - \mu) = 0\f$, whose covariance is \f$Q^+\f$, it provides `constrained_rng(cstate, mu, seed, unit, y, tmp)`, which writes \f$y = \mu + (I - P) L^{-\top} z\f$ with \f$Q + cP = L L^\top\f$, and `constrained_covariance(cstate, out)`, which writes \f$Q^+ = (Q + cP)^{-1} - P/c\f$; both take a state from `constrained_state()`. On the host, `start_value(summary, theta)` projects the sample covariance \f$C\f$ onto the range, \f$C_p = (I - P) C (I - P)\f$, and passes its pseudo-inverse \f$C_p^+\f$ to `structure.params_from_matrix()`.
 
@@ -347,12 +347,12 @@ void eval_mvgaussian(const Kokkos::View<const double**>& y,
         double g[d];
         const auto st = state_view();
         log_lik(i) = dist.logpdf(st, &y(i, 0), &mu(i, 0));
-        if (dist.template logpdf_dmu_dk<1, 0>(st, &y(i, 0), &mu(i, 0), nullptr, g, w)) {
+        if (dist.template logpdf_dk<0, 1>(st, &y(i, 0), &mu(i, 0), nullptr, g, w)) {
           for (int k = 0; k < d; ++k) grad_mu(i, k) = g[k];
         }
         const int idx[1] = {0};
         double dth = 0.0;
-        if (dist.template logpdf_dmu_dk<0, 1>(st, &y(i, 0), &mu(i, 0), idx, &dth, w)) {
+        if (dist.template logpdf_dk<1, 0>(st, &y(i, 0), &mu(i, 0), idx, &dth, w)) {
           grad_theta(i, 0) = dth;
         }
       });

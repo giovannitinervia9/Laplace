@@ -21,7 +21,7 @@ where \f$\delta = r^\top W r\f$ and \f$c_d(\nu) = \log\Gamma((\nu + d)/2) - \log
 \anchor mvstudent_t1_rest
 ## Matrix parameters, degrees of freedom and parameter table
 
-"The rest" is \f$(\theta_0, \dots, \theta_{q-1}, \nu)\f$ with \f$q = \f$`structure.n_params()`, so `n_params()` returns \f$q + 1\f$ and \f$\nu\f$ has the last index \f$q\f$ in `idx` and `ab`. The \f$\theta\f$ table (`theta_table_entries()`, `theta_table_size()`, `fill_theta_table_entry()`, `with_theta_table()`) matches \ref mvgaussian1_theta_table "the Gaussian theta table": it stores \f$\theta\f$-derivatives of \f$W\f$ and \f$\log\det M\f$ only, without \f$\nu\f$.
+"The rest" is \f$(\theta_0, \dots, \theta_{q-1}, \nu)\f$ with \f$q = \f$`structure.n_params()`, so `theta_size()` returns \f$q + 1\f$ and \f$\nu\f$ has the last index \f$q\f$ in `idx` and `ab`. The \f$\theta\f$ table (`theta_table_entries()`, `theta_table_size()`, `fill_theta_table_entry()`, `with_theta_table()`) matches \ref mvgaussian1_theta_table "the Gaussian theta table": it stores \f$\theta\f$-derivatives of \f$W\f$ and \f$\log\det M\f$ only, without \f$\nu\f$.
 
 ## State
 
@@ -30,7 +30,7 @@ where \f$\delta = r^\top W r\f$ and \f$c_d(\nu) = \log\Gamma((\nu + d)/2) - \log
 \anchor mvstudent_t1_blocks
 ## Log-density derivative blocks
 
-`logpdf_dmu_dk<A, K>(state, y, mu, idx, out, w)` computes the order-\f$(A, K)\f$ block for \f$A + K \le 6\f$, using the storage of \ref distrib_multivariate "Multivariate" (\ref laplace::distrib::sym_tensor "sym_tensor" over \f$d\f$ for \f$A \ge 3\f$); `logpdf_dy_dk<J, K>()` gives \f$(-1)^J\f$ times the block with \f$A = J\f$. Unlike the Gaussian, blocks with \f$A \ge 3\f$ are nonzero.
+`logpdf_dk<K, A>(state, y, mu, idx, out, w)` computes the order-\f$(A, K)\f$ block for \f$A + K \le 6\f$, using the storage of \ref distrib_multivariate "Multivariate" (\ref laplace::distrib::sym_tensor "sym_tensor" over \f$d\f$ for \f$A \ge 3\f$); `logpdf_dy_dk<J, K>()` gives \f$(-1)^J\f$ times the block with \f$A = J\f$. Unlike the Gaussian, blocks with \f$A \ge 3\f$ are nonzero.
 
 With \f$W_U = \partial_U W\f$ along \f$\theta\f$-subset \f$U\f$, the derivatives of \f$\delta = r^\top W r\f$ are \f$r^\top W_U r\f$ (zero \f$\mu\f$), \f$-2(W_U r)_i\f$ (one \f$\mu\f$), \f$2(W_U)_{ij}\f$ (two \f$\mu\f$), and zero with three or more \f$\mu\f$. By \ref faa_di_bruno "Faà di Bruno's formula", a block with \f$A\f$ positions in \f$\mu\f$, \f$K_\theta\f$ in \f$\theta\f$, and \f$c\f$ in \f$\nu\f$ (\f$A + K_\theta \ge 1\f$) sums over set partitions of those \f$A + K_\theta\f$ positions with at most two \f$\mu\f$ positions per part:
 \f[
@@ -67,11 +67,11 @@ scaled by \f$2^{-k}\f$, so every term of order \f$k\f$ has one sign. In 60-digit
 \anchor mvstudent_t1_info
 ## Expected Fisher information
 
-`expected_info_dk<K>(state, block, ab, idx, out, w)` (\f$0 \le K \le 4\f$) uses `info_scratch_size()` doubles in `w` (same as \ref mvgaussian1_info "mvgaussian1"). Let \f$\kappa = (\nu + \rho)/(\nu + \rho + 2)\f$ and \f$t_a = \partial_a\log\det\Sigma\f$. From Lange, Little and Taylor (1989) (checked by quadrature in `tools/reference/mvstudent_t_forms.py` to \f$4.2 \times 10^{-22}\f$ for proper \f$d = 2\f$ and \f$3.4 \times 10^{-21}\f$ for degenerate \f$d = 3, \rho = 2\f$):
+`expected_info_dk<K>(state, slot_a, slot_b, ab, idx, out, w)` (\f$0 \le K \le 4\f$) uses `info_scratch_size()` doubles in `w` (same as \ref mvgaussian1_info "mvgaussian1"). Let \f$\kappa = (\nu + \rho)/(\nu + \rho + 2)\f$ and \f$t_a = \partial_a\log\det\Sigma\f$. From Lange, Little and Taylor (1989) (checked by quadrature in `tools/reference/mvstudent_t_forms.py` to \f$4.2 \times 10^{-22}\f$ for proper \f$d = 2\f$ and \f$3.4 \times 10^{-21}\f$ for degenerate \f$d = 3, \rho = 2\f$):
 
-- `vector_vector` evaluates \f$I_{\mu\mu} = \kappa W\f$ by Leibniz's rule across \f$\nu\f$-derivatives of \f$\kappa\f$ and \f$\theta\f$-derivatives of \f$W\f$.
-- `vector_rest` vanishes identically and returns `false`.
-- `rest_rest` evaluates \f$\partial_T I_{ab}\f$ for `ab` = \f$(a, b)\f$. For two \f$\theta\f$ indices (\f$a, b < q\f$),
+- The block `(0, 0)` evaluates \f$I_{\mu\mu} = \kappa W\f$ by Leibniz's rule across \f$\nu\f$-derivatives of \f$\kappa\f$ and \f$\theta\f$-derivatives of \f$W\f$.
+- The block `(0, theta_slot)` vanishes identically and returns `false`.
+- The block `(theta_slot, theta_slot)` evaluates \f$\partial_T I_{ab}\f$ for `ab` = \f$(a, b)\f$. For two \f$\theta\f$ indices (\f$a, b < q\f$),
 \f[
 I_{ab} = \kappa I^G_{ab} - \frac{t_a t_b}{2(\nu + \rho + 2)},
 \f]
@@ -190,14 +190,14 @@ void eval_mvstudent_t(const Kokkos::View<const double**>& y,
         double g[d];
         const auto st = state_view();
         log_lik(i) = dist.logpdf(st, &y(i, 0), &mu(i, 0));
-        if (dist.template logpdf_dmu_dk<1, 0>(st, &y(i, 0), &mu(i, 0), nullptr, g, w)) {
+        if (dist.template logpdf_dk<0, 1>(st, &y(i, 0), &mu(i, 0), nullptr, g, w)) {
           for (int k = 0; k < d; ++k) grad_mu(i, k) = g[k];
         }
         const int idx_th[1] = {0};
         const int idx_nu[1] = {1};
         double dth = 0.0, dnu = 0.0;
-        if (dist.template logpdf_dmu_dk<0, 1>(st, &y(i, 0), &mu(i, 0), idx_th, &dth, w)) grad_theta0(i) = dth;
-        if (dist.template logpdf_dmu_dk<0, 1>(st, &y(i, 0), &mu(i, 0), idx_nu, &dnu, w)) grad_nu(i) = dnu;
+        if (dist.template logpdf_dk<1, 0>(st, &y(i, 0), &mu(i, 0), idx_th, &dth, w)) grad_theta0(i) = dth;
+        if (dist.template logpdf_dk<1, 0>(st, &y(i, 0), &mu(i, 0), idx_nu, &dnu, w)) grad_nu(i) = dnu;
       });
 }
 \endcode
@@ -236,7 +236,7 @@ Parameter ordering and the \f$\theta\f$ table (\ref mvstudent_t1_rest "mvstudent
 
 - `theta_state(theta, w)` returns \ref laplace::distrib::mvstudent_t_state "mvstudent_t_state\<mvgaussian2_state\>", storing \f$W = Q\f$, \f$\log\det Q\f$, and the factor \f$L\f$ of \f$Q = L L^\top\f$.
 - Derivative blocks use \f$W_U = \partial_U Q\f$ from `structure.matrix_dk` (or the \f$\theta\f$ table) and add \f$+\tfrac{1}{2}\partial_T\log\det Q\f$ when \f$A = c = 0\f$.
-- In `expected_info_dk<K>()`, `vector_vector` writes \f$\kappa\partial_T Q\f$ and `rest_rest` uses \f$t_a = -\partial_a\log\det Q\f$; when `S::closed_factor` is `true`, \f$I_{ab}\f$ uses the traceless factor form from the factor of \f$Q\f$, and otherwise the trace route of \ref distrib_mvgaussian2 "mvgaussian2".
+- In `expected_info_dk<K>()`, the block `(0, 0)` writes \f$\kappa\partial_T Q\f$ and the block `(theta_slot, theta_slot)` uses \f$t_a = -\partial_a\log\det Q\f$; when `S::closed_factor` is `true`, \f$I_{ab}\f$ uses the traceless factor form from the factor of \f$Q\f$, and otherwise the trace route of \ref distrib_mvgaussian2 "mvgaussian2".
 - `rng(state, mu, seed, unit, y)` writes \f$y = \mu + L^{-\top} z / \sqrt{w}\f$ (\ref mvstudent_t1_draws "mvstudent_t1 draws").
 - `covariance(theta, out, w)` writes packed \f$\tfrac{\nu}{\nu - 2}Q^{-1}\f$ for \f$\nu > 2\f$ (quiet NaN otherwise); `start_value(summary, theta)` sets \f$\nu = 5\f$ and maps the floored inverse of \f$0.6 C\f$ to \f$\theta\f$.
 - No improper specialization (singular \f$Q\f$) is provided.

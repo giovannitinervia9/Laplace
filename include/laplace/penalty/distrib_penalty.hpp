@@ -99,6 +99,8 @@ template <distrib::multivariate_distrib M>
 struct distrib_penalty {
   static_assert(M::normalization != distrib::distrib_normalization::degenerate,
                 "distrib_penalty: a degenerate distribution is a constraint, not a penalty");
+  static_assert(distrib::detail_mv::dense_param_index<M>(1) < 0,
+                "distrib_penalty: M has a dense parameter besides the location");
   /// Compile-time penalty descriptor traits of `M`.
   using traits = distrib_penalty_traits<M>;
 
@@ -140,7 +142,7 @@ struct distrib_penalty {
   /// \return The dimension \f$d\f$ of \f$\beta\f$.
   LAPLACE_PENALTY_FORWARD_HD int dim() const { return distribution.dim(); }
   /// \return The number of hyperparameters.
-  LAPLACE_PENALTY_FORWARD_HD int n_params() const { return distribution.n_params(); }
+  LAPLACE_PENALTY_FORWARD_HD int theta_size() const { return distribution.theta_size(); }
   /// \return Doubles of the state written by `theta_state()`.
   LAPLACE_PENALTY_FORWARD_HD int state_size() const { return distribution.state_size(); }
   /// \return Doubles of scratch `w` after the state: that of `M` plus `dim()` for the zero location.
@@ -148,7 +150,7 @@ struct distrib_penalty {
 
   /**
    * \brief Compute what depends on \f$\theta\f$ only (log determinant, matrix, factor).
-   * \param theta Hyperparameters, length `n_params()`.
+   * \param theta Hyperparameters, length `theta_size()`.
    * \param w Caller workspace of `state_size() + scratch_size()` doubles.
    * \return The state of `M`.
    */
@@ -156,7 +158,7 @@ struct distrib_penalty {
 
   /**
    * \brief Return the weak-convexity constant \f$\sup(-\mathrm{pen}'')\f$ at `theta`.
-   * \param theta Hyperparameters, length `n_params()`.
+   * \param theta Hyperparameters, length `theta_size()`.
    * \return Weak-convexity constant (0 for a convex penalty).
    */
   LAPLACE_HD double weak_convexity(const double* theta) const { return traits::weak_convexity(theta); }
@@ -175,10 +177,11 @@ struct distrib_penalty {
   /**
    * \brief Derivatives of the penalty: `J` in \f$\beta\f$ and `K` in \f$\theta\f$ along the sorted tuple `idx`.
    *
-   * Equal to \f$-\f$ `M::logpdf_dy_dk<J, K>`; the output layout is that of `M`
-   * (scalar, `dim()`-vector, packed symmetric matrix for \f$J = 0, 1, 2\f$) and
-   * `false` is returned, `out` untouched, when the block is zero by structure
-   * or not provided (\f$J \ge 3\f$).
+   * Equal to \f$-\f$ `M::logpdf_dy_dk<J, K>`; the output layout is that of `M`,
+   * the packed symmetric tensor of order \f$J\f$ over \f$\beta\f$
+   * (`sym_tensor_size(dim(), J)` doubles: scalar, `dim()`-vector, packed matrix,
+   * sorted tuples for \f$J \ge 3\f$), and `false` is returned, `out` untouched,
+   * when `M` reports the block zero by structure.
    *
    * \tparam J Derivative order in \f$\beta\f$.
    * \tparam K Derivative order in \f$\theta\f$.
@@ -187,14 +190,14 @@ struct distrib_penalty {
    * \param idx Sorted tuple of `K` parameter indices (unused when `K == 0`).
    * \param out Output buffer.
    * \param w Scratch of `scratch_size()` doubles.
-   * \return `true` if written; `false` and `out` untouched when structurally zero or \f$J \ge 3\f$.
+   * \return `true` if written; `false` and `out` untouched when structurally zero.
    */
   LAPLACE_PENALTY_NO_EXEC_CHECK
   template <int J, int K>
   LAPLACE_HD bool value_dbeta_dk(const state_type& st, const double* beta, const int* idx, double* out,
                                  double* w) const {
     if (!distribution.template logpdf_dy_dk<J, K>(st, beta, location(w), idx, out, w)) return false;
-    const int n = J == 0 ? 1 : (J == 1 ? dim() : pdmat::packed_size(dim()));
+    const int n = distrib::sym_tensor_size(dim(), J);
     for (int k = 0; k < n; ++k) out[k] = -out[k];
     return true;
   }

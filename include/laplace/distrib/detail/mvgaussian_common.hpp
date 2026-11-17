@@ -120,10 +120,10 @@ LAPLACE_HD double logpdf(const S& s, const St& st, const double* y, const double
          0.5 * mv::packed_quadratic(s.dim, st.quadratic, y, mu);
 }
 
-template <bool Prec, int A, int K, class St, class S>
-LAPLACE_HD bool logpdf_dmu_dk(const S& s, const St& st, const double* y, const double* mu, const int* idx, double* out,
-                              double* w) {
-  static_assert(A >= 0 && K >= 0 && A + K <= 6, "logpdf_dmu_dk: A + K <= 6");
+template <bool Prec, int K, int A, class St, class S>
+LAPLACE_HD bool logpdf_dk(const S& s, const St& st, const double* y, const double* mu, const int* idx, double* out,
+                          double* w) {
+  static_assert(A >= 0 && K >= 0 && A + K <= 6, "logpdf_dk: A + K <= 6");
   const int d = s.dim, np = packed_size(d);
   if constexpr (A >= 3) {
     return false;
@@ -163,7 +163,7 @@ LAPLACE_HD bool logpdf_dmu_dk(const S& s, const St& st, const double* y, const d
 template <bool Prec, int J, int K, class St, class S>
 LAPLACE_HD bool logpdf_dy_dk(const S& s, const St& st, const double* y, const double* mu, const int* idx, double* out,
                              double* w) {
-  if (!logpdf_dmu_dk<Prec, J, K>(s, st, y, mu, idx, out, w)) return false;
+  if (!logpdf_dk<Prec, K, J>(s, st, y, mu, idx, out, w)) return false;
   if constexpr (J % 2 == 1) {
     const int n = J == 1 ? s.dim : packed_size(s.dim);
     for (int k = 0; k < n; ++k) out[k] = -out[k];
@@ -307,12 +307,12 @@ LAPLACE_HD int info_scratch_size(const S& s) {
 }
 
 template <bool Prec, int K, class St, class S>
-LAPLACE_HD bool expected_info_dk(const S& s, const St& st, distrib_mv_info_block block, const int* ab, const int* idx,
+LAPLACE_HD bool expected_info_dk(const S& s, const St& st, int slot_a, int slot_b, const int* ab, const int* idx,
                                  double* out, double* w) {
   static_assert(K >= 0 && K <= 4, "expected_info_dk: K <= 4");
   const int d = s.dim, np = packed_size(d);
-  if (block == distrib_mv_info_block::vector_rest) return false;
-  if (block == distrib_mv_info_block::vector_vector) {
+  if (slot_a != slot_b) return false;
+  if (slot_a != theta_slot) {
     if constexpr (K == 0) {
       for (int k = 0; k < np; ++k) out[k] = st.quadratic[k];
       return true;

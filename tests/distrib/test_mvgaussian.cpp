@@ -59,8 +59,8 @@ const char* sname[] = {"diagonal", "ar1", "compound_symmetry", "log_cholesky", "
 template <class D, int A, int K>
 KOKKOS_INLINE_FUNCTION bool block_ak(const D& g, const typename D::state_type& st, const double* y, const double* mu,
                                      const int* idx, const int* ab, double* out, double* w) {
-  if constexpr (A < 0) return g.template expected_info_dk<K>(st, ld::distrib_mv_info_block::rest_rest, ab, idx, out, w);
-  else return g.template logpdf_dmu_dk<A, K>(st, y, mu, idx, out, w);
+  if constexpr (A < 0) return g.template expected_info_dk<K>(st, ld::theta_slot, ld::theta_slot, ab, idx, out, w);
+  else return g.template logpdf_dk<K, A>(st, y, mu, idx, out, w);
 }
 template <class D, int A>
 KOKKOS_INLINE_FUNCTION bool block_a(const D& g, const typename D::state_type& st, int K, const double* y,
@@ -477,7 +477,7 @@ void mvgaussian_table_case() {
 template <class D>
 void mvgaussian_draws_check(const D& g, const std::vector<double>& theta_h, const char* name, bool exact_start) {
   using St = typename D::state_type;
-  const int d = g.dim(), q = g.n_params(), np = lp::packed_size(d), nq = lp::packed_size(q);
+  const int d = g.dim(), q = g.theta_size(), np = lp::packed_size(d), nq = lp::packed_size(q);
   const int n = 200000, chunk = 20000, nv = d + nq + d * q;
   Kokkos::View<double*> theta("theta", q), mu("mu", d), state("state", g.state_size() + std::max(g.scratch_size(), g.info_scratch_size()));
   Kokkos::View<St> st("st");
@@ -498,12 +498,12 @@ void mvgaussian_draws_check(const D& g, const std::vector<double>& theta_h, cons
           for (int b = 0; b <= a; ++b) {
             const int ab[2] = {a, b};
             double r = 0.0;
-            if (!g.template expected_info_dk<0>(st(), ld::distrib_mv_info_block::rest_rest, ab, nullptr, &r, ws))
+            if (!g.template expected_info_dk<0>(st(), ld::theta_slot, ld::theta_slot, ab, nullptr, &r, ws))
               r = 0.0;
             info(lp::packed_index(a, b)) = r;
           }
-        g.template expected_info_dk<0>(st(), ld::distrib_mv_info_block::vector_vector, nullptr, nullptr, &info(nq), ws);
-        g.template logpdf_dmu_dk<2, 0>(st(), mu.data(), mu.data(), nullptr, &info(nq + np), ws);
+        g.template expected_info_dk<0>(st(), 0, 0, nullptr, nullptr, &info(nq), ws);
+        g.template logpdf_dk<0, 2>(st(), mu.data(), mu.data(), nullptr, &info(nq + np), ws);
       });
   Kokkos::View<double**, Kokkos::LayoutRight> v("v", n, nv);
   Kokkos::View<double**, Kokkos::LayoutRight> work("work", chunk, g.scratch_size() + 64);
@@ -518,13 +518,13 @@ void mvgaussian_draws_check(const D& g, const std::vector<double>& theta_h, cons
             for (int b = 0; b <= a; ++b) {
               const int ab[2] = {b, a};
               double r = 0.0;
-              if (!g.template logpdf_dmu_dk<0, 2>(st(), y, mu.data(), ab, &r, ws)) r = 0.0;
+              if (!g.template logpdf_dk<2, 0>(st(), y, mu.data(), ab, &r, ws)) r = 0.0;
               v(i, d + lp::packed_index(a, b)) = -r;
             }
           double m[max_d];
           for (int a = 0; a < q; ++a) {
             const int t[1] = {a};
-            if (!g.template logpdf_dmu_dk<1, 1>(st(), y, mu.data(), t, m, ws))
+            if (!g.template logpdf_dk<1, 1>(st(), y, mu.data(), t, m, ws))
               for (int k = 0; k < d; ++k) m[k] = 0.0;
             for (int k = 0; k < d; ++k) v(i, d + nq + a * d + k) = -m[k];
           }

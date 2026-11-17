@@ -233,12 +233,12 @@ template <>
 inline constexpr bool exp_linear_structure<pdmat::weighted_sum_psdmat> = true;
 
 template <bool Prec, int K, class S>
-bool rank_deficient_info(const S& s, const mvgaussian_rank_deficient_state& st, distrib_mv_info_block block,
+bool rank_deficient_info(const S& s, const mvgaussian_rank_deficient_state& st, int slot_a, int slot_b,
                          const int* ab, const int* idx, double* out, double* w) {
   static_assert(K >= 0 && K <= 4, "expected_info_dk: K <= 4");
   const rank_deficient_view<S> v(s, st);
-  if (block == distrib_mv_info_block::vector_rest) return false;
-  if (block == distrib_mv_info_block::vector_vector) {
+  if (slot_a != slot_b) return false;
+  if (slot_a != theta_slot) {
     if constexpr (K == 0) {
       for (int k = 0; k < packed_size(s.dim); ++k) out[k] = st.quadratic[k];
       return true;

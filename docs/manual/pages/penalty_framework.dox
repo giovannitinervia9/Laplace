@@ -17,7 +17,7 @@ which is flat along the null space of \f$Q\f$.
 
 ## Properties and the penalty concept
 
-A type modeling \ref laplace::penalty::penalty "penalty" declares eight compile-time static descriptors, the dimension queries `dim()` returning \f$d\f$ and `n_params()` returning \f$q\f$, and `weak_convexity(theta)`.
+A type modeling \ref laplace::penalty::penalty "penalty" declares eight compile-time static descriptors, the dimension queries `dim()` returning \f$d\f$ and `theta_size()` returning \f$q\f$, and `weak_convexity(theta)`.
 
 | Member | Type | Meaning |
 |---|---|---|

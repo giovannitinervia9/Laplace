@@ -1,28 +1,52 @@
 /**
 \defgroup distrib_multivariate Multivariate
-\brief The interface shared by the multivariate distributions: one vector parameter that varies by unit, and the parameters of a matrix structure.
+\brief The interface shared by the multivariate distributions: typed parameters split into dense and indexed arrays, and block-wise derivative helpers.
 
-Include `<laplace/distrib/multivariate_core.hpp>` for the shared interface. Every type and function on this page lives in namespace `laplace::distrib`. The distributions themselves are documented on their own pages: the multivariate Gaussian in the covariance parametrization (\ref distrib_mvgaussian1 "mvgaussian1") and in the precision parametrization (\ref distrib_mvgaussian2 "mvgaussian2").
+Include `<laplace/distrib/multivariate_core.hpp>` for the shared interface. Every type and function on this page lives in namespace `laplace::distrib`. The distributions themselves are documented on their own pages: \ref distrib_mvgaussian1 "mvgaussian1", \ref distrib_mvgaussian2 "mvgaussian2", \ref distrib_mvstudent_t1 "mvstudent_t1", and \ref distrib_mvstudent_t2 "mvstudent_t2". The free helpers marked `LAPLACE_HD` (all helpers here except `summarize_mv_sample()`) can be called on the host and inside Kokkos kernels on the device.
 
 ## The interface
 
-A multivariate distribution models the concept \ref laplace::distrib::multivariate_distrib "multivariate_distrib". It has one vector parameter \f$\mu \in \mathbb{R}^d\f$, which varies by unit, and the parameter vector \f$\theta \in \mathbb{R}^q\f$ of a matrix structure \f$M(\theta)\f$ modeling \ref laplace::pdmat::pdmat_structure "pdmat_structure" (see \ref pdmat "Positive definite structures"). The distribution holds its structure by value in the public member `structure`, so that it can be copied into Kokkos kernels.
+A multivariate distribution models \ref laplace::distrib::multivariate_distrib "multivariate_distrib". It declares \f$P\f$ typed parameters in `params` and holds its matrix structure \f$M\f$ (a \ref laplace::pdmat::pdmat_structure "pdmat_structure", see \ref pdmat "Positive definite structures", or in the singular classes below a positive semidefinite structure) by value in `structure`, so that it can be copied into Kokkos kernels.
 
 | Member | Meaning |
 |---|---|
 | `normalization` | Static \ref laplace::distrib::distrib_normalization "distrib_normalization" constant (see below) |
+| `n_params` | Static `int` constant giving the parameter count \f$P\f$ |
+| `params` | Static array `distrib_mv_param_info[n_params]` of parameter descriptors |
 | `state_type` | Type of the precomputed state returned by `theta_state()` |
-| `structure` | Matrix structure \f$M(\theta)\f$, held by value |
-| `dim()` | Dimension \f$d\f$ of the observation \f$y\f$ and of the vector parameter \f$\mu\f$ |
-| `n_params()` | Number \f$q\f$ of structure parameters |
+| `structure` | Matrix structure held by value |
+| `dim()` | Dimension \f$d\f$ of the observation \f$y\f$ |
+| `param_size(j)` | Number of coordinates of parameter \f$j\f$ |
+| `param_offset(j)` | Starting index of parameter \f$j\f$ within its array (`x` or \f$\theta\f$) |
+| `theta_size()` | Length of the indexed parameter array \f$\theta\f$ |
 | `state_size()` | Doubles that hold the state |
-| `scratch_size()` | Doubles of working scratch for `theta_state()` and the derivative blocks |
+| `scratch_size()` | Doubles of working scratch for `theta_state()` and derivative blocks |
 | `theta_state(theta, w)` | Precomputes into `w` what depends on \f$\theta\f$ only |
-| `logpdf(state, y, mu)` | Log-density of the unit \f$y\f$ at the vector parameter \f$\mu\f$ |
-| `logpdf_dmu_dk<A, K>(state, y, mu, idx, out, w)` | Block with \f$A\f$ derivatives in \f$\mu\f$ and \f$K\f$ in \f$\theta\f$, \f$A + K \le 6\f$ |
-| `logpdf_dy_dk<J, K>(state, y, mu, idx, out, w)` | Block with \f$J\f$ derivatives in \f$y\f$ and \f$K\f$ in \f$\theta\f$, \f$J + K \le 6\f$ |
+| `logpdf(state, y, x)` | Log-density of \f$y\f$ at dense coordinates `x` |
+| `logpdf_dk<K, A...>(state, y, x, idx, out, w)` | Derivative block of order \f$K\f$ in \f$\theta\f$ and \f$A_j\f$ in the dense parameters, \f$K + \sum_j A_j \le 6\f$ |
+| `logpdf_dy_dk<J, K, A...>(state, y, x, idx, out, w)` | Derivative block of order \f$J\f$ in \f$y\f$, \f$K\f$ in \f$\theta\f$ and \f$A_j\f$ in the dense parameters, \f$J + K + \sum_j A_j \le 6\f$ |
 
-The concept requires `normalization`, `state_type`, `dim()`, `n_params()`, `state_size()`, `scratch_size()`, `theta_state()`, `logpdf()` and the first-order blocks `logpdf_dmu_dk<1, 0>` and `logpdf_dmu_dk<0, 1>`. Each distribution page lists the further members it provides (expected information, draws, moments, starting values).
+The concept requires `normalization`, `n_params`, `params`, `state_type`, `dim()`, `param_size()`, `param_offset()`, `theta_size()`, `state_size()`, `scratch_size()`, `theta_state()`, `logpdf()`, `logpdf_dk<0, 1>()`, `logpdf_dk<1>()`, and `logpdf_dy_dk<1, 0>()`. Each distribution page lists the further members it provides (expected information, draws, moments, starting values).
+
+## Typed parameters
+
+Each parameter \f$j\f$ has a \ref laplace::distrib::distrib_mv_param_info "distrib_mv_param_info" descriptor `params[j]` carrying `name`, `kind`, `lower`, `upper`, and `regularity`. Here `lower` and `upper` give the open natural domain of each coordinate for `scalar` parameters only (unused otherwise), and `regularity` is the log-density differentiability order (\ref laplace::distrib::infinitely_smooth "infinitely_smooth" for every parameter declared so far).
+
+The \ref laplace::distrib::distrib_mv_param_kind "distrib_mv_param_kind" `kind` places each parameter into one of two groups:
+
+- Dense (`vector`, `simplex_vector`, where \ref laplace::distrib::mv_param_dense "mv_param_dense(kind)" is `true`): coordinates are concatenated in declaration order in `x`, and derivatives cover all of them at once. A `simplex_vector` is carried by its additive log-ratio coordinates.
+- Indexed (`scalar`, `matrix`, where `mv_param_dense(kind)` is `false`): coordinates are concatenated in declaration order in \f$\theta\f$ of `theta_size()` doubles, and derivatives take a sorted tuple of \f$\theta\f$-indices, one call per tuple. A `matrix` is carried by its `pdmat` or `psdmat` structure's parameters.
+
+`param_size(j)` returns the coordinate count of parameter \f$j\f$, and `param_offset(j)` returns its start in `x` or \f$\theta\f$. One sorted tuple over \f$\theta\f$ may span several indexed parameters, such as the structure parameters and \f$\nu\f$ below.
+
+| Distribution | `params` | Dense `x` | Indexed \f$\theta\f$ |
+|---|---|---|---|
+| \ref distrib_mvgaussian1 "mvgaussian1" | \f$\mu\f$ (`vector`), \f$\Sigma\f$ (`matrix`) | \f$\mu\f$ | structure \f$\theta\f$ |
+| \ref distrib_mvgaussian2 "mvgaussian2" | \f$\mu\f$ (`vector`), \f$Q\f$ (`matrix`) | \f$\mu\f$ | structure \f$\theta\f$ |
+| \ref distrib_mvstudent_t1 "mvstudent_t1" | \f$\mu\f$ (`vector`), \f$\Sigma\f$ (`matrix`), \f$\nu\f$ (`scalar`, \f$(0, \infty)\f$) | \f$\mu\f$ | structure \f$\theta\f$, then \f$\nu\f$ |
+| \ref distrib_mvstudent_t2 "mvstudent_t2" | \f$\mu\f$ (`vector`), \f$Q\f$ (`matrix`), \f$\nu\f$ (`scalar`, \f$(0, \infty)\f$) | \f$\mu\f$ | structure \f$\theta\f$, then \f$\nu\f$ |
+
+With one dense parameter, as in all four distributions, `x` is \f$\mu\f$ and \f$\theta\f$ holds the structure's parameters (plus \f$\nu\f$ for the Student t).
 
 ## State and scratch
 
@@ -30,13 +54,26 @@ The work is split between a state, which depends on \f$\theta\f$ only, and the e
 
 ## Derivative blocks
 
-`logpdf_dmu_dk<A, K>(state, y, mu, idx, out, w)` writes the derivative of the log-density of order \f$A\f$ in \f$\mu\f$ and order \f$K\f$ in \f$\theta\f$ along the sorted index tuple `idx` (ignored when \f$K = 0\f$), for \f$A + K \le 6\f$; `w` holds `scratch_size()` doubles. The output `out` is a scalar when \f$A = 0\f$, a \f$d\f$-vector when \f$A = 1\f$, a packed symmetric \f$d \times d\f$ matrix when \f$A = 2\f$, and a \ref laplace::distrib::sym_tensor "sym_tensor" over \f$d\f$ components when \f$A \ge 3\f$. When a block vanishes identically by structure, the call returns `false` and leaves `out` untouched. `logpdf_dy_dk<J, K>` gives the same blocks in the observation \f$y\f$, equal to \f$(-1)^J\f$ times the \f$\mu\f$ block with \f$A = J\f$.
+`logpdf_dk<K, A...>(state, y, x, idx, out, w)` writes the derivative of order \f$K\f$ in \f$\theta\f$ along the sorted tuple `idx` (ignored when \f$K = 0\f$) and order \f$A_j\f$ in the \f$j\f$-th dense parameter, with \f$K + \sum_j A_j \le 6\f$ and `w` holding `scratch_size()` doubles. Omitted trailing orders are \f$0\f$, so `logpdf_dk<K>` is `logpdf_dk<K, 0>`. `out` holds the Kronecker product, row-major in declaration order, of the packed symmetric tensors of order \f$A_j\f$ over each dense parameter's coordinates, where an order-\f$0\f$ factor has size \f$1\f$. With one dense parameter of size \f$m\f$, `out` is a scalar (\f$A = 0\f$), an \f$m\f$-vector (\f$A = 1\f$), a packed symmetric \f$m \times m\f$ matrix (\f$A = 2\f$), or a \ref laplace::distrib::sym_tensor "sym_tensor" over \f$m\f$ components (\f$A \ge 3\f$). When a block vanishes identically by structure, the call returns `false` and leaves `out` untouched. `logpdf_dy_dk<J, K, A...>(state, y, x, idx, out, w)` adds the order \f$J\f$ in \f$y\f$, with \f$J + K + \sum_j A_j \le 6\f$: `out` is the packed symmetric tensor of order \f$J\f$ over the \f$d\f$ coordinates of \f$y\f$, Kronecker product (row-major, \f$y\f$ first) with the layout of `logpdf_dk<K, A...>`. The four distributions above depend on \f$y\f$ and \f$\mu\f$ only through \f$y - \mu\f$, so \f$\partial_y^J \partial_\mu^A = (-1)^J \partial_\mu^{J + A}\f$: with \f$A = 0\f$ the block is \f$(-1)^J\f$ times the \f$\mu\f$ block of order \f$J\f$; with \f$A > 0\f$ the order-\f$(J + A)\f$ \f$\mu\f$ block is computed at the front of `w` and its entries are placed in the \f$(J, A)\f$ layout, so `w` then holds `scratch_size() + sym_tensor_size(d, J + A)` doubles.
 
 Symmetric \f$d \times d\f$ matrices are stored packed by rows of the lower triangle, with entry \f$(i, j)\f$, \f$0 \le j \le i < d\f$, at index \f$i(i + 1)/2 + j\f$ (see \ref laplace::pdmat::packed_index "packed_index()"). Tensors of order 3 or higher use the `sym_tensor` order, the sorted tuples in lexicographic order (see \ref distrib_core "The structure of a distribution"); the two orders already differ at order 2.
 
 ## Expected information blocks
 
-The expected Fisher information of a multivariate distribution is split into three blocks, selected by \ref laplace::distrib::distrib_mv_info_block "distrib_mv_info_block": `vector_vector`, the \f$(\mu, \mu)\f$ block; `vector_rest`, the cross block \f$(\mu, \theta)\f$; and `rest_rest`, the \f$(\theta, \theta)\f$ block.
+`expected_info_dk<K>(state, slot_a, slot_b, ab, idx, out, w)` writes the order-\f$K\f$ \f$\theta\f$-derivative along `idx` of the expected Fisher information block for `(slot_a, slot_b)`. A slot is a dense parameter's index in `params`, or \ref laplace::distrib::theta_slot "theta_slot" (\f$-1\f$) for \f$\theta\f$. For one dense parameter, `(slot, slot)` writes its packed symmetric matrix; for two distinct dense parameters of sizes \f$n_a\f$ and \f$n_b\f$, `(slot_a, slot_b)` writes the full \f$n_a \times n_b\f$ matrix (none of the four distributions has two); `(slot, theta_slot)` writes the dense parameter's vector for \f$\theta\f$-coordinate `ab[0]`; `(theta_slot, theta_slot)` writes the entry at `ab` = \f$(a, b)\f$. For the four distributions above, `(0, theta_slot)` vanishes by symmetry and returns `false` with `out` untouched.
+
+## Blocks
+
+A distribution may split \f$y\f$ and each dense parameter into \f$G\f$ blocks, each owning a contiguous coordinate range, and return derivatives concatenated over \f$g = 0, \dots, G - 1\f$ in the dense layout restricted to block \f$g\f$. Without declared blocks (as in all four distributions above), \f$G = 1\f$. Here `slot` is \ref laplace::distrib::y_slot "y_slot" (\f$-2\f$) for \f$y\f$ or a dense parameter index:
+
+- \ref laplace::distrib::mv_n_blocks "mv_n_blocks(d)" returns \f$G\f$ (`d.n_blocks()` if declared, else \f$1\f$).
+- \ref laplace::distrib::mv_slot_size "mv_slot_size(d, slot)" returns `d.dim()` for `y_slot`, else `d.param_size(slot)`.
+- \ref laplace::distrib::mv_block_start "mv_block_start(d, slot, g)" (\f$0 \le g \le G\f$) returns the start \f$s_g\f$ of block \f$g\f$, which owns \f$[s_g, s_{g+1})\f$ (for \f$G = 1\f$: \f$0\f$ and `mv_slot_size(d, slot)`).
+- \ref laplace::distrib::mv_block_tensor_size "mv_block_tensor_size(d, slot, order)" returns \f$\sum_{g=0}^{G-1}\f$ `sym_tensor_size(n_g, order)`, where \f$n_g\f$ is block \f$g\f$'s size in `slot`.
+- \ref laplace::distrib::mv_block_tensor_size "mv_block_tensor_size\<A...\>(d, J)" returns the `out` length of `mv_logpdf_dy_dk_blocks<J, K, A...>()` (of `mv_logpdf_dk_blocks<K, A...>()` when \f$J = 0\f$, the default), summing `sym_tensor_size(n_{yg}, J)` \f$\prod_j\f$ `sym_tensor_size(n_{jg}, A_j)` over blocks \f$g\f$, where \f$n_{yg}\f$ and \f$n_{jg}\f$ are the sizes of \f$y\f$ and of dense parameter \f$j\f$ in block \f$g\f$.
+- \ref laplace::distrib::mv_logpdf_dk_blocks "mv_logpdf_dk_blocks\<K, A...\>(d, st, y, x, idx, out, w)" and \ref laplace::distrib::mv_logpdf_dy_dk_blocks "mv_logpdf_dy_dk_blocks\<J, K, A...\>(d, st, y, x, idx, out, w)" call `logpdf_dk_blocks` / `logpdf_dy_dk_blocks` when blocks are declared, else `logpdf_dk` / `logpdf_dy_dk`.
+
+With \f$d = 1000\f$ coordinates in \f$1000\f$ singleton blocks, a second-order tensor drops from \f$500{,}500\f$ doubles to \f$1000\f$, and a third-order tensor from \f$1.67 \times 10^8\f$ doubles to \f$1000\f$.
 
 ## Normalization classes
 
@@ -55,9 +92,19 @@ On the host, \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample(y, 
 ## Module types and functions
 
 - \ref laplace::distrib::multivariate_distrib "multivariate_distrib" — concept of a multivariate distribution
+- \ref laplace::distrib::distrib_mv_param_kind "distrib_mv_param_kind" — parameter kind (`scalar`, `vector`, `simplex_vector`, `matrix`)
+- \ref laplace::distrib::distrib_mv_param_info "distrib_mv_param_info" — descriptor of one parameter (`name`, `kind`, `lower`, `upper`, `regularity`)
+- \ref laplace::distrib::mv_param_dense "mv_param_dense()" — whether a parameter kind is dense
+- \ref laplace::distrib::theta_slot "theta_slot" — slot constant for the indexed array \f$\theta\f$ (\f$-1\f$)
+- \ref laplace::distrib::y_slot "y_slot" — slot constant for the observation \f$y\f$ in block queries (\f$-2\f$)
 - \ref laplace::distrib::distrib_normalization "distrib_normalization" — normalization class of the matrix parameter (`proper`, `degenerate`, `improper`)
-- \ref laplace::distrib::distrib_mv_info_block "distrib_mv_info_block" — block selector for the expected information (`vector_vector`, `vector_rest`, `rest_rest`)
 - \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat" — concept of a positive semidefinite structure with a constant, supplied null space
+- \ref laplace::distrib::mv_slot_size "mv_slot_size()" — coordinate count of `y_slot` or a dense parameter
+- \ref laplace::distrib::mv_n_blocks "mv_n_blocks()" — number of coordinate blocks \f$G\f$
+- \ref laplace::distrib::mv_block_start "mv_block_start()" — starting coordinate of a block in a slot
+- \ref laplace::distrib::mv_block_tensor_size "mv_block_tensor_size()" — block-layout tensor length in doubles
+- \ref laplace::distrib::mv_logpdf_dk_blocks "mv_logpdf_dk_blocks()" — block-layout wrapper for `logpdf_dk<K, A...>()`
+- \ref laplace::distrib::mv_logpdf_dy_dk_blocks "mv_logpdf_dy_dk_blocks()" — block-layout wrapper for `logpdf_dy_dk<J, K, A...>()`
 - \ref laplace::distrib::distrib_mv_sample_summary "distrib_mv_sample_summary" — sample count, dimension, mean and packed covariance
 - \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample()" — computes the summary from \f$n\f$ observation vectors on the host
 */

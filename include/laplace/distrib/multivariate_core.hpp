@@ -1,10 +1,14 @@
 // The pieces shared by the multivariate distributions (laplace::distrib); the
 // design is in note/distrib_multivariate.md, decided with Giovanni on
-// 2026-11-15. distrib/core.hpp (the univariate structure) is not changed.
+// 2026-11-15, and its typed parameter list in note/multivariate_typed_params.md
+// (2026-11-17). distrib/core.hpp (the univariate structure) is not changed.
 //
-// A multivariate distrib has one vector parameter mu in R^d, which varies by
-// unit, and "the rest", the parameters theta of its structure. It holds its
-// structure by value (copied into kernels) and splits the work in two:
+// A multivariate distrib declares P typed parameters (params[P]): vectors
+// (vector, simplex_vector), which are dense, and scalars and matrices, which
+// are indexed. The coordinates of the dense parameters are concatenated, in
+// declaration order, in one array x; those of the indexed parameters in one
+// array theta of theta_size() doubles. A distrib holds its structure by value
+// (copied into kernels) and splits the work in two:
 //
 //   state_size(), scratch_size()  doubles of the state and of the working scratch
 //   theta_state(theta, w)         writes into w[0, state_size()) what depends on
@@ -13,18 +17,25 @@
 //                                 points into w and at theta; it uses
 //                                 w[state_size(), state_size() + scratch_size())
 //                                 as scratch
-//   logpdf(state, y, mu)          the log-density of the unit y
-//   logpdf_dmu_dk<A, K>(state, y, mu, idx, out, w)
-//                                 A derivatives in mu and K in theta along the
-//                                 sorted tuple idx (ignored when K = 0), A + K <= 6;
-//                                 out is a scalar (A = 0), a d-vector (A = 1), a
-//                                 packed symmetric d x d matrix (A = 2, by rows of
-//                                 the lower triangle, entry (i, j) at
-//                                 i (i + 1)/2 + j), a sym_tensor over d (A >= 3,
-//                                 the sorted tuples in lexicographic order);
-//                                 returns false, out untouched, when the block is
-//                                 zero by structure; w has scratch_size() doubles
-//   logpdf_dy_dk<J, K>            the same in y, (-1)^J times the mu block
+//   logpdf(state, y, x)           the log-density of the unit y
+//   logpdf_dk<K, A...>(state, y, x, idx, out, w)
+//                                 K derivatives in theta along the sorted tuple
+//                                 idx (ignored when K = 0) and A_j in the j-th
+//                                 dense parameter (omitted trailing orders are 0),
+//                                 sum A + K <= 6; out is the Kronecker product,
+//                                 row-major in declaration order, of the packed
+//                                 symmetric tensors of order A_j over each dense
+//                                 parameter's coordinates: a scalar (order 0), a
+//                                 vector (1), a packed symmetric matrix (2, by rows
+//                                 of the lower triangle, entry (i, j) at
+//                                 i (i + 1)/2 + j), a sym_tensor (>= 3, the sorted
+//                                 tuples in lexicographic order); returns false,
+//                                 out untouched, when the block is zero by
+//                                 structure; w has scratch_size() doubles
+//   logpdf_dy_dk<J, K, A...>      J derivatives in y, K in theta and A_j in the j-th
+//                                 dense parameter, sum J + K + A <= 6; out is the
+//                                 packed tensor of order J over y, Kronecker (y
+//                                 first) with the layout of logpdf_dk
 //   normalization                 proper, degenerate or improper (below)
 //
 // The state stays valid while w and theta do. With a theta shared by the units
@@ -37,6 +48,7 @@
 #include <laplace/pdmat/core.hpp>
 
 #include <concepts>
+#include <utility>
 #include <vector>
 
 namespace laplace::distrib {
@@ -58,41 +70,308 @@ enum class distrib_normalization : int { proper, degenerate, improper };
 
 /**
  * \ingroup distrib_multivariate
- * \brief Block selector for the expected Fisher information matrix and its derivatives.
+ * \brief Kind of a parameter of a multivariate distribution.
  *
- * Partitions the parameter vector into the location vector \f$\mu\f$ and the
- * matrix-structure parameter vector \f$\theta\f$:
- * - `vector_vector`: the \f$(\mu, \mu)\f$ block.
- * - `vector_rest`: the cross \f$(\mu, \theta)\f$ block.
- * - `rest_rest`: the \f$(\theta, \theta)\f$ block.
+ * Distinguishes indexed parameters (`scalar` and `matrix`), whose coordinates
+ * are concatenated in \f$\theta\f$ and differentiated by sorted index tuple,
+ * from dense parameters (`vector` and `simplex_vector`), whose coordinates are
+ * concatenated in `x` and differentiated over all coordinates at once. A
+ * `simplex_vector` is carried by its additive log-ratio coordinates; a `matrix`
+ * is carried by the parameters of its `pdmat` or `psdmat` structure.
+ *
+ * \see distrib_mv_param_info, mv_param_dense(), distrib_multivariate
  */
-// The blocks of the expected information: (mu, mu), (mu, theta), (theta, theta).
-enum class distrib_mv_info_block : int { vector_vector, vector_rest, rest_rest };
+enum class distrib_mv_param_kind : int { scalar, vector, simplex_vector, matrix };
 
 /**
  * \ingroup distrib_multivariate
- * \brief Concept satisfied by multivariate distribution descriptors in \c laplace::distrib.
+ * \brief Descriptor of one parameter of a multivariate distribution.
  *
- * Requires a compile-time `normalization` constant, an associated `state_type`,
- * dimension and buffer-size queries (`dim`, `n_params`, `state_size`,
- * `scratch_size`), parameter precomputation (`theta_state`), `logpdf`, and
- * first-order derivative calls `logpdf_dmu_dk<1, 0>` and `logpdf_dmu_dk<0, 1>`.
+ * \see distrib_mv_param_kind, mv_param_dense(), distrib_multivariate
+ */
+struct distrib_mv_param_info {
+  /// Null-terminated parameter identifier name.
+  const char* name;
+  /// Storage and differentiation kind (`scalar`, `vector`, `simplex_vector`, or `matrix`).
+  distrib_mv_param_kind kind;
+  /// Lower bound of the open natural domain of each coordinate (used for `scalar` parameters only).
+  double lower;
+  /// Upper bound of the open natural domain of each coordinate (used for `scalar` parameters only).
+  double upper;
+  /// Differentiability order of the log-density in this parameter (`infinitely_smooth` or a non-negative integer).
+  int regularity;
+};
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Whether a parameter kind is dense, with its coordinates concatenated in `x`.
+ *
+ * \param k Parameter kind.
+ * \return `true` for `vector` and `simplex_vector`; `false` for `scalar` and `matrix`.
+ * \see distrib_mv_param_kind, distrib_mv_param_info, distrib_multivariate
+ */
+LAPLACE_HD constexpr bool mv_param_dense(distrib_mv_param_kind k) {
+  return k == distrib_mv_param_kind::vector || k == distrib_mv_param_kind::simplex_vector;
+}
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Slot constant (\f$-1\f$) for the indexed coordinate array \f$\theta\f$.
+ *
+ * A slot passed to `expected_info_dk()` is either the index in `params` of a
+ * dense parameter or `theta_slot` for \f$\theta\f$.
+ *
+ * \see y_slot, distrib_multivariate
+ */
+inline constexpr int theta_slot = -1;
+/**
+ * \ingroup distrib_multivariate
+ * \brief Slot constant (\f$-2\f$) for the observation \f$y\f$ in block queries.
+ *
+ * \see theta_slot, mv_slot_size(), mv_block_start(), mv_block_tensor_size(), distrib_multivariate
+ */
+inline constexpr int y_slot = -2;
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Concept satisfied by multivariate distributions in `laplace::distrib`.
+ *
+ * Requires the compile-time constants `normalization` and `n_params`, the
+ * parameter descriptor array `params`, an associated `state_type`, dimension
+ * and size queries (`dim()`, `param_size()`, `param_offset()`, `theta_size()`,
+ * `state_size()`, `scratch_size()`), parameter precomputation
+ * (`theta_state()`), `logpdf()`, and the first-order derivative blocks
+ * `logpdf_dk<0, 1>()` and `logpdf_dk<1>()`.
  *
  * \tparam D Multivariate distribution type to check.
+ * \see distrib_normalization, distrib_mv_param_info, distrib_multivariate
  */
 template <class D>
 concept multivariate_distrib =
     requires(const D d, const double* p, double* w, const int* idx, const typename D::state_type& st) {
       { D::normalization } -> std::convertible_to<distrib_normalization>;
+      { D::n_params } -> std::convertible_to<int>;
+      { D::params[0] } -> std::convertible_to<distrib_mv_param_info>;
       { d.dim() } -> std::convertible_to<int>;
-      { d.n_params() } -> std::convertible_to<int>;
+      { d.param_size(0) } -> std::convertible_to<int>;
+      { d.param_offset(0) } -> std::convertible_to<int>;
+      { d.theta_size() } -> std::convertible_to<int>;
       { d.state_size() } -> std::convertible_to<int>;
       { d.scratch_size() } -> std::convertible_to<int>;
       { d.theta_state(p, w) } -> std::same_as<typename D::state_type>;
       { d.logpdf(st, p, p) } -> std::same_as<double>;
-      { d.template logpdf_dmu_dk<1, 0>(st, p, p, idx, w, w) } -> std::same_as<bool>;
-      { d.template logpdf_dmu_dk<0, 1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
+      { d.template logpdf_dk<0, 1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
+      { d.template logpdf_dk<1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
+      { d.template logpdf_dy_dk<1, 0>(st, p, p, idx, w, w) } -> std::same_as<bool>;
     };
+
+// Blocks (note/multivariate_typed_params.md section 4). A distrib may split y
+// and each dense parameter into G blocks, block g owning the contiguous range
+// [block_start(slot, g), block_start(slot, g + 1)) of each, and then return its
+// derivatives block by block (logpdf_dk_blocks, logpdf_dy_dk_blocks): the
+// concatenation over g of the dense layout restricted to block g's
+// coordinates. A distrib that declares no n_blocks() has G = 1, and the helpers
+// below fall back to the dense calls.
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Number of coordinates in a block-query slot.
+ *
+ * Returns `d.dim()` when `slot == y_slot`, and `d.param_size(slot)` when
+ * `slot` indexes a dense parameter in `D::params`.
+ *
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \param slot `y_slot` or the index in `D::params` of a dense parameter.
+ * \return Number of coordinates in `slot`.
+ * \see y_slot, mv_block_start(), mv_block_tensor_size(), distrib_multivariate
+ */
+template <class D>
+LAPLACE_HD int mv_slot_size(const D& d, int slot) {
+  return slot == y_slot ? d.dim() : d.param_size(slot);
+}
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Number of coordinate blocks \f$G\f$ of a multivariate distribution.
+ *
+ * Returns `d.n_blocks()` when `D` declares it, and \f$1\f$ otherwise.
+ *
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \return Number of blocks \f$G \ge 1\f$.
+ * \see mv_block_start(), mv_block_tensor_size(), mv_logpdf_dk_blocks(), mv_logpdf_dy_dk_blocks(), distrib_multivariate
+ */
+template <class D>
+LAPLACE_HD int mv_n_blocks(const D& d) {
+  if constexpr (requires { d.n_blocks(); }) return d.n_blocks();
+  else return 1;
+}
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Starting coordinate index of block \f$g\f$ in a slot.
+ *
+ * Block \f$g\f$ (\f$0 \le g < G\f$) owns the contiguous coordinate range
+ * \f$[s_g, s_{g+1})\f$, where \f$s_g =\f$ `mv_block_start(d, slot, g)`. Calls
+ * `d.block_start(slot, g)` when `D` declares it; otherwise (\f$G = 1\f$)
+ * returns \f$0\f$ for \f$g = 0\f$ and `mv_slot_size(d, slot)` for \f$g = 1\f$.
+ *
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \param slot `y_slot` or the index in `D::params` of a dense parameter.
+ * \param g Block index satisfying \f$0 \le g \le G\f$, where \f$G =\f$ `mv_n_blocks(d)`.
+ * \return Starting coordinate of block \f$g\f$, or `mv_slot_size(d, slot)` when \f$g = G\f$.
+ * \see mv_n_blocks(), mv_slot_size(), mv_block_tensor_size(), distrib_multivariate
+ */
+template <class D>
+LAPLACE_HD int mv_block_start(const D& d, int slot, int g) {
+  if constexpr (requires { d.block_start(slot, g); }) return d.block_start(slot, g);
+  else return g == 0 ? 0 : mv_slot_size(d, slot);
+}
+
+namespace detail_mv {
+// the order in mu of logpdf_dk<K, A...> for a distrib with one dense parameter
+template <int... A>
+constexpr int dense_order() {
+  static_assert(sizeof...(A) <= 1, "logpdf_dk: this distrib has one dense parameter (mu)");
+  return (0 + ... + A);
+}
+// the index in params of the a-th dense parameter (-1 if none)
+template <class D>
+constexpr int dense_param_index(int a) {
+  for (int j = 0, c = 0; j < D::n_params; ++j)
+    if (mv_param_dense(D::params[j].kind)) {
+      if (c == a) return j;
+      ++c;
+    }
+  return -1;
+}
+template <class D, int A>
+inline constexpr int dense_param_v = dense_param_index<D>(A);
+// prod_j sym_tensor_size(n_jg, A_j) over the dense parameters j, block g
+template <int... A, class D, std::size_t... I>
+LAPLACE_HD int block_kron_size(const D& d, int g, std::index_sequence<I...>) {
+  static_assert(((dense_param_v<D, int(I)> >= 0) && ...), "more orders than dense parameters");
+  return (1 * ... *
+          sym_tensor_size(mv_block_start(d, dense_param_v<D, int(I)>, g + 1) - mv_block_start(d, dense_param_v<D, int(I)>, g),
+                          A));
+}
+}  // namespace detail_mv
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Number of doubles in a symmetric tensor over one slot in the block layout.
+ *
+ * Evaluates \f$\sum_{g=0}^{G-1}\f$ `sym_tensor_size(n_g, order)`, where
+ * \f$G =\f$ `mv_n_blocks(d)` and \f$n_g =\f$
+ * `mv_block_start(d, slot, g + 1) - mv_block_start(d, slot, g)` is the size
+ * of block \f$g\f$ in `slot`. With `slot == y_slot` and `order == J`, this is
+ * the required length of `out` for `mv_logpdf_dy_dk_blocks<J, K>()`.
+ *
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \param slot `y_slot` or the index in `D::params` of a dense parameter.
+ * \param order Non-negative tensor order.
+ * \return Total number of doubles across all \f$G\f$ blocks.
+ * \see mv_n_blocks(), mv_block_start(), mv_logpdf_dy_dk_blocks(), sym_tensor_size(), distrib_multivariate
+ */
+template <class D>
+LAPLACE_HD int mv_block_tensor_size(const D& d, int slot, int order) {
+  int n = 0;
+  for (int g = 0, G = mv_n_blocks(d); g < G; ++g)
+    n += sym_tensor_size(mv_block_start(d, slot, g + 1) - mv_block_start(d, slot, g), order);
+  return n;
+}
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Number of doubles in the output of `mv_logpdf_dk_blocks<K, A...>()` or, with `y_order` \f$= J\f$, of `mv_logpdf_dy_dk_blocks<J, K, A...>()`.
+ *
+ * Evaluates \f$\sum_{g=0}^{G-1} \prod_j\f$ `sym_tensor_size(n_{jg}, A_j)`,
+ * where \f$G =\f$ `mv_n_blocks(d)` and \f$n_{jg}\f$ is the number of
+ * coordinates of the \f$j\f$-th dense parameter in block \f$g\f$ (omitted
+ * trailing orders default to \f$0\f$), times `sym_tensor_size(n_yg, y_order)`
+ * for the \f$n_{yg}\f$ coordinates of \f$y\f$ in block \f$g\f$.
+ *
+ * \tparam A Derivative orders in the dense parameters, in declaration order.
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \param y_order Derivative order in \f$y\f$ (0 by default).
+ * \return Total number of doubles across all \f$G\f$ blocks.
+ * \see mv_n_blocks(), mv_block_start(), mv_logpdf_dk_blocks(), sym_tensor_size(), distrib_multivariate
+ */
+template <int... A, class D>
+LAPLACE_HD int mv_block_tensor_size(const D& d, int y_order = 0) {
+  int n = 0;
+  for (int g = 0, G = mv_n_blocks(d); g < G; ++g)
+    n += sym_tensor_size(mv_block_start(d, y_slot, g + 1) - mv_block_start(d, y_slot, g), y_order) *
+         detail_mv::block_kron_size<A...>(d, g, std::make_index_sequence<sizeof...(A)>{});
+  return n;
+}
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Evaluates `logpdf_dk<K, A...>()` in the block layout.
+ *
+ * Calls `d.logpdf_dk_blocks<K, A...>(st, y, x, idx, out, w)` when `D`
+ * declares `n_blocks()`, and falls back to
+ * `d.logpdf_dk<K, A...>(st, y, x, idx, out, w)` (one block, dense layout)
+ * otherwise. `out` must hold `mv_block_tensor_size<A...>(d)` doubles.
+ *
+ * \tparam K Derivative order in \f$\theta\f$.
+ * \tparam A Derivative orders in the dense parameters, in declaration order (omitted trailing orders are \f$0\f$).
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \param st Precomputed state returned by `d.theta_state()`.
+ * \param y Observation vector of length `d.dim()`.
+ * \param x Concatenated dense parameter coordinates.
+ * \param idx Sorted tuple of \f$K\f$ indices into \f$\theta\f$ (ignored when \f$K = 0\f$).
+ * \param out Output buffer of length `mv_block_tensor_size<A...>(d)` doubles; untouched on a `false` return.
+ * \param w Working scratch buffer of length `d.scratch_size()` doubles.
+ * \return `true` if the block may be nonzero, `false` if it vanishes identically by structure (leaving `out` untouched).
+ * \see mv_n_blocks(), mv_block_tensor_size(), mv_logpdf_dy_dk_blocks(), distrib_multivariate
+ */
+template <int K, int... A, class D>
+LAPLACE_HD bool mv_logpdf_dk_blocks(const D& d, const typename D::state_type& st, const double* y, const double* x,
+                                    const int* idx, double* out, double* w) {
+  if constexpr (requires { d.n_blocks(); })
+    return d.template logpdf_dk_blocks<K, A...>(st, y, x, idx, out, w);
+  else
+    return d.template logpdf_dk<K, A...>(st, y, x, idx, out, w);
+}
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Evaluates `logpdf_dy_dk<J, K, A...>()` in the block layout.
+ *
+ * Calls `d.logpdf_dy_dk_blocks<J, K, A...>(st, y, x, idx, out, w)` when `D`
+ * declares `n_blocks()`, and falls back to
+ * `d.logpdf_dy_dk<J, K, A...>(st, y, x, idx, out, w)` (one block, dense layout)
+ * otherwise. `out` must hold `mv_block_tensor_size<A...>(d, J)` doubles.
+ *
+ * \tparam J Derivative order in the observation \f$y\f$.
+ * \tparam K Derivative order in \f$\theta\f$.
+ * \tparam A Derivative orders in the dense parameters, in declaration order (omitted trailing orders are \f$0\f$).
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \param st Precomputed state returned by `d.theta_state()`.
+ * \param y Observation vector of length `d.dim()`.
+ * \param x Concatenated dense parameter coordinates.
+ * \param idx Sorted tuple of \f$K\f$ indices into \f$\theta\f$ (ignored when \f$K = 0\f$).
+ * \param out Output buffer of length `mv_block_tensor_size<A...>(d, J)` doubles; untouched on a `false` return.
+ * \param w Working scratch buffer of the length that `d.logpdf_dy_dk<J, K, A...>()` asks for.
+ * \return `true` if the block may be nonzero, `false` if it vanishes identically by structure (leaving `out` untouched).
+ * \see mv_n_blocks(), mv_block_tensor_size(), mv_logpdf_dk_blocks(), y_slot, distrib_multivariate
+ */
+template <int J, int K, int... A, class D>
+LAPLACE_HD bool mv_logpdf_dy_dk_blocks(const D& d, const typename D::state_type& st, const double* y, const double* x,
+                                       const int* idx, double* out, double* w) {
+  if constexpr (requires { d.n_blocks(); })
+    return d.template logpdf_dy_dk_blocks<J, K, A...>(st, y, x, idx, out, w);
+  else
+    return d.template logpdf_dy_dk<J, K, A...>(st, y, x, idx, out, w);
+}
 
 /**
  * \ingroup distrib_multivariate
@@ -184,7 +463,7 @@ concept constant_null_space_psdmat = pdmat::psdmat_structure<S> && S::constant_n
 struct mvgaussian_rank_deficient_state {
   /**
    * \ingroup distrib_mvgaussian1
-   * \brief Pointer to caller-owned matrix structure parameter vector \f$\theta\f$ of length `n_params()`.
+   * \brief Pointer to caller-owned matrix structure parameter vector \f$\theta\f$ of length `theta_size()`.
    */
   const double* theta;
   /**
@@ -343,6 +622,63 @@ LAPLACE_HD int merge_sorted(const int* a, int na, const int* b, int nb, int* out
   int i = 0, j = 0, k = 0;
   while (i < na || j < nb) out[k++] = (j >= nb || (i < na && a[i] <= b[j])) ? a[i++] : b[j++];
   return k;
+}
+
+// position of the sorted tuple t[0] <= ... <= t[k-1] over p in the layout of
+// a derivative block: packed by rows of the lower triangle for k = 2,
+// sym_tensor order (sym_tensor_position with p and k known at run time) else
+LAPLACE_HD int block_position(int p, int k, const int* t) {
+  if (k == 2) return pdmat::packed_index(t[1], t[0]);
+  int pos = 0, prev = 0;
+  for (int j = 0; j < k; ++j) {
+    for (int v = prev; v < t[j]; ++v) pos += binomial_coef(p - v + k - j - 2, k - j - 1);
+    prev = t[j];
+  }
+  return pos;
+}
+
+// the sorted tuple after t over p in the same layout; false after the last
+LAPLACE_HD bool next_block_tuple(int p, int k, int* t) {
+  if (k == 2) {  // rows of the lower triangle: (j, i) with j <= i, by i then j
+    if (t[0] < t[1]) {
+      ++t[0];
+      return true;
+    }
+    if (t[1] == p - 1) return false;
+    ++t[1];
+    t[0] = 0;
+    return true;
+  }
+  int i = k - 1;
+  while (i >= 0 && t[i] == p - 1) --i;
+  if (i < 0) return false;
+  ++t[i];
+  for (int j = i + 1; j < k; ++j) t[j] = t[i];
+  return true;
+}
+
+// logpdf_dy_dk<J, K, A> of a law of y - mu: d_y^J d_mu^A l = (-1)^J d_mu^(J+A) l.
+// The order-(J + A) tensor in mu goes to w[0, m), the call's scratch after it;
+// out[(u, v)], u a sorted J-tuple over y (outer) and v a sorted A-tuple over mu
+// (inner), each in the layout of its order (block_position), is (-1)^J times
+// its entry at the merged tuple.
+template <int J, int K, int A, class D>
+LAPLACE_HD bool location_dy_dk(const D& g, const typename D::state_type& st, const double* y, const double* mu,
+                               const int* idx, double* out, double* w) {
+  static_assert(J >= 0 && K >= 0 && A > 0 && J + K + A <= 6, "logpdf_dy_dk: J + K + A <= 6");
+  const int d = g.dim(), m = sym_tensor_size(d, J + A);
+  if (!g.template logpdf_dk<K, J + A>(st, y, mu, idx, w, w + m)) return false;
+  const double sign = J % 2 == 1 ? -1.0 : 1.0;
+  int u[J + 1] = {}, v[A] = {}, t[J + A];
+  int o = 0;
+  do {
+    for (int b = 0; b < A; ++b) v[b] = 0;
+    do {
+      merge_sorted(u, J, v, A, t);
+      out[o++] = sign * w[block_position(d, J + A, t)];
+    } while (next_block_tuple(d, A, v));
+  } while (next_block_tuple(d, J, u));
+  return true;
 }
 
 }  // namespace detail_mv

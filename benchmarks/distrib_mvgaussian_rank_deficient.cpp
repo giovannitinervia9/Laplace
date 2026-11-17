@@ -73,22 +73,22 @@ void run(const char* name, const D& g, const ws_t& s, bool improper) {
   const int i0[1] = {0}, i01[2] = {0, 1}, i00[2] = {0, 0};
   std::printf("  logpdf                 %.4g s\n", seconds(reps, [&] { out[0] = g.logpdf(st, y.data(), mu.data()); }));
   std::printf("  A=1 K=0 (W r)          %.4g s\n",
-              seconds(reps, [&] { g.template logpdf_dmu_dk<1, 0>(st, y.data(), mu.data(), nullptr, out.data(), ws); }));
+              seconds(reps, [&] { g.template logpdf_dk<0, 1>(st, y.data(), mu.data(), nullptr, out.data(), ws); }));
   std::printf("  A=0 K=1                %.4g s\n",
-              seconds(reps, [&] { g.template logpdf_dmu_dk<0, 1>(st, y.data(), mu.data(), i0, out.data(), ws); }));
+              seconds(reps, [&] { g.template logpdf_dk<1, 0>(st, y.data(), mu.data(), i0, out.data(), ws); }));
   std::printf("  A=0 K=2 (0,0)          %.4g s\n",
-              seconds(reps, [&] { g.template logpdf_dmu_dk<0, 2>(st, y.data(), mu.data(), i00, out.data(), ws); }));
+              seconds(reps, [&] { g.template logpdf_dk<2, 0>(st, y.data(), mu.data(), i00, out.data(), ws); }));
   std::printf("  A=0 K=2 (0,1)          %.4g s\n",
-              seconds(reps, [&] { g.template logpdf_dmu_dk<0, 2>(st, y.data(), mu.data(), i01, out.data(), ws); }));
+              seconds(reps, [&] { g.template logpdf_dk<2, 0>(st, y.data(), mu.data(), i01, out.data(), ws); }));
   std::printf("  A=1 K=1                %.4g s\n",
-              seconds(reps, [&] { g.template logpdf_dmu_dk<1, 1>(st, y.data(), mu.data(), i0, out.data(), ws); }));
+              seconds(reps, [&] { g.template logpdf_dk<1, 1>(st, y.data(), mu.data(), i0, out.data(), ws); }));
   double* tab = ws + sc;
   std::printf("  table orders 1-2 (%d)  %.4g s\n", g.theta_table_entries(2), seconds(1, [&] {
                 for (int e = 0; e < g.theta_table_entries(2); ++e) g.fill_theta_table_entry(st, 2, e, tab, ws);
               }));
   const auto stt = g.with_theta_table(st, 2, tab);
   std::printf("  A=0 K=2 (0,1) table    %.4g s\n",
-              seconds(reps, [&] { g.template logpdf_dmu_dk<0, 2>(stt, y.data(), mu.data(), i01, out.data(), ws); }));
+              seconds(reps, [&] { g.template logpdf_dk<2, 0>(stt, y.data(), mu.data(), i01, out.data(), ws); }));
   std::printf("  log_pdet (structure)   %.4g s\n", seconds(reps, [&] { out[0] = s.log_pdet(th, ws); }));
   (void)improper;
 }

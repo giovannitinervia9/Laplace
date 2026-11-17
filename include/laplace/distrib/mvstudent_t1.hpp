@@ -49,6 +49,13 @@ struct mvstudent_t1_distrib<S> {
 
   /// Normalization regime (`proper`: positive definite scale matrix).
   static constexpr distrib_normalization normalization = distrib_normalization::proper;
+  /// Number of parameters: \f$\mu\f$, \f$\Sigma\f$ and \f$\nu\f$.
+  static constexpr int n_params = 3;
+  /// Descriptors of \f$\mu\f$ (dense), \f$\Sigma\f$ (indexed, the parameters \f$\theta\f$ of its structure) and \f$\nu\f$ (indexed, last in the indexed coordinates).
+  static constexpr distrib_mv_param_info params[n_params] = {
+      {"mu", distrib_mv_param_kind::vector, -distrib_infinity, distrib_infinity, infinitely_smooth},
+      {"Sigma", distrib_mv_param_kind::matrix, 0.0, 0.0, infinitely_smooth},
+      {"nu", distrib_mv_param_kind::scalar, 0.0, distrib_infinity, infinitely_smooth}};
   /// Precomputed state type returned by `theta_state()`.
   using state_type = mvstudent_t_state<mvgaussian1_state>;
 
@@ -66,10 +73,22 @@ struct mvstudent_t1_distrib<S> {
    */
   LAPLACE_HD int dim() const { return structure.dim; }
   /**
-   * \brief Return the number of non-location parameters: the structure's \f$\theta\f$ followed by \f$\nu\f$.
-   * \return Parameter count `structure.n_params() + 1`.
+   * \brief Return the number of coordinates of parameter `j`.
+   * \param j Parameter index in `params`.
+   * \return `dim()` for \f$\mu\f$, `structure.n_params()` for the matrix, 1 for \f$\nu\f$.
    */
-  LAPLACE_HD int n_params() const { return structure.n_params() + 1; }
+  LAPLACE_HD int param_size(int j) const { return j == 0 ? structure.dim : j == 1 ? structure.n_params() : 1; }
+  /**
+   * \brief Return where the coordinates of parameter `j` start in their array (\f$x\f$ for the dense, \f$\theta\f$ for the indexed).
+   * \param j Parameter index in `params`.
+   * \return 0 for \f$\mu\f$ (in \f$x\f$) and for the matrix (in \f$\theta\f$), `structure.n_params()` for \f$\nu\f$ (in \f$\theta\f$).
+   */
+  LAPLACE_HD int param_offset(int j) const { return j == 2 ? structure.n_params() : 0; }
+  /**
+   * \brief Return the number of indexed coordinates: the structure's \f$\theta\f$ followed by \f$\nu\f$.
+   * \return `structure.n_params() + 1`.
+   */
+  LAPLACE_HD int theta_size() const { return structure.n_params() + 1; }
   /**
    * \brief Return the number of doubles needed to store \f$\Sigma^{-1}\f$ and \f$L\f$ in `st.gauss`.
    * \return `2 * pdmat::packed_size(structure.dim)`.
@@ -94,7 +113,7 @@ struct mvstudent_t1_distrib<S> {
   /**
    * \brief Precompute the matrix state (`gauss`), \f$\nu\f$, dimension \f$d\f$, and \f$c_d^{(k)}(\nu)\f$ for \f$k = 0, \dots, 6\f$.
    *
-   * \param theta Parameter vector of length `n_params()` holding \f$\theta_0, \dots, \theta_{q-1}\f$ followed by \f$\nu > 0\f$ at index `structure.n_params()`.
+   * \param theta Parameter vector of length `theta_size()` holding \f$\theta_0, \dots, \theta_{q-1}\f$ followed by \f$\nu > 0\f$ at index `structure.n_params()`.
    * \param w Caller workspace of at least `state_size() + scratch_size()` doubles; the first `state_size()` doubles back `st.gauss` while the state is in use.
    * \return Populated `mvstudent_t_state<mvgaussian1_state>`.
    */
@@ -121,7 +140,7 @@ struct mvstudent_t1_distrib<S> {
    * Supports \f$A, K \ge 0\f$ with \f$A + K \le 6\f$. Indices in `idx` with value `structure.n_params()`
    * differentiate with respect to \f$\nu\f$; smaller indices differentiate with respect to \f$\theta\f$.
    *
-   * \tparam A Derivative order with respect to \f$\mu\f$ (`A >= 0`).
+   * \tparam A Derivative order with respect to \f$\mu\f$, the one dense parameter (`A >= 0`; omitted means 0).
    * \tparam K Derivative order with respect to \f$(\theta, \nu)\f$ (`K >= 0`, `A + K <= 6`).
    * \param st Precomputed state from `theta_state()`.
    * \param y Observation vector of length `dim()`.
@@ -131,18 +150,21 @@ struct mvstudent_t1_distrib<S> {
    * \param w Caller workspace of at least `scratch_size()` doubles.
    * \return `true` if evaluated; `false` if the block vanishes identically by structure.
    */
-  template <int A, int K>
-  LAPLACE_HD bool logpdf_dmu_dk(const state_type& st, const double* y, const double* mu, const int* idx, double* out,
-                                double* w) const {
-    return detail_mvstudent_t::logpdf_dmu_dk<false, A, K>(structure, st, y, mu, idx, out, w);
+  template <int K, int... A>
+  LAPLACE_HD bool logpdf_dk(const state_type& st, const double* y, const double* mu, const int* idx, double* out,
+                            double* w) const {
+    return detail_mvstudent_t::logpdf_dk<false, K, detail_mv::dense_order<A...>()>(structure, st, y, mu, idx, out, w);
   }
   /**
    * \brief Evaluate partial derivatives of the log-density with respect to \f$y\f$ (order `J`) and the rest \f$(\theta, \nu)\f$ (order `K`).
    *
-   * Equal to \f$(-1)^J\f$ times `logpdf_dmu_dk<J, K>()` for \f$J + K \le 6\f$.
+   * Equal to \f$(-1)^J\f$ times `logpdf_dk<K, J>()` for \f$J + K \le 6\f$.
    *
    * \tparam J Derivative order with respect to \f$y\f$ (`J >= 0`).
    * \tparam K Derivative order with respect to \f$(\theta, \nu)\f$ (`K >= 0`, `J + K <= 6`).
+   * \tparam A Derivative order with respect to \f$\mu\f$ (`A >= 0`, `J + K + A <= 6`; omitted means 0). With `A > 0`
+   *         the output is the Kronecker product, the \f$y\f$ factor first, of the packed tensors of order `J` and `A`
+   *         over \f$d\f$, and `w` holds `scratch_size() + sym_tensor_size(dim(), J + A)` doubles.
    * \param st Precomputed state from `theta_state()`.
    * \param y Observation vector of length `dim()`.
    * \param mu Location vector of length `dim()`.
@@ -151,33 +173,36 @@ struct mvstudent_t1_distrib<S> {
    * \param w Caller workspace of at least `scratch_size()` doubles.
    * \return `true` if evaluated; `false` if the block vanishes identically by structure.
    */
-  template <int J, int K>
+  template <int J, int K, int... A>
   LAPLACE_HD bool logpdf_dy_dk(const state_type& st, const double* y, const double* mu, const int* idx, double* out,
                                double* w) const {
+    if constexpr (detail_mv::dense_order<A...>() > 0)
+      return detail_mv::location_dy_dk<J, K, detail_mv::dense_order<A...>()>(*this, st, y, mu, idx, out, w);
     return detail_mvstudent_t::logpdf_dy_dk<false, J, K>(structure, st, y, mu, idx, out, w);
   }
   /**
    * \brief Evaluate an expected Fisher information block or its `K`-th derivative with respect to \f$(\theta, \nu)\f$.
    *
-   * Supports \f$0 \le K \le 4\f$ across `vector_vector`, `vector_rest`, and `rest_rest`.
+   * Supports \f$0 \le K \le 4\f$ across `(0, 0)`, `(0, theta_slot)`, and `(theta_slot, theta_slot)`.
    * Uses the traceless factor form for \f$(\theta, \theta)\f$ pairs when `S::closed_factor` is `true`,
    * and the positive-term recurrence in \f$d\f$ for \f$I_{\nu\nu}\f$.
    *
    * \tparam K Derivative order with respect to \f$(\theta, \nu)\f$ (`0 <= K <= 4`).
    * \param st Precomputed state from `theta_state()`.
-   * \param block Block of the expected information matrix.
-   * \param ab Two-element index pair `(a, b)` in \f$\{0, \dots, q\}\f$ selecting an entry within `rest_rest` (`q = structure.n_params()` for \f$\nu\f$; unused otherwise).
+   * \param slot_a Slot of the row parameter: 0 for \f$\mu\f$ or `theta_slot`.
+   * \param slot_b Slot of the column parameter: 0 for \f$\mu\f$ or `theta_slot`.
+   * \param ab Two-element index pair `(a, b)` in \f$\{0, \dots, q\}\f$ selecting an entry within `(theta_slot, theta_slot)` (`q = structure.n_params()` for \f$\nu\f$; unused otherwise).
    * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q\}\f$ (unused when `K == 0`).
-   * \param out Output buffer of length `pdmat::packed_size(dim())` (packed lower-triangular) for `vector_vector`, or length `1` (`out[0]`) for `rest_rest`.
+   * \param out Output buffer of length `pdmat::packed_size(dim())` (packed lower-triangular) for `(0, 0)`, or length `1` (`out[0]`) for `(theta_slot, theta_slot)`.
    * \param w Caller workspace of at least `info_scratch_size()` doubles.
-   * \return `true` if evaluated; `false` for `vector_rest` or structurally zero derivatives.
+   * \return `true` if evaluated; `false` for `(0, theta_slot)` or structurally zero derivatives.
    */
   template <int K>
-  LAPLACE_HD bool expected_info_dk(const state_type& st, distrib_mv_info_block block, const int* ab, const int* idx,
+  LAPLACE_HD bool expected_info_dk(const state_type& st, int slot_a, int slot_b, const int* ab, const int* idx,
                                    double* out, double* w) const {
     constexpr auto R = S::closed_factor ? detail_mvstudent_t::info_route::traceless
                                         : detail_mvstudent_t::info_route::gauss_proper;
-    return detail_mvstudent_t::expected_info_dk<false, R, K>(structure, st, block, ab, idx, out, w);
+    return detail_mvstudent_t::expected_info_dk<false, R, K>(structure, st, slot_a, slot_b, ab, idx, out, w);
   }
   /**
    * \brief Return the number of entries in a \f$\theta\f$-derivative table of orders 1 to `k_max`.
@@ -260,7 +285,7 @@ struct mvstudent_t1_distrib<S> {
    * parameters from \f$0.6\f$ times the sample covariance via the Gaussian starting rule.
    *
    * \param summary Sample mean and covariance summary produced by `summarize_mv_sample()`.
-   * \param theta Output parameter vector of length `n_params()`.
+   * \param theta Output parameter vector of length `theta_size()`.
    */
   void start_value(const distrib_mv_sample_summary& summary, double* theta) const {
     distrib_mv_sample_summary s = summary;
@@ -271,7 +296,7 @@ struct mvstudent_t1_distrib<S> {
   /**
    * \brief Write the distribution mean \f$\mathbb{E}[Y] = \mu\f$ into `out` when \f$\nu > 1\f$, or quiet NaN otherwise.
    *
-   * \param theta Parameter vector of length `n_params()` with \f$\nu\f$ at index `structure.n_params()`.
+   * \param theta Parameter vector of length `theta_size()` with \f$\nu\f$ at index `structure.n_params()`.
    * \param mu Location vector of length `dim()`.
    * \param out Output mean vector of length `dim()`.
    */
@@ -282,7 +307,7 @@ struct mvstudent_t1_distrib<S> {
   /**
    * \brief Write the covariance matrix \f$\frac{\nu}{\nu - 2}\Sigma(\theta)\f$ in packed lower-triangular order when \f$\nu > 2\f$, or quiet NaN otherwise.
    *
-   * \param theta Parameter vector of length `n_params()` with \f$\nu\f$ at index `structure.n_params()`.
+   * \param theta Parameter vector of length `theta_size()` with \f$\nu\f$ at index `structure.n_params()`.
    * \param out Output packed lower-triangular buffer of length `pdmat::packed_size(dim())`.
    * \param w Caller scratch buffer of at least `structure.scratch_size()` doubles.
    */
@@ -323,6 +348,19 @@ struct mvstudent_t1_distrib<S> {
   static constexpr distrib_normalization normalization = distrib_normalization::degenerate;
   /**
    * \ingroup distrib_mvstudent_t1
+   * \brief Number of parameters: \f$\mu\f$, \f$\Sigma\f$ and \f$\nu\f$.
+   */
+  static constexpr int n_params = 3;
+  /**
+   * \ingroup distrib_mvstudent_t1
+   * \brief Descriptors of \f$\mu\f$ (dense), \f$\Sigma\f$ (indexed, the parameters \f$\theta\f$ of its structure) and \f$\nu\f$ (indexed, last in the indexed coordinates).
+   */
+  static constexpr distrib_mv_param_info params[n_params] = {
+      {"mu", distrib_mv_param_kind::vector, -distrib_infinity, distrib_infinity, infinitely_smooth},
+      {"Sigma", distrib_mv_param_kind::matrix, 0.0, 0.0, infinitely_smooth},
+      {"nu", distrib_mv_param_kind::scalar, 0.0, distrib_infinity, infinitely_smooth}};
+  /**
+   * \ingroup distrib_mvstudent_t1
    * \brief Precomputed state type returned by `theta_state()`.
    */
   using state_type = mvstudent_t_state<mvgaussian_rank_deficient_state>;
@@ -342,10 +380,24 @@ struct mvstudent_t1_distrib<S> {
   int dim() const { return structure.dim; }
   /**
    * \ingroup distrib_mvstudent_t1
-   * \brief Return the number of non-location parameters: the structure's \f$\theta\f$ followed by \f$\nu\f$.
-   * \return Parameter count `structure.n_params() + 1`.
+   * \brief Return the number of coordinates of parameter `j`.
+   * \param j Parameter index in `params`.
+   * \return `dim()` for \f$\mu\f$, `structure.n_params()` for the matrix, 1 for \f$\nu\f$.
    */
-  int n_params() const { return structure.n_params() + 1; }
+  int param_size(int j) const { return j == 0 ? structure.dim : j == 1 ? structure.n_params() : 1; }
+  /**
+   * \ingroup distrib_mvstudent_t1
+   * \brief Return where the coordinates of parameter `j` start in their array (\f$x\f$ for the dense, \f$\theta\f$ for the indexed).
+   * \param j Parameter index in `params`.
+   * \return 0 for \f$\mu\f$ (in \f$x\f$) and for the matrix (in \f$\theta\f$), `structure.n_params()` for \f$\nu\f$ (in \f$\theta\f$).
+   */
+  int param_offset(int j) const { return j == 2 ? structure.n_params() : 0; }
+  /**
+   * \ingroup distrib_mvstudent_t1
+   * \brief Return the number of indexed coordinates: the structure's \f$\theta\f$ followed by \f$\nu\f$.
+   * \return `structure.n_params() + 1`.
+   */
+  int theta_size() const { return structure.n_params() + 1; }
   /**
    * \ingroup distrib_mvstudent_t1
    * \brief Return the constant rank \f$\rho\f$ of \f$\Sigma(\theta)\f$.
@@ -385,7 +437,7 @@ struct mvstudent_t1_distrib<S> {
    * \ingroup distrib_mvstudent_t1
    * \brief Precompute the rank-deficient matrix state (`gauss`), \f$\nu\f$, rank \f$\rho\f$, and \f$c_\rho^{(k)}(\nu)\f$ for \f$k = 0, \dots, 6\f$.
    *
-   * \param theta Parameter vector of length `n_params()` holding \f$\theta_0, \dots, \theta_{q-1}\f$ followed by \f$\nu > 0\f$ at index `structure.n_params()`.
+   * \param theta Parameter vector of length `theta_size()` holding \f$\theta_0, \dots, \theta_{q-1}\f$ followed by \f$\nu > 0\f$ at index `structure.n_params()`.
    * \param w Caller workspace of at least `state_size() + scratch_size()` doubles; the first `state_size()` doubles back `st.gauss` while the state is in use.
    * \return Populated `mvstudent_t_state<mvgaussian_rank_deficient_state>`.
    */
@@ -420,7 +472,7 @@ struct mvstudent_t1_distrib<S> {
    * Higher-order blocks differentiate the law on the range using \f$\Sigma^+\f$
    * and \f$\log\lvert\Sigma\rvert_+\f$ without testing support.
    *
-   * \tparam A Derivative order with respect to \f$\mu\f$ (`A >= 0`).
+   * \tparam A Derivative order with respect to \f$\mu\f$, the one dense parameter (`A >= 0`; omitted means 0).
    * \tparam K Derivative order with respect to \f$(\theta, \nu)\f$ (`K >= 0`, `A + K <= 6`).
    * \param st Precomputed state from `theta_state()`.
    * \param y Observation vector of length `dim()`.
@@ -430,14 +482,14 @@ struct mvstudent_t1_distrib<S> {
    * \param w Caller workspace of at least `scratch_size()` doubles.
    * \return `true` if evaluated; `false` if the block vanishes identically by structure.
    */
-  template <int A, int K>
-  bool logpdf_dmu_dk(const state_type& st, const double* y, const double* mu, const int* idx, double* out,
-                     double* w) const {
-    if constexpr (A == 0 && K == 0) {
+  template <int K, int... A>
+  bool logpdf_dk(const state_type& st, const double* y, const double* mu, const int* idx, double* out,
+                 double* w) const {
+    if constexpr (detail_mv::dense_order<A...>() == 0 && K == 0) {
       out[0] = logpdf(st, y, mu);
       return true;
     } else {
-      return detail_mvstudent_t::logpdf_dmu_dk<false, A, K>(
+      return detail_mvstudent_t::logpdf_dk<false, K, detail_mv::dense_order<A...>()>(
           detail_mvgaussian::rank_deficient_view<S>(structure, st.gauss), st, y, mu, idx, out, w);
     }
   }
@@ -445,10 +497,13 @@ struct mvstudent_t1_distrib<S> {
    * \ingroup distrib_mvstudent_t1
    * \brief Evaluate partial derivatives of the degenerate log-density with respect to \f$y\f$ (order `J`) and \f$(\theta, \nu)\f$ (order `K`).
    *
-   * Equal to \f$(-1)^J\f$ times `logpdf_dmu_dk<J, K>()` for \f$J + K \le 6\f$.
+   * Equal to \f$(-1)^J\f$ times `logpdf_dk<K, J>()` for \f$J + K \le 6\f$.
    *
    * \tparam J Derivative order with respect to \f$y\f$ (`J >= 0`).
    * \tparam K Derivative order with respect to \f$(\theta, \nu)\f$ (`K >= 0`, `J + K <= 6`).
+   * \tparam A Derivative order with respect to \f$\mu\f$ (`A >= 0`, `J + K + A <= 6`; omitted means 0). With `A > 0`
+   *         the output is the Kronecker product, the \f$y\f$ factor first, of the packed tensors of order `J` and `A`
+   *         over \f$d\f$, and `w` holds `scratch_size() + sym_tensor_size(dim(), J + A)` doubles.
    * \param st Precomputed state from `theta_state()`.
    * \param y Observation vector of length `dim()`.
    * \param mu Location vector of length `dim()`.
@@ -457,10 +512,12 @@ struct mvstudent_t1_distrib<S> {
    * \param w Caller workspace of at least `scratch_size()` doubles.
    * \return `true` if evaluated; `false` if the block vanishes identically by structure.
    */
-  template <int J, int K>
+  template <int J, int K, int... A>
   bool logpdf_dy_dk(const state_type& st, const double* y, const double* mu, const int* idx, double* out,
                     double* w) const {
-    if (!logpdf_dmu_dk<J, K>(st, y, mu, idx, out, w)) return false;
+    if constexpr (detail_mv::dense_order<A...>() > 0)
+      return detail_mv::location_dy_dk<J, K, detail_mv::dense_order<A...>()>(*this, st, y, mu, idx, out, w);
+    if (!logpdf_dk<K, J>(st, y, mu, idx, out, w)) return false;
     if constexpr (J % 2 == 1) {
       const int n = J == 1 ? dim() : binomial_coef(dim() + J - 1, J);
       for (int k = 0; k < n; ++k) out[k] = -out[k];
@@ -476,19 +533,20 @@ struct mvstudent_t1_distrib<S> {
    *
    * \tparam K Derivative order with respect to \f$(\theta, \nu)\f$ (`0 <= K <= 4`).
    * \param st Precomputed state from `theta_state()`.
-   * \param block Block of the expected information matrix.
-   * \param ab Two-element index pair `(a, b)` in \f$\{0, \dots, q\}\f$ selecting an entry within `rest_rest` (`q = structure.n_params()` for \f$\nu\f$; unused otherwise).
+   * \param slot_a Slot of the row parameter: 0 for \f$\mu\f$ or `theta_slot`.
+   * \param slot_b Slot of the column parameter: 0 for \f$\mu\f$ or `theta_slot`.
+   * \param ab Two-element index pair `(a, b)` in \f$\{0, \dots, q\}\f$ selecting an entry within `(theta_slot, theta_slot)` (`q = structure.n_params()` for \f$\nu\f$; unused otherwise).
    * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q\}\f$ (unused when `K == 0`).
-   * \param out Output buffer of length `pdmat::packed_size(dim())` (`vector_vector`) or length `1` (`rest_rest`).
+   * \param out Output buffer of length `pdmat::packed_size(dim())` (`(0, 0)`) or length `1` (`(theta_slot, theta_slot)`).
    * \param w Caller workspace of at least `info_scratch_size()` doubles.
-   * \return `true` if evaluated; `false` for `vector_rest` or structurally zero derivatives.
+   * \return `true` if evaluated; `false` for `(0, theta_slot)` or structurally zero derivatives.
    */
   template <int K>
     requires detail_mvgaussian::exp_linear_structure<S>
-  bool expected_info_dk(const state_type& st, distrib_mv_info_block block, const int* ab, const int* idx,
+  bool expected_info_dk(const state_type& st, int slot_a, int slot_b, const int* ab, const int* idx,
                         double* out, double* w) const {
     return detail_mvstudent_t::expected_info_dk<false, detail_mvstudent_t::info_route::gauss_degenerate, K>(
-        detail_mvgaussian::rank_deficient_view<S>(structure, st.gauss), st, block, ab, idx, out, w);
+        detail_mvgaussian::rank_deficient_view<S>(structure, st.gauss), st, slot_a, slot_b, ab, idx, out, w);
   }
   /**
    * \ingroup distrib_mvstudent_t1
@@ -569,7 +627,7 @@ struct mvstudent_t1_distrib<S> {
    * maps to structure parameters, and sets \f$\nu = 5.0\f$ at index `structure.n_params()`.
    *
    * \param summary Sample mean and covariance summary produced by `summarize_mv_sample()`.
-   * \param theta Output parameter vector of length `n_params()`.
+   * \param theta Output parameter vector of length `theta_size()`.
    */
   void start_value(const distrib_mv_sample_summary& summary, double* theta) const {
     distrib_mv_sample_summary s = summary;
@@ -580,7 +638,7 @@ struct mvstudent_t1_distrib<S> {
   /**
    * \ingroup distrib_mvstudent_t1
    * \brief Write the distribution mean \f$\mathbb{E}[Y] = \mu\f$ into `out` when \f$\nu > 1\f$, or quiet NaN otherwise.
-   * \param theta Parameter vector of length `n_params()` with \f$\nu\f$ at index `structure.n_params()`.
+   * \param theta Parameter vector of length `theta_size()` with \f$\nu\f$ at index `structure.n_params()`.
    * \param mu Location vector of length `dim()`.
    * \param out Output mean vector of length `dim()`.
    */
@@ -591,7 +649,7 @@ struct mvstudent_t1_distrib<S> {
   /**
    * \ingroup distrib_mvstudent_t1
    * \brief Write the covariance matrix \f$\frac{\nu}{\nu - 2}\Sigma(\theta)\f$ in packed lower-triangular order when \f$\nu > 2\f$, or quiet NaN otherwise.
-   * \param theta Parameter vector of length `n_params()` with \f$\nu\f$ at index `structure.n_params()`.
+   * \param theta Parameter vector of length `theta_size()` with \f$\nu\f$ at index `structure.n_params()`.
    * \param out Output packed lower-triangular buffer of length `pdmat::packed_size(dim())`.
    * \param w Caller scratch buffer of at least `structure.scratch_size()` doubles.
    */

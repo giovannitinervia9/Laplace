@@ -90,7 +90,7 @@ enum class penalty_scale_mixture : int { none, inverse_gamma_variance, exponenti
  *
  * Requires the compile-time descriptors `normalization`, `beta_regularity`,
  * `kinks`, `prox`, `structure`, `theta_regularity`, `q_linear_in_theta` and
- * `scale_mixture`, the dimension queries `dim()` and `n_params()`, and
+ * `scale_mixture`, the dimension queries `dim()` and `theta_size()`, and
  * `weak_convexity(theta)`.
  *
  * \tparam P Penalty type to check.
@@ -106,7 +106,7 @@ concept penalty = requires(const P p, const double* theta) {
   { P::q_linear_in_theta } -> std::convertible_to<bool>;
   { P::scale_mixture } -> std::convertible_to<penalty_scale_mixture>;
   { p.dim() } -> std::convertible_to<int>;
-  { p.n_params() } -> std::convertible_to<int>;
+  { p.theta_size() } -> std::convertible_to<int>;
   { p.weak_convexity(theta) } -> std::convertible_to<double>;
 };
 

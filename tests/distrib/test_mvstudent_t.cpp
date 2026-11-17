@@ -56,9 +56,9 @@ const char* sname[] = {"diagonal", "ar1", "compound_symmetry", "log_cholesky", "
 template <class D, int A, int K>
 KOKKOS_INLINE_FUNCTION bool block_ak(const D& g, const typename D::state_type& st, const double* y, const double* mu,
                                      const int* idx, const int* ab, double* out, double* w) {
-  if constexpr (A == -2) return g.template expected_info_dk<K>(st, ld::distrib_mv_info_block::vector_vector, ab, idx, out, w);
-  else if constexpr (A == -1) return g.template expected_info_dk<K>(st, ld::distrib_mv_info_block::rest_rest, ab, idx, out, w);
-  else return g.template logpdf_dmu_dk<A, K>(st, y, mu, idx, out, w);
+  if constexpr (A == -2) return g.template expected_info_dk<K>(st, 0, 0, ab, idx, out, w);
+  else if constexpr (A == -1) return g.template expected_info_dk<K>(st, ld::theta_slot, ld::theta_slot, ab, idx, out, w);
+  else return g.template logpdf_dk<K, A>(st, y, mu, idx, out, w);
 }
 template <class D, int A>
 KOKKOS_INLINE_FUNCTION bool block_a(const D& g, const typename D::state_type& st, int K, const double* y,
@@ -518,11 +518,11 @@ bool degenerate_block(const ld::mvstudent_t1_distrib<ws_t>& g, const ld::mvstude
     if constexpr (A + KK > 6 || (A < 0 && KK > 4)) {
       return false;
     } else if constexpr (A == -2) {
-      return g.template expected_info_dk<KK>(st, ld::distrib_mv_info_block::vector_vector, c.ab, idx, out, w);
+      return g.template expected_info_dk<KK>(st, 0, 0, c.ab, idx, out, w);
     } else if constexpr (A == -1) {
-      return g.template expected_info_dk<KK>(st, ld::distrib_mv_info_block::rest_rest, c.ab, idx, out, w);
+      return g.template expected_info_dk<KK>(st, ld::theta_slot, ld::theta_slot, c.ab, idx, out, w);
     } else {
-      return g.template logpdf_dmu_dk<A, KK>(st, y, mu, idx, out, w);
+      return g.template logpdf_dk<KK, A>(st, y, mu, idx, out, w);
     }
   };
   switch (K) {
@@ -624,6 +624,83 @@ TEST_CASE("mvstudent_t1, mvstudent_t2: draws") {
                                 "mvstudent_t1 log_cholesky d=3");
   mvstudent_t_test::draws_check(ld::mvstudent_t2_distrib<lc>(lc(3)), {0.2, 0.4, -0.3, 0.1, 0.5, -0.2, 8.0},
                                 "mvstudent_t2 log_cholesky d=3");
+}
+TEST_CASE("mvstudent_t1: the typed parameter list and the one-block fallback of the block helpers") {
+  namespace lp = laplace::pdmat;
+  namespace ld = laplace::distrib;
+  using lc = mvstudent_t_test::log_chol;
+  using T = ld::mvstudent_t1_distrib<lc>;
+  static_assert(T::n_params == 3 && T::params[0].kind == ld::distrib_mv_param_kind::vector &&
+                T::params[1].kind == ld::distrib_mv_param_kind::matrix &&
+                T::params[2].kind == ld::distrib_mv_param_kind::scalar);
+  constexpr int d = 3;
+  const T g{lc(d)};
+  const int q = lc(d).n_params();
+  CHECK(g.param_size(0) == d);
+  CHECK(g.param_size(1) == q);
+  CHECK(g.param_size(2) == 1);
+  CHECK(g.param_offset(0) == 0);
+  CHECK(g.param_offset(1) == 0);
+  CHECK(g.param_offset(2) == q);
+  CHECK(g.theta_size() == q + 1);
+  CHECK(ld::mv_n_blocks(g) == 1);
+  CHECK(ld::mv_block_start(g, ld::y_slot, 0) == 0);
+  CHECK(ld::mv_block_start(g, ld::y_slot, 1) == d);
+  CHECK(ld::mv_block_start(g, 0, 1) == d);
+  CHECK(ld::mv_block_tensor_size<2>(g) == lp::packed_size(d));
+  CHECK(ld::mv_block_tensor_size<>(g) == 1);
+  CHECK(ld::mv_block_tensor_size(g, ld::y_slot, 3) == ld::sym_tensor_size(d, 3));
+  CHECK(ld::mv_block_tensor_size<1>(g, 2) == lp::packed_size(d) * d);
+  const std::vector<double> th = {0.2, 0.4, -0.3, 0.1, 0.5, -0.2, 8.0}, y = {0.3, -1.1, 0.7}, mu = {0.1, 0.2, -0.4};
+  std::vector<double> w(g.state_size() + g.scratch_size());
+  const auto st = g.theta_state(th.data(), w.data());
+  double* ws = w.data() + g.state_size();
+  const int idx[2] = {1, q};
+  std::vector<double> a(d), b(d);
+  REQUIRE(g.logpdf_dk<2, 1>(st, y.data(), mu.data(), idx, a.data(), ws));
+  REQUIRE(ld::mv_logpdf_dk_blocks<2, 1>(g, st, y.data(), mu.data(), idx, b.data(), ws));
+  CHECK(a == b);
+  REQUIRE(ld::mv_logpdf_dy_dk_blocks<1, 2>(g, st, y.data(), mu.data(), idx, b.data(), ws));
+  for (int k = 0; k < d; ++k) CHECK(b[k] == -a[k]);
+  double s0 = 0.0, s1 = 0.0;
+  REQUIRE(g.logpdf_dk<1>(st, y.data(), mu.data(), idx + 1, &s0, ws));
+  REQUIRE(g.logpdf_dk<1, 0>(st, y.data(), mu.data(), idx + 1, &s1, ws));
+  CHECK(s0 == s1);
+  // logpdf_dy_dk<J, K, A>: d_y^J d_mu^A = (-1)^J d_mu^(J + A), y factor first
+  std::vector<double> wy(g.scratch_size() + ld::sym_tensor_size(d, 3)), t3(ld::sym_tensor_size(d, 3)), t2(lp::packed_size(d));
+  std::vector<double> c(d * d), e(lp::packed_size(d) * d);
+  REQUIRE(g.logpdf_dk<1, 2>(st, y.data(), mu.data(), idx + 1, t2.data(), ws));
+  REQUIRE(g.logpdf_dy_dk<1, 1, 1>(st, y.data(), mu.data(), idx + 1, c.data(), wy.data()));
+  for (int i = 0; i < d; ++i)
+    for (int j = 0; j < d; ++j) CHECK(c[i * d + j] == -t2[lp::packed_index(i > j ? i : j, i > j ? j : i)]);
+  REQUIRE(g.logpdf_dk<0, 3>(st, y.data(), mu.data(), nullptr, t3.data(), ws));
+  REQUIRE(g.logpdf_dy_dk<2, 0, 1>(st, y.data(), mu.data(), nullptr, e.data(), wy.data()));
+  for (int i = 0; i < d; ++i)  // the y pair (i, j), j <= i, packed by rows; then k
+    for (int j = 0; j <= i; ++j)
+      for (int k = 0; k < d; ++k) {
+        int s[3] = {i, j, k};
+        std::sort(s, s + 3);
+        CHECK(e[lp::packed_index(i, j) * d + k] == t3[ld::sym_tensor_position<d, 3>(s)]);
+      }
+  // against central differences in y of the order below
+  const double h = 1e-5;
+  std::vector<double> yp(y), ym(y), fp(d * d), fm(d * d), gp(d), gm(d);
+  for (int i = 0; i < d; ++i) {
+    yp = y;
+    ym = y;
+    yp[i] += h;
+    ym[i] -= h;
+    REQUIRE(g.logpdf_dy_dk<0, 1, 1>(st, yp.data(), mu.data(), idx + 1, gp.data(), wy.data()));
+    REQUIRE(g.logpdf_dy_dk<0, 1, 1>(st, ym.data(), mu.data(), idx + 1, gm.data(), wy.data()));
+    for (int j = 0; j < d; ++j) CHECK(c[i * d + j] == doctest::Approx((gp[j] - gm[j]) / (2 * h)).epsilon(1e-6));
+    REQUIRE(g.logpdf_dy_dk<1, 0, 1>(st, yp.data(), mu.data(), nullptr, fp.data(), wy.data()));
+    REQUIRE(g.logpdf_dy_dk<1, 0, 1>(st, ym.data(), mu.data(), nullptr, fm.data(), wy.data()));
+    for (int j = 0; j < d; ++j)
+      for (int k = 0; k < d; ++k) {
+        const int o = lp::packed_index(i > j ? i : j, i > j ? j : i) * d + k;
+        CHECK(e[o] == doctest::Approx((fp[j * d + k] - fm[j * d + k]) / (2 * h)).epsilon(1e-6));
+      }
+  }
 }
 TEST_CASE("mvstudent_t1 degenerate over weighted_sum_psdmat: against mpmath, support, draw") {
   mvstudent_t_test::mvstudent_t_degenerate_case();

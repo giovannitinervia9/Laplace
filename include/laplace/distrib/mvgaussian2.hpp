@@ -75,6 +75,12 @@ struct mvgaussian2_distrib<S> {
 
   /// Normalization regime (`proper`: positive definite precision).
   static constexpr distrib_normalization normalization = distrib_normalization::proper;
+  /// Number of parameters: \f$\mu\f$ and \f$Q\f$.
+  static constexpr int n_params = 2;
+  /// Descriptors of \f$\mu\f$ (dense) and \f$Q\f$ (indexed, the parameters \f$\theta\f$ of its structure).
+  static constexpr distrib_mv_param_info params[n_params] = {
+      {"mu", distrib_mv_param_kind::vector, -distrib_infinity, distrib_infinity, infinitely_smooth},
+      {"Q", distrib_mv_param_kind::matrix, 0.0, 0.0, infinitely_smooth}};
   /// Precomputed state type returned by `theta_state`.
   using state_type = mvgaussian2_state;
 
@@ -92,10 +98,22 @@ struct mvgaussian2_distrib<S> {
    */
   LAPLACE_HD int dim() const { return structure.dim; }
   /**
-   * \brief Return the number of precision parameters in \f$\theta\f$.
-   * \return Parameter count `structure.n_params()`.
+   * \brief Return the number of coordinates of parameter `j`.
+   * \param j Parameter index in `params`.
+   * \return `dim()` for \f$\mu\f$, `structure.n_params()` for the matrix.
    */
-  LAPLACE_HD int n_params() const { return structure.n_params(); }
+  LAPLACE_HD int param_size(int j) const { return j == 0 ? structure.dim : structure.n_params(); }
+  /**
+   * \brief Return where the coordinates of parameter `j` start in their array (\f$x\f$ for the dense, \f$\theta\f$ for the indexed).
+   * \param j Parameter index in `params`.
+   * \return 0: \f$\mu\f$ starts \f$x\f$ and the matrix starts \f$\theta\f$.
+   */
+  LAPLACE_HD int param_offset(int j) const { return (void)j, 0; }
+  /**
+   * \brief Return the number of indexed coordinates, the parameters \f$\theta\f$ of the structure.
+   * \return `structure.n_params()`.
+   */
+  LAPLACE_HD int theta_size() const { return structure.n_params(); }
   /**
    * \brief Return the number of doubles needed to store `quadratic` and `factor` in `mvgaussian2_state`.
    * \return `2 * pdmat::packed_size(structure.dim)`.
@@ -119,7 +137,7 @@ struct mvgaussian2_distrib<S> {
   /**
    * \brief Precompute \f$\log\det Q(\theta)\f$, \f$Q(\theta)\f$, and Cholesky factor \f$L\f$ (\f$Q = L L^\top\f$).
    *
-   * \param theta Parameter vector of length `n_params()`.
+   * \param theta Parameter vector of length `theta_size()`.
    * \param w Caller workspace of at least `state_size() + scratch_size()` doubles; the first `state_size()` doubles back `quadratic` and `factor` while the state is in use.
    * \return Populated `mvgaussian2_state`.
    */
@@ -143,20 +161,20 @@ struct mvgaussian2_distrib<S> {
    * Supports \f$A, K \ge 0\f$ with \f$A + K \le 6\f$. Blocks with \f$A \ge 3\f$
    * and structurally zero blocks return `false` without modifying `out`.
    *
-   * \tparam A Derivative order with respect to \f$\mu\f$ (`A >= 0`).
+   * \tparam A Derivative order with respect to \f$\mu\f$, the one dense parameter (`A >= 0`; omitted means 0).
    * \tparam K Derivative order with respect to \f$\theta\f$ (`K >= 0`, `A + K <= 6`).
    * \param st Precomputed state from `theta_state`.
    * \param y Observation vector of length `dim()`.
    * \param mu Location vector of length `dim()`.
-   * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q - 1\}\f$, \f$q\f$ = `n_params()` (unused when `K == 0`).
+   * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q - 1\}\f$, \f$q\f$ = `theta_size()` (unused when `K == 0`).
    * \param out Output buffer of length `1` (`A = 0`), `dim()` (`A = 1`), or `pdmat::packed_size(dim())` (`A = 2`, packed lower-triangular).
    * \param w Caller workspace of at least `scratch_size()` doubles.
    * \return `true` if `A <= 2` and the block is not structurally zero; `false` otherwise.
    */
-  template <int A, int K>
-  LAPLACE_HD bool logpdf_dmu_dk(const mvgaussian2_state& st, const double* y, const double* mu, const int* idx,
-                                double* out, double* w) const {
-    return detail_mvgaussian::logpdf_dmu_dk<true, A, K>(structure, st, y, mu, idx, out, w);
+  template <int K, int... A>
+  LAPLACE_HD bool logpdf_dk(const mvgaussian2_state& st, const double* y, const double* mu, const int* idx,
+                            double* out, double* w) const {
+    return detail_mvgaussian::logpdf_dk<true, K, detail_mv::dense_order<A...>()>(structure, st, y, mu, idx, out, w);
   }
   /**
    * \brief Evaluate partial derivatives of the log density with respect to \f$y\f$ (order `J`) and \f$\theta\f$ (order `K`).
@@ -166,44 +184,50 @@ struct mvgaussian2_distrib<S> {
    *
    * \tparam J Derivative order with respect to \f$y\f$ (`J >= 0`).
    * \tparam K Derivative order with respect to \f$\theta\f$ (`K >= 0`, `J + K <= 6`).
+   * \tparam A Derivative order with respect to \f$\mu\f$ (`A >= 0`, `J + K + A <= 6`; omitted means 0). With `A > 0`
+   *         the output is the Kronecker product, the \f$y\f$ factor first, of the packed tensors of order `J` and `A`
+   *         over \f$d\f$, and `w` holds `scratch_size() + sym_tensor_size(dim(), J + A)` doubles.
    * \param st Precomputed state from `theta_state`.
    * \param y Observation vector of length `dim()`.
    * \param mu Location vector of length `dim()`.
-   * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q - 1\}\f$, \f$q\f$ = `n_params()` (unused when `K == 0`).
+   * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q - 1\}\f$, \f$q\f$ = `theta_size()` (unused when `K == 0`).
    * \param out Output buffer of length `1` (`J = 0`), `dim()` (`J = 1`), or `pdmat::packed_size(dim())` (`J = 2`, packed lower-triangular).
    * \param w Caller workspace of at least `scratch_size()` doubles.
    * \return `true` if `J <= 2` and the block is not structurally zero; `false` otherwise.
    */
-  template <int J, int K>
+  template <int J, int K, int... A>
   LAPLACE_HD bool logpdf_dy_dk(const mvgaussian2_state& st, const double* y, const double* mu, const int* idx,
                                double* out, double* w) const {
+    if constexpr (detail_mv::dense_order<A...>() > 0)
+      return detail_mv::location_dy_dk<J, K, detail_mv::dense_order<A...>()>(*this, st, y, mu, idx, out, w);
     return detail_mvgaussian::logpdf_dy_dk<true, J, K>(structure, st, y, mu, idx, out, w);
   }
   /**
    * \brief Evaluate the expected Fisher information matrix block or its `K`-th derivative with respect to \f$\theta\f$.
    *
-   * Supports \f$K \in \{0, \dots, 4\}\f$ across `vector_vector`, `vector_rest`, and `rest_rest`.
+   * Supports \f$K \in \{0, \dots, 4\}\f$ across `(0, 0)`, `(0, theta_slot)`, and `(theta_slot, theta_slot)`.
    *
    * \tparam K Derivative order with respect to \f$\theta\f$ (`0 <= K <= 4`).
    * \param st Precomputed state from `theta_state`.
-   * \param block Block of the expected information matrix.
-   * \param ab Two-element index pair `(a, b)` selecting an entry within `rest_rest` (unused otherwise).
+   * \param slot_a Slot of the row parameter: 0 for \f$\mu\f$ or `theta_slot`.
+   * \param slot_b Slot of the column parameter: 0 for \f$\mu\f$ or `theta_slot`.
+   * \param ab Two-element index pair `(a, b)` selecting an entry within `(theta_slot, theta_slot)` (unused otherwise).
    * \param idx Sorted parameter indices of length `K` in \f$\theta\f$ (unused when `K == 0`).
-   * \param out Output buffer of length `pdmat::packed_size(dim())` (packed lower-triangular) for `vector_vector`, or length `1` (`out[0]`) for `rest_rest`.
+   * \param out Output buffer of length `pdmat::packed_size(dim())` (packed lower-triangular) for `(0, 0)`, or length `1` (`out[0]`) for `(theta_slot, theta_slot)`.
    * \param w Caller workspace of at least `info_scratch_size()` doubles.
-   * \return `true` if evaluated; `false` for `vector_rest` or structurally zero derivatives.
+   * \return `true` if evaluated; `false` for `(0, theta_slot)` or structurally zero derivatives.
    */
   template <int K>
-  LAPLACE_HD bool expected_info_dk(const mvgaussian2_state& st, distrib_mv_info_block block, const int* ab,
+  LAPLACE_HD bool expected_info_dk(const mvgaussian2_state& st, int slot_a, int slot_b, const int* ab,
                                    const int* idx, double* out, double* w) const {
-    return detail_mvgaussian::expected_info_dk<true, K>(structure, st, block, ab, idx, out, w);
+    return detail_mvgaussian::expected_info_dk<true, K>(structure, st, slot_a, slot_b, ab, idx, out, w);
   }
   /**
    * \ingroup distrib_mvgaussian2
    * \brief Return the number of entries in a \f$\theta\f$-derivative table of orders 1 to `k_max`.
    *
    * Equals \f$\sum_{j=1}^{k_{\max}} \binom{q + j - 1}{j}\f$ for \f$k_{\max} \ge 1\f$
-   * (0 if \f$k_{\max} \le 0\f$), where \f$q\f$ is `n_params()`, covering all sorted
+   * (0 if \f$k_{\max} \le 0\f$), where \f$q\f$ is `theta_size()`, covering all sorted
    * parameter-index tuples of orders 1 through `k_max` in lexicographic order.
    *
    * \param k_max Largest derivative order in \f$\theta\f$ stored in the table.
@@ -255,8 +279,8 @@ struct mvgaussian2_distrib<S> {
    * \ingroup distrib_mvgaussian2
    * \brief Return a copy of `st` with a filled \f$\theta\f$-derivative table attached.
    *
-   * Sets `table` and `table_order` on the returned state so that `logpdf_dmu_dk()`,
-   * `logpdf_dy_dk()`, and the `vector_vector` block of `expected_info_dk()` read
+   * Sets `table` and `table_order` on the returned state so that `logpdf_dk()`,
+   * `logpdf_dy_dk()`, and the `(0, 0)` block of `expected_info_dk()` read
    * precomputed derivatives for orders up to `k_max`. The buffer `table` must
    * remain alive while the returned state is used.
    *
@@ -294,7 +318,7 @@ struct mvgaussian2_distrib<S> {
    * \brief Compute starting matrix parameters `theta` on the host from a sample summary.
    *
    * \param summary Sample mean and covariance summary produced by `summarize_mv_sample`.
-   * \param theta Output parameter vector of length `n_params()`.
+   * \param theta Output parameter vector of length `theta_size()`.
    */
   // (host) theta from a sample summary (summarize_mv_sample)
   void start_value(const distrib_mv_sample_summary& summary, double* theta) const {
@@ -312,7 +336,7 @@ struct mvgaussian2_distrib<S> {
   /**
    * \brief Write the covariance matrix \f$Q(\theta)^{-1}\f$ in packed lower-triangular order.
    *
-   * \param theta Parameter vector of length `n_params()`.
+   * \param theta Parameter vector of length `theta_size()`.
    * \param out Output packed lower-triangular buffer of length `pdmat::packed_size(dim())`.
    * \param w Caller scratch buffer of at least `structure.scratch_size()` doubles.
    */
@@ -351,6 +375,12 @@ struct mvgaussian2_distrib<S> {
    * \brief Normalization regime (`distrib_normalization::improper`: singular precision).
    */
   static constexpr distrib_normalization normalization = distrib_normalization::improper;
+  /// Number of parameters: \f$\mu\f$ and \f$Q\f$.
+  static constexpr int n_params = 2;
+  /// Descriptors of \f$\mu\f$ (dense) and \f$Q\f$ (indexed, the parameters \f$\theta\f$ of its structure).
+  static constexpr distrib_mv_param_info params[n_params] = {
+      {"mu", distrib_mv_param_kind::vector, -distrib_infinity, distrib_infinity, infinitely_smooth},
+      {"Q", distrib_mv_param_kind::matrix, 0.0, 0.0, infinitely_smooth}};
   /**
    * \ingroup distrib_mvgaussian2
    * \brief Precomputed state type returned by `theta_state()` and `constrained_state()`.
@@ -371,11 +401,22 @@ struct mvgaussian2_distrib<S> {
    */
   int dim() const { return structure.dim; }
   /**
-   * \ingroup distrib_mvgaussian2
-   * \brief Return the number of precision parameters in \f$\theta\f$.
-   * \return Parameter count `structure.n_params()`.
+   * \brief Return the number of coordinates of parameter `j`.
+   * \param j Parameter index in `params`.
+   * \return `dim()` for \f$\mu\f$, `structure.n_params()` for the matrix.
    */
-  int n_params() const { return structure.n_params(); }
+  LAPLACE_HD int param_size(int j) const { return j == 0 ? structure.dim : structure.n_params(); }
+  /**
+   * \brief Return where the coordinates of parameter `j` start in their array (\f$x\f$ for the dense, \f$\theta\f$ for the indexed).
+   * \param j Parameter index in `params`.
+   * \return 0: \f$\mu\f$ starts \f$x\f$ and the matrix starts \f$\theta\f$.
+   */
+  LAPLACE_HD int param_offset(int j) const { return (void)j, 0; }
+  /**
+   * \brief Return the number of indexed coordinates, the parameters \f$\theta\f$ of the structure.
+   * \return `structure.n_params()`.
+   */
+  LAPLACE_HD int theta_size() const { return structure.n_params(); }
   /**
    * \ingroup distrib_mvgaussian2
    * \brief Return the constant rank \f$\rho\f$ of \f$Q(\theta)\f$.
@@ -413,7 +454,7 @@ struct mvgaussian2_distrib<S> {
    * `shifted_inverse` as `nullptr`. Use `constrained_state()` when draws or
    * constrained covariances are needed.
    *
-   * \param theta Parameter vector of length `n_params()`.
+   * \param theta Parameter vector of length `theta_size()`.
    * \param w Caller workspace of at least `state_size() + scratch_size()` doubles; the first `state_size()` doubles back the returned state while it is in use.
    * \return Populated `mvgaussian_rank_deficient_state`.
    * \see constrained_state(), mvgaussian_rank_deficient_state, state_size(), distrib_multivariate
@@ -431,7 +472,7 @@ struct mvgaussian2_distrib<S> {
    * \f$\operatorname{tr} Q \le 0\f$). Required by `constrained_rng()` and
    * `constrained_covariance()`.
    *
-   * \param theta Parameter vector of length `n_params()`.
+   * \param theta Parameter vector of length `theta_size()`.
    * \param w Caller workspace of at least `state_size() + scratch_size()` doubles; the first `state_size()` doubles back the returned state while it is in use.
    * \return Populated `mvgaussian_rank_deficient_state` with `factor` and `shifted_inverse` set.
    * \see theta_state(), constrained_rng(), constrained_covariance(), distrib_multivariate
@@ -447,7 +488,7 @@ struct mvgaussian2_distrib<S> {
    * \param y Observation vector of length `dim()`.
    * \param mu Location vector of length `dim()`.
    * \return Value of \f$-\frac{\rho}{2}\log 2\pi + \frac{1}{2}\log\lvert Q\rvert_+ - \frac{1}{2} r^\top Q r\f$ with \f$r = y - \mu\f$.
-   * \see logpdf_dmu_dk(), theta_state(), distrib_multivariate
+   * \see logpdf_dk(), theta_state(), distrib_multivariate
    */
   double logpdf(const mvgaussian_rank_deficient_state& st, const double* y, const double* mu) const {
     return detail_mvgaussian::rank_deficient_logpdf<true>(structure, st, y, mu);
@@ -461,25 +502,25 @@ struct mvgaussian2_distrib<S> {
    * `logpdf()` for \f$A = 0, K = 0\f$). Blocks with \f$A \ge 3\f$ or
    * structurally zero derivatives return `false` without modifying `out`.
    *
-   * \tparam A Derivative order with respect to \f$\mu\f$ (`A >= 0`).
+   * \tparam A Derivative order with respect to \f$\mu\f$, the one dense parameter (`A >= 0`; omitted means 0).
    * \tparam K Derivative order with respect to \f$\theta\f$ (`K >= 0`, `A + K <= 6`).
    * \param st Precomputed state from `theta_state()` or `constrained_state()`.
    * \param y Observation vector of length `dim()`.
    * \param mu Location vector of length `dim()`.
-   * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q - 1\}\f$, \f$q\f$ = `n_params()` (unused when `K == 0`).
+   * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q - 1\}\f$, \f$q\f$ = `theta_size()` (unused when `K == 0`).
    * \param out Output buffer of length `1` (`A = 0`), `dim()` (`A = 1`), or `pdmat::packed_size(dim())` (`A = 2`, packed lower-triangular).
    * \param w Caller workspace of at least `scratch_size()` doubles.
    * \return `true` if evaluated; `false` when `A >= 3` or the block vanishes identically by structure.
    * \see logpdf(), logpdf_dy_dk(), with_theta_table(), distrib_multivariate
    */
-  template <int A, int K>
-  bool logpdf_dmu_dk(const mvgaussian_rank_deficient_state& st, const double* y, const double* mu, const int* idx,
-                     double* out, double* w) const {
-    if constexpr (A == 0 && K == 0) {
+  template <int K, int... A>
+  bool logpdf_dk(const mvgaussian_rank_deficient_state& st, const double* y, const double* mu, const int* idx,
+                 double* out, double* w) const {
+    if constexpr (detail_mv::dense_order<A...>() == 0 && K == 0) {
       out[0] = logpdf(st, y, mu);
       return true;
     } else {
-      return detail_mvgaussian::logpdf_dmu_dk<true, A, K>(
+      return detail_mvgaussian::logpdf_dk<true, K, detail_mv::dense_order<A...>()>(
           detail_mvgaussian::rank_deficient_view<S>(structure, st), st, y, mu, idx, out, w);
     }
   }
@@ -487,23 +528,28 @@ struct mvgaussian2_distrib<S> {
    * \ingroup distrib_mvgaussian2
    * \brief Evaluate partial derivatives of the log-density with respect to \f$y\f$ (order `J`) and \f$\theta\f$ (order `K`).
    *
-   * Equal to \f$(-1)^J\f$ times `logpdf_dmu_dk<J, K>()` for \f$J + K \le 6\f$.
+   * Equal to \f$(-1)^J\f$ times `logpdf_dk<K, J>()` for \f$J + K \le 6\f$.
    *
    * \tparam J Derivative order with respect to \f$y\f$ (`J >= 0`).
    * \tparam K Derivative order with respect to \f$\theta\f$ (`K >= 0`, `J + K <= 6`).
+   * \tparam A Derivative order with respect to \f$\mu\f$ (`A >= 0`, `J + K + A <= 6`; omitted means 0). With `A > 0`
+   *         the output is the Kronecker product, the \f$y\f$ factor first, of the packed tensors of order `J` and `A`
+   *         over \f$d\f$, and `w` holds `scratch_size() + sym_tensor_size(dim(), J + A)` doubles.
    * \param st Precomputed state from `theta_state()` or `constrained_state()`.
    * \param y Observation vector of length `dim()`.
    * \param mu Location vector of length `dim()`.
-   * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q - 1\}\f$, \f$q\f$ = `n_params()` (unused when `K == 0`).
+   * \param idx Sorted parameter indices of length `K` in \f$\{0, \dots, q - 1\}\f$, \f$q\f$ = `theta_size()` (unused when `K == 0`).
    * \param out Output buffer of length `1` (`J = 0`), `dim()` (`J = 1`), or `pdmat::packed_size(dim())` (`J = 2`, packed lower-triangular).
    * \param w Caller workspace of at least `scratch_size()` doubles.
    * \return `true` if evaluated; `false` when `J >= 3` or the block vanishes identically by structure.
-   * \see logpdf_dmu_dk(), distrib_multivariate
+   * \see logpdf_dk(), distrib_multivariate
    */
-  template <int J, int K>
+  template <int J, int K, int... A>
   bool logpdf_dy_dk(const mvgaussian_rank_deficient_state& st, const double* y, const double* mu, const int* idx,
                     double* out, double* w) const {
-    if (!logpdf_dmu_dk<J, K>(st, y, mu, idx, out, w)) return false;
+    if constexpr (detail_mv::dense_order<A...>() > 0)
+      return detail_mv::location_dy_dk<J, K, detail_mv::dense_order<A...>()>(*this, st, y, mu, idx, out, w);
+    if (!logpdf_dk<K, J>(st, y, mu, idx, out, w)) return false;
     if constexpr (J % 2 == 1) {
       const int n = J == 1 ? dim() : pdmat::packed_size(dim());
       for (int k = 0; k < n; ++k) out[k] = -out[k];
@@ -516,27 +562,28 @@ struct mvgaussian2_distrib<S> {
    *
    * Supports \f$0 \le K \le 4\f$ for structures satisfying
    * \f$\partial_{ab} Q = \delta_{ab}\,\partial_a Q\f$ (such as
-   * `pdmat::weighted_sum_psdmat`). `vector_vector` writes packed \f$Q\f$ or
-   * its \f$\theta\f$-derivatives; `vector_rest` returns `false` without
-   * modifying `out`; `rest_rest` writes \f$\partial_T I_{ab}\f$ for the
+   * `pdmat::weighted_sum_psdmat`). `(0, 0)` writes packed \f$Q\f$ or
+   * its \f$\theta\f$-derivatives; `(0, theta_slot)` returns `false` without
+   * modifying `out`; `(theta_slot, theta_slot)` writes \f$\partial_T I_{ab}\f$ for the
    * constrained law \f$U_0^\top(y - \mu) = 0\f$, where
    * \f$I_{ab} = -\frac{1}{2}\partial_{ab}\log\lvert Q\rvert_+ + \frac{1}{2}\delta_{ab}\partial_a\log\lvert Q\rvert_+\f$.
    *
    * \tparam K Derivative order with respect to \f$\theta\f$ (`0 <= K <= 4`).
    * \param st Precomputed state from `theta_state()` or `constrained_state()`.
-   * \param block Block of the expected information matrix.
-   * \param ab Two-element index pair `(a, b)` selecting an entry within `rest_rest` (unused otherwise).
+   * \param slot_a Slot of the row parameter: 0 for \f$\mu\f$ or `theta_slot`.
+   * \param slot_b Slot of the column parameter: 0 for \f$\mu\f$ or `theta_slot`.
+   * \param ab Two-element index pair `(a, b)` selecting an entry within `(theta_slot, theta_slot)` (unused otherwise).
    * \param idx Sorted parameter indices of length `K` in \f$\theta\f$ (unused when `K == 0`).
-   * \param out Output buffer of length `pdmat::packed_size(dim())` (`vector_vector`) or length `1` (`rest_rest`).
+   * \param out Output buffer of length `pdmat::packed_size(dim())` (`(0, 0)`) or length `1` (`(theta_slot, theta_slot)`).
    * \param w Caller workspace of at least `info_scratch_size()` doubles.
-   * \return `true` if evaluated; `false` for `vector_rest` or structurally zero derivatives.
-   * \see info_scratch_size(), distrib_mv_info_block, distrib_multivariate
+   * \return `true` if evaluated; `false` for `(0, theta_slot)` or structurally zero derivatives.
+   * \see info_scratch_size(), theta_slot, distrib_multivariate
    */
   template <int K>
     requires detail_mvgaussian::exp_linear_structure<S>
-  bool expected_info_dk(const mvgaussian_rank_deficient_state& st, distrib_mv_info_block block, const int* ab,
+  bool expected_info_dk(const mvgaussian_rank_deficient_state& st, int slot_a, int slot_b, const int* ab,
                         const int* idx, double* out, double* w) const {
-    return detail_mvgaussian::rank_deficient_info<true, K>(structure, st, block, ab, idx, out, w);
+    return detail_mvgaussian::rank_deficient_info<true, K>(structure, st, slot_a, slot_b, ab, idx, out, w);
   }
   /**
    * \ingroup distrib_mvgaussian2
@@ -637,7 +684,7 @@ struct mvgaussian2_distrib<S> {
    * \f$c = \operatorname{tr} C_p / \rho\f$, and calls `structure.params_from_matrix()`.
    *
    * \param summary Sample mean and covariance summary produced by `summarize_mv_sample()`.
-   * \param theta Output parameter vector of length `n_params()`.
+   * \param theta Output parameter vector of length `theta_size()`.
    * \see summarize_mv_sample(), distrib_mv_sample_summary, distrib_multivariate
    */
   void start_value(const distrib_mv_sample_summary& summary, double* theta) const {

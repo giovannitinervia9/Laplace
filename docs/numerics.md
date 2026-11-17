@@ -8264,7 +8264,7 @@ theta inside the guards.
 
 What: the first multivariate distribs (design in `note/distrib_multivariate.md`,
 2026-11-15): `include/laplace/distrib/multivariate_core.hpp` (the concept
-`multivariate_distrib`, `distrib_normalization`, `distrib_mv_info_block`,
+`multivariate_distrib`, `distrib_normalization`, the information slots (an enum of three blocks until the typed parameter list of 2026-11-17),
 `distrib_mv_sample_summary` and `summarize_mv_sample`),
 `include/laplace/distrib/mvgaussian1.hpp` (covariance Sigma = M(theta)) and
 `include/laplace/distrib/mvgaussian2.hpp` (precision Q = M(theta)), over any
@@ -8549,7 +8549,7 @@ by structure), d_T log det M and d_T W packed. `theta_table_entries(k_max)`,
 `theta_table_size(k_max)`, `fill_theta_table_entry(state, k_max, entry, table, w)`
 (one entry per call, so that a kernel fills it in parallel) and
 `with_theta_table(state, k_max, table)`, which attaches it to the state; the unit
-functions (`logpdf_dmu_dk`, `logpdf_dy_dk`, the (mu, mu) block of `expected_info_dk`)
+functions (`logpdf_dk`, `logpdf_dy_dk`, the (mu, mu) block of `expected_info_dk`)
 read it when it covers the order asked for and compute as before otherwise. Test:
 every block of orders 1 to 3 of the reference file read from a table equals the block
 computed directly, to the bit, on gcc and CUDA.

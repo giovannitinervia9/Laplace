@@ -282,10 +282,10 @@ LAPLACE_HD double logpdf_value(const S& s, const mvstudent_t_state<St>& st, cons
 }
 
 // A derivatives in mu, the sorted tuple idx of K indices of the rest (nu = q)
-template <bool Prec, int A, int K, class St, class S>
-LAPLACE_HD bool logpdf_dmu_dk(const S& s, const mvstudent_t_state<St>& st, const double* y, const double* mu,
-                              const int* idx, double* out, double* w) {
-  static_assert(A >= 0 && K >= 0 && A + K <= 6, "logpdf_dmu_dk: A + K <= 6");
+template <bool Prec, int K, int A, class St, class S>
+LAPLACE_HD bool logpdf_dk(const S& s, const mvstudent_t_state<St>& st, const double* y, const double* mu,
+                          const int* idx, double* out, double* w) {
+  static_assert(A >= 0 && K >= 0 && A + K <= 6, "logpdf_dk: A + K <= 6");
   const int d = s.dim, np = packed_size(d), q = s.n_params();
   const St& gs = st.gauss;
   int c = 0;
@@ -460,7 +460,7 @@ LAPLACE_HD bool logpdf_dmu_dk(const S& s, const mvstudent_t_state<St>& st, const
 template <bool Prec, int J, int K, class St, class S>
 LAPLACE_HD bool logpdf_dy_dk(const S& s, const mvstudent_t_state<St>& st, const double* y, const double* mu,
                              const int* idx, double* out, double* w) {
-  if (!logpdf_dmu_dk<Prec, J, K>(s, st, y, mu, idx, out, w)) return false;
+  if (!logpdf_dk<Prec, K, J>(s, st, y, mu, idx, out, w)) return false;
   if constexpr (J % 2 == 1) {
     const int nn = J == 1 ? s.dim : binomial_coef(s.dim + J - 1, J);
     for (int k = 0; k < nn; ++k) out[k] = -out[k];
@@ -483,10 +483,10 @@ LAPLACE_HD void info_theta_parts(const S& s, const St& gs, const int* pair, cons
   if constexpr (R == info_route::traceless) {
     hz = mg::expected_info_factor<KT, true>(s, gs, pair, tt, &H, w);
   } else if constexpr (R == info_route::gauss_proper) {
-    hz = mg::expected_info_dk<Prec, KT>(s, gs, distrib_mv_info_block::rest_rest, pair, tt, &H, w);
+    hz = mg::expected_info_dk<Prec, KT>(s, gs, theta_slot, theta_slot, pair, tt, &H, w);
   } else {
     // host only, as the degenerate class
-    KOKKOS_IF_ON_HOST((hz = mg::rank_deficient_info<false, KT>(s.s, gs, distrib_mv_info_block::rest_rest, pair, tt, &H, w);))
+    KOKKOS_IF_ON_HOST((hz = mg::rank_deficient_info<false, KT>(s.s, gs, theta_slot, theta_slot, pair, tt, &H, w);))
     KOKKOS_IF_ON_DEVICE((hz = false;))
   }
   if (!hz) H = 0.0;
@@ -534,7 +534,7 @@ LAPLACE_HD int info_scratch(const S& s) {
 }
 
 template <bool Prec, info_route R, int K, class St, class S>
-LAPLACE_HD bool expected_info_dk(const S& s, const mvstudent_t_state<St>& st, distrib_mv_info_block block,
+LAPLACE_HD bool expected_info_dk(const S& s, const mvstudent_t_state<St>& st, int slot_a, int slot_b,
                                  const int* ab, const int* idx, double* out, double* w) {
   static_assert(K >= 0 && K <= 4, "expected_info_dk: K <= 4");
   const int q = s.n_params(), np = packed_size(s.dim), rho = st.rho;
@@ -543,8 +543,8 @@ LAPLACE_HD bool expected_info_dk(const S& s, const mvstudent_t_state<St>& st, di
   int c = 0;
   for (int k = 0; k < K; ++k) c += idx[k] == q;
   const int kt = K - c;
-  if (block == distrib_mv_info_block::vector_rest) return false;
-  if (block == distrib_mv_info_block::vector_vector) {
+  if (slot_a != slot_b) return false;
+  if (slot_a != theta_slot) {
     const double* P = nullptr;
     double* ws = w + np;
     if (!w_dk_runtime<Prec>(s, gs, kt, idx, w, P, ws)) return false;

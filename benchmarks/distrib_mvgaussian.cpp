@@ -34,29 +34,29 @@ constexpr int max_d = 10;
 template <class D>
 KOKKOS_INLINE_FUNCTION double unit_work(const D& g, const typename D::state_type& st, const double* y,
                                         const double* mu, int order, double* ws) {
-  const int d = g.dim(), q = g.n_params();
+  const int d = g.dim(), q = g.theta_size();
   double out[lp::packed_size(max_d)];
   if (order == 0) return g.logpdf(st, y, mu);
   double s = 0.0;
   if (order == 1) {
-    g.template logpdf_dmu_dk<1, 0>(st, y, mu, nullptr, out, ws);
+    g.template logpdf_dk<0, 1>(st, y, mu, nullptr, out, ws);
     for (int k = 0; k < d; ++k) s += out[k];
     for (int j = 0; j < q; ++j) {
       const int t[1] = {j};
-      if (g.template logpdf_dmu_dk<0, 1>(st, y, mu, t, out, ws)) s += out[0];
+      if (g.template logpdf_dk<1, 0>(st, y, mu, t, out, ws)) s += out[0];
     }
     return s;
   }
-  g.template logpdf_dmu_dk<2, 0>(st, y, mu, nullptr, out, ws);
+  g.template logpdf_dk<0, 2>(st, y, mu, nullptr, out, ws);
   s += out[0];
   for (int j = 0; j < q; ++j) {
     const int t[1] = {j};
-    if (g.template logpdf_dmu_dk<1, 1>(st, y, mu, t, out, ws)) s += out[0];
+    if (g.template logpdf_dk<1, 1>(st, y, mu, t, out, ws)) s += out[0];
   }
   for (int a = 0; a < q; ++a)
     for (int b = a; b < q; ++b) {
       const int t[2] = {a, b};
-      if (g.template logpdf_dmu_dk<0, 2>(st, y, mu, t, out, ws)) s += out[0];
+      if (g.template logpdf_dk<2, 0>(st, y, mu, t, out, ws)) s += out[0];
     }
   return s;
 }
@@ -134,7 +134,7 @@ template <template <class> class G>
 void run(const char* name, int d, int n) {
   const log_chol s(d);
   const G<log_chol> g(s);
-  const int q = g.n_params();
+  const int q = g.theta_size();
   std::mt19937_64 rng(20261115 + d);
   std::normal_distribution<double> nd(0.0, 1.0);
   Kokkos::View<double*> theta("theta", q);
