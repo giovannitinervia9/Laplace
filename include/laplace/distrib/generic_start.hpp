@@ -39,6 +39,35 @@ inline double quantile_type7(std::vector<double>& v, double p) {
   return a + (h - static_cast<double>(lo)) * (b - a);
 }
 
+// The sample with the observations that sit on an atom removed. The summaries
+// of a law carrying atoms (core.hpp, the atom descriptors) describe the part it
+// spreads over Lebesgue measure, and a point mass at the end of the support
+// would otherwise drag the mean, the variance and the quartiles that the family
+// starts from: a gamma with a third of its mass at zero would start from a mean
+// two thirds of its own. The route asks through distrib_n_atoms and
+// distrib_atom_point, so a family without atoms is not touched. What the mass of
+// each atom starts at is the concern of whoever weighs it, which no descriptor
+// can decide: an atom declares its point and its mass and nothing that says
+// which parameter carries it, so a family with atom parameters supplies its own
+// start_value over the sample (atom_mixture_distrib does) and never reaches
+// here.
+template <class D>
+std::vector<double> sample_off_atoms(const D& d, const std::vector<double>& y) {
+  if constexpr (distrib_n_atoms<D>() == 0) {
+    return (void)d, y;
+  } else {
+    std::vector<double> rest;
+    rest.reserve(y.size());
+    for (double v : y) {
+      bool on_atom = false;
+      for (int i = 0; i < distrib_n_atoms<D>(); ++i)
+        if (distrib_atom_point(d, i) == v) on_atom = true;
+      if (!on_atom) rest.push_back(v);
+    }
+    return rest.empty() ? y : rest;  // a sample entirely on the atoms says nothing else
+  }
+}
+
 }  // namespace detail_start
 
 /**
@@ -139,6 +168,10 @@ D distrib_start_value(const D& prototype, const distrib_sample_summary& s) {
  * Host-only routine that returns \c prototype.start_value(y) when \p D declares a member
  * over the sample, without building a summary, and otherwise calls
  * summarize_sample(std::vector<double>) once and returns \c prototype.start_value(summary).
+ * When \p D declares atoms (\ref distrib_atoms "the atom descriptors") the observations sitting
+ * on an atom point are dropped before the summary, so that the moments and quartiles describe
+ * the part of the law spread over Lebesgue measure; a sample lying entirely on the atoms is
+ * summarized as it is.
  * The selection is made at compile time, preserving any non-parameter fields of \p prototype
  * (such as \c size on \c binomial_distrib). Fails to compile if \p D declares neither
  * \c start_value member.
@@ -155,7 +188,7 @@ D distrib_start_value(const D& prototype, const std::vector<double>& y) {
   if constexpr (requires { prototype.start_value(y); })
     return prototype.start_value(y);
   else
-    return prototype.start_value(summarize_sample(y));
+    return prototype.start_value(summarize_sample(detail_start::sample_off_atoms(prototype, y)));
 }
 
 /**

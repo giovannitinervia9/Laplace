@@ -32,6 +32,23 @@ namespace laplace::distrib {
 
 namespace detail_generic {
 
+// Whether y is one of the atom points. There logpdf returns a log MASS and not
+// a log density, so a quadrature of the density has to skip the node: the panel
+// routines cut at the atoms, which puts each of them at a panel end, but a
+// tanh-sinh node whose distance to that end underflows is evaluated AT the end
+// all the same (quadrature.hpp, tanh_sinh_node returning 2), so the cut alone
+// does not make the point unreachable. The test does.
+template <class D>
+LAPLACE_HD_FORCEINLINE bool at_an_atom(const D& d, double y) {
+  if constexpr (distrib_n_atoms<D>() == 0) {
+    return (void)d, (void)y, false;
+  } else {
+    for (int i = 0; i < distrib_n_atoms<D>(); ++i)
+      if (distrib_atom_point(d, i) == y) return true;
+    return false;
+  }
+}
+
 // l(y) of either kind
 template <class D>
 LAPLACE_HD_FORCEINLINE double log_density(const D& d, double y) {
@@ -260,7 +277,7 @@ LAPLACE_HD vec_expectation<M> expectation_vec_by_integral(const D& d, const H& h
   vec_expectation<M> r;
   if constexpr (D::kind == distrib_kind::continuous) {
     auto g = [&](double y, double* out) {
-      const double mass = math::exp(d.logpdf(y));
+      const double mass = at_an_atom(d, y) ? 0.0 : math::exp(d.logpdf(y));
       if (mass == 0.0) {
         for (int m = 0; m < M; ++m) out[m] = 0.0;
         return;
@@ -332,7 +349,7 @@ LAPLACE_HD math::quad::quad_result expectation_by_integral(const D& d, const H& 
   const double lo = d.support_lower(), hi = d.support_upper(), c = d.center(), s = d.scale();
   if constexpr (D::kind == distrib_kind::continuous) {
     auto g = [&](double y) {
-      const double m = math::exp(d.logpdf(y));
+      const double m = detail_generic::at_an_atom(d, y) ? 0.0 : math::exp(d.logpdf(y));
       return m == 0.0 ? 0.0 : h(y) * m;
     };
     math::quad::quad_result r;

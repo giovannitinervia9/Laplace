@@ -43,11 +43,31 @@ namespace laplace::distrib {
 
 namespace detail_generic {
 
-constexpr double log_half = -0.69314718055994530942;
+// log_half and log1mexp live in generic_cdf.hpp, which the atom terms of the
+// cumulative functions need them for.
 
-// log(1 - e^x), x <= 0 (Maechler's switch at -log 2)
-LAPLACE_HD_FORCEINLINE double log1mexp(double x) {
-  return x > log_half ? math::log(-Kokkos::expm1(x)) : Kokkos::log1p(-math::exp(x));
+// The atom whose jump holds the target, or -1. With atoms F has jumps and the
+// quantile is inf{y : F(y) >= p}, which is the atom point c_i whenever p lies in
+// (F(c_i-), F(c_i)]; there the root of F(y) = p does not exist. Both ends of the
+// jump come from the cumulative function at c_i itself, which already counts the
+// atoms at or below it, so the atom points need not be sorted and nothing is
+// asked of the families beyond the three descriptors. On the upper form the
+// predicate is 1 - F(c_i) <= q < 1 - F(c_i-).
+template <class D>
+LAPLACE_HD int atom_holding_target(const D& d, double t, bool upper) {
+  for (int i = 0; i < distrib_n_atoms<D>(); ++i) {
+    const double m = distrib_atom_log_mass(d, i);
+    if (!(m > -distrib_infinity)) continue;
+    const double c = distrib_atom_point(d, i);
+    if (upper) {
+      const double lgc = distrib_log_ccdf(d, c);  // log(1 - F(c))
+      if (t >= lgc && t < log_add(lgc, m)) return i;
+    } else {
+      const double lfc = distrib_log_cdf(d, c);  // log F(c)
+      if (t <= lfc && t > log_subtract(lfc, m)) return i;
+    }
+  }
+  return -1;
 }
 
 // the root of log F(y) = t (upper = false) or log(1 - F(y)) = t (upper = true)
@@ -55,6 +75,10 @@ template <class D>
 LAPLACE_HD double quantile_root_log(const D& d, double t, bool upper) {
   const double lo_end = d.support_lower(), hi_end = d.support_upper();
   const bool lo_fin = lo_end > -1e308, hi_fin = hi_end < 1e308;
+  if constexpr (distrib_n_atoms<D>() > 0) {  // a target inside a jump: the atom point itself
+    const int i = atom_holding_target(d, t, upper);
+    if (i >= 0) return distrib_atom_point(d, i);
+  }
   // g increases with y
   auto g = [&](double y) { return upper ? t - distrib_log_ccdf(d, y) : distrib_log_cdf(d, y) - t; };
   double x = d.center(), s = d.scale();
@@ -97,7 +121,9 @@ LAPLACE_HD double quantile_root_log(const D& d, double t, bool upper) {
   for (int it = 0; it < 200; ++it) {
     if (gc == 0.0) return x;
     if (gc < 0.0) lo = x; else hi = x;
-    const double lf = detail_generic::log_density(d, x);
+    // At an atom log_density is a log MASS, so f/F there is not the derivative
+    // of g: the step is left to the bisection below (core.hpp, the atom rules).
+    const double lf = at_an_atom(d, x) ? -distrib_infinity : detail_generic::log_density(d, x);
     const double dg = math::exp(lf - (upper ? distrib_log_ccdf(d, x) : distrib_log_cdf(d, x)));
     double nx = x - gc / dg;
     const double tol = 4.0 * 0x1p-53 * Kokkos::fabs(x);
@@ -125,6 +151,7 @@ template <class D>
 LAPLACE_HD double quantile_root(const D& d, double t, bool upper, double target) {
   const double y = quantile_root_log(d, t, upper);
   if (!(target >= 0x1p-1022) || !(y > d.support_lower() && y < d.support_upper())) return y;
+  if (at_an_atom(d, y)) return y;  // the quantile is the atom point exactly; its mass is not a density
   const double f = math::exp(detail_generic::log_density(d, y));
   if (!(f > 0.0)) return y;
   const double ny = upper ? y + (distrib_ccdf(d, y) - target) / f : y - (distrib_cdf(d, y) - target) / f;

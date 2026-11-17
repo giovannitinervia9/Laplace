@@ -19,6 +19,7 @@
 #include <laplace/distrib/gamma2.hpp>
 #include <laplace/distrib/gaussian1.hpp>
 #include <laplace/distrib/gaussian2.hpp>
+#include <laplace/distrib/laplace1.hpp>
 #include <laplace/distrib/generic_cdf.hpp>
 #include <laplace/distrib/generic_expectation.hpp>
 #include <laplace/distrib/generic_info.hpp>
@@ -302,8 +303,12 @@ TEST_CASE("transformed: the atom of a zero-adjusted gamma comes out at g(0) with
   CHECK(ld::distrib_atom_point(d, 0) == 2.0);
   CHECK(ld::distrib_atom_log_mass(d, 0) == ld::distrib_atom_log_mass(z, 0));
   CHECK(d.logpdf(2.0) == z.logpdf(0.0));
-  CHECK(d.y_kinks().count == 1);
-  CHECK(d.y_kinks().point[0] == 2.0);
+  // the atom's image is not a kink in y, the mixture no longer reporting its
+  // atoms there; the quadrature is given it as a cut of its own and its
+  // integrand returns zero at it (docs/numerics.md, "The generic cumulative
+  // routes of a law that carries atoms")
+  CHECK(d.y_kinks().count == 0);
+  CHECK(ld::detail_generic::density_cuts(d, std::vector<double>(8).data()) == 1);
   const auto a = d.logpdf_d3(2.0), b = z.logpdf_d3(0.0);
   for (int i = 0; i < a.size; ++i) CHECK(a[i] == b[i]);
   const double mass = total_mass(d);
@@ -353,10 +358,15 @@ TEST_CASE("transformed: the refusals") {
   // an atom at 0 has no finite image under log
   const zag z{.parent = ld::gamma2_distrib{2.0, 0.5}, .atom_alr = {-1.0}, .point = {0.0}};
   CHECK_THROWS_AS(ld::transformed(z, lb::scalar_bijector{lb::scalar_bijector_map::log}), std::invalid_argument);
-  // two atoms and Yeo-Johnson's own kink make three non-smooth points
+  // laplace1's kink at 1 and Yeo-Johnson's at 0 make two; shifted by one and carried through Yeo-Johnson
+  // again, they land off 0 and the map adds its own, three non-smooth points (atoms are not kinks)
+  const auto yj = inverted(lb::scalar_bijector::yeo_johnson(0.6));
+  const auto two = ld::transformed(ld::transformed(ld::laplace1_distrib{1.0, 1.0}, yj),
+                                   lb::scalar_bijector::affine(-1.0, 1.0));  // g(v) = v + 1
+  CHECK(two.y_kinks().count == 2);
+  CHECK_THROWS_AS(ld::transformed(two, yj), std::invalid_argument);
+  // two atoms under a smooth map are a law
   const zan2 w{.parent = ld::gaussian1_distrib{0.0, 1.0}, .atom_alr = {-1.0, -1.0}, .point = {-1.0, 1.0}};
-  CHECK_THROWS_AS(ld::transformed(w, inverted(lb::scalar_bijector::yeo_johnson(0.6))), std::invalid_argument);
-  // the same two atoms under a smooth map are a law
   CHECK_NOTHROW(ld::transformed(w, inverted(lb::scalar_bijector::bounded(-1.0, 3.0))));
 }
 

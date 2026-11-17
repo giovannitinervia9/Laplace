@@ -266,13 +266,20 @@ struct atom_mixture_distrib : detail_atom_mixture::observation_regularity<D, D::
                 "atom_mixture_distrib carries one to six atoms");
   /// Whether any atom adds to the parent's mass instead of replacing it.
   static constexpr bool any_inflated = ((M == atom_mode::inflated) || ...);
-  // A declared atom has to be a panel boundary, or a quadrature node could land
-  // on it and read a mass as if it were a density, and the only way to say so
-  // is y_kinks(), which carries two points. So a continuous parent takes two
-  // atoms at most; a discrete one declares none and may take six.
-  static_assert(D::kind == distrib_kind::discrete || n_atom_points <= 2,
-                "a continuous parent takes at most two atoms, which is what y_kinks() can report so that a "
-                "quadrature panel splits at each of them");
+  // A continuous parent took two atoms at most until 2026-11-17, because a
+  // declared atom had to be a panel boundary and the only way to say so was
+  // y_kinks(), which carries two points. That reason is gone: a quadrature of
+  // the density is kept off the atoms by its integrand, which returns zero
+  // there, and the panel routines are given the atom points separately. So the
+  // limit is six for either kind, the one above (Giovanni, 2026-11-17). Six
+  // fits: detail_generic::density_cuts writes the parent's kinks and then the
+  // atom points, at most 8, a distrib_kinks never holding more than 2, and
+  // panels_quad reads 8 interior cuts into a cut[10] it also puts the centre
+  // in and an ends[12], so 9 and 11 of them are used at six atoms
+  // (docs/numerics.md, "The generic cumulative routes of a law that carries
+  // atoms"). What six costs is the order-6 tensor over D::n_params + 6
+  // parameters, binomial(D::n_params + 11, 6) components, which is the user's
+  // to pay and not a limit of this file.
   static_assert(D::kind == distrib_kind::discrete || !any_inflated,
                 "a continuous parent has no mass at a point to inflate, and inflating one is the same model as "
                 "adjusting it: use atom_mode::adjusted, or the factory zero_adjusted");
@@ -829,15 +836,22 @@ struct atom_mixture_distrib : detail_atom_mixture::observation_regularity<D, D::
   LAPLACE_HD double scale() const { return parent.scale(); }
 
   /**
-   * \brief Non-smooth points of \f$\log f\f$ in \f$y\f$: the atoms, so that a quadrature panel splits there.
-   * \return Up to two atom positions, nothing continuous in them.
+   * \brief Non-smooth points of \f$\log f\f$ in \f$y\f$, the parent's; an atom is not one of them.
+   *
+   * The continuous part of the mixture is the parent's density times one constant, so it has exactly
+   * the parent's kinks and the parent's regularity in \f$y\f$, and \c continuous_order is forwarded
+   * as it comes. The atom positions are not reported here: a quadrature of the density is kept off
+   * them by its integrand, which returns zero at an atom point, and the panel routines are given
+   * those points separately (\ref distrib_atoms "the atom descriptors";
+   * `docs/numerics.md`, "The generic cumulative routes of a law that carries atoms"). Reporting them
+   * here instead dropped the parent's own kinks, so an atom mixture over \ref laplace::distrib::laplace1_distrib
+   * "laplace1_distrib" or \ref laplace::distrib::enet_distrib "enet_distrib" lost the kink at \f$\mu\f$
+   * that each of them declares.
+   * \return The parent's kinks, or none when it declares none.
    */
   LAPLACE_HD distrib_kinks y_kinks() const {
-    distrib_kinks k;
-    k.count = n_atom_points < 2 ? n_atom_points : 2;
-    for (int i = 0; i < k.count; ++i) k.point[i] = point[i];
-    k.continuous_order = 0;
-    return k;
+    if constexpr (requires { parent.y_kinks(); }) return parent.y_kinks();
+    else return distrib_kinks{};
   }
 
   /**

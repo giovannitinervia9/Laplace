@@ -136,10 +136,18 @@ struct distrib_param_info {
 // Two rules come with the declaration. logpdf(y) is one log-density with
 // respect to Lebesgue measure plus a counting measure on the atoms, so it gives
 // the log mass at an atom and the log density elsewhere; a quadrature node that
-// landed on an atom would read a mass as if it were a density, and the rule
-// that stops it is that a declared atom is also reported by y_kinks(), which
-// the panel routines already split on. And logpdf_dy_dk<J, K> with J >= 1 has
-// no meaning at an atom, the derivative in y of a mass not being a quantity.
+// landed on an atom would read a mass as if it were a density, and what stops
+// it is that every integrand of the generic cumulative and expectation routes
+// returns zero at an atom point (detail_generic::at_an_atom), the continuous
+// part carrying no mass there. Reporting the atom through y_kinks() is NOT
+// sufficient, and this comment said for a time that it was: a cut makes the
+// atom a panel END, and tanh_sinh_quad does evaluate its integrand at a panel
+// end when a node's distance to it underflows, so a cut puts the point exactly
+// where a node can reach it (measured on 2026-11-17; docs/numerics.md, "The
+// generic cumulative routes of a law that carries atoms"). The atom points are
+// still passed as cuts, for the panel split they buy. And logpdf_dy_dk<J, K>
+// with J >= 1 has no meaning at an atom, the derivative in y of a mass not
+// being a quantity.
 //
 // Every route asks through the three functions below and never through kind,
 // which is the defect to avoid: a route that asks the object what it carries

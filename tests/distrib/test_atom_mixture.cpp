@@ -100,9 +100,13 @@ TEST_CASE("atom_mixture: the descriptors and the atoms") {
   CHECK(ld::distrib_n_atoms<zag>() == 1);
   CHECK(ld::distrib_atom_point(d, 0) == 0.0);
   CHECK(ld::distrib_atom_log_mass(d, 0) == d.logpdf(0.0));
-  // the atom is reported as a kink in y, so that a quadrature panel splits there
-  CHECK(d.y_kinks().count == 1);
-  CHECK(d.y_kinks().point[0] == 0.0);
+  // The atom is NOT reported as a kink in y: a quadrature of the density is kept
+  // off it by its integrand, which returns zero at an atom point, and the panel
+  // routines are given the atom points separately (2026-11-17; docs/numerics.md,
+  // "The generic cumulative routes of a law that carries atoms"). What y_kinks()
+  // carries is the parent's, gamma2 declaring none.
+  CHECK(d.y_kinks().count == 0);
+  CHECK(ld::detail_generic::density_cuts(d, std::vector<double>(8).data()) == 1);
   // a family that declares none answers for itself
   CHECK(ld::distrib_n_atoms<ld::gamma2_distrib>() == 0);
 }

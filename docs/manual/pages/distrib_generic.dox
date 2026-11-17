@@ -61,6 +61,43 @@ Upper-tail quantiles at \f$\log q \in \{-50, -300\}\f$ pass \f$\log(1 - F)\f$ wi
 
 Quantiles, discrete CDFs, and variates take tens to thousands of nanoseconds; one-pass expected information evaluates derivatives at every node or term. On one gcc thread, continuous log-CDF derivatives take 72 us, 424 us, 2.9 ms, and 34 ms at orders 1, 2, 4, and 6 (full CPU/CUDA timings in `docs/numerics.md`).
 
+## Atoms in the generic routes
+
+An atom is a point carrying probability mass beyond what the distribution's `kind` accounts for, queried through \ref distrib_atoms "the atom descriptors" of `<laplace/distrib/core.hpp>`. Let \f$\pi_i\f$ denote the mass of atom \f$i\f$ and \f$c_i\f$ its point.
+
+The cumulative distribution function \f$F(y)\f$ equals the integral of the density over the support up to \f$y\f$ plus the masses \f$\pi_i\f$ with \f$c_i \le y\f$. Because \f$F\f$ is right-continuous, an atom at \f$y\f$ counts towards \f$F(y)\f$, while the complement \f$1 - F(y)\f$ holds the integral above \f$y\f$ plus the masses strictly above \f$y\f$. The continuous integral and the atom masses on the requested side are combined as a log-sum-exp so that a small probability keeps its accuracy. The side of \f$y\f$ that does not hold `center()` is the one integrated. The other continuous tail is taken as its log-scale complement against \f$C = 1 - \sum_i \pi_i\f$, the mass spread over Lebesgue measure, rather than against \f$1\f$.
+
+For parameter derivatives of \f$\log F(y)\f$ or \f$\log(1 - F(y))\f$, the side asked for is \f$G = S + A\f$, where \f$S\f$ is its continuous integral and \f$A\f$ is the sum of atom masses on it. Writing \f$G = \sum_j s_j X_j\f$ with signs \f$s_j \in \{-1, +1\}\f$ and term weights \f$w_j = s_j X_j / G\f$, the derivative ratios for a parameter multi-index \f$T\f$ and derivative operator \f$d_T\f$ obey \f$d_T G / G = \sum_j w_j \, d_T X_j / X_j\f$. The derivatives of \f$\log G\f$ follow from the Bell relation solved for them. The derivatives of an atom's log mass are `logpdf_dk<K>()` at its point \f$c_i\f$, because `logpdf()` returns the log mass there, and there is no separate descriptor for them. Because \f$C\f$ carries parameter derivatives of its own through the same ratio relation applied to \f$1 - \sum_i \pi_i\f$, the complement of an integrated side \f$I\f$ is formed from \f$C - I\f$ rather than \f$1 - I\f$.
+
+With atoms, \f$F\f$ has jumps and the quantile for \f$p \in (0, 1)\f$ is \f$\inf\{y : F(y) \ge p\}\f$, which equals \f$c_i\f$ exactly when \f$p\f$ lies in \f$(F(c_i-), F(c_i)]\f$. Both ends of each jump come from the cumulative function at \f$c_i\f$ itself, so the atom points need not be sorted. Between the atoms, \f$\mathrm{d}\log F / \mathrm{d}y = f(y) / F(y)\f$ holds because the atom mass at or below \f$y\f$ is locally constant, so no mass is subtracted. At an atom point during root-finding, the density is taken as zero, which sends the Newton step to the bisection fallback and skips the final linear-scale Newton step.
+
+When \ref distrib_start "distrib_start_value()" builds a sample summary for a `distrib` with atoms, observations sitting on an atom point are excluded when forming the summary, unless every observation lies on an atom. The resulting moments and quartiles therefore describe the part of the distribution spread over Lebesgue measure. The mass of each atom is not set here, as an atom declares only its point and mass without naming which parameter carries it, so a `distrib` with atom parameters supplies its own starting value over the sample (such as \ref distrib_atom_mixture "atom_mixture_distrib").
+
+Member `logpdf()` evaluates a single log-density with respect to Lebesgue measure plus a counting measure on the atoms, returning the log mass at an atom point. To avoid reading a point mass as a density, every integrand of the generic cumulative and expectation quadratures tests for atom points and returns zero there. A panel cut alone does not keep quadrature nodes off an atom point. It places the atom at a panel endpoint, where \ref laplace::math::quad::tanh_sinh_quad "tanh_sinh_quad()" evaluates the integrand if a node rounds onto that end. The atom points are also passed to \ref laplace::math::quad::panels_quad "panels_quad()" as cuts alongside `y_kinks()` for the panel split, within the budget of `center()` plus at most \f$8\f$ interior cuts: at most \f$2\f$ kinks from `y_kinks()` followed by at most \f$6\f$ atom points, with duplicates dropped.
+
+The table below reports the measured accuracy in `tests/distrib/test_generic_atoms.cpp` of the generic routes against the closed forms they reproduce: a gamma with fixed mass \f$0.3\f$ at zero against its closed form, a zero-adjusted gamma (\ref distrib_atom_mixture "atom-mixture wrapper") with its closed routes hidden, that same law truncated to \f$[0, 3]\f$ (\ref distrib_truncated "truncated wrapper") with its closed routes hidden, a zero-adjusted `laplace1` parent, and a three-atom gamma. Every figure holds on both the `gcc` and the CUDA build. Only the log-cdf derivative rows move between them, which is the device's FMA contraction, and the test bounds were set from the larger of the two. For the logarithms, the ulp measure is not reported because \f$\log F\f$ passes through zero in the far upper tail, where an ulp of it is a denormal.
+
+| Quantity | gcc | CUDA |
+|---|---|---|
+| Fixed mass, `cdf` | 2 ulp | 2 ulp |
+| Fixed mass, `ccdf` | 21 ulp | 21 ulp |
+| Fixed mass, `log_cdf` | \f$3.9 \times 10^{-16}\f$ abs | \f$3.9 \times 10^{-16}\f$ abs |
+| Fixed mass, `quantile` | \f$1.28 \times 10^{-11}\f$ rel | \f$1.28 \times 10^{-11}\f$ rel |
+| Atom mixture, `cdf` | 3 ulp | 3 ulp |
+| Atom mixture, `ccdf` | 16 ulp | 16 ulp |
+| Atom mixture, `log_cdf` | \f$4.4 \times 10^{-16}\f$ abs | \f$4.4 \times 10^{-16}\f$ abs |
+| Atom mixture, `log_ccdf` | \f$5.7 \times 10^{-14}\f$ abs | \f$5.7 \times 10^{-14}\f$ abs |
+| Atom mixture, `log_cdf_dk<1>` | \f$1.2 \times 10^{-15}\f$ rel | \f$3.7 \times 10^{-15}\f$ rel |
+| Atom mixture, `log_cdf_dk<2>` | \f$1.4 \times 10^{-15}\f$ rel | \f$1.6 \times 10^{-15}\f$ rel |
+| Atom mixture, `log_cdf_dk<3>` | \f$2.7 \times 10^{-15}\f$ rel | \f$3.1 \times 10^{-15}\f$ rel |
+| Atom mixture, `quantile` | \f$1.06 \times 10^{-13}\f$ rel | \f$1.06 \times 10^{-13}\f$ rel |
+| Truncated, `cdf` | 1 ulp | 2 ulp |
+| Truncated, `ccdf` | 7 ulp | 7 ulp |
+| `laplace1` parent, `cdf` | \f$2.9 \times 10^{-16}\f$ rel | \f$2.9 \times 10^{-16}\f$ rel |
+| Three atoms, `cdf` | \f$4.0 \times 10^{-16}\f$ rel | \f$4.0 \times 10^{-16}\f$ rel |
+
+A gamma with shape \f$2\f$ and rate \f$1\f$ carrying mass \f$0.3\f$ at zero, truncated to \f$[0, 3]\f$, has a cumulative distribution function at zero of \f$0.34859553994375395\f$, where an atom-blind route returns zero.
+
 ## Example
 
 Random draws and expected information in a Kokkos kernel:

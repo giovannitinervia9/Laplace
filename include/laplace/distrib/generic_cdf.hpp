@@ -47,6 +47,99 @@ namespace laplace::distrib {
 
 namespace detail_generic {
 
+constexpr double log_half = -0.69314718055994530942;
+
+// log(1 - e^x), x <= 0 (Maechler's switch at -log 2)
+LAPLACE_HD_FORCEINLINE double log1mexp(double x) {
+  return x > log_half ? math::log(-Kokkos::expm1(x)) : Kokkos::log1p(-math::exp(x));
+}
+
+// log(e^a + e^b), either end at minus infinity
+LAPLACE_HD_FORCEINLINE double log_add(double a, double b) {
+  if (!(b > -distrib_infinity)) return a;
+  if (!(a > -distrib_infinity)) return b;
+  const double hi = a > b ? a : b, lo = a > b ? b : a;
+  return hi + Kokkos::log1p(math::exp(lo - hi));
+}
+
+// --------------------------------------------------------------------- atoms
+//
+// A law may carry mass on points that its kind does not account for (core.hpp,
+// the atom descriptors). Everything below asks through distrib_n_atoms,
+// distrib_atom_point and distrib_atom_log_mass, which answer for a family that
+// declares nothing, so a family without atoms compiles to what it compiled to
+// before and pays nothing.
+//
+// at_an_atom(d, y), in generic_expectation.hpp, tells whether y is an atom point.
+
+// f(y) relative to e^la, zero at an atom: the integrand of every quadrature of
+// the density below
+template <class D>
+LAPLACE_HD_FORCEINLINE double density_off_atoms(const D& d, double y, double la) {
+  if (at_an_atom(d, y)) return 0.0;
+  return math::exp(d.logpdf(y) - la);
+}
+
+// The cuts a quadrature of the density is given: the kinks of log f in y
+// (at most 2, distrib_kinks) followed by the atom points (at most 6, core.hpp),
+// so at most 8, which is what panels_quad keeps. Returns the number written.
+template <class D>
+LAPLACE_HD int density_cuts(const D& d, double* cut) {
+  int n = 0;
+  if constexpr (requires { d.y_kinks(); }) {
+    const distrib_kinks k = d.y_kinks();
+    for (int i = 0; i < k.count && n < 8; ++i) cut[n++] = k.point[i];
+  }
+  for (int i = 0; i < distrib_n_atoms<D>() && n < 8; ++i) {
+    const double c = distrib_atom_point(d, i);
+    bool seen = false;  // a family that already reports its atoms as kinks
+    for (int j = 0; j < n; ++j)
+      if (cut[j] == c) seen = true;
+    if (!seen) cut[n++] = c;
+  }
+  return n;
+}
+static_assert(2 + 6 <= 8, "the cuts of a density quadrature are at most 2 kinks and 6 atoms, panels_quad's budget");
+
+// The log mass the atoms put on one side of y: the lower side (upper = false)
+// holds the atoms at or below y, since F(y) = P(Y <= y), and the upper side
+// those strictly above it. Writes their indices to on[] and returns the count.
+template <class D>
+LAPLACE_HD int atoms_on_side(const D& d, double y, bool upper, int* on, double& log_mass) {
+  log_mass = -distrib_infinity;
+  int n = 0;
+  for (int i = 0; i < distrib_n_atoms<D>(); ++i) {
+    const double m = distrib_atom_log_mass(d, i);
+    if (!(m > -distrib_infinity)) continue;
+    const double c = distrib_atom_point(d, i);
+    if (upper ? c > y : c <= y) {
+      log_mass = log_add(log_mass, m);
+      on[n++] = i;
+    }
+  }
+  return n;
+}
+
+// log of the mass the law spreads over Lebesgue measure, 1 minus the atoms';
+// minus infinity when every bit of the mass is atomic
+template <class D>
+LAPLACE_HD double log_continuous_mass(const D& d) {
+  if constexpr (distrib_n_atoms<D>() == 0) {
+    return (void)d, 0.0;
+  } else {
+    double all = -distrib_infinity;
+    for (int i = 0; i < distrib_n_atoms<D>(); ++i) all = log_add(all, distrib_atom_log_mass(d, i));
+    return !(all > -distrib_infinity) ? 0.0 : (all < 0.0 ? log1mexp(all) : -distrib_infinity);
+  }
+}
+
+// log(e^lx - e^ly), minus infinity where the difference is not positive
+LAPLACE_HD_FORCEINLINE double log_subtract(double lx, double ly) {
+  if (!(ly > -distrib_infinity)) return lx;
+  if (!(ly < lx)) return -distrib_infinity;
+  return lx + log1mexp(ly - lx);
+}
+
 // log of the lower tail sum_(i <= k) (upper = false) or of the upper one sum_(i > k)
 template <class D>
 LAPLACE_HD double log_tail_by_sum(const D& d, double k, bool upper) {
@@ -372,7 +465,7 @@ LAPLACE_HD double cdf_partials_by_integral(const D& d, double y, bool upper, dou
   L0.fill(d, y);
   const bell_table<P, K> tb;
   const auto g = [&](double t, double* out) {
-    const double w = math::exp(d.logpdf(t) - la);
+    const double w = density_off_atoms(d, t, la);
     if (!(w > 0.0)) {
       for (int m = 0; m < M; ++m) out[m] = 0.0;
       return;
@@ -386,12 +479,9 @@ LAPLACE_HD double cdf_partials_by_integral(const D& d, double y, bool upper, dou
   };
   const double lo = upper ? y : d.support_lower(), hi = upper ? d.support_upper() : y;
   vec_expectation<M> q;
-  if constexpr (requires { d.y_kinks(); }) {
-    const distrib_kinks k = d.y_kinks();
-    panels_vec<M>(g, lo, hi, d.center(), d.scale(), k.point, k.count, q);
-  } else {
-    panels_vec<M>(g, lo, hi, d.center(), d.scale(), nullptr, 0, q);
-  }
+  double cut[8];
+  const int nc = density_cuts(d, cut);
+  panels_vec<M>(g, lo, hi, d.center(), d.scale(), cut, nc, q);
   if (!(q.value[0] > 0.0)) return -distrib_infinity;
   // The per-component stopping test of the rule (the change of the last
   // refinement against that component's own L1 norm) is conservative here: the
@@ -405,34 +495,92 @@ LAPLACE_HD double cdf_partials_by_integral(const D& d, double y, bool upper, dou
   return la + math::log(q.value[0]);
 }
 
-// log F(y) (upper = false) or log(1 - F(y)) (upper = true) by quadrature of the
-// density over the side that does not hold the centre, the other side by the
-// complement on the log scale
+// log of the integral of the density over (lo, y] (upper = false) or over
+// (y, hi) (upper = true): the continuous part of the tail asked for. The side of
+// y that does not hold the centre is the one integrated, the other being its
+// complement against the continuous mass log_c (which is 0, so the complement is
+// log1p(-S) exactly as before, for a law with no atoms). The density at the end
+// point y is divided out, so a tail far below the double range still gives its
+// logarithm. Returns NaN where the quadrature did not converge.
 template <class D>
-LAPLACE_HD double log_cdf_side_by_integral(const D& d, double y, bool upper) {
-  static_assert(D::kind == distrib_kind::continuous,
-                "the cdf by quadrature of the density is for continuous distributions");
+LAPLACE_HD double log_density_tail_by_integral(const D& d, double y, bool upper, double log_c) {
   const double lo = d.support_lower(), hi = d.support_upper();
-  if (y <= lo) return upper ? 0.0 : -distrib_infinity;
-  if (y >= hi) return upper ? -distrib_infinity : 0.0;
+  if (y <= lo) return upper ? log_c : -distrib_infinity;
+  if (y >= hi) return upper ? -distrib_infinity : log_c;
   const bool lower_side = y < d.center();
   const bool integrated_is_asked = lower_side != upper;
   const double lf = d.logpdf(y);
   const double la = (lf > -distrib_infinity && lf < distrib_infinity) ? lf : 0.0;
-  const auto f = [&](double t) { return math::exp(d.logpdf(t) - la); };
+  const auto f = [&](double t) { return density_off_atoms(d, t, la); };
   math::quad::quad_result q;
   const double a = lower_side ? lo : y, b = lower_side ? y : hi;
-  if constexpr (requires { d.y_kinks(); }) {
-    const distrib_kinks k = d.y_kinks();
-    q = math::quad::panels_quad(f, a, b, d.center(), d.scale(), k.point, k.count);
-  } else {
-    q = math::quad::panels_quad(f, a, b, d.center(), d.scale());
-  }
-  if (!q.converged || !(q.value > 0.0)) return q.value > 0.0 ? math::detail::quiet_nan() : -distrib_infinity;
-  const double log_s = la + math::log(q.value);
+  double cut[8];
+  const int nc = density_cuts(d, cut);
+  q = math::quad::panels_quad(f, a, b, d.center(), d.scale(), cut, nc);
+  if (!q.converged && q.value > 0.0) return math::detail::quiet_nan();
+  // An empty integral is an empty tail on the side integrated, and the whole of
+  // the continuous mass on the other: returning minus infinity for both, as this
+  // route did before the atoms were added, made log(1 - F) minus infinity just
+  // above a finite lower end, where it is log C. A window of denormal width is
+  // where the quadrature reaches that case.
+  const double log_s = q.value > 0.0 ? la + math::log(q.value) : -distrib_infinity;
   if (integrated_is_asked) return log_s;
-  return Kokkos::log1p(-math::exp(log_s));
+  return log_subtract(log_c, log_s);
 }
+
+// log F(y) (upper = false) or log(1 - F(y)) (upper = true) by quadrature of the
+// density over the side that does not hold the centre, the other side by the
+// complement on the log scale, plus the mass of the atoms on the side asked for:
+// F(y) = int_lo^y f + sum_(c_i <= y) pi_i, and the complement with the atoms
+// strictly above y. The sum is a log-sum-exp against the log integral, so the
+// small-probability end keeps its accuracy.
+template <class D>
+LAPLACE_HD double log_cdf_side_by_integral(const D& d, double y, bool upper) {
+  static_assert(D::kind == distrib_kind::continuous,
+                "the cdf by quadrature of the density is for continuous distributions");
+  if constexpr (distrib_n_atoms<D>() == 0) {
+    return log_density_tail_by_integral(d, y, upper, 0.0);
+  } else {
+    int on[distrib_n_atoms<D>()];
+    double log_a;
+    atoms_on_side(d, y, upper, on, log_a);
+    const double log_c = log_continuous_mass(d);
+    const double log_s = !(log_c > -distrib_infinity) ? -distrib_infinity
+                                                      : log_density_tail_by_integral(d, y, upper, log_c);
+    if (log_s != log_s) return log_s;  // the quadrature did not converge
+    return log_add(log_s, log_a);
+  }
+}
+
+// The derivatives of log G for a G that is a signed sum of terms, from the
+// derivatives of each term's logarithm: with w_j = s_j X_j / G the weight of the
+// term X_j in G = sum_j s_j X_j,
+//
+//   d_T G / G = sum_j w_j d_T X_j / X_j,
+//
+// and the derivatives of log G follow from the Bell relation solved for them.
+// The weights sum to one, and every term's ratio at the empty multiset is one,
+// so r[0] comes out as one of its own. This is the arithmetic of
+// detail_truncated::combine_order, which does it per order over a whole tensor
+// for two terms; here one component at a time and over any number of them,
+// which is how this file is indexed.
+template <int K>
+struct log_sum_ratios {
+  static constexpr int full = (1 << K) - 1;
+  double r[1 << K];
+  LAPLACE_HD void start() {
+    for (int m = 0; m <= full; ++m) r[m] = 0.0;
+  }
+  // a term of weight w whose logarithm has the derivatives u[]
+  LAPLACE_HD void add(const double* u, double w) {
+    double rx[1 << K];
+    ratios_from_log_tail_dk<K>(u, rx);
+    for (int m = 0; m <= full; ++m) r[m] += w * rx[m];
+  }
+  // a term of weight w that does not depend on the parameters
+  LAPLACE_HD void add_constant(double w) { r[0] += w; }
+  LAPLACE_HD void finish(double* u) const { log_tail_dk_from_ratios<K>(r, u); }
+};
 
 // d^K log F / dtheta^K (upper = false) or d^K log(1 - F) / dtheta^K (upper = true)
 // by quadrature of the density: one pass for every component, from the
@@ -440,27 +588,60 @@ LAPLACE_HD double log_cdf_side_by_integral(const D& d, double y, bool upper) {
 // holds where every parameter is smooth: a parameter of finite regularity moves
 // a kink of l in y, and differentiating the integrand across it would miss a
 // boundary term, so such a component is NaN.
+//
+// With atoms the side asked for is G = S + A, the integral of the density over
+// it plus the mass of the atoms on it, and the two are combined in ratio space
+// by log_sum_ratios. The derivatives of an atom's log mass are logpdf_dk at its
+// point, which is what the atom descriptors say they are (core.hpp): there is no
+// separate descriptor for them, logpdf returning the log mass there. The mass
+// the law spreads over Lebesgue measure, C = 1 - sum_i pi_i, carries derivatives
+// of its own, so the complement of the integrated side is C - I and not 1 - I.
 template <int K, class D>
 LAPLACE_HD sym_tensor<D::n_params, K> log_cdf_side_dk_by_integral(const D& d, double y, bool upper) {
   static_assert(D::kind == distrib_kind::continuous,
                 "the derivatives of the log cdf by quadrature are for continuous distributions");
   constexpr int P = D::n_params;
+  constexpr int NA = distrib_n_atoms<D>();
   constexpr int full = (1 << K) - 1;
   sym_tensor<P, K> t;
   const double lo = d.support_lower(), hi = d.support_upper();
-  if (upper ? y >= hi : y <= lo) {  // the side asked for has probability 0
+  // the atoms on the side asked for, and the mass spread over Lebesgue measure
+  int on[NA > 0 ? NA : 1];
+  int n_on = 0;
+  double log_a = -distrib_infinity;
+  const double log_c = log_continuous_mass(d);
+  log_density_partials<P, K> La[NA > 0 ? NA : 1];
+  if constexpr (NA > 0) {
+    n_on = atoms_on_side(d, y, upper, on, log_a);
+    for (int i = 0; i < NA; ++i) La[i].fill(d, distrib_atom_point(d, i));
+  }
+  // S, the continuous part of the side: nothing, all of C, or the quadrature
+  const bool s_zero = (upper ? y >= hi : y <= lo) || !(log_c > -distrib_infinity);
+  const bool s_whole = !s_zero && (upper ? y <= lo : y >= hi);
+  // the whole side, the atoms included, has probability 0 or 1. Without atoms
+  // these are the two tests this route has always made; with them an atom on an
+  // end of the support moves both, since F at a finite lower end is the mass
+  // sitting there and not zero.
+  if (s_zero && !(log_a > -distrib_infinity)) {
     for (int i = 0; i < sym_tensor<P, K>::size; ++i) t[i] = math::detail::quiet_nan();
     return t;
   }
-  if (upper ? y <= lo : y >= hi) return t;  // probability 1, every derivative 0
+  if (s_whole && n_on == NA) return t;  // every derivative 0
   const bool lower_side = y < d.center();
   const bool integrated_is_asked = lower_side != upper;
   double A[mi_count<P, K>()];
-  const double log_s = cdf_partials_by_integral<K>(d, y, !lower_side, A);
+  double log_i = -distrib_infinity, log_s = -distrib_infinity;
+  if (s_whole) {
+    log_s = log_c;
+  } else if (!s_zero) {
+    log_i = cdf_partials_by_integral<K>(d, y, !lower_side, A);
+    log_s = integrated_is_asked ? log_i : log_subtract(log_c, log_i);
+  }
+  const double log_g = log_add(log_s, log_a);
   log_density_partials<P, K> L0;
   L0.fill(d, y);
-  const double log_o = integrated_is_asked ? 0.0 : Kokkos::log1p(-math::exp(log_s));
-  const double fac = integrated_is_asked ? 0.0 : -math::exp(log_s - log_o);
+  const double w_i = integrated_is_asked || s_zero || s_whole ? 0.0 : -math::exp(log_i - log_s);
+  const double w_c = integrated_is_asked || s_zero || s_whole ? 0.0 : math::exp(log_c - log_s);
   // the descriptors as a value: a static constexpr array cannot be indexed on
   // the device (the same helper the expected information uses)
   constexpr regularity_orders<D> R = regularities_of<D>();
@@ -475,21 +656,59 @@ LAPLACE_HD sym_tensor<D::n_params, K> log_cdf_side_dk_by_integral(const D& d, do
       next_multi_index<P, K>(c);
       continue;
     }
-    double r[1 << K], u[1 << K];
-    r[0] = 1.0;
-    for (int mask = 1; mask <= full; ++mask) {  // the sub-multiset of c that the mask selects
-      int idx[K];
-      int n = 0;
-      for (int i = 0; i < K; ++i)
-        if (mask >> i & 1) idx[n++] = c[i];
-      r[mask] = A[1 + mi_position<P, K>(idx, n)];
+    // the derivatives of each atom's log mass, logpdf_dk at its point
+    double um[NA > 0 ? NA : 1][1 << K];
+    if constexpr (NA > 0)
+      for (int i = 0; i < NA; ++i) {
+        um[i][0] = 0.0;
+        for (int m = 1; m <= full; ++m) um[i][m] = l_over(La[i], nullptr, 0, c, m);
+      }
+    // the derivatives of log C, from C = 1 - sum_i pi_i
+    double uc[1 << K];
+    for (int m = 0; m <= full; ++m) uc[m] = 0.0;  // C is 1 where there are no atoms
+    if constexpr (NA > 0) {
+      if (!s_zero) {
+        log_sum_ratios<K> acc;
+        acc.start();
+        acc.add_constant(math::exp(-log_c));
+        for (int i = 0; i < NA; ++i) acc.add(um[i], -math::exp(distrib_atom_log_mass(d, i) - log_c));
+        acc.finish(uc);
+      }
     }
-    log_tail_dk_from_ratios<K>(r, u);  // d_T log W
-    for (int m = 1; m <= full; ++m) u[m] += l_over(L0, nullptr, 0, c, m);  // + d_T l(y)
-    if (!integrated_is_asked) {
-      ratios_from_log_tail_dk<K>(u, r);
-      for (int m = 1; m <= full; ++m) r[m] *= fac;
-      log_tail_dk_from_ratios<K>(r, u);
+    double r[1 << K], u[1 << K];
+    // d_T log S
+    if (s_zero) {
+      for (int m = 0; m <= full; ++m) u[m] = 0.0;
+    } else if (s_whole) {
+      for (int m = 0; m <= full; ++m) u[m] = uc[m];
+    } else {
+      r[0] = 1.0;
+      for (int mask = 1; mask <= full; ++mask) {  // the sub-multiset of c that the mask selects
+        int idx[K];
+        int n = 0;
+        for (int i = 0; i < K; ++i)
+          if (mask >> i & 1) idx[n++] = c[i];
+        r[mask] = A[1 + mi_position<P, K>(idx, n)];
+      }
+      log_tail_dk_from_ratios<K>(r, u);  // d_T log W
+      for (int m = 1; m <= full; ++m) u[m] += l_over(L0, nullptr, 0, c, m);  // + d_T l(y) = d_T log I
+      if (!integrated_is_asked) {  // the asked side is C - I
+        log_sum_ratios<K> acc;
+        acc.start();
+        acc.add(uc, w_c);
+        acc.add(u, w_i);
+        acc.finish(u);
+      }
+    }
+    // d_T log G for G = S + A
+    if constexpr (NA > 0) {
+      if (n_on > 0) {
+        log_sum_ratios<K> acc;
+        acc.start();
+        if (!s_zero) acc.add(u, math::exp(log_s - log_g));
+        for (int j = 0; j < n_on; ++j) acc.add(um[on[j]], math::exp(distrib_atom_log_mass(d, on[j]) - log_g));
+        acc.finish(u);
+      }
     }
     t[comp] = u[full];
     next_multi_index<P, K>(c);
@@ -554,9 +773,14 @@ LAPLACE_HD double log_ccdf_by_sum(const D& d, double y) { return detail_generic:
  * \brief Natural logarithm of cumulative distribution function \f$\log F(y)\f$ for a continuous distribution by quadrature.
  *
  * Integrates the density over the side of \f$y\f$ that does not hold `d.center()`, using
- * laplace::math::quad::panels_quad() split at `d.y_kinks()` when present with panel width `d.scale()`.
+ * laplace::math::quad::panels_quad() split at `d.y_kinks()` when present and at the points of any
+ * declared atoms (\ref distrib_atoms "the atom descriptors"), with panel width `d.scale()`.
  * When \f$y < \mathrm{center}()\f$, it integrates the lower tail directly; when \f$y \ge \mathrm{center}()\f$,
- * it integrates the upper tail \f$S\f$ and returns the log-scale complement \f$\log(1 - e^{\log S})\f$.
+ * it integrates the upper tail \f$S\f$ and returns the log-scale complement against the mass the law
+ * spreads over Lebesgue measure, \f$C = 1 - \sum_i \pi_i\f$ with \f$\pi_i\f$ the mass of atom \f$i\f$
+ * (so \f$\log(1 - e^{\log S})\f$ for a law with no atoms). The masses of the atoms on the side asked
+ * for are then added on the log scale, \f$F\f$ being right-continuous, so an atom at \f$y\f$ counts
+ * towards \f$F(y)\f$ and not towards its complement.
  * Where \f$\ell(y) = \log f(y)\f$ is finite, the density at the endpoint is divided out, giving
  * \f$\log S = \ell(y) + \log W\f$ with \f$W = \int (f(t)/f(y))\,\mathrm{d}t\f$, so that tails far below
  * the smallest normal `double` keep their logarithm accurately.
