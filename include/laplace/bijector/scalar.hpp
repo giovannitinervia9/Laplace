@@ -821,6 +821,22 @@ LAPLACE_BIJ_NOINLINE LAPLACE_HD void inv_lj_partials(scalar_bijector_map k, doub
   }
 }
 
+// The generic bound differences, bound - value and value - bound. An infinite
+// bound lies at infinite distance from every point of the range, the bound
+// itself included: the distance function is the constant +inf there, and so is
+// its limit at the end of the closed domain, while the difference would be
+// inf - inf and gave NaN (repaired 2026-11-17, convention decided with
+// Giovanni the same day; docs/numerics.md). A NaN value, which is how a point
+// outside the domain and an invalid parameter arrive here, stays NaN.
+LAPLACE_HD_FORCEINLINE double to_upper_bound(double hi, double value) {
+  if (hi == inf()) return Kokkos::isnan(value) ? nan() : inf();
+  return hi - value;
+}
+LAPLACE_HD_FORCEINLINE double to_lower_bound(double lo, double value) {
+  if (lo == -inf()) return Kokkos::isnan(value) ? nan() : inf();
+  return value - lo;
+}
+
 // The distances of h(u) to the bounds of its range (the domain of g), computed
 // without forming h, where h saturates at a bound other than 0 or infinity:
 // 1 - h(u) of logit is expit(-u), exact while 1 - expit(u) has rounded to 0
@@ -846,7 +862,7 @@ LAPLACE_BIJ_NOINLINE LAPLACE_HD double inv_to_upper(scalar_bijector_map k, doubl
     case scalar_bijector_map::upper_bounded: return upper_bounded_inv_to_upper(u, p1, p2);
     case scalar_bijector_map::box_cox: return box_cox_inv_to_upper(u, p1, p2);
     case scalar_bijector_map::yeo_johnson: return yeo_johnson_inv_to_upper(u, p1, p2);
-    default: return dom_hi(k, p1, p2) - inv<0>(k, u, p1, p2);
+    default: return to_upper_bound(dom_hi(k, p1, p2), inv<0>(k, u, p1, p2));
   }
 }
 LAPLACE_BIJ_NOINLINE LAPLACE_HD double inv_to_lower(scalar_bijector_map k, double u, double p1, double p2) {
@@ -861,7 +877,7 @@ LAPLACE_BIJ_NOINLINE LAPLACE_HD double inv_to_lower(scalar_bijector_map k, doubl
     case scalar_bijector_map::upper_bounded: return upper_bounded_inv_to_lower(u, p1, p2);
     case scalar_bijector_map::box_cox: return box_cox_inv_to_lower(u, p1, p2);
     case scalar_bijector_map::yeo_johnson: return yeo_johnson_inv_to_lower(u, p1, p2);
-    default: return inv<0>(k, u, p1, p2) - dom_lo(k, p1, p2);
+    default: return to_lower_bound(dom_lo(k, p1, p2), inv<0>(k, u, p1, p2));
   }
 }
 
@@ -1992,7 +2008,8 @@ struct scalar_bijector {
    * Evaluates \f$\sup(V) - h(u)\f$ directly without forming \f$h(u)\f$ where catastrophic
    * cancellation would otherwise occur near the bound (e.g. \f$1 - \operatorname{expit}(u) = \operatorname{expit}(-u)\f$
    * for \c logit, \f$(b - a)\operatorname{expit}(-u)\f$ for \c bounded, \f$e^{-u}\f$ for \c upper_bounded).
-   * Returns \f$+\infty\f$ when the upper bound is \f$+\infty\f$.
+   * Returns \f$+\infty\f$ whenever the upper bound is \f$+\infty\f$, at every point of the
+   * closed domain and at the bound itself, where \f$h(u) = +\infty\f$ as well.
    * When inverted is true, computes the generic difference \c forward_domain_upper() - inverse(u).
    *
    * \param u Point in the domain of inverse().
@@ -2002,7 +2019,7 @@ struct scalar_bijector {
    * \see inverse(), inverse_distance_lower(), forward_domain_upper(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_distance_upper(double u) const {
-    if (inverted) return forward_domain_upper() - inverse(u);
+    if (inverted) return detail_scalar::to_upper_bound(forward_domain_upper(), inverse(u));
     return detail_scalar::inv_to_upper(map, u, parameter_1(), parameter_2());
   }
   /**
@@ -2012,7 +2029,8 @@ struct scalar_bijector {
    * Evaluates \f$h(u) - \inf(V)\f$ directly without forming \f$h(u)\f$ where catastrophic
    * cancellation would otherwise occur near the bound (e.g. \f$h(u)\f$ for \c logit,
    * \f$(b - a)\operatorname{expit}(u)\f$ for \c bounded, \f$e^u\f$ for \c lower_bounded).
-   * Returns \f$+\infty\f$ when the lower bound is \f$-\infty\f$.
+   * Returns \f$+\infty\f$ whenever the lower bound is \f$-\infty\f$, at every point of the
+   * closed domain and at the bound itself, where \f$h(u) = -\infty\f$ as well.
    * When inverted is true, computes the generic difference \c inverse(u) - forward_domain_lower().
    *
    * \param u Point in the domain of inverse().
@@ -2022,7 +2040,7 @@ struct scalar_bijector {
    * \see inverse(), inverse_distance_upper(), forward_domain_lower(), bijector_scalar
    */
   LAPLACE_HD_FORCEINLINE double inverse_distance_lower(double u) const {
-    if (inverted) return inverse(u) - forward_domain_lower();
+    if (inverted) return detail_scalar::to_lower_bound(forward_domain_lower(), inverse(u));
     return detail_scalar::inv_to_lower(map, u, parameter_1(), parameter_2());
   }
 };

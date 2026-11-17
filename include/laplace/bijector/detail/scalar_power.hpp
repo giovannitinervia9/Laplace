@@ -44,10 +44,14 @@ LAPLACE_HD_FORCEINLINE power_sum power_two_sum(double a, double b) {
   return {s, (a - (s - bb)) + (b - bb)};
 }
 
-// 1 + e log x for an exponent offset e, with the term skipped where it is zero
-// (log 0 is infinite and 0 times infinity is not wanted at the bounds)
+// 1 + e log x for an exponent offset e, with the term skipped where it would not
+// be a small correction: log x is infinite at x = 0 and at x = inf, and e times
+// an infinity swamps the power instead of correcting it. At both bounds the sign
+// of the whole exponent is carried by its leading part s, which power_scaled
+// raises directly (repaired 2026-11-17: with the term kept, h(inf) of power was
+// NaN for a negative exponent and the wrong infinity for 1 < lambda < inf).
 LAPLACE_HD_FORCEINLINE double power_offset(double e, double x) {
-  if (e == 0.0 || x == 0.0) return 1.0;
+  if (e == 0.0 || x == 0.0 || !Kokkos::isfinite(x)) return 1.0;
   return 1.0 + e * m::log(x);
 }
 

@@ -11,6 +11,9 @@
 //         ulpC stays of the order of the rounding of the intermediate
 //         quantities; the reference files carry order 7 for the scale of
 //         order 6.
+// The last case covers the two distance functions at the ends of the closed domain for
+// every map, those with parameters included, since both members live in scalar.hpp and
+// share one generic path.
 // The bounds are on ulpC. Set LAPLACE_PRINT_ERRORS=1 to print the table.
 // Bounds: the errors measured on 2026-11-12 on the gcc/OpenMP and CUDA builds
 // (docs/numerics.md) with a margin of about half again.
@@ -20,9 +23,14 @@
 
 #include <laplace/bijector/scalar.hpp>
 
+#include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <map>
+#include <string>
 #include <tuple>
+#include <utility>
+#include <vector>
 
 #ifndef LAPLACE_REFERENCE_DIR
 #error "LAPLACE_REFERENCE_DIR must point to tests/data/reference"
@@ -132,6 +140,120 @@ void check(const char* name, bmap m, double bound) {
 
 }  // namespace
 
+// ---------------------------------------------------------------- the ends of the distances
+//
+// inverse_distance_upper() and inverse_distance_lower() at both ends of the closed domain of
+// inverse(), for every map and for the plain and the inverted bijector, in a kernel on the
+// default execution space. Both members are declared in scalar.hpp and share one generic
+// path, so the maps with parameters are here as well, each with its own test file for
+// everything that belongs to the map alone.
+//
+// The rule checked is the convention of 2026-11-17 (docs/numerics.md): the distance to an
+// infinite bound is +inf at every point of the closed domain, the bound included, where
+// h(u) has reached that bound and the generic difference was inf - inf and gave NaN; to a
+// finite bound it is the difference itself, which is +inf only where h(u) has run off to
+// the opposite, infinite bound and finite otherwise. Invalid parameters give NaN.
+//
+// The kernel is a named function with external linkage: an extended device lambda inside a
+// doctest TEST_CASE collides with the one of another translation unit (see CLAUDE.md).
+
+constexpr int scalar_ends_fields = 10;
+using scalar_ends_view = Kokkos::View<double* [scalar_ends_fields]>;
+
+void scalar_distance_ends_kernel(Kokkos::View<laplace::bijector::scalar_bijector*> cases, scalar_ends_view out) {
+  Kokkos::parallel_for(
+      "bijector_scalar_distance_ends", cases.extent(0), KOKKOS_LAMBDA(int i) {
+        const auto b = cases(i);
+        const double ends[2] = {b.inverse_domain_lower(), b.inverse_domain_upper()};
+        out(i, 0) = ends[0];
+        out(i, 1) = ends[1];
+        for (int e = 0; e < 2; ++e) {
+          out(i, 2 + 2 * e) = b.inverse_distance_upper(ends[e]);
+          out(i, 3 + 2 * e) = b.inverse_distance_lower(ends[e]);
+          out(i, 8 + e) = b.inverse(ends[e]);
+        }
+        out(i, 6) = b.forward_domain_lower();
+        out(i, 7) = b.forward_domain_upper();
+      });
+}
+
+TEST_CASE("bijector scalar: the distances at the ends of every domain") {
+  const double pinf = std::numeric_limits<double>::infinity();
+  std::vector<lb::scalar_bijector> cases;
+  std::vector<std::string> names;
+  auto add = [&](const char* name, lb::scalar_bijector b) {
+    cases.push_back(b);
+    names.push_back(std::string(name) + " plain");
+    b.inverted = true;
+    cases.push_back(b);
+    names.push_back(std::string(name) + " inverted");
+  };
+  const std::pair<const char*, bmap> free_maps[] = {
+      {"identity", bmap::identity}, {"log", bmap::log},           {"logit", bmap::logit},
+      {"probit", bmap::probit},     {"cauchit", bmap::cauchit},   {"cloglog", bmap::cloglog},
+      {"loglog", bmap::loglog},     {"inverse", bmap::inverse},   {"inverse_sq", bmap::inverse_sq},
+      {"sqrt", bmap::sqrt},         {"atanh", bmap::atanh},       {"asinh", bmap::asinh}};
+  for (const auto& [name, m] : free_maps) add(name, lb::scalar_bijector{m});
+  add("affine(2,3)", lb::scalar_bijector::affine(2.0, 3.0));
+  add("affine(2,-3)", lb::scalar_bijector::affine(2.0, -3.0));
+  add("power(3)", lb::scalar_bijector::power(3.0));
+  add("power(-3)", lb::scalar_bijector::power(-3.0));
+  add("power(2.5)", lb::scalar_bijector::power(2.5));
+  add("softplus(1)", lb::scalar_bijector::softplus(1.0));
+  add("bounded(-2,3)", lb::scalar_bijector::bounded(-2.0, 3.0));
+  add("lower_bounded(1)", lb::scalar_bijector::lower_bounded(1.0));
+  add("upper_bounded(1)", lb::scalar_bijector::upper_bounded(1.0));
+  add("box_cox(0.5)", lb::scalar_bijector::box_cox(0.5));
+  add("box_cox(0)", lb::scalar_bijector::box_cox(0.0));
+  add("box_cox(-0.5)", lb::scalar_bijector::box_cox(-0.5));
+  add("yeo_johnson(0.5)", lb::scalar_bijector::yeo_johnson(0.5));
+  add("yeo_johnson(1)", lb::scalar_bijector::yeo_johnson(1.0));
+  add("yeo_johnson(-0.5)", lb::scalar_bijector::yeo_johnson(-0.5));
+  add("yeo_johnson(2.5)", lb::scalar_bijector::yeo_johnson(2.5));
+  add("affine(1,0) invalid", lb::scalar_bijector::affine(1.0, 0.0));
+  add("bounded(3,1) invalid", lb::scalar_bijector::bounded(3.0, 1.0));
+
+  const int n = static_cast<int>(cases.size());
+  Kokkos::View<lb::scalar_bijector*> dev("bijector_cases", n);
+  auto host = Kokkos::create_mirror_view(dev);
+  for (int i = 0; i < n; ++i) host(i) = cases[i];
+  Kokkos::deep_copy(dev, host);
+  scalar_ends_view out("bijector_ends", n);
+  scalar_distance_ends_kernel(dev, out);
+  const auto r = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+
+  for (int i = 0; i < n; ++i) {
+    const double range_lo = r(i, 6), range_hi = r(i, 7);
+    for (int e = 0; e < 2; ++e) {
+      const double u = r(i, e), h = r(i, 8 + e);
+      const double to_up = r(i, 2 + 2 * e), to_lo = r(i, 3 + 2 * e);
+      INFO(names[i], " at u = ", u, ": h = ", h, ", range = [", range_lo, ", ", range_hi, "], to_upper = ", to_up,
+           ", to_lower = ", to_lo);
+      if (std::isnan(range_hi)) {  // invalid parameters
+        CHECK(std::isnan(to_up));
+        CHECK(std::isnan(to_lo));
+        continue;
+      }
+      CHECK(!std::isnan(to_up));
+      CHECK(!std::isnan(to_lo));
+      CHECK(to_up >= 0.0);
+      CHECK(to_lo >= 0.0);
+      // an infinite bound: +inf everywhere, the bound itself included
+      if (range_hi == pinf) CHECK(to_up == pinf);
+      if (range_lo == -pinf) CHECK(to_lo == pinf);
+      // a finite bound: the difference, infinite only where h has reached the other bound
+      if (std::isfinite(range_hi)) {
+        if (h == -pinf) CHECK(to_up == pinf);
+        else CHECK(to_up == doctest::Approx(range_hi - h));
+      }
+      if (std::isfinite(range_lo)) {
+        if (h == pinf) CHECK(to_lo == pinf);
+        else CHECK(to_lo == doctest::Approx(h - range_lo));
+      }
+    }
+  }
+}
+
 TEST_CASE("bijector scalar: accuracy against mpmath") {
   check("log", bmap::log, 6);
   check("logit", bmap::logit, 16);
@@ -187,4 +309,9 @@ TEST_CASE("bijector scalar: constant derivatives, identity, inversion, domain") 
   CHECK(ex.inverse_distance_upper(2.0) == std::numeric_limits<double>::infinity());
   CHECK(ex.inverse_distance_lower(2.0) == lg.forward(2.0) + std::numeric_limits<double>::infinity());
   CHECK(std::isnan((lb::scalar_bijector{bmap::sqrt}).inverse_distance_upper(-1.0)));
+  // an inverted bijector outside the domain of its inverse (the domain of g) is NaN too,
+  // and not the +inf that the infinite bound alone would give
+  const lb::scalar_bijector lt_inv{bmap::logit, true};
+  CHECK(std::isnan(lt_inv.inverse_distance_upper(1.5)));
+  CHECK(std::isnan(lt_inv.inverse_distance_lower(-0.5)));
 }

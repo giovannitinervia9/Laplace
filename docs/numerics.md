@@ -9879,3 +9879,279 @@ Gaussian's Q^+ to 1e-14.
 
 Open. statmodels7 has no improper t (its mvstudent_t refuses a rank-deficient
 matrix): no frozen references. No bench: the kernels are the degenerate t's.
+
+## The bound distances of the scalar bijectors at an infinite bound (2026-11-17)
+
+**What was wrong.** `scalar_bijector::inverse_distance_upper` and
+`inverse_distance_lower` return the distance of `h(u)` to the two bounds of the
+range of `h`, which is the domain of `g`. Six maps compute that distance
+directly, to avoid the cancellation of a difference near a finite bound, and
+seven more return `+inf` for a bound that is infinite; everything else went
+through the generic difference, `dom_hi - h(u)` and `h(u) - dom_lo` for a plain
+bijector and `forward_domain_upper() - inverse(u)` and
+`inverse(u) - forward_domain_lower()` for an inverted one. Wherever the bound
+is infinite and `h(u)` has reached it, that difference is `inf - inf` and gave
+NaN. The defect was found by the session that wrote `transformed_distrib`,
+which reads the ends of the support of `g(X)` from the bijector.
+
+Measured over the twenty maps in twenty-seven parameter settings, both
+directions of each (plain and inverted), at both ends of the closed domain of
+`h`, for both distances: 108 cells, of which 58 were NaN.
+
+| where | cells | before | after |
+|---|---|---|---|
+| plain bijector, the generic difference | 8 | NaN | `+inf` |
+| inverted bijector, the generic difference | 45 | NaN | `+inf` |
+| `h(u)` itself NaN at the end, `power` | 1 | NaN | the value's limit |
+| `h(u)` itself NaN at the end, `box_cox` | 4 | NaN | the value's limit |
+| every other cell | 50 | the limit | unchanged |
+
+The eight cells of the plain direction are `identity` at both ends, `log` and
+`sqrt` and `asinh` at `u = +inf`, `asinh` at `u = -inf`, and `inverse` and
+`inverse_sq` at `u = 0`, where `h(u) = +inf`. The forty-five of the inverted
+direction are every end of every map whose image, which is the range of `h`
+there, has an infinite bound. That set is not confined to an infinite argument:
+inverted `logit`, `probit`, `cauchit`, `cloglog` and `loglog` failed at the
+finite ends `u = 0` and `u = 1`, inverted `atanh` at `u = -1` and `u = 1`, and
+inverted `bounded(-2, 3)` at `u = -2` and `u = 3`. The defect is that the value
+has reached an infinite bound, not that the argument is infinite.
+
+**The convention, decided with Giovanni on 2026-11-17: the distance to an
+infinite bound is `+inf` at every point of the closed domain, the bound itself
+included.** With `V = (v_min, v_max)` the range of `h`, the upper distance is
+`d(u) = v_max - h(u)`. When `v_max` is finite, `h(u) -> v_max` as `u` runs to
+the end of its domain and the limit of `d` is 0, which is what the functions
+already returned. When `v_max = +inf`, every `h(u)` of the interior is finite
+and `d(u) = +inf` identically: `d` is the constant `+inf` on the whole
+interior, so `+inf` is also its limit at the end, and the rule of the module,
+that a closed bound gives the limit, decides the value without a further
+choice. The alternative put to Giovanni was 0, read as the distance of the
+bound from itself, which is a value assigned to `inf - inf` by decree rather
+than a limit; it would also have meant rewriting the seven per-map functions
+that today return `+inf` ignoring `u`. The two conventions differ in those 53
+cells and nowhere else.
+
+The repair is two helpers in `detail_scalar` of
+`include/laplace/bijector/scalar.hpp`, `to_upper_bound(hi, value)` and
+`to_lower_bound(lo, value)`, which return `+inf` for an infinite bound and the
+difference otherwise, and NaN wherever the value is NaN, which is how a point
+outside the closed domain and an invalid parameter arrive there. They replace
+the generic difference in the two `default:` branches of `inv_to_upper` and
+`inv_to_lower` and in the `inverted` branch of the two members. No per-map
+function needed a change, and no caller was touched.
+
+**A second defect, in `power`, repaired here.** `power_offset(e, x)` forms the
+small exponent correction `1 + e log x`, the term that carries the part of the
+exponent lost to rounding when `1/lambda` is not representable. Its guard
+skipped the term at `x = 0`, where `log x` is infinite, and not at an infinite
+`x`, where it is infinite as well: with `e` of the order of 1e-17 the term came
+out as an infinity of the sign of `e` and multiplied the power instead of
+correcting it. So `h(+inf)` was NaN for `power(-3)` and `power(-2.5)`, where the
+power is 0 and the correction `-inf`, and `-inf` for `power(2.5)`, where the
+power is `+inf` and the correction again negative; the true limits are 0 and
+`+inf`. The guard now skips any non-finite `x`, at which the sign of the whole
+exponent is carried by its leading part, the one that `power_scaled` raises
+directly. Finite arguments are untouched, the condition being `!isfinite(x)`.
+The four `box_cox` cells of the table were repaired in `scalar_box_cox.hpp` by
+the session that owns that file, on the same day.
+
+**The test** is in `tests/bijector/test_scalar.cpp`, the case "bijector scalar:
+the distances at the ends of every domain": thirty settings covering the twenty
+maps, each plain and inverted, in a kernel on the default execution space (a
+named function with external linkage, never a lambda inside a `TEST_CASE`). For
+each of the two ends of the closed domain of `h` it checks that neither
+distance is NaN and that neither is negative; that the distance to an infinite
+bound is exactly `+inf`; that the distance to a finite bound equals the
+difference, except where `h(u)` has run off to the opposite infinite bound and
+the distance is `+inf` there too; and that both distances are NaN for the two
+invalid settings, `affine(1, 0)` and `bounded(3, 1)`. 688 assertions, green on
+gcc; the CUDA build gives the same counts.
+
+**The partials repaired too (Giovanni, the same day, after the measurement
+above).** All six families now return their limits: the forward map's and its
+log-Jacobian's at v = 0 and v = +inf, the inverse map's and its log-Jacobian's
+at an infinite end of the image and at the finite one. Measured before, over the
+same 21 values of lambda: 4 to 35 NaN components per lambda among the 27 with
+n2 = 0 over orders 1 to 6, at every end. After: none, on gcc and on CUDA.
+
+**What the rules are.** The rule of the pure limits carries over wherever the
+argument runs to an infinity: a lambda-derivative multiplies the closed form by
+a logarithm of the argument, which loses to a negative power of it and wins
+against a vanishing exponent, so the exponent's three-way verdict is unchanged
+and only the knife-edge value moves, from the prefactor at n1 = 0 to an infinity
+above it. The six rules, with n0 = K - n1 argument derivatives and n1 in lambda:
+
+- *g at both ends.* The sum over p of e_(m-1-p)(c) n!/(n-p)! L^(n-p) is dominated
+  by the smallest p whose coefficient does not vanish, a smaller p carrying a
+  higher power of L = log v; if every coefficient in range vanishes the sum is
+  identically zero. At n0 = 0 the value tends to an end of the image, whose
+  lambda-derivatives are (-1)^(n1+1) n1!/lambda^(n1+1) where that end is finite.
+- *log|g'| at both ends.* It is linear in lambda, so only n1 = 0 and n1 = 1 are
+  not identically zero; the column n1 = 1 is d^n0_v log v, free of lambda, and so
+  is not zero at lambda = 1 where the column n1 = 0 is.
+- *h at an infinite end.* P_n0(lambda) with the sign (-1)^n1 from the
+  lambda-derivatives, and the exponent's sign from 1 - n0 lambda; at u = -inf
+  everything dies with h.
+- *log|h'| at an infinite end.* An argument derivative carries w^(-n0) and dies,
+  so only n0 = 0 survives, and there the quantity is c_n1 log w with
+  c_n1 = d^n1_lambda[(1 - lambda)/lambda]. At lambda = 0 it is affine in u and a
+  second family appears, the constant (-1)^n1 (n1!)^2 wherever n0 = n1 + 1.
+- *log|h'| at the finite end.* The most singular term is C u^n1 w^(-n0-n1), so
+  every entry with n1 >= 1 is an infinity, of the sign of
+  -(1 - lambda)(-1)^n0/lambda^(n1+1-n0); at lambda = 1 the factor 1 - lambda
+  vanishes and the next term, carrying -1/lambda^2, leaves (-1)^n0.
+- *h at the finite end,* the one that is not the pure rule in disguise. There a
+  lambda-derivative brings u/w and not log w, so it lowers the power of w by one:
+  the exponent is 1/lambda - K and depends on the total order alone, not on how
+  it splits. Above the edge the sign is that of
+  P_n0 (-1)^n1 prod_(i=0..n1-1)(1 - (n0+i) lambda), the sign of lambda cancelling
+  between u^n1 and the product, and below 0 that product and P_n0 are both
+  positive, which leaves (-1)^n1. On the edge itself, K lambda = 1, the power is 1
+  and no logarithm is left, so every n1 is finite and the column is
+  P_K(lambda) (-1/lambda^2)^n1, consecutive entries in the ratio -1/lambda^2,
+  which is -K^2 there; at K = 6 and lambda = 1/6 it is 5/324, -5/9, 20, -720,
+  25920, -933120, 33592320. Two degeneracies, both at lambda = 1/M with M an
+  integer below K, where either P_n0 or one factor of the product vanishes and the
+  next term takes over: the limit is then 0 at n1 = 0, where h^(K) is identically
+  zero, and an infinity of sign (-1)^(n0+M) above it.
+
+**Checked**: all 2592 of them, by `check_partials_limits` in
+`tools/reference/bijector_box_cox_forms.py`, each rule against SymPy's own limit
+of the mixed derivative of the definition, over lambda in {-3/2, -1/2, 0, 1/6,
+1/4, 1/3, 1/2, 2/3, 1, 3/2, 2, 3} and every (K, n1) with K from 1 to 6, with the
+free invariant that the column n1 = 0 reproduces the pure rule. With the 1232
+pure limits of the section above, 3824 limits of box_cox are now held against
+SymPy's own limit of the definition. One defect in the
+check itself, found and repaired: `bc_definition` substitutes lambda before
+differentiating, which leaves an expression without lambda whose
+lambda-derivatives are identically zero and would have passed any rule at all;
+`bc_definition_sym` keeps lambda symbolic and reaches the degenerate lambda = 0
+as a limit afterwards.
+
+**The test** is the case "box_cox: the partials at the ends of both domains" in
+`tests/bijector/test_box_cox.cpp`, in a second kernel: no NaN in any of the 27
+entries of any of the four quantities at any of the four ends, the column n1 = 0
+against the pure member of the same order (two code paths that must agree), the
+knife-edge columns and the degenerate ones written out, the constants of
+log|h'| at lambda = 0, the lambda-derivatives of the bound, the vanishing of
+log|g'| above n1 = 1, and the approach to every finite limit. The approach is a
+weak oracle here and the arguments are chosen for it: a lambda-derivative brings
+powers of the logarithm, so the correction decays as v^lambda (log v)^n1 and
+1e-20 still leaves 6e-3 relative at lambda = 1/3 and order 6; the forward
+arguments are therefore 1e-300 and 1e300, where the forms are clean, while the
+inverse ones stop at 1e20 for the reason measured above.
+
+**CUDA, with the same counts.** 7 box_cox cases, 16307 assertions on the
+`build_cuda.bat` default build, against 16299 on gcc; the eight extra are the
+device's own `REQUIRE` on the mirror. The full suite is 667 cases and 1187260
+assertions there, all passing. Measured on the default build and not under
+`nofmad`, as the bounds require. An earlier CUDA run of the same code failed 12
+assertions, all of them in `test_yeo_johnson.cpp` and none in box_cox, and they
+went with that session's own repair of its plateau gates.
+
+**Why box_cox cannot lose an infinity to FMA at a finite end, and the check that
+shows it.** The yeo_johnson session measured a defect of that kind in its own map
+and asked whether box_cox shares it. It does not, and the reason is structural:
+at a finite end every quantity of box_cox is taken by the guard
+`bc_inv_end_of`, which asks `u == -1/lambda`, a comparison with the bound the
+dispatch itself used, and then returns a literal infinity from the limit
+functions. No intermediate has to cancel. The defect needs the opposite shape,
+which is what the sibling had: the infinity obtained by letting w = 1 + lambda u
+cancel to exactly zero, so that the negative powers produce it by themselves.
+The host does cancel there, lambda times the rounded -1/lambda rounding back to
+-1; CUDA does not, nvcc contracting 1 + lambda u into an FMA that keeps the
+exact product, so w survives at about 4e-17 and the infinity comes out as a
+finite 1e100 instead.
+
+What shows it rather than argues it: the test asserts those values as exact
+infinities and not merely as large ones, and they pass on the device. The pure
+log-Jacobian at the finite end is 48 such assertions (8 values of lambda by
+orders 1 to 6), h itself at the finite end 7 more per negative lambda, and the
+partials now 54 (two negative lambda by the 27 entries) plus the three of
+lambda = 2/3 past its edge. The general rule is worth keeping next to the FMA
+entry of CLAUDE.md: an assertion that holds on gcc because an intermediate is
+exactly zero is a CUDA failure in waiting, and it does not present as a
+tolerance problem but as an infinity turning into a large finite number.
+
+
+
+**A test defect that only CUDA could show, and the rule it gives.** Both kernels
+of `test_box_cox.cpp` take a pointer into a multi-dimensional View and walk the
+last index by hand, which is contiguous only under `LayoutRight`. The views were
+declared without a layout, so each took the execution space's own: `LayoutRight`
+on the host and `LayoutLeft` on CUDA, where the FIRST index is contiguous. On the
+device the writes therefore scattered across the lambda index and every entry
+never written read back as the zero Kokkos had initialized it with. Measured on
+CUDA before the layout was named: 120 failed assertions in the case of the pure
+limits, every one of them an expected infinity read as exactly 0, while gcc was
+green throughout; found by the yeo_johnson session, whose own views had the same
+shape and the same 54 and 53 failures. Naming `Kokkos::LayoutRight` in the two
+aliases is the whole repair, and it is the pattern `param_common.hpp` already
+uses.
+
+Two things this is worth keeping for. A green host run says nothing about this
+class of defect: a test that writes through a raw pointer into a
+multi-dimensional View has to run on CUDA before it is believed. And the rule
+generalizes beyond ScatterView, which `CLAUDE.md` already records from the other
+direction: wherever a kernel takes a pointer into a View and walks one index by
+hand, the layout is named and not left to the default.
+
+## The improper multivariate Student t: mvstudent_t2 over a singular Q (2026-11-17)
+
+What. The improper (intrinsic) class of `mvstudent_t2_distrib<S>` for a positive
+semidefinite structure with a constant null space (`weighted_sum_psdmat`), the
+t counterpart of the improper `mvgaussian2`: Q = M(theta) of rank rho < d, r = y - mu,
+delta = r' Q r,
+
+    l = c_rho(nu) + 1/2 log|Q|_+ - (nu + rho)/2 log1p(delta/nu),
+
+defined for every y. Writing r = U a + U0 b (U, U0 orthonormal bases of the range and
+of the null space of Q), delta depends on a only, so the law is the rho-dimensional
+proper t of a times Lebesgue measure on b; it is also the scale mixture, over
+w ~ Gamma(nu/2, rate nu/2), of the improper Gaussian with precision w Q and its
+range-only constant. Use: a t penalty on a smooth, Q = lambda S.
+
+How. The blocks are the degenerate mvstudent_t1's kernels with W = Q and the sign
++1/2 of the log pseudo-determinant (the far-tail double-double route included);
+no support test. The state holds no factor; `constrained_state` adds the factor of
+Q + cP for the constrained law U0'(y - mu) = 0: `constrained_rng`
+(y = mu + (I - P) L^-T z / sqrt(w)), `constrained_mean` (mu for nu > 1, NaN otherwise),
+`constrained_covariance` (nu/(nu - 2) Q^+ for nu > 2, NaN otherwise). The expected
+information is that of the constrained law: mu block kappa Q, theta-theta
+kappa I^G_ab - t_a t_b/(2 (nu + rho + 2)) with I^G from log|Q|_+ (structures with
+d_ab Q = delta_ab d_a Q), theta-nu and nu-nu as the proper t with rho.
+The improper `mvgaussian2` gained `constrained_mean` (mu) for symmetry.
+
+One matrix. With a single penalty (one theta) the theta-theta entry is
+kappa rho/2 - rho^2/(2 (nu + rho + 2)) = nu rho/(2 (nu + rho + 2)), formed by a
+cancellation that loses about (nu + rho)/nu: with exact inputs (mpmath at 50 digits)
+1.5-29 ulp at nu = 1 for rho = 8-98, 81 ulp at rho = 498, 4.9e3 ulp at nu = 0.01,
+rho = 98. Ttilde = 0 exactly there, so the traceless form with H = 0,
+nu t^2/(2 rho (nu + rho + 2)), is used instead, in the route shared with the
+degenerate mvstudent_t1: measured 0 ulp against nu rho/(2 (nu + rho + 2)) at
+nu = 1e-3 to 30, both classes. Several penalties keep the direct form.
+
+Measured (tests/distrib/test_mvstudent_t_improper.cpp, references
+tools/reference/distrib_mvstudent_t_improper.py, mpmath at 60 digits from the
+definition, 3866 values; weighted_sum structures d = 4..6, m = 1..3; host only, the
+CUDA build compiles and runs the host tests; gcc and MSVC host tables identical
+except one cell), worst ulp1N over A + K <= 6 and the information to order 4:
+
+| point | blocks | information |
+|---|---|---|
+| random, m = 1, 2, 3, two D2 | 4.2 | 3.0 |
+| m = 1, nu = 0.05 | 2.1 | 1.9 |
+| m = 1, nu = 1e6 | 0.79 | 0.18 |
+| two penalties 9 apart | 23 | 0.67 |
+| large residual | 2.1 | 0.56 |
+
+The spread point (theta 9 apart) is the worst, as in the degenerate class, but
+small: the improper blocks use Q itself, never the dense (Sigma + cP)^-1. A shift
+of y along the null space (+0.75 times the constant vector) changes no block beyond
+65.3 ulp1N, the rounding of the shifted y. Constrained draws (d = 5, rho = 4, nu = 7,
+2e5 draws): null component 1.7e-15 relative, mean 0.0022 sd, covariance 0.0028 of
+its largest entry; the constrained covariance equals nu/(nu - 2) times the improper
+Gaussian's Q^+ to 1e-14.
+
+Open. statmodels7 has no improper t (its mvstudent_t refuses a rank-deficient
+matrix): no frozen references. No bench: the kernels are the degenerate t's.
