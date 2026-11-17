@@ -41,6 +41,19 @@
 // derivatives are continuous. The log-Jacobians are continuous at 0 up to
 // their first derivative.
 //
+// At an infinite argument every form above is NaN, exprel and log1prel being
+// evaluated at an infinite argument themselves, while the limit exists; and at
+// the finite end of the image, where there is one, the forms reach the limit
+// only because 1 + lambda u cancels to exactly zero, which an FMA prevents. So
+// every quantity takes its limit from a guard at both kinds of end: the value
+// and the x-derivatives from yj_fwd_at_inf, yj_inv_at_inf, yj_fwd_lj_at_inf,
+// yj_inv_lj_at_inf, yj_inv_at_edge and yj_inv_lj_at_edge, and the
+// lambda-derivatives (the _partials functions) from the four
+// yj_*_partials_at_inf and from yj_inv_partials_at_edge and
+// yj_inv_lj_partials_at_edge, with the derivation and the limits below.
+// g(+inf) and g(-inf) are the two ends of the image of g. Nothing is NaN at
+// an end of either domain for a valid lambda.
+//
 // Invalid parameters (lambda NaN or infinite): every function returns NaN; the
 // bounds of the domains are NaN (the dispatch then rejects every argument).
 #pragma once
@@ -90,10 +103,315 @@ LAPLACE_HD double yj_exprel_d(double y, double X, double a, int k) {
   if constexpr (J == 6) return m::exprel_d6(y);
 }
 
+// ---------------------------------------------------------------- the limits at an infinite argument
+//
+// Every form above is written from exprel or log1prel, whose argument is itself infinite at an
+// infinite x: exprel(inf) and log1prel(inf) are inf/inf, so the form gives NaN where the limit
+// exists. The four functions below return the limit instead, and each quantity calls its own at
+// the top. The argument enters every closed form only through a power of 1 + v, 1 - v,
+// 1 + lambda u or 1 - c u, c = 2 - lambda, so the sign of that power's exponent decides: above
+// zero the power runs to +inf and the prefactor gives the sign, at zero the power is 1 and the
+// prefactor is the whole limit, below zero the power dies and the limit is 0. The limits and
+// their derivation are in tools/reference/bijector_yeo_johnson_forms.py (check_limits), which
+// compares each of them with SymPy's limit of the definition.
+//
+// The exponent is never formed: it vanishes exactly where a product of lambda with a small
+// integer equals 1 (or where lambda equals the integer), so the two are compared instead of
+// subtracted. A subtraction is what nvcc contracts into an FMA, and the exact product
+// 3 (1/3) is 1 - 2^-54, not 1, so the knife edge would be reached on one platform and not on
+// the other. Where the comparison fails the limit is +-inf or 0, which is the limit for that
+// lambda: only lambda exactly 1/n carries a finite limit of order n.
+//
+// The derivation and every limit are in tools/reference/bijector_yeo_johnson_forms.py
+// (check_limits), which compares each of them with SymPy's limit of the definition.
+
+// The limit of pref w^e as w -> +inf: above is true where e > 0, and pref is then never zero
+// in any of the uses below; an exponent known to vanish returns pref before this is called.
+LAPLACE_HD_FORCEINLINE double yj_limit_power(double pref, bool above) {
+  if (above) return pref > 0.0 ? inf() : -inf();
+  return 0.0;
+}
+
+// g and its v-derivatives at v = +inf (upper) and at v = -inf. The value is the end of the
+// image of g: -1/lambda below 0 and 1/(2 - lambda) above 2, infinite otherwise. For n >= 1
+//   g^(n) = prod_(k=1..n-1)(lambda - k) (1 + v)^(lambda - n)                     v > 0
+//   g^(n) = (-1)^(n-1) prod_(k=1..n-1)(c - k) (1 - v)^(c - n)                    v < 0
+// and the exponent lambda - n (or c - n) decides, the prefactor being (-1)^(n-1) (n-1)! where
+// it vanishes.
+template <int K>
+LAPLACE_HD double yj_fwd_at_inf(bool upper, double p1) {
+  if (!yeo_johnson_valid(p1)) return nan();
+  if constexpr (K == 0) {
+    return upper ? (p1 < 0.0 ? -1.0 / p1 : inf()) : (p1 > 2.0 ? 1.0 / (2.0 - p1) : -inf());
+  }
+  const double a = upper ? p1 : 2.0 - p1;  // lambda, or c = 2 - lambda
+  double pref = (upper || (K % 2) == 1) ? 1.0 : -1.0;
+  for (int k = 1; k <= K - 1; ++k) pref *= a - k;
+  if (a == double(K)) return pref;
+  return yj_limit_power(pref, a > double(K));
+}
+
+// h and its u-derivatives at u = +inf (upper) and at u = -inf. The range of h is R, so the
+// value is infinite with the sign of u; u = +inf belongs to the domain of h only for
+// lambda >= 0 and u = -inf only for lambda <= 2, the dispatch rejecting the other end. For
+// n >= 1
+//   h^(n) = prod_(k=1..n-1)(1 - k lambda) (1 + lambda u)^(1/lambda - n)          u > 0
+//   h^(n) = prod_(k=1..n-1)(k c - 1) (1 - c u)^(1/c - n)                         u < 0
+// and 1 - n lambda (or 1 - n c) has the sign of the exponent, zero included; lambda = 0 above,
+// where h = e^u - 1, and lambda = 2 below, where h = 1 - e^(-u), fall under its positive case.
+template <int K>
+LAPLACE_HD double yj_inv_at_inf(bool upper, double p1) {
+  if (!yeo_johnson_valid(p1)) return nan();
+  if constexpr (K == 0) return upper ? inf() : -inf();
+  const double a = upper ? p1 : 2.0 - p1;  // lambda, or c = 2 - lambda
+  double pref = 1.0;
+  for (int k = 1; k <= K - 1; ++k) pref *= upper ? 1.0 - k * a : k * a - 1.0;
+  const double ka = double(K) * a;
+  if (ka == 1.0) return pref;
+  return yj_limit_power(pref, ka < 1.0);
+}
+
+// log|g'| and its v-derivatives at an infinite v: (lambda - 1) log(1 + v) above and
+// (1 - lambda) log(1 - v) below run to an infinity of the sign of lambda - 1 (of 1 - lambda)
+// and are 0 at lambda = 1, where g is the identity. Every v-derivative carries (1 + v)^(-n) or
+// (1 - v)^(-n) and dies.
+template <int K>
+LAPLACE_HD double yj_fwd_lj_at_inf(bool upper, double p1) {
+  if (!yeo_johnson_valid(p1)) return nan();
+  if constexpr (K == 0) {
+    const double s = upper ? p1 - 1.0 : 1.0 - p1;
+    return s > 0.0 ? inf() : (s < 0.0 ? -inf() : 0.0);
+  }
+  static_cast<void>(upper);
+  return 0.0;
+}
+
+// log|h'| and its u-derivatives at an infinite u: (1/lambda - 1) log(1 + lambda u) above and
+// (1/c - 1) log(1 - c u) below run to an infinity of the sign of 1 - lambda (of lambda - 1) and
+// are 0 at lambda = 1, where h is the identity; lambda = 0 above, where log|h'| = u, and
+// lambda = 2 below, where log|h'| = -u, fall under the positive case. Every u-derivative
+// carries (1 + lambda u)^(-n) or (1 - c u)^(-n) and dies, except on those two edges, where
+// log|h'| is affine in u: the first derivative is then its slope, 1 above and -1 below.
+template <int K>
+LAPLACE_HD double yj_inv_lj_at_inf(bool upper, double p1) {
+  if (!yeo_johnson_valid(p1)) return nan();
+  if constexpr (K == 0) {
+    const double s = upper ? 1.0 - p1 : p1 - 1.0;
+    return s > 0.0 ? inf() : (s < 0.0 ? -inf() : 0.0);
+  }
+  if constexpr (K == 1) return upper ? (p1 == 0.0 ? 1.0 : 0.0) : (p1 == 2.0 ? -1.0 : 0.0);
+  static_cast<void>(upper);
+  return 0.0;
+}
+
+// ---- the mixed derivatives at an infinite argument
+//
+// out[n1] is d^(K - n1)_x d^n1_lambda, n1 = 0..K: the entries of bijector_partials<K> with
+// n2 = 0, which are the only ones this map writes (it has no second parameter). A
+// lambda-derivative multiplies a closed form by a logarithm of the argument, which loses to a
+// negative power of it and wins against a vanishing exponent, so the sign of the exponent
+// decides as it does for the pure derivatives: above zero an infinity, below zero zero, and at
+// zero the prefactor for n1 = 0 and an infinity above it. The entries at n1 = 0 agree with
+// the pure functions above, which the reference script checks.
+//
+// The inverse's negative branch is its positive branch reflected: h(u) = -h_pos(-u; c) and
+// log|h'|(u) = log|h'_pos|(-u; c) with c = 2 - lambda, so d^n0_u d^n1_lambda carries
+// (-1)^(n0+n1+1) for h and (-1)^(n0+n1) for its log-Jacobian, with c in place of lambda.
+//
+// A factorial and an integer power with a run-time order: the loops run over n1, and this
+// path is taken only at an infinite argument.
+LAPLACE_HD_FORCEINLINE double yj_fact_at(int n) {
+  double f = 1.0;
+  for (int k = 2; k <= n; ++k) f *= double(k);
+  return f;
+}
+LAPLACE_HD_FORCEINLINE double yj_ipow_at(double z, int n) {
+  double p = 1.0;
+  for (int k = 0; k < n; ++k) p *= z;
+  return p;
+}
+
+// g: prod_(k=1..n0-1)(a - k) (1 +- v)^(a - n0), a = lambda above and c = 2 - lambda below,
+// with (-1)^(n0-1) on the negative branch and (-1)^n1 from d^n1_lambda = (-1)^n1 d^n1_c there.
+// At n0 = 0 the value tends to an end of the image, whose lambda-derivatives are those of
+// -1/lambda (above, below lambda = 0) and of 1/(2 - lambda) (below, above lambda = 2).
+template <int K>
+LAPLACE_HD void yj_fwd_partials_at_inf(bool upper, double p1, double* out) {
+  const double a = upper ? p1 : 2.0 - p1;
+  for (int n1 = 0; n1 <= K; ++n1) {
+    if (!yeo_johnson_valid(p1)) {
+      out[n1] = nan();
+      continue;
+    }
+    const int n0 = K - n1;
+    if (n0 == 0) {
+      if (upper) {
+        out[n1] = p1 < 0.0 ? ((n1 % 2 ? 1.0 : -1.0) * yj_fact_at(n1) / yj_ipow_at(p1, n1 + 1)) : inf();
+      } else {
+        out[n1] = p1 > 2.0 ? (yj_fact_at(n1) / yj_ipow_at(2.0 - p1, n1 + 1))
+                           : yj_limit_power(n1 % 2 ? 1.0 : -1.0, true);
+      }
+      continue;
+    }
+    double pref = (upper || ((n0 - 1 + n1) % 2) == 0) ? 1.0 : -1.0;
+    for (int k = 1; k <= n0 - 1; ++k) pref *= a - double(k);
+    if (a == double(n0) && n1 == 0) {
+      out[n1] = pref;
+      continue;
+    }
+    out[n1] = yj_limit_power(pref, a >= double(n0));
+  }
+}
+
+// h: prod_(k=1..n0-1)(1 - k a) (1 + a |u|)^(1/a - n0), a = lambda above and c below, the sign
+// of 1 - n0 a being the sign of the exponent (lambda = 0 above and lambda = 2 below included).
+template <int K>
+LAPLACE_HD void yj_inv_partials_at_inf(bool upper, double p1, double* out) {
+  const double a = upper ? p1 : 2.0 - p1;
+  for (int n1 = 0; n1 <= K; ++n1) {
+    if (!yeo_johnson_valid(p1)) {
+      out[n1] = nan();
+      continue;
+    }
+    const int n0 = K - n1;
+    double v = 1.0;
+    for (int k = 1; k <= n0 - 1; ++k) v *= 1.0 - double(k) * a;
+    if (n1 % 2) v = -v;                                 // (-1)^n1 from the lambda-derivatives
+    if (!upper && ((n0 + n1) % 2) == 0) v = -v;         // (-1)^(n0+n1+1) from the reflection
+    const double na = double(n0) * a;
+    out[n1] = (na == 1.0 && n1 == 0) ? v : yj_limit_power(v, na <= 1.0);
+  }
+}
+
+// log|g'| is (lambda - 1) log(1 + v) above and (1 - lambda) log(1 - v) below: linear in
+// lambda, so only n1 = 0 and n1 = 1 are not identically zero, and every v-derivative carries
+// a negative power of 1 +- v and dies.
+template <int K>
+LAPLACE_HD void yj_fwd_lj_partials_at_inf(bool upper, double p1, double* out) {
+  for (int n1 = 0; n1 <= K; ++n1) {
+    if (!yeo_johnson_valid(p1)) {
+      out[n1] = nan();
+      continue;
+    }
+    if (K - n1 >= 1) {
+      out[n1] = 0.0;
+    } else if (n1 == 0) {
+      const double s = upper ? p1 - 1.0 : 1.0 - p1;
+      out[n1] = s > 0.0 ? inf() : (s < 0.0 ? -inf() : 0.0);
+    } else if (n1 == 1) {
+      out[n1] = upper ? inf() : -inf();
+    } else {
+      out[n1] = 0.0;
+    }
+  }
+}
+
+// log|h'| above is Psi = (1 - lambda) log(1 + lambda u)/lambda. For lambda > 0 a u-derivative
+// carries (1 + lambda u)^(-n0) and dies, while a pure lambda-derivative multiplies the
+// logarithm by d^n1_lambda[(1 - lambda)/lambda], of sign (-1)^n1. At lambda = 0, Psi is the
+// series (1 - lambda) sum_j (-1)^j u^(j+1) lambda^j/(j + 1), so d^n1_lambda Psi is a polynomial
+// in u of degree n1 + 1 with leading coefficient (-1)^n1 n1!/(n1 + 1): its n0-th u-derivative
+// runs to (-1)^n1 inf below n1 + 1, is the constant (-1)^n1 (n1!)^2 at n0 = n1 + 1, and
+// vanishes above.
+template <int K>
+LAPLACE_HD void yj_inv_lj_partials_at_inf(bool upper, double p1, double* out) {
+  const double a = upper ? p1 : 2.0 - p1;
+  for (int n1 = 0; n1 <= K; ++n1) {
+    if (!yeo_johnson_valid(p1)) {
+      out[n1] = nan();
+      continue;
+    }
+    const int n0 = K - n1;
+    double v;
+    if (a == 0.0) {
+      if (n0 < n1 + 1) {
+        v = (n1 % 2) ? -inf() : inf();
+      } else if (n0 == n1 + 1) {
+        v = ((n1 % 2) ? -1.0 : 1.0) * yj_fact_at(n1) * yj_fact_at(n1);
+      } else {
+        v = 0.0;
+      }
+    } else if (n0 >= 1) {
+      v = 0.0;
+    } else if (n1 == 0) {
+      v = a == 1.0 ? 0.0 : (a < 1.0 ? inf() : -inf());
+    } else {
+      v = (n1 % 2) ? -inf() : inf();
+    }
+    if (!upper && ((n0 + n1) % 2)) v = -v;
+    out[n1] = v;
+  }
+}
+
+// h and log|h'| with their u-derivatives at the FINITE end of the domain of h. There
+// w = 1 + lambda u (1 - c u below) vanishes and every derivative is a negative power of it,
+// hence an infinity. On the host w comes out exactly zero and the powers give that infinity by
+// themselves, so these two were right without a branch; nvcc contracts 1 + lambda u into an FMA,
+// which multiplies lambda by the ROUNDED -1/lambda exactly instead of rounding the product,
+// leaves w at about 4e-17 and turns the infinity into a finite 1e100 (measured 7.8e100 at order
+// six, 2026-11-17). The limit is therefore returned here rather than left to the arithmetic.
+// h^(n) = P_n w^(1/lambda - n), with P_n > 0 at the upper end (lambda < 0, every factor above 1)
+// and of sign (-1)^(n-1) at the lower one (lambda > 2).
+template <int K>
+LAPLACE_HD double yj_inv_at_edge(bool upper, double p1) {
+  if (!yeo_johnson_valid(p1)) return nan();
+  if (upper) return inf();
+  return (K % 2) ? inf() : -inf();  // (-1)^(K-1)
+}
+
+// log|h'| = (1/lambda - 1) log w and its u-derivatives: +inf at the upper end, (-1)^K inf at
+// the lower one, which are the n1 = 0 entries of yj_inv_lj_partials_at_edge below.
+template <int K>
+LAPLACE_HD double yj_inv_lj_at_edge(bool upper, double p1) {
+  if (!yeo_johnson_valid(p1)) return nan();
+  if (upper) return inf();
+  return (K % 2) ? -inf() : inf();
+}
+
+// h and its mixed derivatives at the FINITE end of the domain of h. There
+// h^(n0) = P_n0 w^(1/lambda - n0) with w = 1 + lambda u vanishing and the exponent negative, so
+// every entry is an infinity; each lambda-derivative multiplies by a term dominated by
+// (1/lambda - n0) u/w, which is negative at the upper end (u = -1/lambda > 0 with lambda < 0,
+// where P_n0 > 0 as well), so the sign alternates in n1. The reflection adds (-1)^(n0+n1+1)
+// below lambda = 2 and leaves (-1)^(n0+1). Without this the entries come from the forms, where
+// FMA keeps w at about 4e-17 and an infinity comes out as a finite 1e100 on the device.
+template <int K>
+LAPLACE_HD void yj_inv_partials_at_edge(bool upper, double p1, double* out) {
+  for (int n1 = 0; n1 <= K; ++n1) {
+    if (!yeo_johnson_valid(p1)) {
+      out[n1] = nan();
+      continue;
+    }
+    const int e = upper ? n1 : (K - n1 + 1);
+    out[n1] = (e % 2) ? -inf() : inf();
+  }
+}
+
+// log|h'| and its mixed derivatives at the FINITE end of the domain of h, which is -1/lambda
+// below lambda = 0 and 1/(2 - lambda) above lambda = 2. There w = 1 + lambda u (1 - c u below)
+// vanishes, and d^n0_u log|h'| = (1 - lambda)(-1)^(n0-1)(n0-1)! lambda^(n0-1) w^(-n0); each
+// lambda-derivative raises the power of 1/w by one and brings a factor -n0 u, so the most
+// singular term is C u^n1 w^(-n0-n1) and the limit is an infinity whose sign, with u at the end
+// itself, is that of (1 - lambda)(-1)^(n0-1) lambda^(n0-1-n1), namely (-1)^n1 above; below,
+// log|h'|(u) = log|h'_pos|(-u; c) adds (-1)^(n0+n1) and leaves (-1)^n0.
+template <int K>
+LAPLACE_HD void yj_inv_lj_partials_at_edge(bool upper, double p1, double* out) {
+  for (int n1 = 0; n1 <= K; ++n1) {
+    if (!yeo_johnson_valid(p1)) {
+      out[n1] = nan();
+      continue;
+    }
+    const int e = upper ? n1 : K - n1;
+    out[n1] = (e % 2) ? -inf() : inf();
+  }
+}
+
 template <int K>
 LAPLACE_HD double yeo_johnson_fwd(double x, double p1, double p2) {
   static_assert(K >= 0 && K <= 6, "order 0 to 6");
   static_cast<void>(p2);
+  // an infinite x: the forms below give NaN there, the limit is taken instead
+  if (Kokkos::isinf(x)) return yj_fwd_at_inf<K>(x > 0.0, p1);
   if constexpr (K == 0) {
     if (x >= 0.0) {
       const double lp0 = Kokkos::log1p(x);
@@ -174,6 +492,11 @@ LAPLACE_HD void yeo_johnson_fwd_partials(double x, double p1, double p2, double*
   static_assert(K >= 1 && K <= 6, "order 1 to 6");
   static_cast<void>(p2);
   for (int i = 0; i < (K + 1) * (K + 2) / 2; ++i) out[i] = 0.0;
+  // an infinite x: the forms below give NaN there, the limits are taken instead
+  if (Kokkos::isinf(x)) {
+    yj_fwd_partials_at_inf<K>(x > 0.0, p1, out);
+    return;
+  }
   if constexpr (K == 1) {
     if (x >= 0.0) {
       const double lp0 = Kokkos::log1p(x);
@@ -397,6 +720,12 @@ template <int K>
 LAPLACE_HD double yeo_johnson_inv(double x, double p1, double p2) {
   static_assert(K >= 0 && K <= 6, "order 0 to 6");
   static_cast<void>(p2);
+  // an infinite x: the forms below give NaN there, the limit is taken instead
+  if (Kokkos::isinf(x)) return yj_inv_at_inf<K>(x > 0.0, p1);
+  // the finite end of the domain of h, where the forms give a large finite value
+  // under FMA contraction instead of the infinity the limit has
+  if ((p1 < 0.0 && x == -1.0 / p1) || (p1 > 2.0 && x == 1.0 / (2.0 - p1)))
+    return yj_inv_at_edge<K>(p1 < 0.0, p1);
   if constexpr (K == 0) {
     if (x >= 0.0) {
       const double z = (p1 * x);
@@ -503,6 +832,17 @@ LAPLACE_HD void yeo_johnson_inv_partials(double x, double p1, double p2, double*
   static_assert(K >= 1 && K <= 6, "order 1 to 6");
   static_cast<void>(p2);
   for (int i = 0; i < (K + 1) * (K + 2) / 2; ++i) out[i] = 0.0;
+  // an infinite x: the forms below give NaN there, the limits are taken instead
+  if (Kokkos::isinf(x)) {
+    yj_inv_partials_at_inf<K>(x > 0.0, p1, out);
+    return;
+  }
+  // the finite end of the domain of h, where the forms give a large finite
+  // value under FMA contraction instead of the infinity the limit has
+  if ((p1 < 0.0 && x == -1.0 / p1) || (p1 > 2.0 && x == 1.0 / (2.0 - p1))) {
+    yj_inv_partials_at_edge<K>(p1 < 0.0, p1, out);
+    return;
+  }
   if constexpr (K == 1) {
     if (x >= 0.0) {
       const double z = (p1 * x);
@@ -825,6 +1165,8 @@ template <int K>
 LAPLACE_HD double yeo_johnson_fwd_lj(double x, double p1, double p2) {
   static_assert(K >= 0 && K <= 6, "order 0 to 6");
   static_cast<void>(p2);
+  // an infinite x: the forms below give NaN there, the limit is taken instead
+  if (Kokkos::isinf(x)) return yj_fwd_lj_at_inf<K>(x > 0.0, p1);
   if constexpr (K == 0) {
     if (x >= 0.0) {
       return ((-1.0 + p1) * Kokkos::log1p(x));
@@ -889,6 +1231,11 @@ LAPLACE_HD void yeo_johnson_fwd_lj_partials(double x, double p1, double p2, doub
   static_assert(K >= 1 && K <= 6, "order 1 to 6");
   static_cast<void>(p2);
   for (int i = 0; i < (K + 1) * (K + 2) / 2; ++i) out[i] = 0.0;
+  // an infinite x: the forms below give NaN there, the limits are taken instead
+  if (Kokkos::isinf(x)) {
+    yj_fwd_lj_partials_at_inf<K>(x > 0.0, p1, out);
+    return;
+  }
   if constexpr (K == 1) {
     if (x >= 0.0) {
       out[0] = ((1.0 / ipow<1>((1.0 + x))) * (-1.0 + p1));
@@ -1224,6 +1571,12 @@ template <int K>
 LAPLACE_HD double yeo_johnson_inv_lj(double x, double p1, double p2) {
   static_assert(K >= 0 && K <= 6, "order 0 to 6");
   static_cast<void>(p2);
+  // an infinite x: the forms below give NaN there, the limit is taken instead
+  if (Kokkos::isinf(x)) return yj_inv_lj_at_inf<K>(x > 0.0, p1);
+  // the finite end of the domain of h, where the forms give a large finite value
+  // under FMA contraction instead of the infinity the limit has
+  if ((p1 < 0.0 && x == -1.0 / p1) || (p1 > 2.0 && x == 1.0 / (2.0 - p1)))
+    return yj_inv_lj_at_edge<K>(p1 < 0.0, p1);
   if constexpr (K == 0) {
     if (x >= 0.0) {
       const double z = (p1 * x);
@@ -1299,6 +1652,17 @@ LAPLACE_HD void yeo_johnson_inv_lj_partials(double x, double p1, double p2, doub
   static_assert(K >= 1 && K <= 6, "order 1 to 6");
   static_cast<void>(p2);
   for (int i = 0; i < (K + 1) * (K + 2) / 2; ++i) out[i] = 0.0;
+  // an infinite x: the forms below give NaN there, the limits are taken instead
+  if (Kokkos::isinf(x)) {
+    yj_inv_lj_partials_at_inf<K>(x > 0.0, p1, out);
+    return;
+  }
+  // the finite end of the domain of h, where the forms give a large finite
+  // value under FMA contraction instead of the infinity the limit has
+  if ((p1 < 0.0 && x == -1.0 / p1) || (p1 > 2.0 && x == 1.0 / (2.0 - p1))) {
+    yj_inv_lj_partials_at_edge<K>(p1 < 0.0, p1, out);
+    return;
+  }
   if constexpr (K == 1) {
     if (x >= 0.0) {
       yeo_johnson_inv_lj_pos_partials<1>(x, p1, out);
