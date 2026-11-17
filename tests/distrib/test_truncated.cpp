@@ -15,7 +15,11 @@
 //     against the direct sum;
 //   * the cumulative functions and their derivatives on both tails, and
 //     F + (1 - F) = 1;
-//   * the quantile against the cumulative function it inverts;
+//   * the quantile against the cumulative function it inverts, deep in the
+//     upper tail of a parent with atoms too;
+//   * an atom on the upper bound, over a continuous and a discrete parent:
+//     the mass, both tails of Z, the cumulative functions at the bound and
+//     just below it, the quantile inside the jump, the derivatives;
 //   * truncated(zero_adjusted(gamma2)) with the atom kept integrates to one,
 //     which is what proves that the atom is read from the object;
 //   * the two compositions that are models: an atom on a truncated parent, and
@@ -54,6 +58,8 @@ using tzag = ld::truncated_distrib<zag>;
 using zan = ld::atom_mixture_distrib<ld::gaussian1_distrib, ld::adjusted, ld::adjusted>;
 using tzan = ld::truncated_distrib<zan>;
 using atg = ld::atom_mixture_distrib<tgau, ld::adjusted>;
+using gup = ld::atom_mixture_distrib<ld::gaussian1_distrib, ld::adjusted>;
+using tgup = ld::truncated_distrib<gup>;
 
 namespace {
 
@@ -304,6 +310,35 @@ TEST_CASE("truncated: the quantile inverts the cumulative function") {
       CHECK(d.cdf(y) == doctest::Approx(p).epsilon(1e-9));
     }
   }
+  // Narrow windows, where the target F(a) + pZ cancels and one Newton step on the summed mass repairs y.
+  // The summed cdf is the twin: y can be no closer than its ulp, which moves the cdf by ulp(y) f / Z,
+  // about eps |y| / w. Near a = 0 the unrepaired y missed by 2e-4 of the window at w = 1e-12.
+  for (double a : {0.0, -1e-3, 1.0, 4.0, -3.0})
+    for (double w : {1e-2, 1e-6, 1e-12}) {
+      const tgau d = ld::truncated(ld::gaussian1_distrib{0.4, 1.3}, a, a + w);
+      for (double p : {1e-6, 0.1, 0.5, 0.9, 1.0 - 1e-6}) {
+        const double y = d.quantile(p);
+        INFO("window [" << a << ", " << a << " + " << w << "], p = " << p << ", y = " << y);
+        CHECK(std::fabs(d.cdf(y) - p) <= 1e-13 + 8e-16 * std::fabs(y) / w);
+      }
+    }
+  // a narrow discrete window: the integers are summed
+  const tpois n = ld::truncated(ld::poisson_distrib{1000.0}, 1000.0, 1001.0);
+  for (double p : {0.3, 0.6}) {
+    const double k = n.quantile(p);
+    INFO("p = " << p << ", k = " << k);
+    CHECK(n.cdf(k) >= p);
+    CHECK(n.cdf(k - 1.0) < p);
+  }
+  // a parent with atoms, deep in the upper tail, where the quantile is read from log(1 - F): with the linear
+  // route 1 - p = 1e-15 came back 1.3e-3 off
+  const tzan z = ld::truncated(ld::zero_one_adjusted(ld::gaussian1_distrib{0.4, 1.3}, -1.0, -2.0), 0.0, 20.0);
+  REQUIRE(!z.from_lower_tail());
+  for (double q : {1e-5, 1e-10, 1e-15}) {
+    const double p = 1.0 - q, y = z.quantile(p);
+    INFO("1 - p = " << q << ", y = " << y);
+    CHECK(z.ccdf(y) == doctest::Approx(1.0 - p).epsilon(1e-12));
+  }
   const tpois e = ld::truncated(ld::poisson_distrib{3.5}, 2.0, 9.0);
   for (double p : {0.01, 0.3, 0.7, 0.999}) {
     const double k = e.quantile(p);
@@ -367,6 +402,70 @@ TEST_CASE("truncated: an atom mixture keeping every atom, with one on the lower 
   for (double y : {0.0, 0.5, 1.0, 1.7}) check_value_derivs(build, th, y, 2e-5);
   for (bool upper : {false, true}) check_tail_derivs(build, th, 0.5, upper, 3e-5);
   CHECK(d.cdf(1.2) + d.ccdf(1.2) == doctest::Approx(1.0).epsilon(1e-13));
+}
+
+// An atom on the UPPER bound: F(upper) holds its jump and 1 - F(upper) does not, so both tails of Z keep it,
+// the cumulative function reaches one only at the bound and the quantile returns the bound inside the jump.
+TEST_CASE("truncated: an atom on the upper bound") {
+  const std::vector<double> th{0.4, 1.3, -1.0};
+  const auto build = [](const double* t) {
+    return ld::truncated(gup{.parent = ld::gaussian1_distrib{t[0], t[1]}, .atom_alr = {t[2]}, .point = {2.0}}, 0.0,
+                         2.0);
+  };
+  const tgup d = build(th.data());
+  const double pa = std::exp(d.atom_log_mass(0));
+  CHECK(total_mass(d, 0.0, 2.0, {2.0}) == doctest::Approx(1.0).epsilon(1e-10));
+  // Z from the lower tail and from the upper tail, which must both count the atom
+  const double lz_lo = std::log(std::exp(d.parent.log_cdf(2.0)) - std::exp(d.parent.log_cdf(0.0)));
+  const double lz_up = std::log(std::exp(d.parent.log_ccdf(0.0)) - std::exp(d.parent.log_ccdf(2.0)));
+  CHECK(d.log_norm() == doctest::Approx(lz_lo).epsilon(1e-14));
+  CHECK(d.log_norm() == doctest::Approx(lz_up).epsilon(1e-14));
+  // at the bound and just below it
+  CHECK(d.cdf(2.0) == 1.0);
+  CHECK(d.ccdf(2.0) == 0.0);
+  // the continuous cell's weight, and its mass on [y, 2] in closed form (the cancellation of the erfc
+  // difference costs nothing here, the atom holding nearly all the mass)
+  const double pin = std::exp(d.parent.logpdf(1.0) - d.parent.parent.logpdf(1.0));
+  const auto cont = [&](double y) { return pin * std::exp(log_gauss_window(0.4, 1.3, y, 2.0)); };
+  for (double h : {1e-3, 1e-9}) {
+    const double y = 2.0 - h;
+    INFO("y = 2 - " << h);
+    CHECK(d.ccdf(y) == doctest::Approx(pa + cont(y) / std::exp(d.log_norm())).epsilon(1e-12));
+    CHECK(d.cdf(y) + d.ccdf(y) == doctest::Approx(1.0).epsilon(1e-14));
+  }
+  // the quantile: the bound for every p inside the jump, below it otherwise
+  for (double p : {1.0 - 0.9 * pa, 1.0 - 0.1 * pa, 1.0 - 1e-12}) {
+    INFO("p = " << p);
+    CHECK(d.quantile(p) == 2.0);
+  }
+  for (double p : {0.1, 0.5, 1.0 - 1.1 * pa}) {
+    const double y = d.quantile(p);
+    INFO("p = " << p << ", y = " << y);
+    CHECK(y < 2.0);
+    CHECK(d.cdf(y) == doctest::Approx(p).epsilon(1e-9));
+  }
+  for (double y : {0.0, 1.0, 1.999, 2.0}) check_value_derivs(build, th, y, 2e-5);
+  for (double y : {1.0, 1.999})
+    for (bool upper : {false, true}) check_tail_derivs(build, th, y, upper, 3e-5);
+  // a window narrow enough for the continuous part to cancel, against the atom plus that part
+  const tgup n = ld::truncated(d.parent, 2.0 - 1e-8, 2.0);
+  CHECK(n.log_norm() == doctest::Approx(std::log(std::exp(n.parent.logpdf(2.0)) + cont(2.0 - 1e-8))).epsilon(1e-14));
+
+  // a discrete parent inflated at the upper bound
+  using zip = ld::atom_mixture_distrib<ld::poisson_distrib, ld::inflated>;
+  const auto pb = [](const double* t) {
+    return ld::truncated(zip{.parent = ld::poisson_distrib{t[0]}, .atom_alr = {t[1]}, .point = {9.0}}, 2.0, 9.0);
+  };
+  const std::vector<double> tp{3.5, -1.0};
+  const auto e = pb(tp.data());
+  double s = 0.0;
+  for (int k = 0; k <= 12; ++k) s += std::exp(e.logpmf(k));
+  CHECK(s == doctest::Approx(1.0).epsilon(1e-14));
+  CHECK(e.cdf(9.0) == 1.0);
+  CHECK(e.ccdf(8.0) == doctest::Approx(std::exp(e.logpmf(9.0))).epsilon(1e-13));
+  CHECK(e.quantile(1.0 - 0.5 * std::exp(e.logpmf(9.0))) == 9.0);
+  for (double y : {2.0, 9.0}) check_value_derivs(pb, tp, y, 2e-5);
+  for (bool upper : {false, true}) check_tail_derivs(pb, tp, 8.0, upper, 3e-5);
 }
 
 TEST_CASE("truncated: an atom on a truncated parent, the atom outside the window") {
@@ -482,7 +581,7 @@ LAPLACE_HD double truncated_kernel_value(int i) {
     // and a window of width 1e-8, where Z is summed
     const tgau w{.parent = ld::gaussian1_distrib{0.4, 1.3}, .lower = 1.0, .upper = 1.0 + 1e-8};
     return d.logpdf(y) + d.logpdf_d2(y)[1] + d.log_cdf_d1(y)[0] + d.log_ccdf_d1(y)[1] + d.quantile(0.01 + 0.03 * i) +
-           w.logpdf(1.0 + 3e-10 * i) + w.logpdf_d1(1.0 + 3e-10 * i)[1];
+           w.logpdf(1.0 + 3e-10 * i) + w.logpdf_d1(1.0 + 3e-10 * i)[1] + w.quantile(0.01 + 0.03 * i);
   } else if constexpr (W == 1) {
     const tzag z{.parent = zag{.parent = ld::gamma2_distrib{2.0, 0.5}, .atom_alr = {-1.0}, .point = {0.0}},
                  .lower = 0.0, .upper = 3.0};

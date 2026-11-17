@@ -34,7 +34,9 @@
 // inside it; for a discrete parent, its masses at the integers, when there are
 // at most 64. The derivatives follow from the same sum through the ratios.
 // The same applies to the masses on [lower, y] and (y, upper] in the cumulative
-// functions of the truncated law.
+// functions of the truncated law, and the quantile, whose target F(lower-) + pZ
+// cancels in the same windows, is then repaired by one Newton step on the summed
+// mass (a discrete parent's by summing its integers).
 //
 // The left limit reads the mass at the point from the object and never from its
 // kind (note/piano_wrapper.md section 3.7): for a continuous parent it is the
@@ -447,8 +449,10 @@ struct truncated_distrib : detail_atom_mixture::observation_regularity<D, D::kin
    * \brief Evaluates the quantile \f$F^{-1}(p)\f$.
    *
    * On the lower tail it is the parent's quantile at \f$F(\mathrm{lower}-) + pZ\f$; on the upper tail the
-   * parent's upper quantile at \f$\log(1 - F(\mathrm{upper}) + (1 - p)Z)\f$, read from the log scale where
-   * the parent has no atom; the result is kept inside the window.
+   * parent's upper quantile at \f$\log(1 - F(\mathrm{upper}) + (1 - p)Z)\f$, read from the log scale; the
+   * result is kept inside the window. Where \f$Z\f$ is summed, those targets cancel: a continuous parent's
+   * result then takes one Newton step on the summed mass below it (above it for \f$p > 1/2\f$), and a
+   * discrete parent's is the first integer whose summed mass from the lower bound reaches \f$pZ\f$.
    * \param p Probability in \f$[0, 1]\f$.
    * \return The quantile.
    */
@@ -456,6 +460,19 @@ struct truncated_distrib : detail_atom_mixture::observation_regularity<D, D::kin
     if (!(p > 0.0)) return p == 0.0 ? support_lower() : math::detail::quiet_nan();
     if (!(p < 1.0)) return p == 1.0 ? support_upper() : math::detail::quiet_nan();
     const double lz = log_norm();
+    const bool narrow = window_summed();
+    if constexpr (D::kind == distrib_kind::discrete) {
+      // the window holds at most max_summed_points integers: the first whose summed mass from lower reaches p Z
+      if (narrow) {
+        const double t = math::log(p) + lz, hi = upper_end();
+        double c = -distrib_infinity, k = first_point(lower, true);
+        for (; k < hi; k += 1.0) {
+          c = detail_truncated::log_combine_value(c, detail_generic::log_density(parent, k), false);
+          if (c >= t) break;
+        }
+        return k;
+      }
+    }
     double y;
     if (from_lower_tail()) {
       const double t = detail_truncated::log_combine_value(left_limit_value(false), math::log(p) + lz, false);
@@ -463,11 +480,23 @@ struct truncated_distrib : detail_atom_mixture::observation_regularity<D, D::kin
     } else {
       const double t = detail_truncated::log_combine_value(detail_truncated::tail_value(parent, upper_end(), true),
                                                            Kokkos::log1p(-p) + lz, false);
-      if constexpr (distrib_n_atoms<D>() == 0) y = distrib_quantile_from_log_upper(parent, t);
-      else y = distrib_quantile(parent, -Kokkos::expm1(t));
+      y = distrib_quantile_from_log_upper(parent, t);
     }
     const double lo = support_lower(), hi = support_upper();
-    return y < lo ? lo : (y > hi ? hi : y);
+    y = y < lo ? lo : (y > hi ? hi : y);
+    if constexpr (D::kind == distrib_kind::continuous) {
+      // In a narrow window the target F(lower-) + pZ above is a difference that cancels, and y misses by
+      // about eps F(lower) / f(y): one Newton step on the summed mass below y (above it for p > 1/2), whose
+      // error is relative, takes y to a few ulps.
+      // ponytail: an atom within that step of y is not looked for; the step is eps F / f long
+      if (narrow && atom_at(y) < 0) {
+        const double r = p <= 0.5 ? (y > lower ? math::exp(summed_value(lower, y, true) - lz) : 0.0) - p
+                                  : (1.0 - p) - (y < upper ? math::exp(summed_value(y, upper, false) - lz) : 0.0);
+        y -= r / math::exp(log_value(y));
+        y = y < lo ? lo : (y > hi ? hi : y);
+      }
+    }
+    return y;
   }
 
   /**
@@ -664,6 +693,15 @@ struct truncated_distrib : detail_atom_mixture::observation_regularity<D, D::kin
       }
     }
     return g;
+  }
+
+  // whether log_norm() sums the mass of the window rather than taking a difference
+  LAPLACE_HD bool window_summed() const {
+    const double b = upper_end();
+    const bool lt = from_lower_tail();
+    const double la = lt ? detail_truncated::tail_value(parent, b, false) : limit_value(lower, true, true);
+    const double lb = lt ? limit_value(lower, true, false) : detail_truncated::tail_value(parent, b, true);
+    return lb - la > detail_truncated::cancel_log && summable(lower, b, true);
   }
 
   // log of the parent's mass on [a, b] (closed) or (a, b], as the difference
