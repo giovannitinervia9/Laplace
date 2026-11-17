@@ -423,6 +423,76 @@ TEST_CASE("atom_mixture: the tensor is block diagonal, and exactly so") {
   }
 }
 
+namespace {
+
+// logpdf_dy_dk<J, K> for J >= 1: away from an atom it is the parent's tensor over the parent's own
+// parameters and exactly zero wherever a free coordinate appears, the cell's mass and the
+// renormalization not depending on y; at an atom every component is a quiet NaN.
+template <int J, int K>
+void check_dy_dk(const zan& d, const ld::gaussian1_distrib& p, double y, bool at_atom) {
+  constexpr int P = zan::n_params, Q = ld::gaussian1_distrib::n_params;
+  const auto t = d.template logpdf_dy_dk<J, K>(y);
+  if constexpr (K == 0) {
+    INFO("J = " << J << ", K = 0, y = " << y);
+    if (at_atom) CHECK(std::isnan(t[0]));
+    else CHECK(t[0] == p.template logpdf_dy_dk<J, 0>(y)[0]);
+  } else {
+    const auto pt = p.template logpdf_dy_dk<J, K>(y);
+    for (const auto& idx : sorted_indices(P, K)) {
+      const double v = t[position_of(P, idx)];
+      INFO("J = " << J << ", K = " << K << ", y = " << y << ", component " << position_of(P, idx));
+      if (at_atom) CHECK(std::isnan(v));
+      else if (idx.back() >= Q) CHECK(v == 0.0);                   // a free coordinate
+      else CHECK(v == pt[position_of(Q, idx)]);                    // the parent's own, bit for bit
+    }
+  }
+  if constexpr (K > 0) check_dy_dk<J, K - 1>(d, p, y, at_atom);
+}
+
+template <int J>
+void check_dy_dk_orders(const zan& d, const ld::gaussian1_distrib& p, double y, bool at_atom) {
+  check_dy_dk<J, 6 - J>(d, p, y, at_atom);
+  if constexpr (J > 1) check_dy_dk_orders<J - 1>(d, p, y, at_atom);
+}
+
+}  // namespace
+
+TEST_CASE("atom_mixture: the derivatives in y are the parent's, and a NaN at an atom") {
+
+  const std::vector<double> th{0.4, 1.3, -1.0, -2.0};
+  const zan d = make_zan(th.data());
+  const ld::gaussian1_distrib p{th[0], th[1]};
+  for (double y : {-0.6, 0.5, 0.0, 1.0}) check_dy_dk_orders<6>(d, p, y, y == 0.0 || y == 1.0);
+  // J = 0 forwards to the routes the cases above already check
+  CHECK(d.logpdf_dy_dk<0, 0>(-0.6)[0] == d.logpdf(-0.6));
+  const auto a = d.logpdf_dy_dk<0, 2>(-0.6);
+  const auto b = d.logpdf_dk<2>(-0.6);
+  for (int i = 0; i < decltype(a)::size; ++i) CHECK(a[i] == b[i]);
+}
+
+// the same member on the device, in a named function for the reason given below
+void atom_mixture_dy_dk_kernel_case() {
+  const int n = 16;
+  Kokkos::View<double*> out("out", n);
+  Kokkos::parallel_for(
+      "distrib_atom_mixture_dy_dk", n, KOKKOS_LAMBDA(const int i) {
+        const double y = -0.7 + 0.1 * i;
+        const zan d{.parent = ld::gaussian1_distrib{0.4, 1.3}, .atom_alr = {-1.0, -2.0}, .point = {0.0, 1.0}};
+        out(i) = d.logpdf_dy_dk<1, 0>(y)[0] + d.logpdf_dy_dk<2, 2>(y)[3] + d.logpdf_dy_dk<3, 3>(y)[5];
+      });
+  auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+  for (int i = 0; i < n; ++i) {
+    const double y = -0.7 + 0.1 * i;
+    const zan d{.parent = ld::gaussian1_distrib{0.4, 1.3}, .atom_alr = {-1.0, -2.0}, .point = {0.0, 1.0}};
+    const double r = d.logpdf_dy_dk<1, 0>(y)[0] + d.logpdf_dy_dk<2, 2>(y)[3] + d.logpdf_dy_dk<3, 3>(y)[5];
+    INFO("i = " << i << ", y = " << y);
+    if (std::isnan(r)) CHECK(std::isnan(h(i)));
+    else CHECK(h(i) == doctest::Approx(r).epsilon(1e-12));
+  }
+}
+
+TEST_CASE("atom_mixture: the derivatives in y on the device") { atom_mixture_dy_dk_kernel_case(); }
+
 // The kernel lives in a named function with external linkage, not in the body of the TEST_CASE: see the
 // comment on gaussian3_kernel_case in test_gaussian3.cpp for why.
 void atom_mixture_kernel_case() {

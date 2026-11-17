@@ -487,6 +487,54 @@ struct atom_mixture_distrib : detail_atom_mixture::observation_regularity<D, D::
     return t;
   }
 
+  /**
+   * \brief Derivatives of order \f$J\f$ in \f$y\f$ and \f$K\f$ in the parameters of the log-density.
+   *
+   * Away from the atoms the log-density is \f$\log \pi_N(u) + \log f(y)\f$ less the renormalization,
+   * and neither the cell's mass nor the renormalization depends on \f$y\f$, so for \f$J \ge 1\f$ every
+   * component carrying a free coordinate vanishes and what is left is the parent's own tensor over its
+   * own parameters. At an atom a derivative in \f$y\f$ has no meaning, the derivative of a mass not
+   * being a quantity (\ref distrib_atoms "the atom descriptors"), and every component is a quiet NaN,
+   * so that a caller which asks there reads a signal rather than the parent's density derivative.
+   * \tparam J Derivative order in \f$y\f$.
+   * \tparam K Derivative order in the parameters, with \f$J + K \le 6\f$.
+   * \param y Observation point.
+   * \return The packed symmetric tensor of order \f$K\f$ holding the \f$J\f$-th derivative in \f$y\f$.
+   */
+  template <int J, int K>
+  LAPLACE_HD sym_tensor<n_params, K> logpdf_dy_dk(double y) const requires(D::kind == distrib_kind::continuous) {
+    static_assert(J >= 0 && K >= 0 && J + K <= 6, "total order at most six");
+    constexpr int P = n_params, Q = D::n_params;
+    sym_tensor<P, K> t;
+    if constexpr (J == 0) {
+      if constexpr (K == 0) t[0] = logpdf(y);
+      else t = log_value_dk<K>(y);
+      return t;
+    } else {
+      if (atom_at(y) >= 0) {
+        for (int i = 0; i < sym_tensor<P, K>::size; ++i) t[i] = math::detail::quiet_nan();
+        return t;
+      }
+      const auto pt = parent.template logpdf_dy_dk<J, K>(y);
+      if constexpr (K == 0) {
+        t[0] = pt[0];
+      } else {
+        int idx[K];
+        for (int j = 0; j < K; ++j) idx[j] = 0;
+        for (;;) {
+          // only a component whose every index is a parent parameter survives
+          if (idx[K - 1] < Q) t[sym_tensor_position<P, K>(idx)] = pt[sym_tensor_position<Q, K>(idx)];
+          int j = K - 1;
+          while (j >= 0 && idx[j] == P - 1) --j;
+          if (j < 0) break;
+          const int v = idx[j] + 1;
+          for (int m = j; m < K; ++m) idx[m] = v;
+        }
+      }
+      return t;
+    }
+  }
+
   /// \brief Evaluates the first derivatives of the log-density. \param y Observation point. \return Order-1 tensor.
   LAPLACE_HD sym_tensor<n_params, 1> logpdf_d1(double y) const requires(D::kind == distrib_kind::continuous) { return log_value_dk<1>(y); }
   /// \brief Derivatives of order 1 of the log-mass. \param y Observation point. \return Order-1 tensor.
