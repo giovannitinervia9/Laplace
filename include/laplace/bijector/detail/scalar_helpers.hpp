@@ -49,14 +49,14 @@ LAPLACE_HD_FORCEINLINE double ipow(double x) {
 }
 
 template <int K>
-constexpr double fact() {  // K!
+LAPLACE_HD constexpr double fact() {  // K!
   double f = 1.0;
   for (int i = 2; i <= K; ++i) f *= i;
   return f;
 }
 
 template <int K>
-constexpr double sgn() {  // (-1)^K
+LAPLACE_HD constexpr double sgn() {  // (-1)^K
   return K % 2 == 0 ? 1.0 : -1.0;
 }
 

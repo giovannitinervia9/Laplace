@@ -31,6 +31,7 @@
 #pragma once
 
 #include <laplace/core/config.hpp>
+#include <Kokkos_NumericTraits.hpp>
 
 #include <limits>
 
@@ -151,7 +152,7 @@ struct distrib_param_info {
  * \return `D::n_atoms` when the member exists, 0 otherwise.
  */
 template <class D>
-constexpr int distrib_n_atoms() {
+LAPLACE_HD constexpr int distrib_n_atoms() {
   if constexpr (requires { D::n_atoms; }) return D::n_atoms;
   else return 0;
 }
@@ -166,7 +167,7 @@ constexpr int distrib_n_atoms() {
 template <class D>
 LAPLACE_HD double distrib_atom_point(const D& d, int i) {
   if constexpr (requires { d.atom_point(i); }) return d.atom_point(i);
-  else return (void)d, (void)i, std::numeric_limits<double>::quiet_NaN();
+  else return (void)d, (void)i, Kokkos::Experimental::quiet_NaN_v<double>;
 }
 
 /**

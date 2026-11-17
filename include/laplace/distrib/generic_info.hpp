@@ -168,7 +168,7 @@ struct regularity_orders {
   int r[D::n_params];
 };
 template <class D>
-constexpr regularity_orders<D> regularities_of() {
+LAPLACE_HD constexpr regularity_orders<D> regularities_of() {
   regularity_orders<D> o{};
   for (int j = 0; j < D::n_params; ++j) o.r[j] = D::params[j].regularity;
   return o;

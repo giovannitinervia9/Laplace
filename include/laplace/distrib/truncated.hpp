@@ -27,6 +27,15 @@
 //
 //   d_T (A - B) / (A - B) = (A / Z) d_T A / A - (B / Z) d_T B / B.
 //
+// When the two numbers are close, the difference loses about eps A / Z of
+// relative precision (eps over the width of a narrow window). Where B > 15 A / 16
+// the mass is summed instead: for a continuous parent, a 16-node Gauss-Legendre
+// rule on each piece of the interval between the parent's kinks plus the atoms
+// inside it; for a discrete parent, its masses at the integers, when there are
+// at most 64. The derivatives follow from the same sum through the ratios.
+// The same applies to the masses on [lower, y] and (y, upper] in the cumulative
+// functions of the truncated law.
+//
 // The left limit reads the mass at the point from the object and never from its
 // kind (note/piano_wrapper.md section 3.7): for a continuous parent it is the
 // parent's declared atom at lower, if any, through distrib_atom_point and
@@ -184,6 +193,12 @@ LAPLACE_HD log_term<Q, K> log_combine(const log_term<Q, K>& x, const log_term<Q,
   return g;
 }
 
+// log(15 / 16): above it, log B - log A means that A - B has lost four bits or
+// more, and the mass is summed instead
+inline constexpr double cancel_log = -0.06453852113757118;
+// at most this many integers are summed in place of the difference
+inline constexpr int max_summed_points = 64;
+
 // The refusal of a window that kills a cell names the model that is meant,
 // which always exists (note/piano_wrapper.md section 5ter).
 inline std::string killed_cell_message(double c, double lower, double upper) {
@@ -246,16 +261,7 @@ struct truncated_distrib : detail_atom_mixture::observation_regularity<D, D::kin
    * \param upper_tail \c true for \f$\log(1 - F)\f$, \c false for \f$\log F\f$.
    * \return The value.
    */
-  LAPLACE_HD double left_limit_value(bool upper_tail) const {
-    if constexpr (D::kind == distrib_kind::discrete) {
-      return detail_truncated::tail_value(parent, lower_end() - 1.0, upper_tail);
-    } else {
-      const double t = detail_truncated::tail_value(parent, lower, upper_tail);
-      const int i = atom_at_lower();
-      if (i < 0) return t;
-      return detail_truncated::log_combine_value(t, distrib_atom_log_mass(parent, i), !upper_tail);
-    }
-  }
+  LAPLACE_HD double left_limit_value(bool upper_tail) const { return limit_value(lower, true, upper_tail); }
 
   /// \brief Whether \f$Z\f$ is taken from the lower tail. \return \f$F(\mathrm{upper}) \le 1 - F(\mathrm{lower}-)\f$.
   LAPLACE_HD bool from_lower_tail() const {
@@ -264,15 +270,10 @@ struct truncated_distrib : detail_atom_mixture::observation_regularity<D, D::kin
 
   /**
    * \brief Evaluates \f$\log Z\f$, the parent's mass on the window.
-   * \return The value, from the tail of the parent that holds the smaller numbers.
+   * \return The value, from the tail of the parent that holds the smaller numbers, or summed over the
+   * window when the two cumulative values cancel.
    */
-  LAPLACE_HD double log_norm() const {
-    using detail_truncated::tail_value;
-    if (from_lower_tail())
-      return detail_truncated::log_combine_value(tail_value(parent, upper_end(), false), left_limit_value(false),
-                                                 true);
-    return detail_truncated::log_combine_value(left_limit_value(true), tail_value(parent, upper_end(), true), true);
-  }
+  LAPLACE_HD double log_norm() const { return mass_value(lower, upper_end(), true, from_lower_tail()); }
 
   /**
    * \brief Evaluates the log-density, or the log mass where the law has one.
@@ -380,18 +381,9 @@ struct truncated_distrib : detail_atom_mixture::observation_regularity<D, D::kin
   LAPLACE_HD double log_cdf_tail(double y, bool upper_tail) const {
     if (y < lower_end()) return upper_tail ? 0.0 : -distrib_infinity;
     if (!(y < upper_end())) return upper_tail ? -distrib_infinity : 0.0;
-    using detail_truncated::tail_value;
-    double a, b;
-    if (from_lower_tail()) {
-      const double fy = tail_value(parent, y, false);
-      a = upper_tail ? tail_value(parent, upper_end(), false) : fy;
-      b = upper_tail ? fy : left_limit_value(false);
-    } else {
-      const double sy = tail_value(parent, y, true);
-      a = upper_tail ? sy : left_limit_value(true);
-      b = upper_tail ? tail_value(parent, upper_end(), true) : sy;
-    }
-    return detail_truncated::log_combine_value(a, b, true) - log_norm();
+    const bool lt = from_lower_tail();
+    const double m = upper_tail ? mass_value(y, upper_end(), false, lt) : mass_value(lower, y, true, lt);
+    return m - log_norm();
   }
 
   /// \brief Evaluates \f$\log F(y)\f$. \param y Observation point. \return The value.
@@ -418,18 +410,8 @@ struct truncated_distrib : detail_atom_mixture::observation_regularity<D, D::kin
     static_assert(K >= 1 && K <= 6, "orders one to six");
     sym_tensor<n_params, K> t;
     if (y < lower_end() || !(y < upper_end())) return t;
-    using detail_truncated::tail_term;
-    detail_truncated::log_term<n_params, K> a, b;
-    if (from_lower_tail()) {
-      const auto fy = tail_term<K>(parent, y, false);
-      a = upper_tail ? tail_term<K>(parent, upper_end(), false) : fy;
-      b = upper_tail ? fy : left_limit_term<K>(false);
-    } else {
-      const auto sy = tail_term<K>(parent, y, true);
-      a = upper_tail ? sy : left_limit_term<K>(true);
-      b = upper_tail ? tail_term<K>(parent, upper_end(), true) : sy;
-    }
-    const auto g = detail_truncated::log_combine(a, b, true);
+    const bool lt = from_lower_tail();
+    const auto g = upper_tail ? mass_term<K>(y, upper_end(), false, lt) : mass_term<K>(lower, y, true, lt);
     if (!(g.lv > -distrib_infinity)) return t;
     const auto z = log_norm_term<K>();
     for (int i = 0; i < t.size; ++i) t[i] = g.t.v[g.t.offset(K) + i] - z.t.v[z.t.offset(K) + i];
@@ -551,32 +533,157 @@ struct truncated_distrib : detail_atom_mixture::observation_regularity<D, D::kin
    */
   template <int K>
   LAPLACE_HD detail_truncated::log_term<n_params, K> log_norm_term() const {
-    using detail_truncated::tail_term;
-    if (from_lower_tail())
-      return detail_truncated::log_combine(tail_term<K>(parent, upper_end(), false), left_limit_term<K>(false), true);
-    return detail_truncated::log_combine(left_limit_term<K>(true), tail_term<K>(parent, upper_end(), true), true);
+    return mass_term<K>(lower, upper_end(), true, from_lower_tail());
   }
 
  private:
-  // the index of the parent's atom sitting on the lower bound, or -1
-  LAPLACE_HD int atom_at_lower() const {
+  // the index of the parent's atom sitting at x, or -1
+  LAPLACE_HD int atom_at(double x) const {
     for (int i = 0; i < distrib_n_atoms<D>(); ++i)
-      if (distrib_atom_point(parent, i) == lower) return i;
+      if (distrib_atom_point(parent, i) == x) return i;
     return -1;
   }
 
-  // left_limit_value with its derivatives: the atom's mass derivatives are the
+  // log F or log(1 - F) of the parent at x, or at x- when closed, so that x
+  // belongs to the mass above it; for a discrete parent F(x-) is F at the
+  // integer below
+  LAPLACE_HD double limit_value(double x, bool closed, bool upper_tail) const {
+    if (!closed) return detail_truncated::tail_value(parent, x, upper_tail);
+    if constexpr (D::kind == distrib_kind::discrete) {
+      return detail_truncated::tail_value(parent, Kokkos::ceil(x) - 1.0, upper_tail);
+    } else {
+      const double t = detail_truncated::tail_value(parent, x, upper_tail);
+      const int i = atom_at(x);
+      if (i < 0) return t;
+      return detail_truncated::log_combine_value(t, distrib_atom_log_mass(parent, i), !upper_tail);
+    }
+  }
+
+  // limit_value with its derivatives: the atom's mass derivatives are the
   // parent's log value derivatives at its point (core.hpp)
   template <int K>
-  LAPLACE_HD detail_truncated::log_term<n_params, K> left_limit_term(bool upper_tail) const {
+  LAPLACE_HD detail_truncated::log_term<n_params, K> limit_term(double x, bool closed, bool upper_tail) const {
+    if (!closed) return detail_truncated::tail_term<K>(parent, x, upper_tail);
     if constexpr (D::kind == distrib_kind::discrete) {
-      return detail_truncated::tail_term<K>(parent, lower_end() - 1.0, upper_tail);
+      return detail_truncated::tail_term<K>(parent, Kokkos::ceil(x) - 1.0, upper_tail);
     } else {
-      const auto t = detail_truncated::tail_term<K>(parent, lower, upper_tail);
-      const int i = atom_at_lower();
-      if (i < 0) return t;
-      return detail_truncated::log_combine(t, detail_truncated::value_term<K>(parent, lower), !upper_tail);
+      const auto t = detail_truncated::tail_term<K>(parent, x, upper_tail);
+      if (atom_at(x) < 0) return t;
+      return detail_truncated::log_combine(t, detail_truncated::value_term<K>(parent, x), !upper_tail);
     }
+  }
+
+  // whether the mass on [a, b] ((a, b] when not closed) can be summed: both ends
+  // finite and, for a discrete parent, at most max_summed_points integers
+  LAPLACE_HD bool summable(double a, double b, bool closed) const {
+    if (!(a > -distrib_infinity && b < distrib_infinity)) return false;
+    if constexpr (D::kind == distrib_kind::discrete)
+      return Kokkos::floor(b) - first_point(a, closed) < detail_truncated::max_summed_points;
+    else return true;
+  }
+
+  // the first integer of [a, b] or (a, b]
+  LAPLACE_HD static double first_point(double a, bool closed) {
+    return closed ? Kokkos::ceil(a) : Kokkos::floor(a) + 1.0;
+  }
+
+  // the cuts of [a, b] at the parent's kinks inside it: cut[0] = a < ... < cut[n] = b
+  // ponytail: assumes the parent lists its kinks in increasing order, as every distrib does
+  LAPLACE_HD int pieces(double a, double b, double* cut) const {
+    int n = 0;
+    cut[0] = a;
+    if constexpr (requires { parent.y_kinks(); }) {
+      const distrib_kinks k = parent.y_kinks();
+      for (int j = 0; j < k.count; ++j)
+        if (k.point[j] > cut[n] && k.point[j] < b) cut[++n] = k.point[j];
+    }
+    cut[++n] = b;
+    return n;
+  }
+
+  // log of the parent's mass on [a, b] or (a, b], summed: Gauss-Legendre on each
+  // piece plus the atoms inside, or the masses at the integers; an online
+  // log-sum-exp keeps far tails from underflowing.
+  // ponytail: 16 nodes per piece are exact to eps when B > 15 A / 16, where the
+  // interval is short against the scale on which the density changes; a parent
+  // with a spike inside such an interval would need an adaptive rule
+  LAPLACE_HD double summed_value(double a, double b, bool closed) const {
+    double m = -distrib_infinity, s = 0.0;
+    const auto add = [&m, &s](double l) {
+      if (!(l > -distrib_infinity)) return;
+      if (l > m) {
+        s = s * math::exp(m - l) + 1.0;
+        m = l;
+      } else {
+        s += math::exp(l - m);
+      }
+    };
+    if constexpr (D::kind == distrib_kind::discrete) {
+      for (double k = first_point(a, closed); k <= b; k += 1.0) add(detail_generic::log_density(parent, k));
+    } else {
+      double cut[4];
+      const int n = pieces(a, b, cut);
+      for (int p = 0; p < n; ++p) {
+        const double c = 0.5 * (cut[p] + cut[p + 1]), hl = 0.5 * (cut[p + 1] - cut[p]);
+        for (int i = 0; i < 16; ++i)
+          add(detail_generic::log_density(parent, c + hl * math::quad::detail::legendre16(i)) +
+              math::log(hl * math::quad::detail::legendre16(16 + i)));
+      }
+      for (int i = 0; i < distrib_n_atoms<D>(); ++i) {
+        const double c = distrib_atom_point(parent, i);
+        if ((closed ? c >= a : c > a) && c <= b) add(distrib_atom_log_mass(parent, i));
+      }
+    }
+    return m + math::log(s);
+  }
+
+  // summed_value with its derivatives, each term folded in through the ratios
+  template <int K>
+  LAPLACE_HD detail_truncated::log_term<n_params, K> summed_term(double a, double b, bool closed) const {
+    using detail_truncated::log_combine;
+    using detail_truncated::value_term;
+    detail_truncated::log_term<n_params, K> g;
+    g.lv = -distrib_infinity;
+    g.zero();
+    if constexpr (D::kind == distrib_kind::discrete) {
+      for (double k = first_point(a, closed); k <= b; k += 1.0) g = log_combine(g, value_term<K>(parent, k), false);
+    } else {
+      double cut[4];
+      const int n = pieces(a, b, cut);
+      for (int p = 0; p < n; ++p) {
+        const double c = 0.5 * (cut[p] + cut[p + 1]), hl = 0.5 * (cut[p + 1] - cut[p]);
+        for (int i = 0; i < 16; ++i) {
+          auto t = value_term<K>(parent, c + hl * math::quad::detail::legendre16(i));
+          t.lv += math::log(hl * math::quad::detail::legendre16(16 + i));
+          g = log_combine(g, t, false);
+        }
+      }
+      for (int i = 0; i < distrib_n_atoms<D>(); ++i) {
+        const double c = distrib_atom_point(parent, i);
+        if ((closed ? c >= a : c > a) && c <= b) g = log_combine(g, value_term<K>(parent, c), false);
+      }
+    }
+    return g;
+  }
+
+  // log of the parent's mass on [a, b] (closed) or (a, b], as the difference
+  // A - B on the tail chosen for the window, or summed where the two cancel
+  LAPLACE_HD double mass_value(double a, double b, bool closed, bool lower_tail) const {
+    const double la = lower_tail ? detail_truncated::tail_value(parent, b, false) : limit_value(a, closed, true);
+    const double lb = lower_tail ? limit_value(a, closed, false) : detail_truncated::tail_value(parent, b, true);
+    if (lb - la > detail_truncated::cancel_log && summable(a, b, closed)) return summed_value(a, b, closed);
+    return detail_truncated::log_combine_value(la, lb, true);
+  }
+
+  // mass_value with its derivatives to order K
+  template <int K>
+  LAPLACE_HD detail_truncated::log_term<n_params, K> mass_term(double a, double b, bool closed,
+                                                              bool lower_tail) const {
+    using detail_truncated::tail_term;
+    const auto x = lower_tail ? tail_term<K>(parent, b, false) : limit_term<K>(a, closed, true);
+    const auto y = lower_tail ? limit_term<K>(a, closed, false) : tail_term<K>(parent, b, true);
+    if (y.lv - x.lv > detail_truncated::cancel_log && summable(a, b, closed)) return summed_term<K>(a, b, closed);
+    return detail_truncated::log_combine(x, y, true);
   }
 };
 

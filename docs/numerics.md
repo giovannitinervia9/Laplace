@@ -9714,9 +9714,10 @@ The expected information is not declared: the information of a truncated law
 is not the parent's, and the generic route of `generic_info.hpp` answers,
 integrating over the window.
 
-**Measured.** `tests/distrib/test_truncated.cpp`, 15 cases and 2829
-assertions, green on gcc and on CUDA (RTX 4070 SUPER) with the same counts. No
-reference file: every quantity has a twin inside the test. log Z of a Gaussian
+**Measured.** `tests/distrib/test_truncated.cpp`, 16 cases and 3169
+assertions, green on gcc and on CUDA (RTX 4070 SUPER) with the same counts.
+One reference file, for the narrow windows (below); every other quantity has a
+twin inside the test. log Z of a Gaussian
 agrees with a difference of erfc values to 1e-12, in the middle, in a narrow
 window [1, 1.01], deep in each tail ([10, 12] and [-12, -10], mean 0.4,
 standard deviation 1.3) and on half lines, and the density integrates to one
@@ -9737,8 +9738,28 @@ with the host to 1e-11.
 The narrow window costs precision that the log form cannot give back: the two
 cumulative values are close, and the relative error of Z grows like the
 machine epsilon over the width of the window. In [1, 1.01] at its middle the
-mu score is 2e-6 while the noise of the differences is about 5e-11, so the
-check point sits at y = 1.0095, away from the middle.
+mu score is 2e-6 while the noise of the differences was about 5e-11, so the
+check point sat at y = 1.0095, away from the middle, until the repair below.
+
+How large the loss is was measured on log Z of a Gaussian with mean 0.4 and
+standard deviation 1.3 truncated to [a, a + w], for a in {1, 4, -3}, against
+mpmath at 200 bits (the reference takes the double nearest to a + w as the
+upper bound, so that the rounding of the bound is not counted). The table
+gives the largest absolute error of log Z over the three windows, which is the
+relative error of Z, for the cumulative route that Laplace used before the repair below and, for
+comparison, for a `panels_quad` of the density over the window:
+
+| w | cumulative route | quadrature of the density |
+|---|---|---|
+| 1e-2 | 1.4e-14 to 3.9e-14 | 0 to 9e-16 |
+| 1e-4 | 2.6e-13 to 4.7e-12 | 0 to 1.8e-15 |
+| 1e-6 | 2.2e-10 to 2.5e-10 | 0 |
+| 1e-8 | 8.6e-9 to 4.2e-8 | 0 |
+| 1e-10 | 1.6e-6 to 3.9e-6 | 0 |
+| 1e-12 | 2.5e-4 to 4.3e-4 | 0 |
+
+The cumulative route loses about 4e-16 / w, as the cancellation predicts; the
+quadrature keeps the machine epsilon.
 
 **A device defect found on the way, in `atom_mixture.hpp`.**
 `detail_atom_mixture::flat_tensors::offset()` was a host-only `constexpr`
@@ -9763,12 +9784,39 @@ through the same code. The translation unit compiles in about ten minutes.
 alone: nvcc rejected the nested requires-expression that probed the parent for
 the member, where gcc accepted it.
 
-**Open.** `atom_mixture_distrib::expected_info()` calls
-`parent.expected_info()` directly, so an atom mixture over a truncated parent
-does not compile its closed information; it should go through
-`distrib_expected_info(parent)`. The generic routes have no atom branches, so
-the generic expected information of a truncated zero-adjusted law misses the
-atom's mass. The narrow-window loss above, which comes from the cumulative
-values themselves. Other host-only `constexpr` helpers called from device code
-appear in nvcc's #20013 warnings (`sgn` and `fact` in the bijectors); whether
-they give wrong values on the device was not checked.
+**Repaired afterwards.** `atom_mixture_distrib` now reaches its parent through
+the dispatchers (`distrib_expected_info`, `distrib_log_cdf`, `distrib_log_ccdf`
+and their derivatives) rather than through the parent's members, so an atom on
+a truncated parent has its closed information, checked against a quadrature of
+the score products plus the atom to 1e-9 and its first derivative against
+differences to 1e-6. The generic expectation (`expectation_by_integral` and the
+generic information built on it) now adds the atoms' masses times h at their
+points to the quadrature of the density, so the generic information of a
+truncated zero-adjusted gamma matches the same quadrature to 1e-9 and its total
+mass is 1 to 1e-10. The other host-only `constexpr` functions that nvcc named in
+#20013 warnings (`fact` and `sgn` in the bijector helpers, `distrib_n_atoms`,
+`regularities_of`) are now `LAPLACE_HD`; after the change nvcc reports none of
+Laplace's own (the ones left come from Boost's error handling).
+
+**The narrow-window loss, repaired (decided with Giovanni).** When
+log B - log A > log(15/16) and both ends are finite, the mass of the interval
+is summed rather than taken as a difference: for a continuous parent, a
+16-node Gauss-Legendre rule of the density on each piece between the parent's
+`y_kinks()`, plus the atoms inside the interval; for a discrete parent, the
+masses at the integers, when there are at most 64. The terms are added by
+log-sum-exp, and the derivatives fold each term in through the same ratio
+relation as the difference. Past 15/16 the difference loses more than four
+bits, and on so short an interval 16 nodes integrate the density to the last
+bit; a spike narrower than the window would need an adaptive rule. The same
+rule serves Z, the mass of [a, y] for F and that of (y, b] for 1 - F.
+Reference: `tests/data/reference/distrib_truncated_narrow.csv`, written by
+`tools/reference/distrib_truncated_narrow.py` from mpmath.diff of the
+definition at 400 and 500 bits (rows kept when the two agree to 2^-80; 270
+rows, none dropped): log Z of the Gaussian above on the 18 windows and its
+derivatives in (mu, sigma) to order four. Measured: log Z within 2.03e-15
+(bound 4e-15), the derivatives within 2.28e-13 of the largest reference of
+their order and window (bound 5e-13); a Poisson(1000) on [1000, 1001] equals
+the direct sum of its two masses (error 0, bound 4e-15). The derivative check
+in [1, 1.01] now also runs at its middle, y = 1.005, and the device kernel
+evaluates a window of width 1e-8.
+

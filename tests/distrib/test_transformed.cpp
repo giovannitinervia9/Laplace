@@ -132,9 +132,7 @@ template <class D>
 double total_mass(const D& d) {
   const auto q = ld::expectation_by_integral(d, [](double) { return 1.0; });
   REQUIRE(q.converged);
-  double s = q.value;
-  for (int i = 0; i < ld::distrib_n_atoms<D>(); ++i) s += std::exp(ld::distrib_atom_log_mass(d, i));
-  return s;
+  return q.value;  // the generic expectation adds the atoms' masses itself
 }
 
 }  // namespace

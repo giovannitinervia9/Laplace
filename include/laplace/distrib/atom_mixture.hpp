@@ -43,6 +43,7 @@
 #include <laplace/bijector/alr.hpp>
 #include <laplace/distrib/core.hpp>
 #include <laplace/distrib/generic_cdf.hpp>
+#include <laplace/distrib/generic_info.hpp>
 #include <laplace/distrib/generic_quantile.hpp>
 #include <laplace/distrib/generic_start.hpp>
 #include <laplace/math/elementary.hpp>
@@ -201,14 +202,8 @@ struct flat_tensors {
 
   template <class D, int T>
   LAPLACE_HD void fill_order(const D& p, double y, bool upper) {
-    const auto tt = [&] {
-      if constexpr (T == 1) return upper ? p.log_ccdf_d1(y) : p.log_cdf_d1(y);
-      else if constexpr (T == 2) return upper ? p.log_ccdf_d2(y) : p.log_cdf_d2(y);
-      else if constexpr (T == 3) return upper ? p.log_ccdf_d3(y) : p.log_cdf_d3(y);
-      else if constexpr (T == 4) return upper ? p.log_ccdf_d4(y) : p.log_cdf_d4(y);
-      else if constexpr (T == 5) return upper ? p.log_ccdf_d5(y) : p.log_cdf_d5(y);
-      else return upper ? p.log_ccdf_d6(y) : p.log_cdf_d6(y);
-    }();
+    // through the dispatchers, so that a parent without closed cumulative derivatives gets the generic ones
+    const auto tt = upper ? distrib_log_ccdf_dk<T>(p, y) : distrib_log_cdf_dk<T>(p, y);
     for (int i = 0; i < tt.size; ++i) v[offset(T) + i] = tt[i];
     if constexpr (T < K) fill_order<D, T + 1>(p, y, upper);
   }
@@ -527,7 +522,7 @@ struct atom_mixture_distrib : detail_atom_mixture::observation_regularity<D, D::
       double w[1];
       cell_map().inverse(atom_alr, pi, w);
     }
-    const auto ip = parent.expected_info();
+    const auto ip = distrib_expected_info<0>(parent);
     for (int a = 0; a < Q; ++a)
       for (int b = a; b < Q; ++b) {
         const int idx[2] = {a, b}, pidx[2] = {a, b};
@@ -593,7 +588,7 @@ struct atom_mixture_distrib : detail_atom_mixture::observation_regularity<D, D::
     int n = 0;
     for (int i = 0; i < n_atom_points; ++i)
       if (upper ? point[i] > y : point[i] <= y) term[n++] = lpi[i];
-    term[n++] = lpi[n_atom_points] + (upper ? parent.log_ccdf(y) : parent.log_cdf(y));
+    term[n++] = lpi[n_atom_points] + (upper ? distrib_log_ccdf(parent, y) : distrib_log_cdf(parent, y));
     return detail_atom_mixture::log_sum_exp(term, n);
   }
 
@@ -628,7 +623,7 @@ struct atom_mixture_distrib : detail_atom_mixture::observation_regularity<D, D::
     for (int i = 0; i < n_atom_points; ++i) on_side[i] = upper ? point[i] > y : point[i] <= y;
     detail_atom_mixture::flat_tensors<D::n_params, K> pct;
     pct.fill(parent, y, upper);
-    return log_two_part_dk<K>(on_side, upper ? parent.log_ccdf(y) : parent.log_cdf(y), pct);
+    return log_two_part_dk<K>(on_side, upper ? distrib_log_ccdf(parent, y) : distrib_log_cdf(parent, y), pct);
   }
 
   /**
@@ -775,7 +770,7 @@ struct atom_mixture_distrib : detail_atom_mixture::observation_regularity<D, D::
     double acc = 0.0;  // the mass of the atoms already passed
     for (int k = 0; k < n_atom_points; ++k) {
       const int i = ord[k];
-      const double below = acc + pi[n_atom_points] * parent.cdf(point[i]);  // F just below the atom
+      const double below = acc + pi[n_atom_points] * math::exp(distrib_log_cdf(parent, point[i]));  // F just below the atom
       if (p <= below) return distrib_quantile(parent, (p - acc) / pi[n_atom_points]);
       if (p <= below + pi[i]) return point[i];
       acc += pi[i];
@@ -942,9 +937,9 @@ struct atom_mixture_distrib : detail_atom_mixture::observation_regularity<D, D::
     int uidx[K == 0 ? 1 : K], pidx[K == 0 ? 1 : K], idx[K == 0 ? 1 : K];
     for (int j = 0; j < K; ++j) { uidx[j] = 0; pidx[j] = 0; idx[j] = 0; }
     // the parent's factor at this order, I itself when no index is left to it
-    const auto ip0 = parent.expected_info();
+    const auto ip0 = distrib_expected_info<0>(parent);
     [[maybe_unused]] auto ipk = [&] {
-      if constexpr (KT >= 1) return parent.template expected_info_dk<KT>();
+      if constexpr (KT >= 1) return distrib_expected_info<KT>(parent);
       else return 0;
     }();
     for (;;) {  // the free part

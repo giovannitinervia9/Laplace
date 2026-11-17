@@ -2,7 +2,8 @@
 // section 4): E[h(Y)] by quadrature over the support (continuous) or by a sum
 // over the support (discrete), and the moments built on it. They read only
 // logpdf / logpmf, the support, center() and scale(), and y_kinks() when the
-// distribution has it.
+// distribution has it. A continuous distribution that declares atoms adds the
+// atoms' masses times h at their points to the quadrature of the density.
 //
 //   expectation_by_integral(d, h)        E[h(Y)], as a quad_result
 //   moment_by_integral(d, k, about)      E[(Y - about)^k]
@@ -273,6 +274,13 @@ LAPLACE_HD vec_expectation<M> expectation_vec_by_integral(const D& d, const H& h
     } else {
       panels_vec<M>(g, lo, hi, c, s, nullptr, 0, r);
     }
+    for (int i = 0; i < distrib_n_atoms<D>(); ++i) {  // the atoms, which the quadrature does not see
+      const double mass = math::exp(distrib_atom_log_mass(d, i));
+      if (mass == 0.0) continue;
+      double v[M];
+      h(distrib_atom_point(d, i), v);
+      for (int m = 0; m < M; ++m) r.value[m] += mass * v[m];
+    }
   } else {
     for (int m = 0; m < M; ++m) r.converged[m] = true;
     double l1[M] = {};
@@ -297,7 +305,7 @@ LAPLACE_HD vec_expectation<M> expectation_vec_by_integral(const D& d, const H& h
  *   \f[
  *   \mathbb{E}[h(Y)] = \int h(y) f(y) \, \mathrm{d}y
  *   \f]
- *   integrated by laplace::math::quad::panels_quad() over the support, from `support_lower()` to `support_upper()`, subdivided at `center()` and at `y_kinks()`, using panel scale `scale()`.
+ *   integrated by laplace::math::quad::panels_quad() over the support, from `support_lower()` to `support_upper()`, subdivided at `center()` and at `y_kinks()`, using panel scale `scale()`. When the distribution declares atoms (\ref distrib_atoms "the atom descriptors"), \f$\sum_i \pi_i h(c_i)\f$ is added, with \f$c_i\f$ the point of atom \f$i\f$ and \f$\pi_i\f$ its mass.
  * - For discrete distributions:
  *   \f[
  *   \mathbb{E}[h(Y)] = \sum_y h(y) p(y)
@@ -327,12 +335,18 @@ LAPLACE_HD math::quad::quad_result expectation_by_integral(const D& d, const H& 
       const double m = math::exp(d.logpdf(y));
       return m == 0.0 ? 0.0 : h(y) * m;
     };
+    math::quad::quad_result r;
     if constexpr (requires { d.y_kinks(); }) {
       const distrib_kinks k = d.y_kinks();
-      return math::quad::panels_quad(g, lo, hi, c, s, k.point, k.count);
+      r = math::quad::panels_quad(g, lo, hi, c, s, k.point, k.count);
     } else {
-      return math::quad::panels_quad(g, lo, hi, c, s);
+      r = math::quad::panels_quad(g, lo, hi, c, s);
     }
+    for (int i = 0; i < distrib_n_atoms<D>(); ++i) {  // the atoms, which the quadrature does not see
+      const double mass = math::exp(distrib_atom_log_mass(d, i));
+      if (mass != 0.0) r.value += mass * h(distrib_atom_point(d, i));
+    }
+    return r;
   } else {
     math::quad::quad_result r;
     r.converged = true;

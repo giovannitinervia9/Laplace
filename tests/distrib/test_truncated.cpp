@@ -8,6 +8,11 @@
 //   * every component of orders one to six against five-point differences of
 //     the order below, in the middle of the window, near both bounds, in a
 //     narrow window and in windows deep in either tail;
+//   * log Z and its derivatives to order four in windows of width 1e-2 to
+//     1e-12, where the two cumulative values cancel and Z is summed, against
+//     mpmath (tests/data/reference/distrib_truncated_narrow.csv, written by
+//     tools/reference/distrib_truncated_narrow.py); the summed Poisson masses
+//     against the direct sum;
 //   * the cumulative functions and their derivatives on both tails, and
 //     F + (1 - F) = 1;
 //   * the quantile against the cumulative function it inverts;
@@ -28,6 +33,8 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -187,9 +194,9 @@ TEST_CASE("truncated: a discrete parent sums to one and keeps both bounds") {
 TEST_CASE("truncated: the derivatives against central differences") {
   const std::vector<double> th{0.4, 1.3};
   for (double y : {0.7, -0.49, 1.99}) check_value_derivs(gau_window{-0.5, 2.0}, th, y, 2e-5);
-  // a narrow window, where Z is small and F(b) - F(a) cancels. Not at its middle, where the score in mu
-  // is 2e-6 and the noise of the differences, eps / width over the step, is of 5e-11
-  check_value_derivs(gau_window{1.0, 1.01}, th, 1.0095, 2e-5);
+  // a narrow window, where F(b) - F(a) cancels and Z is summed instead: at its middle the score in mu
+  // is 2e-6, which the summed Z resolves
+  for (double y : {1.005, 1.0095}) check_value_derivs(gau_window{1.0, 1.01}, th, y, 2e-5);
   // deep in each tail, where one side of the parent rounds to one
   check_value_derivs(gau_window{10.0, 12.0}, th, 10.3, 2e-5);
   check_value_derivs(gau_window{-12.0, -10.0}, th, -10.3, 2e-5);
@@ -218,6 +225,72 @@ TEST_CASE("truncated: the cumulative functions and their derivatives on both tai
   const auto pb = [](const double* t) { return tpois{.parent = ld::poisson_distrib{t[0]}, .lower = 2.0, .upper = 9.0}; };
   for (double y : {2.0, 4.0, 8.0})
     for (bool upper : {false, true}) check_tail_derivs(pb, std::vector<double>{3.5}, y, upper, 3e-5);
+}
+
+namespace {
+
+// one row of tests/data/reference/distrib_truncated_narrow.csv
+struct narrow_row {
+  double a, b, hi, lo;
+  int K, nb;
+};
+
+std::vector<narrow_row> read_narrow_reference() {
+  std::vector<narrow_row> rows;
+  std::FILE* f = std::fopen(LAPLACE_REFERENCE_DIR "/distrib_truncated_narrow.csv", "r");
+  REQUIRE(f != nullptr);
+  char line[256];
+  std::fgets(line, sizeof line, f);
+  while (std::fgets(line, sizeof line, f)) {
+    narrow_row r;
+    char as[64], bs[64], his[64], los[64];
+    if (std::sscanf(line, "%63[^,],%63[^,],%d,%d,%63[^,],%63s", as, bs, &r.K, &r.nb, his, los) != 6) continue;
+    r.a = std::strtod(as, nullptr), r.b = std::strtod(bs, nullptr);
+    r.hi = std::strtod(his, nullptr), r.lo = std::strtod(los, nullptr);
+    rows.push_back(r);
+  }
+  std::fclose(f);
+  return rows;
+}
+
+}  // namespace
+
+TEST_CASE("truncated: a narrow window keeps log Z and its derivatives to the machine precision") {
+  const auto rows = read_narrow_reference();
+  REQUIRE(rows.size() == 270);
+  // the error of log Z, which is the relative error of Z, and that of each derivative relative to the
+  // largest reference of its order and window
+  double e_value = 0.0, e_deriv = 0.0;
+  for (const auto& r : rows) {
+    if (r.K == 0) {
+      const tgau d = gau_window{r.a, r.b}(std::vector<double>{0.4, 1.3}.data());
+      e_value = std::fmax(e_value, std::fabs(d.log_norm() - r.hi - r.lo));
+      continue;
+    }
+    double scale = 0.0;
+    for (const auto& q : rows)
+      if (q.a == r.a && q.b == r.b && q.K == r.K) scale = std::fmax(scale, std::fabs(q.hi));
+    const tgau d = gau_window{r.a, r.b}(std::vector<double>{0.4, 1.3}.data());
+    const auto z = d.log_norm_term<4>();
+    const double v = z.t.v[z.t.offset(r.K) + r.nb];  // with two parameters the component is nb
+    INFO("[" << r.a << ", " << r.b << "], K = " << r.K << ", nb = " << r.nb);
+    e_deriv = std::fmax(e_deriv, std::fabs(v - r.hi) / scale);
+    CHECK(std::fabs(z.lv - d.log_norm()) <= 1e-15 * std::fabs(z.lv));  // the two sums round apart
+  }
+  std::printf("narrow windows: log Z %.2e, derivatives to order 4 %.2e\n", e_value, e_deriv);
+  CHECK(e_value <= 4e-15);
+  CHECK(e_deriv <= 5e-13);
+  // a discrete parent: two points of a Poisson with mean 1000, where Z / F(1001) is 0.05, against their direct sum
+  const auto pb = [](const double* t) {
+    return tpois{.parent = ld::poisson_distrib{t[0]}, .lower = 1000.0, .upper = 1001.0};
+  };
+  const std::vector<double> lam{1000.0};
+  const tpois p = pb(lam.data());
+  const double l0 = p.parent.logpmf(1000.0), l1 = p.parent.logpmf(1001.0);
+  const double e_pois = std::fabs(p.log_norm() - (l0 + std::log1p(std::exp(l1 - l0))));
+  std::printf("narrow Poisson window: log Z %.2e\n", e_pois);
+  CHECK(e_pois <= 4e-15);
+  for (double y : {1000.0, 1001.0}) check_value_derivs(pb, lam, y, 2e-5);
 }
 
 TEST_CASE("truncated: the quantile inverts the cumulative function") {
@@ -264,6 +337,22 @@ TEST_CASE("truncated: a zero-adjusted gamma truncated above its atom integrates 
     if (y == 0.0) CHECK(d.cdf(0.0) >= p);
     else CHECK(d.cdf(y) == doctest::Approx(p).epsilon(1e-9));
   }
+
+  // The generic routes add the atom's mass to the quadrature: the expectation of one is one, and the
+  // generic information is -E[l_ab], the atom's term plus a quadrature over the window.
+  const auto one = ld::expectation_by_integral(d, [](double) { return 1.0; });
+  REQUIRE(one.converged);
+  CHECK(one.value == doctest::Approx(1.0).epsilon(1e-10));
+  constexpr int P = tzag::n_params;
+  const auto info = ld::distrib_expected_info<0>(d);
+  for (const auto& idx : sorted_indices(P, 2)) {
+    const int pos = position_of(P, idx);
+    const auto g = [&](double t) { return -d.logpdf_dk<2>(t)[pos] * std::exp(d.logpdf(t)); };
+    const auto q = laplace::math::quad::panels_quad(g, 0.0, 3.0, 1.0, 0.75);
+    REQUIRE(q.converged);
+    INFO("component " << pos);
+    CHECK(info[pos] == doctest::Approx(g(0.0) + q.value).epsilon(1e-9));
+  }
 }
 
 TEST_CASE("truncated: an atom mixture keeping every atom, with one on the lower bound") {
@@ -291,6 +380,33 @@ TEST_CASE("truncated: an atom on a truncated parent, the atom outside the window
   for (double y : {0.0, 1.0, 2.9}) check_value_derivs(build, th, y, 2e-5);
   for (bool upper : {false, true}) check_tail_derivs(build, th, 1.0, upper, 3e-5);
   CHECK(d.cdf(1.0) + d.ccdf(1.0) == doctest::Approx(1.0).epsilon(1e-13));
+
+  // The atom mixture's closed information reads the truncated parent's through the generic route; it is
+  // checked against -E[l_ab], the atom's mass times its term plus a quadrature over the window.
+  constexpr int P = atg::n_params;
+  const auto info = d.expected_info();
+  for (const auto& idx : sorted_indices(P, 2)) {
+    const int pos = position_of(P, idx);
+    const auto g = [&](double t) { return -d.logpdf_dk<2>(t)[pos] * std::exp(d.logpdf(t)); };
+    const auto q = laplace::math::quad::panels_quad(g, 0.5, 3.0, 0.75, 0.5);
+    REQUIRE(q.converged);
+    INFO("component " << pos);
+    CHECK(info[pos] == doctest::Approx(g(0.0) + q.value).epsilon(1e-9));
+  }
+  const auto ivec = [&](const double* t, int K) {
+    const atg e = build(t);
+    if (K == 0) return as_vec<P, 2>(e.expected_info());
+    return info_vec<P, 1>(e.expected_info_d1());
+  };
+  const auto exact = ivec(th.data(), 1);
+  double scale = 0.0;
+  for (double v : exact) scale = std::fmax(scale, std::fabs(v));
+  for (int pr = 0; pr < ld::sym_tensor_size(P, 2); ++pr)
+    for (int j = 0; j < P; ++j) {
+      const auto fd = diff5([&](const double* t) { return ivec(t, 0); }, th, j, 1e-3 * std::fmax(1e-3, std::fabs(th[j])));
+      INFO("pair " << pr << ", j = " << j);
+      CHECK(std::fabs(exact[pr * P + j] - fd[pr]) <= 1e-6 * scale);
+    }
 }
 
 TEST_CASE("truncated: the refusals and the collapse") {
@@ -363,7 +479,10 @@ LAPLACE_HD double truncated_kernel_value(int i) {
   const double y = 0.05 + 0.09 * i;
   if constexpr (W == 0) {
     const tgau d{.parent = ld::gaussian1_distrib{0.4, 1.3}, .lower = -0.5, .upper = 3.0};
-    return d.logpdf(y) + d.logpdf_d2(y)[1] + d.log_cdf_d1(y)[0] + d.log_ccdf_d1(y)[1] + d.quantile(0.01 + 0.03 * i);
+    // and a window of width 1e-8, where Z is summed
+    const tgau w{.parent = ld::gaussian1_distrib{0.4, 1.3}, .lower = 1.0, .upper = 1.0 + 1e-8};
+    return d.logpdf(y) + d.logpdf_d2(y)[1] + d.log_cdf_d1(y)[0] + d.log_ccdf_d1(y)[1] + d.quantile(0.01 + 0.03 * i) +
+           w.logpdf(1.0 + 3e-10 * i) + w.logpdf_d1(1.0 + 3e-10 * i)[1];
   } else if constexpr (W == 1) {
     const tzag z{.parent = zag{.parent = ld::gamma2_distrib{2.0, 0.5}, .atom_alr = {-1.0}, .point = {0.0}},
                  .lower = 0.0, .upper = 3.0};
