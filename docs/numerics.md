@@ -10155,3 +10155,103 @@ Gaussian's Q^+ to 1e-14.
 
 Open. statmodels7 has no improper t (its mvstudent_t refuses a rank-deficient
 matrix): no frozen references. No bench: the kernels are the degenerate t's.
+
+## The Dirichlet and the multinomial: dirichlet_distrib and multinomial_distrib (2026-11-17)
+
+What. The first laws with a `simplex_vector` parameter: the mean (Dirichlet) or the
+probabilities (multinomial) mu on the open simplex of d categories, carried by their
+additive log-ratio coordinates eta (reference category the last, eta_d = 0),
+log mu_j = eta_j - LSE(eta); the Dirichlet adds the precision phi > 0, alpha_j = phi mu_j;
+the multinomial's size N is a data constant (a trailing field, as binomial_distrib's).
+
+    Dirichlet:   l = lgamma(phi) - sum_j lgamma(alpha_j) + sum_j (alpha_j - 1) log y_j
+    multinomial: l = log N! - sum_j log y_j! + sum_j y_j log mu_j
+
+The multinomial is the first discrete multivariate law (`kind`, `logpmf`); the
+Dirichlet stores d values of y and differentiates in the d - 1 reference coordinates
+(`y_coord_size()`). Derivatives: K in phi, A in eta, A + K <= 6; derivatives in y
+(Dirichlet); the expected information and its derivatives in (eta, phi) to order 4.
+
+How. The derivatives of mu and log mu in eta, over every subset of the positions of a
+tuple, come from alr's subset recursion (d_b mu_c = mu_c (delta_bc - mu_b)), keeping
+every subset; -L is the joint cumulant kappa of the categorical indicators.
+- The cumulants vanish where their polynomials do (1 - 2 mu = 0 and the like), and in
+  double the recursion carries an absolute error of about eps/4 there, which phi or N
+  then multiply (measured 2.5e5 ulp1N at N = 1e6). The recursion runs in
+  double-double from the unit's probabilities, formed once in double-double
+  (mu_j = e^(eta_j - eta_max) / sum, and 1 - mu_j as the sum of the others), and each
+  table entry is rounded at the end; afterwards <= 60 ulp1N.
+- log mu of the largest category is -log1p(sum of the others): eta_c - LSE loses the
+  digits of a probability near one (1e6-1e8 ulp1N at mu = 1 - 1e-8, phi = 1e7).
+- Dirichlet, -sum_j lgamma(phi mu_j), per coordinate: below alpha = 1,
+  -lgamma(a) = log a - lgamma(1 + a), the sum of log alpha_j in closed form through the
+  cumulants and -lgamma(1 + a) through Faa di Bruno with psi_n(1 + a); from alpha = 1,
+  -lgamma(a) = -(a log a - a) + 1/2 log a - 1/2 log 2pi - delta(a), Stirling's error
+  delta through Faa di Bruno (math/stirling.hpp, to order 6), the leading terms in
+  closed form. Measured with exact inputs (scratch, d = 3): the direct route (polygammas
+  at alpha, as beta_distrib) loses 2.2e5 ulp at phi = 1e3, 3.9e9 at 1e5 and 4.6e13 at
+  1e7 in blocks with two or more phi derivatives (the leading Stirling terms are linear
+  in mu_j and cancel across j), and 1e8-3e9 ulp at alpha = 1e-9; this route <= 32 ulp.
+- The pieces linear in mu_j of the large set are summed over the small set with the
+  sign changed (sum_j d mu_j = 0 exactly), and are exactly zero when the large set is
+  empty (else phi^-(K-1) times a rounding: 1e12 ulp1N at phi = 1e-3).
+- The data and Stirling's leading term are combined per large coordinate as
+  d mu_j log(y_j/mu_j), log(y_j/mu_j) = log1p((y_j - mu_j)/mu_j) with mu_j in
+  double-double (y is close to mu at a large phi); the Leibniz terms with a derivative
+  on log mu_j sum, over every j, to (A - 1) kappa, so the large set's share is taken
+  from the cumulant (the value went from 4.6e5 to 90 ulp1N at phi = 1e7).
+- Expected information, E log y_j = psi(alpha_j) - psi(phi):
+  I_ab = phi^2 sum_j psi_1(alpha_j) d_a mu_j d_b mu_j, I_a,phi = sum_j d_a mu_j alpha_j r_1(alpha_j)
+  (r_1 = psi_1 - 1/x: the 1 of alpha psi_1 drops exactly), I_phi,phi = sum_j mu_j^2 r_1(alpha_j) - r_1(phi);
+  their derivatives by the same split, psi_1(a) = 1/a + 1/(2a^2) + delta''(a) from 1 and
+  1/a^2 + psi_1(1 + a) below, and phi sum_large d(mu X_a X_b) (X_a = d_a log mu_j) from the
+  cumulant kappa_ab (8.5e4 -> <= 60 ulp1N). Multinomial: N kappa_ab and N kappa_abt.
+- The multinomial's log-mass in the saddle-point form of binomial_distrib, with
+  Stirling's error and the unit deviance (no cancellation at large N).
+- Two scores were differences of close terms carrying the rounding of mu: y_a - N mu_a
+  and the Dirichlet's (alpha_a - 1)/y_a^J - (alpha_d - 1)/y_d^J; both are formed in
+  double-double from the unit's double-double mu (5.2e5 and 1.75e3 -> 0 ulp1N).
+- Draws: the Dirichlet as log G_j = log G(alpha_j + 1) + log(U_j)/alpha_j (exact in law;
+  the gamma by inversion at draw 2j, the uniform at 2j + 1 of counter_uniform_source),
+  y by log-sum-exp, never 0/0 at a tiny shape; the multinomial by conditional binomials,
+  y_j ~ Bin(N - sum_(i<j) y_i, mu_j / sum_(i>=j) mu_i), by inversion at draw j.
+- The tables (4 KB) and the partition sums (3.5 KB) live in the law's scratch, not on
+  the thread's stack: on CUDA they overran the tests' 8 KB stack.
+
+Measured (tests/distrib/test_simplex.cpp, in a kernel; references
+tools/reference/distrib_simplex.py, mpmath at 60 and 75 digits from the definition,
+11262 values, d = 2, 3, 5, phi from 1e-3 to 1e7, N to 1e6, shapes to 1e-12, the
+information's closed forms checked by quadrature over the beta law), worst ulp1N:
+
+| | gcc | CUDA |
+|---|---|---|
+| Dirichlet blocks, A + K <= 6 | 44.8 | 33.2 |
+| Dirichlet y derivatives | 14.3 | 4.82 |
+| information (eta, eta), (eta, phi), (phi, phi), to order 4 | 4.06, 4.83, 3.06 | 4.27, 5.95, 11.1 |
+| multinomial blocks, A <= 6 | 1.65 | 1.65 |
+| multinomial information, to order 4 | 0.717 | 0.717 |
+
+statmodels7 frozen (tools/reference/statmodels7_simplex.R, distributions7 0.94.2,
+608 values, orders 0-4 and the order-0 information, d = 2, 3, 5): agreement within
+statmodels7's own accuracy, 439 ulp1N in the Dirichlet blocks (its direct routes at
+phi = 300) and 628 in the multinomial log-mass (its lgamma form at size 1000), the rest
+<= 2.3. Its expected third and fourth derivatives are E[d^3 l] and E[d^4 l], not the
+derivatives of the information, and are not frozen. Draws (4e4, d = 3): mean within
+4.5 standard errors, covariance within 4 per cent of its largest entry, on the simplex
+or summing to the size; at phi = 0.01 every coordinate finite and the sum one.
+
+Speed (benchmarks/distrib_simplex.cpp, 2e4 units, phi = 30, size 50), ns per unit,
+orders 0 / 1 / 2:
+
+| | one thread | 16 threads | CUDA |
+|---|---|---|---|
+| Dirichlet d = 3 | 2924 / 3650 / 5975 | 238 / 297 / 501 | 66 / 89 / 185 |
+| Dirichlet d = 10 | 11568 / 15509 / 36658 | 888 / 1229 / 2616 | 207 / 313 / 859 |
+| multinomial d = 3 | 503 / 1503 / 1956 | 44 / 118 / 157 | 12 / 32 / 44 |
+| multinomial d = 10 | 3532 / 7747 / 11839 | 294 / 588 / 920 | 65 / 109 / 236 |
+
+The double-double tables are most of it: a first version that rebuilt the
+double-double probabilities in every table cost 5-40 times more on one thread.
+
+Open. independent_product_distrib does not take a component whose unit is constrained
+(y_coord_size() < dim()).

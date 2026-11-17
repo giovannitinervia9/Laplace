@@ -153,9 +153,9 @@ bool block(const t2_t& g, const t2_t::state_type& st, int K, const Case& c, cons
     if constexpr (A + KK > 6 || (A < 0 && KK > 4)) {
       return false;
     } else if constexpr (A == -2) {
-      return g.template expected_info_dk<KK>(st, 0, 0, c.ab, idx, out, w);
+      return g.template expected_info_dk<KK>(st, 0, 0, c.ab, nullptr, idx, out, w);
     } else if constexpr (A == -1) {
-      return g.template expected_info_dk<KK>(st, ld::theta_slot, ld::theta_slot, c.ab, idx, out, w);
+      return g.template expected_info_dk<KK>(st, ld::theta_slot, ld::theta_slot, c.ab, nullptr, idx, out, w);
     } else {
       return g.template logpdf_dk<KK, A>(st, y, mu, idx, out, w);
     }
@@ -265,7 +265,7 @@ double one_matrix_info(const D& g, double th, double nu) {
   auto st = g.theta_state(theta, w.data());
   const int ab[2] = {0, 0};
   double out = 0.0;
-  g.template expected_info_dk<0>(st, ld::theta_slot, ld::theta_slot, ab, nullptr, &out, w.data() + g.state_size());
+  g.template expected_info_dk<0>(st, ld::theta_slot, ld::theta_slot, ab, nullptr, nullptr, &out, w.data() + g.state_size());
   return out;
 }
 void one_matrix_case() {

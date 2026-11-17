@@ -59,7 +59,7 @@ const char* sname[] = {"diagonal", "ar1", "compound_symmetry", "log_cholesky", "
 template <class D, int A, int K>
 KOKKOS_INLINE_FUNCTION bool block_ak(const D& g, const typename D::state_type& st, const double* y, const double* mu,
                                      const int* idx, const int* ab, double* out, double* w) {
-  if constexpr (A < 0) return g.template expected_info_dk<K>(st, ld::theta_slot, ld::theta_slot, ab, idx, out, w);
+  if constexpr (A < 0) return g.template expected_info_dk<K>(st, ld::theta_slot, ld::theta_slot, ab, nullptr, idx, out, w);
   else return g.template logpdf_dk<K, A>(st, y, mu, idx, out, w);
 }
 template <class D, int A>
@@ -498,11 +498,11 @@ void mvgaussian_draws_check(const D& g, const std::vector<double>& theta_h, cons
           for (int b = 0; b <= a; ++b) {
             const int ab[2] = {a, b};
             double r = 0.0;
-            if (!g.template expected_info_dk<0>(st(), ld::theta_slot, ld::theta_slot, ab, nullptr, &r, ws))
+            if (!g.template expected_info_dk<0>(st(), ld::theta_slot, ld::theta_slot, ab, nullptr, nullptr, &r, ws))
               r = 0.0;
             info(lp::packed_index(a, b)) = r;
           }
-        g.template expected_info_dk<0>(st(), 0, 0, nullptr, nullptr, &info(nq), ws);
+        g.template expected_info_dk<0>(st(), 0, 0, nullptr, nullptr, nullptr, &info(nq), ws);
         g.template logpdf_dk<0, 2>(st(), mu.data(), mu.data(), nullptr, &info(nq + np), ws);
       });
   Kokkos::View<double**, Kokkos::LayoutRight> v("v", n, nv);
