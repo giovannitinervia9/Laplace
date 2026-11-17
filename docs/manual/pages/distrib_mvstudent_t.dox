@@ -1,0 +1,277 @@
+/**
+\defgroup distrib_mvstudent_t1 mvstudent_t1 (location, scale matrix)
+\brief Multivariate Student t distribution with location vector \f$\mu\f$, scale matrix \f$\Sigma = M(\theta)\f$ given by a matrix structure, and degrees of freedom \f$\nu\f$.
+
+Defined in `<laplace/distrib/mvstudent_t1.hpp>` as \ref laplace::distrib::mvstudent_t1_distrib "mvstudent_t1_distrib\<S\>", in namespace `laplace::distrib`. It follows the interface of \ref distrib_multivariate "Multivariate". Over a positive definite structure `S` it is proper; over a structure modeling `constant_null_space_psdmat` a partial specialization gives the degenerate class. Proper evaluation, derivative, information, moment and draw members are `LAPLACE_HD`; `start_value()` and the degenerate class run on the host only. Across orders 0 to 6 and information orders 0 to 4 over six structures, it matches 60-digit mpmath references within 17.1 ulp1N at orders at most 2, within 6.46 ulp1N at higher orders on four structures (up to 784 ulp1N at near-singular points), and within 19.7 ulp1N on expected information.
+
+## Classic form and parametrization
+
+The classic \f$d\f$-variate Student t distribution (Lange, Little and Taylor, 1989) with location \f$\mu \in \mathbb{R}^d\f$, positive definite scale matrix \f$\Sigma \in \mathbb{R}^{d \times d}\f$, and degrees of freedom \f$\nu > 0\f$ has density
+\f[
+f(y; \mu, \Sigma, \nu) = \frac{\Gamma((\nu + d)/2)}{\Gamma(\nu/2)\,(\nu\pi)^{d/2}\det(\Sigma)^{1/2}} \left(1 + \frac{\delta}{\nu}\right)^{-(\nu + d)/2},
+\f]
+for observation \f$y \in \mathbb{R}^d\f$, residual \f$r = y - \mu\f$, and \f$\delta = r^\top \Sigma^{-1} r\f$. Setting \f$\Sigma = M(\theta)\f$ for structure `S` with parameters \f$\theta \in \mathbb{R}^q\f$ and \f$W = \Sigma^{-1}\f$ yields
+\f[
+f_1(y; \mu, \theta, \nu) = \frac{\Gamma((\nu + d)/2)}{\Gamma(\nu/2)\,(\nu\pi)^{d/2}\det(\Sigma)^{1/2}} \left(1 + \frac{\delta}{\nu}\right)^{-(\nu + d)/2},
+\qquad
+\ell_1 = c_d(\nu) - \tfrac{1}{2}\log\det\Sigma - \tfrac{\nu + d}{2}\log\!\left(1 + \tfrac{\delta}{\nu}\right),
+\f]
+where \f$\delta = r^\top W r\f$ and \f$c_d(\nu) = \log\Gamma((\nu + d)/2) - \log\Gamma(\nu/2) - \tfrac{d}{2}\log(\nu\pi)\f$. Here \f$\Sigma\f$ is the scale matrix, not the covariance: the mean is \f$\mu\f$ for \f$\nu > 1\f$, and \f$\operatorname{Var} Y = \frac{\nu}{\nu - 2}\Sigma\f$ for \f$\nu > 2\f$.
+
+\anchor mvstudent_t1_rest
+## Matrix parameters, degrees of freedom and parameter table
+
+"The rest" is \f$(\theta_0, \dots, \theta_{q-1}, \nu)\f$ with \f$q = \f$`structure.n_params()`, so `n_params()` returns \f$q + 1\f$ and \f$\nu\f$ has the last index \f$q\f$ in `idx` and `ab`. The \f$\theta\f$ table (`theta_table_entries()`, `theta_table_size()`, `fill_theta_table_entry()`, `with_theta_table()`) matches \ref mvgaussian1_theta_table "the Gaussian theta table": it stores \f$\theta\f$-derivatives of \f$W\f$ and \f$\log\det M\f$ only, without \f$\nu\f$.
+
+## State
+
+`theta_state(theta, w)` returns \ref laplace::distrib::mvstudent_t_state "mvstudent_t_state\<mvgaussian1_state\>". It holds `gauss`, the \ref laplace::distrib::mvgaussian1_state "mvgaussian1_state" of the matrix (\f$W = \Sigma^{-1}\f$, factor \f$L\f$ with \f$\Sigma = L L^\top\f$, \f$\log\det\Sigma\f$, optional \f$\theta\f$ table), together with `nu` (\f$\nu\f$), `rho` (\f$\rho = d\f$, or the rank in the degenerate class), and `cnu`, holding \f$c_\rho^{(k)}(\nu)\f$ for \f$k = 0, \dots, 6\f$. `state_size()` is \f$2 d(d + 1)/2\f$ doubles and `scratch_size()` is \f$17 d(d + 1)/2 + 128(d + 1)\f$ plus `structure.scratch_size()` doubles.
+
+\anchor mvstudent_t1_blocks
+## Log-density derivative blocks
+
+`logpdf_dmu_dk<A, K>(state, y, mu, idx, out, w)` computes the order-\f$(A, K)\f$ block for \f$A + K \le 6\f$, using the storage of \ref distrib_multivariate "Multivariate" (\ref laplace::distrib::sym_tensor "sym_tensor" over \f$d\f$ for \f$A \ge 3\f$); `logpdf_dy_dk<J, K>()` gives \f$(-1)^J\f$ times the block with \f$A = J\f$. Unlike the Gaussian, blocks with \f$A \ge 3\f$ are nonzero.
+
+With \f$W_U = \partial_U W\f$ along \f$\theta\f$-subset \f$U\f$, the derivatives of \f$\delta = r^\top W r\f$ are \f$r^\top W_U r\f$ (zero \f$\mu\f$), \f$-2(W_U r)_i\f$ (one \f$\mu\f$), \f$2(W_U)_{ij}\f$ (two \f$\mu\f$), and zero with three or more \f$\mu\f$. By \ref faa_di_bruno "Faà di Bruno's formula", a block with \f$A\f$ positions in \f$\mu\f$, \f$K_\theta\f$ in \f$\theta\f$, and \f$c\f$ in \f$\nu\f$ (\f$A + K_\theta \ge 1\f$) sums over set partitions of those \f$A + K_\theta\f$ positions with at most two \f$\mu\f$ positions per part:
+\f[
+\sum_{\text{partitions}} G(n, c) \prod_{\text{part}} \partial_{\text{part}}\delta,
+\f]
+where \f$n\f$ is the number of parts and \f$G(n, c) = \partial_\delta^n \partial_\nu^c g(\delta, \nu)\f$ for \f$g(\delta, \nu) = -\tfrac{\nu + \rho}{2}\log(1 + \delta/\nu)\f$. For \f$n \ge 1\f$ (checked against SymPy in `tools/reference/mvstudent_t_forms.py`; Meurer and others, 2017):
+\f[
+G(n, 0) = -\tfrac{1}{2}(-1)^{n-1}(n - 1)!\,(\nu + \rho)(\nu + \delta)^{-n},
+\f]
+\f[
+G(n, c) = -\tfrac{1}{2}(-1)^{n-1}(n - 1)!\,f_{c-1}(\nu + \delta)^{-(n+c)}\bigl[(1 - n)\nu - (n + c - 1)\rho + c\delta\bigr] \qquad (c \ge 1),
+\f]
+with \f$f_k = (-1)^k n(n + 1)\cdots(n + k - 1)\f$ (\f$f_0 = 1\f$). Nothing cancels as \f$\nu\f$ grows: for \f$n = 1\f$ the \f$\nu\f$ term drops out, leaving \f$c(\delta - \rho)\f$, and for \f$n \ge 2\f$ the \f$\nu\f$ and \f$\rho\f$ terms share the same sign.
+
+Blocks with \f$A = c = 0\f$ add \f$-\tfrac{1}{2}\partial_T\log\det\Sigma\f$. Pure \f$\nu\f$ blocks (\f$A = K_\theta = 0, c \ge 1\f$) return \f$c_\rho^{(c)}(\nu) + G(0, c)\f$, where \f$G(0, c)\f$ equals the pure \f$\nu\f$-derivative of \ref distrib_student_t1 "student_t1" plus
+\f[
+-\tfrac{\rho - 1}{2}(-1)^{c-1}(c - 1)!\,\nu^{-c}\operatorname{expm1}\!\bigl(-c\log(1 + \delta/\nu)\bigr).
+\f]
+When \f$\delta \gg \nu\f$, terms of order one cancel to order \f$\nu/(\nu + \delta)\f$, so for \f$A + K_\theta \ge 3\f$, residuals, \f$W_U r\f$, \f$r^\top W_U r\f$, \f$G(n, c)\f$, and the partition sum use double-double arithmetic; orders 1 and 2 stay in `double`.
+
+\anchor mvstudent_t1_constant
+## Normalizing constant
+
+With \f$b = \nu / 2\f$ and \f$m = \lfloor\rho / 2\rfloor\f$, integer shifts give
+\f[
+c_\rho(\nu) = \sum_{j=1}^{m-1} \log\!\left(1 + \frac{j}{b}\right) + [\rho\text{ odd}]\left(f(b + m) + \tfrac{1}{2}\log\!\left(1 + \frac{m}{b}\right)\right) - \frac{\rho}{2}\log 2\pi,
+\f]
+where \f$f(x) = \log\Gamma(x + \tfrac{1}{2}) - \log\Gamma(x) - \tfrac{1}{2}\log x\f$ is the helper of \ref student "the Student t distribution function". Its \f$b\f$-derivatives use
+\f[
+\frac{\mathrm{d}^k}{\mathrm{d}b^k}\log\!\left(1 + \frac{j}{b}\right) = (-1)^{k-1}(k - 1)!\,b^{-k}\operatorname{expm1}\!\bigl(-k\log(1 + j/b)\bigr),
+\f]
+scaled by \f$2^{-k}\f$, so every term of order \f$k\f$ has one sign. In 60-digit mpmath, \f$c_\rho'(\nu)\f$ stays within \f$2.7 \times 10^{-16}\f$ relative for \f$d = 2, \dots, 1000\f$ and \f$\nu = 2\f$ to \f$10^{10}\f$, whereas direct digamma differences cancel as \f$\nu\f$ grows (losing \f$1.9 \times 10^{-4}\f$ relative at \f$d = 3, \nu = 10^6\f$).
+
+\anchor mvstudent_t1_info
+## Expected Fisher information
+
+`expected_info_dk<K>(state, block, ab, idx, out, w)` (\f$0 \le K \le 4\f$) uses `info_scratch_size()` doubles in `w` (same as \ref mvgaussian1_info "mvgaussian1"). Let \f$\kappa = (\nu + \rho)/(\nu + \rho + 2)\f$ and \f$t_a = \partial_a\log\det\Sigma\f$. From Lange, Little and Taylor (1989) (checked by quadrature in `tools/reference/mvstudent_t_forms.py` to \f$4.2 \times 10^{-22}\f$ for proper \f$d = 2\f$ and \f$3.4 \times 10^{-21}\f$ for degenerate \f$d = 3, \rho = 2\f$):
+
+- `vector_vector` evaluates \f$I_{\mu\mu} = \kappa W\f$ by Leibniz's rule across \f$\nu\f$-derivatives of \f$\kappa\f$ and \f$\theta\f$-derivatives of \f$W\f$.
+- `vector_rest` vanishes identically and returns `false`.
+- `rest_rest` evaluates \f$\partial_T I_{ab}\f$ for `ab` = \f$(a, b)\f$. For two \f$\theta\f$ indices (\f$a, b < q\f$),
+\f[
+I_{ab} = \kappa I^G_{ab} - \frac{t_a t_b}{2(\nu + \rho + 2)},
+\f]
+with \f$I^G_{ab}\f$ from \ref mvgaussian1_info "mvgaussian1". When `S::closed_factor` is `true` in the proper class, it instead evaluates
+\f[
+I_{ab} = \frac{\kappa}{2}\tilde{T}_{ab} + \frac{\nu\,t_a t_b}{2\rho(\nu + \rho + 2)}, \qquad
+\tilde{T}_{ab} = \operatorname{tr}(\tilde{B}_a \tilde{B}_b), \qquad
+\tilde{B}_a = B_a - \frac{\operatorname{tr}(B_a)}{\rho}I,
+\f]
+where \f$B_a = G_a + G_a^\top\f$ is the whitened derivative of \ref mvgaussian1_info "the Gaussian's factor form" with centred diagonal. On `unit_diagonal_scaled_pdmat\<ar1_pdmat\>` with `common_scale`, this avoids small-\f$\nu\f$ cancellation along \f$\Sigma^{-1}\partial_a\Sigma \propto I\f$, staying within \f$0.81\f$ ulp down to \f$\nu = 10^{-3}\f$ (\f$d = 3, \dots, 10\f$) against \f$48\f$ to \f$3370\f$ ulp at \f$\nu \le 0.01\f$ for the first form, whose loss there is about \f$(\nu + \rho)/\nu\f$.
+
+For \f$a < q, b = q\f$, \f$I_{a\nu} = -t_a / ((\nu + \rho)(\nu + \rho + 2))\f$. For \f$a = b = q\f$, `expected_info_dk()` returns `false` if `idx` holds any \f$\theta\f$ index, and otherwise differentiates
+\f[
+I_{\nu\nu} = \tfrac{1}{4}\bigl[\psi'(\nu/2) - \psi'((\nu + \rho)/2)\bigr] - \frac{\rho(\nu + \rho + 4)}{2\nu(\nu + \rho)(\nu + \rho + 2)}.
+\f]
+Because the direct polygamma form cancels as \f$\nu^{-2}\f$ (losing \f$7.7 \times 10^{-3}\f$ relative at \f$d = 1, \nu = 10^5\f$), \f$I_{\nu\nu}\f$ uses the positive-term recurrence (\f$h = \rho/2\f$):
+\f[
+I(\nu, \rho) - I(\nu, \rho - 2) = \frac{4(h + 1)}{(\nu + 2h)(\nu + 2h - 2)^2(\nu + 2h + 2)} + \frac{8(h - 1)^2}{\nu(\nu + 2h)(\nu + 2h - 2)^2(\nu + 2h + 2)},
+\f]
+from \f$I(\nu, 2) = 8/(\nu^2(\nu + 2)(\nu + 4))\f$ for even \f$\rho\f$ and \ref distrib_student_t1 "student_t1" at \f$\rho = 1\f$ for odd \f$\rho\f$. All \f$\nu\f$-derivatives of \f$I_{\nu\nu}\f$ and rational coefficients are sums of positive products.
+
+\anchor mvstudent_t1_draws
+## Draws, moments and starting values
+
+`rng(state, mu, seed, unit, y)` writes \f$y = \mu + L z / \sqrt{w}\f$ (\f$\Sigma = L L^\top\f$), where \f$w = 2 G / \nu\f$, \f$G\f$ is gamma of shape \f$\nu/2\f$ via \ref laplace::distrib::standard_gamma_by_inversion "standard_gamma_by_inversion()", and \f$z_k\f$ (\f$k = 0, \dots, d - 1\f$) are standard normals via \ref laplace::distrib::standard_normal_by_inversion "standard_normal_by_inversion()". All uniforms come from \ref laplace::distrib::counter_uniform_source "counter_uniform_source" `{seed, unit}` (\ref distrib_generic "Generic routes"): \f$z\f$ at indices \f$0\f$ through \f$d - 1\f$ and the gamma draw at index \f$d\f$.
+
+`mean(theta, mu, out)` writes \f$\mu\f$ for \f$\nu > 1\f$ and quiet NaN otherwise; `covariance(theta, out, w)` writes packed \f$\tfrac{\nu}{\nu - 2}\Sigma\f$ for \f$\nu > 2\f$ (with `structure.scratch_size()` doubles in `w`) and quiet NaN otherwise. On the host, `start_value(summary, theta)` sets \f$\nu = 5\f$ and sets \f$\theta_0, \dots, \theta_{q-1}\f$ as in \ref mvgaussian1_draws "mvgaussian1's start_value()" from \f$0.6\f$ times the sample covariance \f$C\f$.
+
+\anchor mvstudent_t1_degenerate
+## The degenerate class
+
+Over a structure `S` modeling \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat", `mvstudent_t1_distrib\<S\>` sets `normalization` to `distrib_normalization::degenerate` and runs on the host only. It defines the proper Student t law of rank \f$\rho\f$ (`rank()`) on \f$\mu + \operatorname{col}(\Sigma)\f$, substituting \f$\rho\f$ for \f$d\f$ and \f$\Sigma^+, \log\lvert\Sigma\rvert_+\f$ for \f$\Sigma^{-1}, \log\det\Sigma\f$ (\ref mvgaussian1_degenerate "degenerate Gaussian").
+
+`logpdf()` returns \f$-\infty\f$ off the support using the same null-space test, while higher-order blocks differentiate the law on the range. `expected_info_dk<K>()` (\f$K \le 4\f$) requires \f$\partial_{ab} M = \delta_{ab}\,\partial_a M\f$ (as on the degenerate Gaussian). `theta_state()` returns `mvstudent_t_state\<mvgaussian_rank_deficient_state\>`, and \f$\theta\f$-table entries fill sequentially. `rng(state, mu, seed, unit, y, tmp)` takes `tmp` of `dim()` doubles and writes \f$y = \mu + (I - P) L z / \sqrt{w}\f$ (\f$\Sigma + cP = L L^\top\f$). `mean()`, `covariance()`, and `start_value()` (projecting \f$0.6 C\f$ without an eigenvalue floor and setting \f$\nu = 5\f$) behave as in the proper class.
+
+\anchor mvstudent_t1_accuracy
+## Accuracy
+
+See \ref accuracy "How accuracy is measured". References (`tools/reference/distrib_mvstudent_t.py`, `tests/data/reference/mvstudent_t.csv`; 12,568 values) were computed with `mpmath` (The mpmath development team, 2023) at 60 digits (checked against 75 digits to \f$10^{-40}(1 + |v|)\f$) across six positive definite structures (including \f$\nu = 10^6\f$, \f$\nu = 0.05\f$, large residuals, and near-singular points) and four `weighted_sum_psdmat` structures (including a spread point at \f$\nu = 10^5\f$). Errors are normwise `ulp1N` in units of \f$\mathrm{ulp}(\max(S_{\mathrm{block}}, 1))\f$, where \f$S_{\mathrm{block}}\f$ is the largest reference magnitude over all entries and tuples of a point, \f$A\f$, and \f$K\f$ (and at least \f$\max |I_{ab}|\f$ for information). Bounds are those of `tests/distrib/test_mvstudent_t.cpp` on gcc 14.2/OpenMP and CUDA (RTX 4070 SUPER); degenerate rows are host code.
+
+| Structures | Blocks \f$A + K \le 2\f$, gcc (CUDA), bound | Blocks \f$A + K \ge 3\f$, gcc (CUDA), bound | Information, gcc (CUDA), bound |
+|---|---|---|---|
+| `diagonal_pdmat` | 1.47 (1.47), 1–2 | 1.49 (0.92), 1–2 | 0.55 (0.55), 1 |
+| `ar1_pdmat` | 1.96 (1.63), 1–3 | 2.68 (2.68), 1–4 | 2.15 (1.16), 1–3 |
+| `compound_symmetry_pdmat` | 5.19 (5.19), 1–7 | 136 (136), 1–210 | 0.42 (0.44), 1 |
+| `unstructured_pdmat\<log_cholesky_bijector\>` | 17.1 (12.2), 7–26 | 622 (784), 6–1200 | 1.49 (2.51), 1–3 |
+| `unit_diagonal_scaled_pdmat\<ar1_pdmat\>` | 1.66 (1.14), 1–2 | 5.19 (5.19), 1–7 | 1.43 (1.17), 1–2 |
+| `factor_analytic_pdmat` | 2.98 (2.98), 1–4 | 6.46 (6.46), 1–9 | 19.7 (19.7), 1–30 |
+| Degenerate (`d = 4`, rank 2) | 0.72, 1 | 3.4, 1–5 | 0.22, 1 |
+| Degenerate (`d = 5, 6`) | 10.2, 1–16 | 32.6, 1–49 | 5.58, 1–8 |
+| Degenerate (`d = 5`, two \f$D_2\f$) | 16.8, 1–26 | 18.4, 1–28 | 7.85, 1–12 |
+| Degenerate (spread, \f$\nu = 10^5\f$) | \f$1.1 \times 10^5\f$, \f$1.7 \times 10^5\f$ | \f$1.8 \times 10^6\f$, \f$2.7 \times 10^6\f$ | \f$2.6 \times 10^5\f$, \f$3.9 \times 10^5\f$ |
+
+At the near-singular `log_cholesky` (\f$\log L_{33} = -11.5\f$) and `compound_symmetry` (\f$\theta = 8\f$) points, `double` errors in \f$\partial_U \Sigma^{-1}\f$ enter far-tail sums (unlike \ref distrib_mvstudent_t2 "mvstudent_t2"); at the spread degenerate point, error comes from \f$(\Sigma + cP)^{-1}\f$ (\ref mvgaussian1_accuracy "mvgaussian1"). Tests also check that an order-3 \f$\theta\f$ table agrees bit for bit, 400,000 draws (`log_cholesky`, \f$d = 3, \nu = 8\f$) match \f$\mu\f$ within \f$0.0032\f$ standard deviations (bound \f$0.01\f$) and \f$\tfrac{\nu}{\nu-2}\Sigma\f$ within \f$0.38\%\f$ of its largest entry (bound \f$0.03\f$), and degenerate `logpdf()` and `rng()` respect the support. See `docs/numerics.md`.
+
+\anchor mvstudent_t1_speed
+## Speed
+
+Times from `benchmarks/distrib_mvstudent_t.cpp` over \f$n = 10^5\f$ units (`unstructured_pdmat\<log_cholesky_bijector\>`, \f$\nu = 5\f$) on gcc 14.2 with OpenMP (16 threads), in nanoseconds per unit:
+
+| Dimension | Mode | Order 0 (ns) | Order 1 (ns) | Order 2 (ns) |
+|---|---|---|---|---|
+| 3 | Shared \f$(\theta, \nu)\f$ | 4.4 | 118 | 1144 |
+| 3 | Shared with \f$\theta\f$ table | 4.8 | 50 | 283 |
+| 3 | Per-unit \f$(\theta, \nu)\f$ | 115 | 217 | 1241 |
+| 10 | Shared \f$(\theta, \nu)\f$ | 10.9 | 4493 | \f$4.63 \times 10^5\f$ |
+| 10 | Shared with \f$\theta\f$ table | 9.3 | 834 | \f$4.46 \times 10^4\f$ |
+| 10 | Per-unit \f$(\theta, \nu)\f$ | 128 | 4732 | \f$4.70 \times 10^5\f$ |
+
+Double-double accumulation for \f$A + K_\theta \ge 3\f$ costs 3.3 times an order-3 block at \f$d = 3\f$ and 4.7 times at \f$d = 5\f$ on one host thread. CUDA timings are not measured.
+
+## Example
+
+Evaluating `logpdf()` and first derivatives using a shared state and order-1 \f$\theta\f$ table on the device:
+
+\code{.cpp}
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/mvstudent_t1.hpp>
+#include <laplace/pdmat/ar1.hpp>
+
+void eval_mvstudent_t(const Kokkos::View<const double**>& y,
+                      const Kokkos::View<const double**>& mu,
+                      const Kokkos::View<const double*>& theta_nu,
+                      Kokkos::View<double*>& log_lik,
+                      Kokkos::View<double**>& grad_mu,
+                      Kokkos::View<double*>& grad_theta0,
+                      Kokkos::View<double*>& grad_nu) {
+  constexpr int d = 3;
+  const int n = static_cast<int>(y.extent(0));
+  const laplace::distrib::mvstudent_t1_distrib<laplace::pdmat::ar1_pdmat> dist(laplace::pdmat::ar1_pdmat(d));
+  using state_t = laplace::distrib::mvstudent_t1_distrib<laplace::pdmat::ar1_pdmat>::state_type;
+  Kokkos::View<double*> state_buf("state_buf", dist.state_size() + dist.scratch_size());
+  Kokkos::View<state_t> state_view("state");
+
+  Kokkos::parallel_for(
+      "mvt_state", 1, KOKKOS_LAMBDA(int) { state_view() = dist.theta_state(theta_nu.data(), state_buf.data()); });
+
+  const int n_entries = dist.theta_table_entries(1);
+  Kokkos::View<double*> table_buf("table_buf", dist.theta_table_size(1));
+  Kokkos::View<double**, Kokkos::LayoutRight> fill_work("fill_work", n_entries, dist.scratch_size());
+
+  Kokkos::parallel_for(
+      "mvt_table", n_entries, KOKKOS_LAMBDA(int e) {
+        dist.fill_theta_table_entry(state_view(), 1, e, table_buf.data(), &fill_work(e, 0));
+      });
+
+  Kokkos::parallel_for(
+      "mvt_attach", 1, KOKKOS_LAMBDA(int) {
+        state_view() = dist.with_theta_table(state_view(), 1, table_buf.data());
+      });
+
+  Kokkos::parallel_for(
+      "mvt_eval", n, KOKKOS_LAMBDA(int i) {
+        constexpr int scratch_cap = 17 * laplace::pdmat::packed_size(d) + 128 * (d + 1);
+        double w[scratch_cap];
+        double g[d];
+        const auto st = state_view();
+        log_lik(i) = dist.logpdf(st, &y(i, 0), &mu(i, 0));
+        if (dist.template logpdf_dmu_dk<1, 0>(st, &y(i, 0), &mu(i, 0), nullptr, g, w)) {
+          for (int k = 0; k < d; ++k) grad_mu(i, k) = g[k];
+        }
+        const int idx_th[1] = {0};
+        const int idx_nu[1] = {1};
+        double dth = 0.0, dnu = 0.0;
+        if (dist.template logpdf_dmu_dk<0, 1>(st, &y(i, 0), &mu(i, 0), idx_th, &dth, w)) grad_theta0(i) = dth;
+        if (dist.template logpdf_dmu_dk<0, 1>(st, &y(i, 0), &mu(i, 0), idx_nu, &dnu, w)) grad_nu(i) = dnu;
+      });
+}
+\endcode
+
+## Module types
+
+- \ref laplace::distrib::mvstudent_t1_distrib "mvstudent_t1_distrib\<S\>" — multivariate Student t with location \f$\mu\f$, scale matrix \f$\Sigma = M(\theta)\f$, and degrees of freedom \f$\nu\f$, and its degenerate specialization
+- \ref laplace::distrib::mvstudent_t_state "mvstudent_t_state\<G\>" — precomputed state at fixed \f$(\theta, \nu)\f$ (shared with mvstudent_t2)
+
+## References
+
+- Lange, Little and Taylor (1989), Robust statistical modeling using the t distribution, Journal of the American Statistical Association, 84, 881–896.
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/
+
+/**
+\defgroup distrib_mvstudent_t2 mvstudent_t2 (location, inverse scale matrix)
+\brief Multivariate Student t distribution with location vector \f$\mu\f$, inverse scale matrix \f$Q = M(\theta)\f$ given by a matrix structure, and degrees of freedom \f$\nu\f$.
+
+Defined in `<laplace/distrib/mvstudent_t2.hpp>` as \ref laplace::distrib::mvstudent_t2_distrib "mvstudent_t2_distrib\<S\>", in namespace `laplace::distrib`. It follows \ref distrib_multivariate "Multivariate" over a positive definite structure `S` (proper class only). Evaluation, derivative, information, moment and draw members are `LAPLACE_HD`; `start_value()` runs on the host only. Across orders 0 to 6 and information orders 0 to 4 over six structures, it matches 60-digit mpmath references within 13.6 ulp1N on blocks and 8.13 ulp1N on expected information.
+
+## Classic form and parametrization
+
+With inverse scale \f$Q = \Sigma^{-1} = M(\theta)\f$ replacing the scale matrix \f$\Sigma\f$ of \ref distrib_mvstudent_t1 "mvstudent_t1", the density and log-density for \f$y, \mu \in \mathbb{R}^d\f$ and \f$\nu > 0\f$ are
+\f[
+f_2(y; \mu, \theta, \nu) = \frac{\Gamma((\nu + d)/2)}{\Gamma(\nu/2)\,(\nu\pi)^{d/2}}\det(Q)^{1/2}\left(1 + \frac{\delta}{\nu}\right)^{-(\nu + d)/2},
+\qquad
+\ell_2 = c_d(\nu) + \tfrac{1}{2}\log\det Q - \tfrac{\nu + d}{2}\log\!\left(1 + \tfrac{\delta}{\nu}\right),
+\f]
+where \f$r = y - \mu\f$, \f$\delta = r^\top Q r\f$, and \f$c_d(\nu)\f$ is given on \ref mvstudent_t1_constant "mvstudent_t1". Here \f$Q\f$ is the precision only up to \f$(\nu - 2)/\nu\f$: \f$\operatorname{Var} Y = \frac{\nu}{\nu - 2}Q^{-1}\f$ for \f$\nu > 2\f$, and the mean is \f$\mu\f$ for \f$\nu > 1\f$.
+
+## Differences from the scale parametrization
+
+Parameter ordering and the \f$\theta\f$ table (\ref mvstudent_t1_rest "mvstudent_t1 parameters"), Faà di Bruno blocks (\ref mvstudent_t1_blocks "derivative blocks"), normalizing constant (\ref mvstudent_t1_constant "normalizing constant"), and \f$I_{\nu\nu}\f$ recurrence (\ref mvstudent_t1_info "expected information") are shared with `mvstudent_t1`. The differences are:
+
+- `theta_state(theta, w)` returns \ref laplace::distrib::mvstudent_t_state "mvstudent_t_state\<mvgaussian2_state\>", storing \f$W = Q\f$, \f$\log\det Q\f$, and the factor \f$L\f$ of \f$Q = L L^\top\f$.
+- Derivative blocks use \f$W_U = \partial_U Q\f$ from `structure.matrix_dk` (or the \f$\theta\f$ table) and add \f$+\tfrac{1}{2}\partial_T\log\det Q\f$ when \f$A = c = 0\f$.
+- In `expected_info_dk<K>()`, `vector_vector` writes \f$\kappa\partial_T Q\f$ and `rest_rest` uses \f$t_a = -\partial_a\log\det Q\f$; when `S::closed_factor` is `true`, \f$I_{ab}\f$ uses the traceless factor form from the factor of \f$Q\f$, and otherwise the trace route of \ref distrib_mvgaussian2 "mvgaussian2".
+- `rng(state, mu, seed, unit, y)` writes \f$y = \mu + L^{-\top} z / \sqrt{w}\f$ (\ref mvstudent_t1_draws "mvstudent_t1 draws").
+- `covariance(theta, out, w)` writes packed \f$\tfrac{\nu}{\nu - 2}Q^{-1}\f$ for \f$\nu > 2\f$ (quiet NaN otherwise); `start_value(summary, theta)` sets \f$\nu = 5\f$ and maps the floored inverse of \f$0.6 C\f$ to \f$\theta\f$.
+- No improper specialization (singular \f$Q\f$) is provided.
+
+## Accuracy
+
+Measured against the same 60-digit mpmath references and test bounds (`tests/distrib/test_mvstudent_t.cpp`) as \ref mvstudent_t1_accuracy "mvstudent_t1":
+
+| Structures | Blocks \f$A + K \le 2\f$, gcc (CUDA), bound | Blocks \f$A + K \ge 3\f$, gcc (CUDA), bound | Information, gcc (CUDA), bound |
+|---|---|---|---|
+| `diagonal_pdmat` | 1.15 (1.15), 1 | 3.27 (3.27), 1–5 | 0.72 (0.72), 1 |
+| `ar1_pdmat` | 1.55 (1.44), 1–2 | 13.5 (13.6), 1–21 | 2.04 (2.24), 1–3 |
+| `compound_symmetry_pdmat` | 1.59 (1.59), 1–2 | 1.25 (1.25), 1 | 0.41 (0.44), 1 |
+| `unstructured_pdmat\<log_cholesky_bijector\>` | 1.08 (1.84), 1–2 | 2.39 (5.7), 1–8 | 2.51 (2.79), 1–4 |
+| `unit_diagonal_scaled_pdmat\<ar1_pdmat\>` | 2.58 (2.58), 1–3 | 2.51 (2.51), 1–3 | 1.55 (5.57), 1–8 |
+| `factor_analytic_pdmat` | 1.11 (1.11), 1 | 2.02 (1.96), 1–3 | 8.13 (7.38), 1–13 |
+
+Because the blocks differentiate \f$Q\f$ directly, they avoid the near-singular losses of `mvstudent_t1`. The \f$\theta\f$-table and draw checks pass as on \ref mvstudent_t1_accuracy "mvstudent_t1".
+
+## Speed
+
+Measured as on \ref mvstudent_t1_speed "mvstudent_t1" (`benchmarks/distrib_mvstudent_t.cpp`, gcc 14.2, OpenMP 16 threads, \f$n = 10^5\f$, `unstructured_pdmat\<log_cholesky_bijector\>`, \f$\nu = 5\f$), in nanoseconds per unit:
+
+| Dimension | Mode | Order 0 (ns) | Order 1 (ns) | Order 2 (ns) |
+|---|---|---|---|---|
+| 3 | Shared \f$(\theta, \nu)\f$ | 4.2 | 57 | 318 |
+| 3 | Shared with \f$\theta\f$ table | 3.9 | 48 | 267 |
+| 3 | Per-unit \f$(\theta, \nu)\f$ | 110 | 154 | 412 |
+| 10 | Shared \f$(\theta, \nu)\f$ | 9.5 | 957 | \f$3.82 \times 10^4\f$ |
+| 10 | Shared with \f$\theta\f$ table | 9.9 | 889 | \f$3.78 \times 10^4\f$ |
+| 10 | Per-unit \f$(\theta, \nu)\f$ | 102 | 1073 | \f$3.94 \times 10^4\f$ |
+
+At \f$d = 10\f$, order 2 takes about 19 times as long as `mvgaussian2` (2021 ns) because each `(rest, rest)` pair evaluates the quadratic forms of its four sub-tuples.
+
+## Module types
+
+- \ref laplace::distrib::mvstudent_t2_distrib "mvstudent_t2_distrib\<S\>" — multivariate Student t with location \f$\mu\f$, inverse scale matrix \f$Q = M(\theta)\f$, and degrees of freedom \f$\nu\f$
+*/

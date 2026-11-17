@@ -190,7 +190,11 @@ LAPLACE_HD int factor_info_scratch(const S& s) {
   return 113 * s.dim * s.dim + packed_size(s.dim) + s.scratch_size();
 }
 
-template <int K, class St, class S>
+// Traceless (the multivariate t, detail/mvstudent_t_common.hpp): 1/2 tr(Btilde_a
+// Btilde_b) instead, Btilde = B - tr(B)/d I, the diagonal of each d_S G centred
+// before the products, so that a B proportional to the identity gives zero
+// exactly.
+template <int K, bool Traceless = false, class St, class S>
 LAPLACE_HD bool expected_info_factor(const S& s, const St& st, const int* pair, const int* idx, double* out,
                                      double* w) {
   constexpr int NT = 1 << K, NM = 4 * NT;  // masks over the positions (a, b, T)
@@ -270,6 +274,16 @@ LAPLACE_HD bool expected_info_factor(const S& s, const St& st, const int* pair, 
     any = true;
     const double* G1 = dG + U * dd;
     const double* G2 = dG + (NT + V) * dd;
+    if constexpr (Traceless) {
+      double m1 = 0.0, m2 = 0.0;
+      for (int i = 0; i < d; ++i) m1 += G1[i * d + i], m2 += G2[i * d + i];
+      m1 /= d, m2 /= d;
+      for (int i = 0; i < d; ++i) {
+        res += 2.0 * (G1[i * d + i] - m1) * (G2[i * d + i] - m2);
+        for (int j = 0; j < i; ++j) res += G1[i * d + j] * G2[i * d + j];
+      }
+      continue;
+    }
     for (int i = 0; i < d; ++i) {
       res += G1[i * d + i] * G2[i * d + i];
       for (int j = 0; j <= i; ++j) res += G1[i * d + j] * G2[i * d + j];

@@ -9469,3 +9469,143 @@ this library needs: a continuous wrapper carries its own cumulative route and
 a discrete one declares no atom, so they would serve only a distribution
 written outside this file. The other wrappers of `note/piano_wrapper.md`,
 truncation first.
+
+## The multivariate Student t: mvstudent_t1 and mvstudent_t2 (2026-11-17)
+
+What: `mvstudent_t1_distrib<S>` (scale matrix Sigma = M(theta)) and
+`mvstudent_t2_distrib<S>` (inverse scale Q = M(theta)), degrees of freedom
+nu > 0 as the last component of "the rest" (theta, nu); proper over a pdmat,
+and for mvstudent_t1 the degenerate class over a psdmat with a constant null
+space (`weighted_sum_psdmat`, host only). The improper class of mvstudent_t2 is
+not built. Headers `include/laplace/distrib/mvstudent_t1.hpp`,
+`mvstudent_t2.hpp`, the state in `mvstudent_t_state.hpp`, shared code
+`distrib/detail/mvstudent_t_common.hpp`. Test
+`tests/distrib/test_mvstudent_t.cpp`, references
+`tools/reference/distrib_mvstudent_t.py` (12568 mpmath values) and
+`tools/reference/statmodels7_mvstudent_t.R` (3378 frozen values), closed forms
+checked by `tools/reference/mvstudent_t_forms.py` (SymPy), bench
+`benchmarks/distrib_mvstudent_t.cpp`.
+
+How. rho = d (proper) or the rank (degenerate), r = y - mu, W = Sigma^-1,
+Sigma^+ or Q, delta = r' W r:
+
+    l = c_rho(nu) -+ 1/2 log|M| - (nu + rho)/2 log1p(delta/nu),
+    c_rho(nu) = lgamma((nu + rho)/2) - lgamma(nu/2) - rho/2 log(nu pi).
+
+- The state is the Gaussian state of the same matrix (W, the factor, log|M|,
+  the theta table unchanged) plus nu and c_rho^(k)(nu), k = 0..6.
+- c_rho by integer shifts of the univariate t's f(x) = lgamma(x + 1/2) -
+  lgamma(x) - 1/2 log x (`math::own::detail_st::fder`): with b = nu/2,
+  m = floor(rho/2), c_rho = sum_(j=1..m-1) log1p(j/b) + [rho odd](f(b + m) +
+  1/2 log1p(m/b)) - rho/2 log 2pi, and d^k log1p(j/b)/db^k = (-1)^(k-1) (k-1)!
+  b^-k expm1(-k log1p(j/b)), one sign. Measured before the choice (mpmath at 60
+  digits, f exact): c'_rho within 2.7e-16 relative for d = 2..1000 and nu = 2
+  to 1e10; the direct digamma form loses 1.9e-4 at d = 3, nu = 1e6 and has the
+  wrong magnitude at 1e10 (d = 2 is exactly zero).
+- Blocks: Faa di Bruno through delta, whose derivatives are r' W_U r,
+  -2 (W_U r)_i, 2 (W_U)_ij and zero with three or more mu: a block is the sum
+  over the set partitions of its A + K_theta positions with at most two mu per
+  part, weighted by G(n, c) = d^n/d delta^n d^c/d nu^c g,
+  g = -(nu + rho)/2 log1p(delta/nu), in closed form without cancellation as
+  nu grows (n = 1: c (delta - rho)). The pure nu blocks: student_t1's pure nu
+  derivative plus -(rho - 1)/2 (-1)^(c-1) (c-1)! nu^-c expm1(-c log1p(delta/nu)).
+  Nonzero up to A = 6 (`sym_tensor` over d for A >= 3).
+- The far tail (decided 2026-11-17): where delta >> nu the terms of the sum are
+  of size one and the block of size nu/(nu + delta) (1-D: d2 log(nu + delta
+  e^-2s) = -4u^2 + 4u = 4u(1 - u), u = delta/(nu + delta)). The sum, its weights
+  and its inputs r' W_U r and W_U r (r by two_sum) are in double-double for
+  A + K_theta >= 3; orders 1 and 2 stay in double. Worst ulp1N before and
+  after: diagonal (large residuals, delta/nu ~ 170) A = 1, K = 5, 1.0e4 to
+  below 1.5; compound_symmetry near singular A = 4, K = 2, 7.7e3 to 136, A = 2,
+  K = 4, 3.3e3 to 46; log_cholesky near singular A = 2, K = 4, 3.8e3 to 266 (gcc;
+  784 on CUDA). A split log(nu + delta) = log delta + log1p(nu/delta) helped only
+  where one component dominates exactly. Cost: 3.3 times per order-3 block at
+  d = 3 and 4.7 at d = 5 (one thread, host); orders 0 to 2 unchanged.
+- Expected information (Lange, Little and Taylor 1989), kappa = (nu + rho)/(nu +
+  rho + 2), t_a = d_a log|Sigma|: I_mumu = kappa W, I_mu,rest = 0, I_ab = kappa
+  I^G_ab - t_a t_b/(2 (nu + rho + 2)), I_a,nu = -t_a/((nu + rho)(nu + rho + 2)),
+  I_nunu = 1/4 [psi'(nu/2) - psi'((nu + rho)/2)] - rho (nu + rho + 4)/(2 nu (nu +
+  rho)(nu + rho + 2)). Checked against E[score score'] by quadrature over the law
+  (mpmath at 20 digits): proper d = 2, 4.2e-22; degenerate d = 3, rho = 2,
+  3.4e-21, which confirms rho in place of d on the range.
+- Small nu (decided 2026-11-16): along a direction where Sigma^-1 d_a Sigma is a
+  multiple of the identity the two terms of I_ab cancel. For closed_factor
+  structures I_ab = kappa Ttilde_ab/2 + nu t_a t_b/(2 rho (nu + rho + 2)),
+  Ttilde from the whitened B_a of the Gaussian's factor form with the diagonal
+  centred (one flag added to `expected_info_factor`). Measured on
+  unit_diagonal_scaled<ar1> with common_scale, exact I_ss = 2 d nu/(nu + d + 2):
+  <= 0.81 ulp for nu down to 1e-3 and d = 3..10, against 48 to 3370 ulp for the
+  direct form at nu <= 0.01. factor_analytic, matrix_log and the degenerate class
+  keep the direct form (loss about (nu + rho)/nu there).
+- I_nunu cancels as nu^-2 relative (the direct form with correctly rounded
+  trigammas: 1.2e-6 at d = 1, nu = 1e4; 7.7e-3 at 1e5). By a recurrence in rho
+  found with SymPy, I(nu, rho) - I(nu, rho - 2) = 4 (h + 1)/((nu + 2h)(nu + 2h -
+  2)^2 (nu + 2h + 2)) + 8 (h - 1)^2/(nu (nu + 2h)(nu + 2h - 2)^2 (nu + 2h + 2)),
+  h = rho/2, positive; I(nu, 2) = 8/(nu^2 (nu + 2)(nu + 4)) and I(nu, 1) is
+  student_t1's. Its nu derivatives are sums of positive products: no series,
+  no cancellation, O(rho) per state.
+- Draws: y = mu + L z/sqrt(w) (L^-T z for mvstudent_t2), w = 2 G/nu,
+  G = P^-1(nu/2, u), z at the indices 0..d-1 and u at index d of
+  `counter_uniform_source{seed, unit}`; degenerate (I - P) L z/sqrt(w).
+  400000 draws (log_cholesky, d = 3, nu = 8): mean within 0.0032 sd, covariance
+  nu/(nu - 2) Sigma within 0.38 per cent of its largest entry.
+- Moments NaN where they do not exist (mean nu <= 1, covariance nu <= 2);
+  start_value nu = 5, Sigma from 0.6 times the sample covariance.
+
+Accuracy against mpmath at 60 digits from the definition (Cholesky or the
+eigendecomposition; the blocks by one-dimensional mpmath.diff along the
+directions of the polarization identity, the information from the formula above
+with the Gaussian part from F = E[-l] as in the Gaussian references). Points:
+per structure a random one at nu = 4.5, and nu = 1e6 (log_cholesky), nu = 0.05
+(ar1, scaled_ar1), large residuals at nu = 2.5 (diagonal), near singular at
+nu = 6 (log_cholesky, log L33 = -11.5) and nu = 3 (compound_symmetry,
+theta = 8). Worst ulp1N, gcc 14.2 / CUDA:
+
+| | blocks, orders <= 2 | blocks, orders >= 3 | information |
+|---|---|---|---|
+| mvstudent_t1 diagonal | 1.47 / 1.47 | 1.49 / 0.92 | 0.55 / 0.55 |
+| mvstudent_t1 ar1 | 1.96 / 1.63 | 2.68 / 2.68 | 2.15 / 1.16 |
+| mvstudent_t1 compound_symmetry | 5.19 / 5.19 | 136 / 136 | 0.42 / 0.44 |
+| mvstudent_t1 log_cholesky | 17.1 / 12.2 | 622 / 784 | 1.49 / 2.51 |
+| mvstudent_t1 scaled_ar1 | 1.66 / 1.14 | 5.19 / 5.19 | 1.43 / 1.17 |
+| mvstudent_t1 factor_analytic | 2.98 / 2.98 | 6.46 / 6.46 | 19.7 / 19.7 |
+| mvstudent_t2 diagonal | 1.15 / 1.15 | 3.27 / 3.27 | 0.72 / 0.72 |
+| mvstudent_t2 ar1 | 1.55 / 1.44 | 13.5 / 13.6 | 2.04 / 2.24 |
+| mvstudent_t2 compound_symmetry | 1.59 / 1.59 | 1.25 / 1.25 | 0.41 / 0.44 |
+| mvstudent_t2 log_cholesky | 1.08 / 1.84 | 2.39 / 5.7 | 2.51 / 2.79 |
+| mvstudent_t2 scaled_ar1 | 2.58 / 2.58 | 2.51 / 2.51 | 1.55 / 5.57 |
+| mvstudent_t2 factor_analytic | 1.11 / 1.11 | 2.02 / 1.96 | 8.13 / 7.38 |
+| degenerate, ws d = 4, rank 2 | 0.72 | 3.4 | 0.22 |
+| degenerate, ws d = 5, 6 | 10.2 | 32.6 | 5.58 |
+| degenerate, ws d = 5, two D2 | 16.8 | 18.4 | 7.85 |
+| degenerate, spread (theta 9 apart), nu = 1e5 | 1.1e5 | 1.8e6 | 2.6e5 |
+
+(orders: A + K, nu included; the degenerate rows are host code, the same on both
+builds.) What it says: the mvstudent_t2 blocks stay within 14 ulp1N; mvstudent_t1
+loses at the two near-singular points, where the errors of d_U Sigma^-1 (the
+structure's inverse recursion) enter sums that the far tail makes
+ill-conditioned; the spread degenerate point is the dense (Sigma + cP)^-1 of the
+degenerate Gaussian (section above), not the t. The bounds of the test are
+these numbers times 1.5 per (structure, A, K).
+
+Against statmodels7 (log_cholesky, d = 2, 3, nu = 0.8, 4.5, 400, orders to 4 and
+the information at order 0; statmodels7's own rounding included): worst
+16.5 ulp1N on mvstudent_t1 and 14.4 on mvstudent_t2.
+
+Speed (gcc 14.2, OpenMP 16 threads, n = 1e5, log_cholesky, nu = 5), ns per
+unit, theta shared / shared with the theta table / per unit:
+
+| | order 0 | order 1 | order 2 |
+|---|---|---|---|
+| mvstudent_t1 d = 3 | 4.4 / 4.8 / 115 | 118 / 50 / 217 | 1144 / 283 / 1241 |
+| mvstudent_t2 d = 3 | 4.2 / 3.9 / 110 | 57 / 48 / 154 | 318 / 267 / 412 |
+| mvstudent_t1 d = 10 | 10.9 / 9.3 / 128 | 4493 / 834 / 4732 | 4.63e5 / 4.46e4 / 4.70e5 |
+| mvstudent_t2 d = 10 | 9.5 / 9.9 / 102 | 957 / 889 / 1073 | 3.82e4 / 3.78e4 / 3.94e4 |
+
+Order 2 at d = 10 costs about 19 times the Gaussian's (mvgaussian2, 2021 ns):
+each (rest, rest) pair needs the quadratic forms of its four sub-tuples. Not
+measured on CUDA yet.
+
+Open: the improper (intrinsic) class of mvstudent_t2; the double-double sums
+take the inputs d_U W in double, so the near-singular mvstudent_t1 cells keep
+the structure's own error (622 to 784 ulp1N).

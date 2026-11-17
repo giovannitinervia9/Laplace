@@ -251,6 +251,13 @@ parent here, in tree order; the module pages define their groups without
 \ingroup distrib_mvgaussian */
 /** \addtogroup distrib_mvgaussian2
 \ingroup distrib_mvgaussian */
+/** \defgroup distrib_mvstudent_t Multivariate t
+\ingroup distrib_multivariate
+\brief The multivariate Student t distribution in two parametrizations. */
+/** \addtogroup distrib_mvstudent_t1
+\ingroup distrib_mvstudent_t */
+/** \addtogroup distrib_mvstudent_t2
+\ingroup distrib_mvstudent_t */
 
 /** \defgroup penalty Penalties
 \brief Penalty concept, compile-time descriptors, and adapters from multivariate distributions. */
