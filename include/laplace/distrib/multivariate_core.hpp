@@ -267,7 +267,8 @@ LAPLACE_HD int block_kron_size(const D& d, int g, std::index_sequence<I...>) {
  * \f$G =\f$ `mv_n_blocks(d)` and \f$n_g =\f$
  * `mv_block_start(d, slot, g + 1) - mv_block_start(d, slot, g)` is the size
  * of block \f$g\f$ in `slot`. With `slot == y_slot` and `order == J`, this is
- * the required length of `out` for `mv_logpdf_dy_dk_blocks<J, K>()`.
+ * the required length of `out` for `mv_logpdf_dy_dk_blocks<J, K>()`. Order 0
+ * is the scalar: \f$1\f$.
  *
  * \tparam D Multivariate distribution type.
  * \param d Multivariate distribution.
@@ -278,6 +279,7 @@ LAPLACE_HD int block_kron_size(const D& d, int g, std::index_sequence<I...>) {
  */
 template <class D>
 LAPLACE_HD int mv_block_tensor_size(const D& d, int slot, int order) {
+  if (order == 0) return 1;  // the scalar, summed over the blocks
   int n = 0;
   for (int g = 0, G = mv_n_blocks(d); g < G; ++g)
     n += sym_tensor_size(mv_block_start(d, slot, g + 1) - mv_block_start(d, slot, g), order);
@@ -292,7 +294,8 @@ LAPLACE_HD int mv_block_tensor_size(const D& d, int slot, int order) {
  * where \f$G =\f$ `mv_n_blocks(d)` and \f$n_{jg}\f$ is the number of
  * coordinates of the \f$j\f$-th dense parameter in block \f$g\f$ (omitted
  * trailing orders default to \f$0\f$), times `sym_tensor_size(n_yg, y_order)`
- * for the \f$n_{yg}\f$ coordinates of \f$y\f$ in block \f$g\f$.
+ * for the \f$n_{yg}\f$ coordinates of \f$y\f$ in block \f$g\f$. Order 0
+ * (`y_order` and every \f$A_j\f$ equal to 0) is the scalar: \f$1\f$.
  *
  * \tparam A Derivative orders in the dense parameters, in declaration order.
  * \tparam D Multivariate distribution type.
@@ -303,6 +306,7 @@ LAPLACE_HD int mv_block_tensor_size(const D& d, int slot, int order) {
  */
 template <int... A, class D>
 LAPLACE_HD int mv_block_tensor_size(const D& d, int y_order = 0) {
+  if (y_order == 0 && (true && ... && (A == 0))) return 1;  // the scalar, summed over the blocks
   int n = 0;
   for (int g = 0, G = mv_n_blocks(d); g < G; ++g)
     n += sym_tensor_size(mv_block_start(d, y_slot, g + 1) - mv_block_start(d, y_slot, g), y_order) *

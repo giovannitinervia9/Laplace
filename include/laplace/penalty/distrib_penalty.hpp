@@ -160,8 +160,16 @@ struct distrib_penalty {
    * \brief Return the weak-convexity constant \f$\sup(-\mathrm{pen}'')\f$ at `theta`.
    * \param theta Hyperparameters, length `theta_size()`.
    * \return Weak-convexity constant (0 for a convex penalty).
+   *
+   * Calls `traits::weak_convexity(distribution, theta)` when the traits read
+   * the distribution (its sizes), `traits::weak_convexity(theta)` otherwise.
    */
-  LAPLACE_HD double weak_convexity(const double* theta) const { return traits::weak_convexity(theta); }
+  LAPLACE_HD double weak_convexity(const double* theta) const {
+    if constexpr (requires { traits::weak_convexity(distribution, theta); })
+      return traits::weak_convexity(distribution, theta);
+    else
+      return traits::weak_convexity(theta);
+  }
 
   /**
    * \brief The penalty value \f$-\log p_M(\beta \mid \mu_0, \theta)\f$.
@@ -177,11 +185,14 @@ struct distrib_penalty {
   /**
    * \brief Derivatives of the penalty: `J` in \f$\beta\f$ and `K` in \f$\theta\f$ along the sorted tuple `idx`.
    *
-   * Equal to \f$-\f$ `M::logpdf_dy_dk<J, K>`; the output layout is that of `M`,
-   * the packed symmetric tensor of order \f$J\f$ over \f$\beta\f$
-   * (`sym_tensor_size(dim(), J)` doubles: scalar, `dim()`-vector, packed matrix,
-   * sorted tuples for \f$J \ge 3\f$), and `false` is returned, `out` untouched,
-   * when `M` reports the block zero by structure.
+   * Equal to \f$-\f$ `distrib::mv_logpdf_dy_dk_blocks<J, K>` of `M`, in the
+   * block layout of `M`: block after block, the packed symmetric tensor of
+   * order \f$J\f$ over that block's coordinates of \f$\beta\f$ (scalar,
+   * vector, packed matrix, sorted tuples for \f$J \ge 3\f$), in all
+   * `distrib::mv_block_tensor_size(distribution, distrib::y_slot, J)` doubles.
+   * A law without blocks is one block, the dense layout over `dim()`.
+   * `false` is returned, `out` untouched, when `M` reports the block zero by
+   * structure.
    *
    * \tparam J Derivative order in \f$\beta\f$.
    * \tparam K Derivative order in \f$\theta\f$.
@@ -196,8 +207,8 @@ struct distrib_penalty {
   template <int J, int K>
   LAPLACE_HD bool value_dbeta_dk(const state_type& st, const double* beta, const int* idx, double* out,
                                  double* w) const {
-    if (!distribution.template logpdf_dy_dk<J, K>(st, beta, location(w), idx, out, w)) return false;
-    const int n = distrib::sym_tensor_size(dim(), J);
+    if (!distrib::mv_logpdf_dy_dk_blocks<J, K>(distribution, st, beta, location(w), idx, out, w)) return false;
+    const int n = distrib::mv_block_tensor_size(distribution, distrib::y_slot, J);
     for (int k = 0; k < n; ++k) out[k] = -out[k];
     return true;
   }

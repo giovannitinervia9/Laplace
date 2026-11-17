@@ -1,0 +1,138 @@
+/**
+\defgroup distrib_independent_product Independent product
+\brief Univariate laws as multivariate ones, products of independent blocks, and their penalty descriptors.
+
+Include `<laplace/distrib/univariate_as_multivariate.hpp>` for \ref laplace::distrib::univariate_as_multivariate "univariate_as_multivariate\<D\>", `<laplace/distrib/independent_product.hpp>` for \ref laplace::distrib::independent_product_distrib "independent_product_distrib\<M...\>", and `<laplace/penalty/independent_product_penalty.hpp>` for their penalty descriptors. The distribution classes and their helpers live in namespace `laplace::distrib`, and the penalty descriptors live in namespace `laplace::penalty`. All public member functions on this page are marked `LAPLACE_HD` and can be called on the host and inside Kokkos kernels on the device. In tests over three products on the host and inside a Kokkos kernel, log-densities match component sums within \f$10^{-14}\f$, derivative blocks agree with central differences within \f$10^{-6}\f$ (with kernel and host errors within \f$10^{-9}\f$), and a two-dimensional normalization integral agrees with \f$1\f$ within \f$10^{-9}\f$.
+
+## Univariate adapter
+
+The adapter \ref laplace::distrib::univariate_as_multivariate "univariate_as_multivariate\<D\>" presents a continuous univariate distribution `D` with a real location as a \ref laplace::distrib::multivariate_distrib "multivariate_distrib" (see \ref distrib_multivariate "Multivariate") of dimension \f$d = 1\f$ and normalization `distrib_normalization::proper`. Parameter \f$0\f$ of `D` becomes the dense location parameter \f$\mu\f$ (`distrib_mv_param_kind::vector`) of size \f$1\f$, so `param_size(0)` is \f$1\f$ and `param_offset(0)` is \f$0\f$. Parameters \f$1, \dots, P - 1\f$ of `D` (where \f$P =\f$ `D::n_params`) become `distrib_mv_param_kind::scalar` parameters whose coordinates form \f$\theta\f$ of length \f$P - 1\f$ in `D`'s order, with `theta_size()` equal to \f$P - 1\f$, `param_size(j)` equal to \f$1\f$, and `param_offset(j)` equal to \f$j - 1\f$ for \f$j \ge 1\f$. Each descriptor in `params` keeps `D`'s `name`, `lower`, `upper`, and `regularity`.
+
+Three compile-time assertions check the requirements on `D`:
+
+- `D::kind == distrib_kind::continuous` (error `"univariate_as_multivariate: D must be continuous"`).
+- `D::params[0].lower == -distrib_infinity && D::params[0].upper == distrib_infinity` (error `"univariate_as_multivariate: D's parameter 0 must be a real location"`).
+- `sizeof(D) == D::n_params * sizeof(double)`, meaning `D` is an aggregate of its \f$P\f$ parameters in `params` order (error `"univariate_as_multivariate: D must be an aggregate of its parameters"`).
+
+Its state type is \ref laplace::distrib::univariate_as_multivariate_state "univariate_as_multivariate_state", which stores only `const double* theta`. Both `state_size()` and `scratch_size()` return \f$0\f$, and `theta_state(theta, w)` returns `{theta}` without writing to `w`; the caller must keep `theta` alive while the state is in use. Each call to `logpdf()` or a derivative function reconstructs `D` from `(x[0], st.theta)` as an aggregate of \f$P\f$ doubles.
+
+A sorted index tuple `idx` of length \f$K\f$ over \f$\theta\f$ corresponds to the tuple `idx + 1` over `D`'s parameters. For \f$J + K + A \le 6\f$ (with omitted \f$A\f$ defaulting to \f$0\f$), `logpdf_dy_dk<J, K, A>(st, y, x, idx, out, w)` evaluates `D::logpdf_dy_dk<J, K + A>(y[0])` and writes one `double` into `out[0]`: entry \f$0\f$ when \f$K = A = 0\f$, and otherwise the component \f$(0^A, \mathrm{idx} + 1)\f$ (\f$A\f$ zeros followed by `idx[i] + 1` for \f$0 \le i < K\f$) located by `sym_tensor_position<n_params, K + A>`. The call always returns `true`, and `logpdf_dk<K, A>` forwards to `logpdf_dy_dk<0, K, A>`.
+
+## Independent product
+
+The distribution \ref laplace::distrib::independent_product_distrib "independent_product_distrib\<M_1, ..., M_n\>" (\f$n \ge 1\f$) forms the product of \f$n\f$ independent multivariate components, each repeated over its copies:
+\f[
+\log p(y \mid \mu, \theta) = \sum_k \sum_c \log p_{M_k}(y_{kc} \mid \mu_{kc}, \theta_{k, h_k(c)}).
+\f]
+Here \f$k = 0, \dots, n - 1\f$ indexes the component distributions \f$M_k\f$, each of dimension \f$d_k\f$, and \f$c = 0, \dots, G_k - 1\f$ indexes the \f$G_k\f$ copies of component \f$k\f$. Component \f$k\f$ has \f$H_k\f$ parameter sets indexed by \f$h = 0, \dots, H_k - 1\f$, and the map \f$h_k(c) \in \{0, \dots, H_k - 1\}\f$ selects the parameter set used by copy \f$c\f$.
+
+Each component is passed as an \ref laplace::distrib::independent_product_component "independent_product_component\<M_k\>" holding `distribution` (`M_k`), `copies` (\f$G_k\f$), `n_sets` (\f$H_k\f$), and `set_of_copy`. Its `set(c)` member evaluates \f$h_k(c)\f$: it returns `set_of_copy[c]` when `set_of_copy` is non-null (the pointer is non-owning and not copied), \f$0\f$ when `set_of_copy` is `nullptr` and `n_sets == 1` (all copies share one parameter set), and \f$c\f$ when `set_of_copy` is `nullptr` and `n_sets == copies` (one set per copy).
+
+The observation vector \f$y\f$ and location vector \f$\mu\f$ are concatenated copy by copy within each component, component by component, so `dim()` returns \f$\sum_k G_k d_k\f$. Each copy forms one block: `n_blocks()` returns \f$\sum_k G_k\f$, and `block_start(slot, g)` (for `y_slot` or parameter \f$0\f$, with \f$0 \le g \le\f$ `n_blocks()`) returns the starting coordinate of block \f$g\f$, or `dim()` when \f$g =\f$ `n_blocks()`.
+
+At compile time, `independent_product_distrib` checks that there is at least one component, that each `M_k` has exactly one dense parameter (its location, at index \f$0\f$), and that `M_k::state_type` is trivially copyable. Its `normalization` is `distrib_normalization::improper` if any component is improper, `distrib_normalization::degenerate` if none is improper and at least one is degenerate, and `distrib_normalization::proper` otherwise.
+
+## Parameters and workspace
+
+The indexed array \f$\theta\f$ has total length `theta_size()` equal to \f$\sum_k H_k q_k\f$, where \f$q_k =\f$ `M_k::theta_size()`, and is ordered param-major. For each component \f$k\f$ and each indexed parameter \f$j = 1, \dots, P_k - 1\f$ of `M_k` (where \f$P_k =\f$ `M_k::n_params`), the \f$H_k\f$ copies of parameter \f$j\f$ sit side by side. For instance, a Student t component with two parameter sets orders \f$\theta\f$ as \f$(\sigma_0, \sigma_1, \nu_0, \nu_1)\f$.
+
+The parameter descriptor table `params` has `n_params` equal to \f$1 + \sum_k (P_k - 1)\f$. Entry \f$0\f$ is `"mu"` (`distrib_mv_param_kind::vector`, bounds \f$(-\infty, \infty)\f$, and regularity equal to the least `M_k::params[0].regularity` over all components). Each subsequent entry belongs to one pair of component \f$k\f$ and indexed parameter \f$j\f$, preserving `M_k`'s `name`, `kind`, `lower`, `upper`, and `regularity`. Consequently, `param_size(0)` equals `dim()`, and for an indexed parameter of component \f$k\f$ it equals \f$H_k\f$ times `M_k`'s parameter size; `param_offset(j)` is \f$0\f$ for \f$j = 0\f$ and the sum of preceding indexed `param_size()` values for \f$j \ge 1\f$.
+
+The state type is \ref laplace::distrib::independent_product_state "independent_product_state", holding `const double* regions`. Calling `theta_state(theta, w)` partitions `w[0, state_size())` into one region per component set \f$(k, h)\f$. For each set, it reserves the size of `M_k::state_type` rounded up to whole `double`s, gathers the set's \f$q_k\f$ parameters into `w` via `gather_set_theta()`, and calls `M_k::theta_state()` on that copy using the trailing memory as scratch. `state_size()` returns the total `double` count of all per-set regions, and `scratch_size()` returns the largest `M_k::scratch_size()` across components. The caller must pass `w` of length `state_size() + scratch_size()` doubles and keep `w`, `theta`, and any `set_of_copy` arrays alive while the state is in use. The helper `each(f)` visits the components in order as `f(component, std::integral_constant<int, k>{})`.
+
+## Derivative blocks and dense layout
+
+A sorted index tuple `idx` of length \f$K\f$ over \f$\theta\f$ whose entries belong to two distinct sets (either two components or two sets of the same component) corresponds to zero mixed partial derivatives by independence. Both derivative routes return `false` and leave `out` untouched for such a tuple.
+
+The block route `logpdf_dy_dk_blocks<J, K, A...>(st, y, x, idx, out, w)` writes, copy after copy, the output of `M_k::logpdf_dy_dk<J, K, A...>` for that copy (\f$\binom{d_k + J - 1}{J}\binom{d_k + A - 1}{A}\f$ doubles), or zeros when the copy belongs to a set outside `idx` or `M_k` returns `false`. Order \f$0\f$ (\f$J = A = 0\f$) is the scalar sum over all copies, written to `out[0]`. The buffer `out` must hold \ref laplace::distrib::mv_block_tensor_size "mv_block_tensor_size\<A...\>(*this, J)" doubles, and `w` must hold the components' scratch (`scratch_size()`, plus \f$\binom{d_k + J + A - 1}{J + A}\f$ doubles when `A > 0` for components that expand mixed \f$(y, \mu)\f$ blocks from a higher-order \f$\mu\f$ tensor). The block layout and the free helpers \ref laplace::distrib::mv_n_blocks "mv_n_blocks()", \ref laplace::distrib::mv_block_start "mv_block_start()", \ref laplace::distrib::mv_block_tensor_size "mv_block_tensor_size()", and \ref laplace::distrib::mv_logpdf_dy_dk_blocks "mv_logpdf_dy_dk_blocks()" are documented on \ref distrib_multivariate "Multivariate".
+
+The dense route `logpdf_dy_dk<J, K, A...>(st, y, x, idx, out, w)` delegates to `logpdf_dy_dk_blocks` when \f$J = A = 0\f$. Otherwise, it evaluates the block route into `w` after the components' scratch and scatters each block's tensor into the packed symmetric tensors over `dim()` (order \f$J\f$ over \f$y\f$, Kronecker product row-major with \f$y\f$ first with order \f$A\f$ over \f$\mu\f$), setting every entry coupling two distinct blocks to \f$0\f$. Because the dense output grows as \f$d^{J + A}\f$, this route is intended for tests and small dimensions; its scratch `w` must hold the components' scratch followed by `mv_block_tensor_size<A...>(*this, J)` doubles. The members `logpdf_dk_blocks<K, A...>` and `logpdf_dk<K, A...>` are the corresponding routes with \f$J = 0\f$.
+
+## Penalty reading
+
+Both `univariate_as_multivariate<D>` and `independent_product_distrib<M...>` specialize \ref laplace::penalty::distrib_penalty_traits "distrib_penalty_traits", whose descriptors are defined on \ref penalty_framework "Framework".
+
+For `univariate_as_multivariate<D>`, `beta_regularity` equals `D::y_regularity`, `kinks` is `penalty_kink_geometry::per_coordinate` when `D::y_regularity` is finite and `penalty_kink_geometry::none` when it is `infinitely_smooth`, `prox` is `penalty_prox_kind::none`, `structure` is `penalty_structure::separable`, `theta_regularity` is the least `regularity` among `D`'s scalar parameters, and `q_linear_in_theta` is `false`. The `scale_mixture` descriptor and `weak_convexity(theta)` (which returns the weak-convexity constant \f$\rho = \sup(-\mathrm{pen}'')\f$) come from \ref laplace::penalty::univariate_penalty_reading "univariate_penalty_reading\<D\>". Its primary template is undefined so unsupported laws fail to compile, and seven specializations are provided (all with `theta_regularity` equal to `infinitely_smooth`).
+
+| Law | Penalty | Regularity in \f$\beta\f$ | Kinks | Scale mixture | \f$\rho\f$ |
+|---|---|---|---|---|---|
+| \ref distrib_laplace1 "laplace1_distrib" | Lasso (\f$\lvert\beta - \mu\rvert / \sigma\f$) | \f$0\f$ | `per_coordinate` | `exponential_variance` | \f$0\f$ |
+| \ref distrib_enet "enet_distrib" | Elastic net | \f$0\f$ | `per_coordinate` | `none` | \f$0\f$ |
+| \ref distrib_student_t1 "student_t1_distrib" | Student (\f$\sigma\f$ scale) | `infinitely_smooth` | `none` | `inverse_gamma_variance` | \f$(\nu + 1)/(8\nu\sigma^2)\f$ |
+| \ref distrib_student_t2 "student_t2_distrib" | Student (\f$\sigma\f$ std. dev.) | `infinitely_smooth` | `none` | `inverse_gamma_variance` | \f$(\nu + 1)/(8(\nu - 2)\sigma^2)\f$ |
+| \ref distrib_pseudohuber "pseudohuber_distrib" | Pseudo-Huber | `infinitely_smooth` | `none` | `none` | \f$0\f$ |
+| \ref distrib_gaussian1 "gaussian1_distrib" | Ridge (\f$\sigma\f$ std. dev.) | `infinitely_smooth` | `none` | `none` | \f$0\f$ |
+| \ref distrib_gaussian2 "gaussian2_distrib" | Ridge (\f$v\f$ variance) | `infinitely_smooth` | `none` | `none` | \f$0\f$ |
+
+### Weak convexity of the Student penalties
+
+For `student_t1_distrib`, writing \f$u = (\beta - \mu)^2 / (\nu \sigma^2)\f$, the second derivative of the penalty in \f$\beta\f$ is
+\f[
+\mathrm{pen}''(\beta) = \frac{\nu + 1}{\nu \sigma^2} \frac{1 - u}{(1 + u)^2}.
+\f]
+Its least value is attained at \f$u = 3\f$ and equals \f$-(\nu + 1) / (8 \nu \sigma^2)\f$, so \f$\rho = (\nu + 1) / (8 \nu \sigma^2)\f$. For `student_t2_distrib`, the standard deviation \f$\sigma\f$ corresponds to scale \f$s = \sigma \sqrt{(\nu - 2) / \nu}\f$, so substituting \f$s\f$ for \f$\sigma\f$ yields \f$\rho = (\nu + 1) / (8 \nu s^2) = (\nu + 1) / (8 (\nu - 2) \sigma^2)\f$.
+
+### Traits of an independent product
+
+For `independent_product_distrib<M...>`, `distrib_penalty_traits` aggregates the components' traits: `beta_regularity` and `theta_regularity` are each the least over all components; `kinks` is the most general geometry present among the components (`none`, `per_coordinate`, `radial`, `linear_map`); `prox` is `penalty_prox_kind::none`; `structure` is `penalty_structure::separable` when every component is separable and `penalty_structure::grouped` otherwise; `q_linear_in_theta` is `true` when it is `true` for every component and `false` otherwise; and `scale_mixture` is that of the component when there is a single component type (`sizeof...(M) == 1`) and `penalty_scale_mixture::none` otherwise.
+
+The member `weak_convexity(m, theta)` returns the largest \f$\rho\f$ over all parameter sets of every component. For each set \f$h\f$, `gather_set_theta()` copies the set's parameters into a fixed buffer of \f$32\f$ doubles; any component with `theta_size() > 32` reports \f$+\infty\f$ (`distrib_infinity`), a safe upper bound. As described on \ref penalty_distrib_penalty "Distribution penalty", \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>" calls this two-argument `weak_convexity(distribution, theta)` overload whenever the traits provide it.
+
+## Accuracy
+
+See \ref accuracy "How accuracy is measured" for test conventions. Automated tests in `tests/penalty/test_independent_product.cpp` exercise three products alongside single-law checks: a \f$4\f$-copy lasso product (`laplace1_distrib`) with a shared scale and prior location \f$\mu_0\f$; a \f$5\f$-copy Student product (`student_t1_distrib`) in \f$2\f$ parameter sets (`{0, 1, 0, 1, 1}`); and a heterogeneous product combining \f$2\f$ shared `enet_distrib` copies, \f$2\f$ dimension-\f$2\f$ `mvgaussian2_distrib` copies with `unstructured_pdmat<log_cholesky_bijector>` by copy, and \f$1\f$ `pseudohuber_distrib` copy (dimension \f$7\f$, \f$5\f$ blocks, \f$10\f$ indexed parameters). Normalization is checked on a \f$2\f$-dimensional product of `pseudohuber_distrib` and `gaussian2_distrib` with \f$\mu_0\f$.
+
+| Check | Scope | Criterion or tolerance |
+|---|---|---|
+| Univariate adapter tensors | `univariate_as_multivariate<student_t2_distrib>` `logpdf()` and blocks \f$(0, 1, 0)\f$, \f$(0, 0, 2)\f$, \f$(2, 2, 1)\f$, \f$(1, 2, 0)\f$ | Exact equality with `student_t2_distrib` |
+| Twin log-density | Student and heterogeneous products, host and Kokkos kernel | Relative error below \f$10^{-14}\f$ against component sum |
+| Derivative finite differences | All \f$13\f$ dense blocks \f$(J, K, A)\f$ with \f$J \le 2\f$, \f$K \le 3\f$, \f$A \le 1\f$, \f$1 \le J + K + A \le 3\f$, host and kernel | Normwise relative error below \f$10^{-6}\f$ (central differences, step \f$10^{-5}\f$ times \f$1\f$ or the coordinate magnitude, whichever is larger) |
+| Kernel and host match | Twin and all \f$13\f$ finite-difference errors | Absolute difference below \f$10^{-9}\f$ |
+| Dense against block route | Heterogeneous product, blocks \f$(2, K, 0)\f$ and \f$(1, K, 1)\f$ for \f$K = 0, 1, 2\f$ | Exact equality on diagonal blocks, \f$0\f$ off-block |
+| Tuples across sets | Heterogeneous product, `{4, 5}` (copies \f$0\f$ and \f$1\f$ of \f$Q\f$) and `{0, 8}` (`enet` and `pseudohuber`) | Returns `false` and leaves `out` untouched |
+| Penalty twin and blocks | Lasso (\f$4\f$ copies, with \f$\mu_0\f$) and heterogeneous (zero location) | Lasso `value()` and `<0, 1>` within \f$10^{-14}\f$, `<1, 1>` exact, `<2, 0>` and `weak_convexity()` equal \f$0\f$; heterogeneous `value()` within \f$10^{-13}\f$, `weak_convexity()` equal \f$0\f$ |
+| Student \f$\rho\f$ | `student_t1_distrib` per set on \f$[0, 20\sigma)\f$ (step \f$10^{-4}\sigma\f$); `student_t2_distrib` at \f$\sigma = 1.5\f$, \f$\nu = 5\f$ | Relative error below \f$10^{-7}\f$ against \f$-\min\mathrm{pen}''\f$, product equals set maximum; `student_t2_distrib` within \f$10^{-15}\f$ |
+| Normalization integral | `pseudohuber_distrib` and `gaussian2_distrib` around \f$\mu_0\f$ | Trapezoid rule on \f$[-30, 30] \times [-8, 8]\f$ (step \f$0.02\f$) within \f$10^{-9}\f$ of \f$1\f$ |
+
+## Example
+
+The following host example, run after `Kokkos::initialize()`, constructs a lasso penalty on \f$4\f$ coefficients with a shared scale \f$\sigma = 0.6\f$ and a prior location \f$\mu_0\f$, and evaluates the penalty value and its gradient in \f$\beta\f$:
+
+\code{.cpp}
+#include <laplace/distrib/independent_product.hpp>
+#include <laplace/distrib/laplace1.hpp>
+#include <laplace/distrib/univariate_as_multivariate.hpp>
+#include <laplace/penalty/independent_product_penalty.hpp>
+
+#include <vector>
+
+double lasso_penalty_example(double (&grad)[4]) {
+  using uam_laplace = laplace::distrib::univariate_as_multivariate<laplace::distrib::laplace1_distrib>;
+  using lasso_dist = laplace::distrib::independent_product_distrib<uam_laplace>;
+
+  const lasso_dist dist(laplace::distrib::independent_product_component<uam_laplace>{{}, 4, 1, nullptr});
+  const double mu0[4] = {0.1, 0.0, -0.3, 0.2};
+  const laplace::penalty::distrib_penalty<lasso_dist> pen(dist, mu0);
+
+  std::vector<double> w(pen.state_size() + pen.scratch_size());
+  const double theta[1] = {0.6};
+  const double beta[4] = {0.7, -0.4, 0.5, 0.1};
+
+  const auto st = pen.theta_state(theta, w.data());
+  double* ws = w.data() + pen.state_size();
+  const double val = pen.value(st, beta, ws);
+  pen.value_dbeta_dk<1, 0>(st, beta, nullptr, grad, ws);
+  return val;
+}
+\endcode
+
+## Module types
+
+- \ref laplace::distrib::univariate_as_multivariate_state "univariate_as_multivariate_state" — state of `univariate_as_multivariate<D>`
+- \ref laplace::distrib::univariate_as_multivariate "univariate_as_multivariate\<D\>" — adapter from a continuous univariate distribution to dimension \f$1\f$
+- \ref laplace::distrib::independent_product_component "independent_product_component\<M\>" — component distribution, copy count, and copy-to-set map
+- \ref laplace::distrib::independent_product_state "independent_product_state" — state of `independent_product_distrib<M...>`
+- \ref laplace::distrib::independent_product_distrib "independent_product_distrib\<M...\>" — product of independent multivariate blocks
+- \ref laplace::penalty::univariate_penalty_reading "univariate_penalty_reading\<D\>" — scale-mixture and weak-convexity reading of a univariate law
+- \ref laplace::penalty::distrib_penalty_traits "distrib_penalty_traits" — specializations for `univariate_as_multivariate<D>` and `independent_product_distrib<M...>`
+*/

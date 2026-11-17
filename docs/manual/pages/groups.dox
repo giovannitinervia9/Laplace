@@ -273,6 +273,8 @@ parent here, in tree order; the module pages define their groups without
 \brief Penalties defined as minus the log density of a distribution. */
 /** \addtogroup penalty_distrib_penalty
 \ingroup penalty_from_distrib */
+/** \addtogroup distrib_independent_product
+\ingroup penalty_from_distrib */
 
 /** \defgroup optimizers Optimizers
 \brief Objectives, stopping rules, line searches and the dense curvature solver for unconstrained minimization on the host. */
