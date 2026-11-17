@@ -1,4 +1,4 @@
-// Scalar bijectors (laplace::bijector), the maps without parameters.
+// Scalar bijectors (laplace::bijector): twelve maps without parameters and eight with them.
 //
 // A bijector is a bijection g: V -> U between open intervals, with inverse
 // h = g^-1. Forward goes from the constrained side to the unconstrained one,

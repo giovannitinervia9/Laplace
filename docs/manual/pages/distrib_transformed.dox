@@ -1,0 +1,122 @@
+/**
+\defgroup distrib_transformed Transformed distribution
+\brief Wrapper carrying a continuous univariate distribution through a fixed monotone scalar bijector.
+
+Defined in `<laplace/distrib/transformed.hpp>` in namespace `laplace::distrib`, this module provides \ref laplace::distrib::transformed_distrib "transformed_distrib\<D\>" and the host factory \ref laplace::distrib::transformed "transformed()". Every evaluation, derivative, cumulative, quantile, expected-information, atom, support, and kink member of `transformed_distrib` is marked `LAPLACE_HD`, while `start_value()` and `transformed()` run on the host only. See \ref distrib_core for the shared distribution interface, \ref distrib_atoms "the atom descriptors" for declared atoms, \ref distrib_generic for the generic routes, \ref bijector_scalar for the scalar bijector maps, and \ref faa_di_bruno for the partial Bell polynomials. In `tests/distrib/test_transformed.cpp`, exact-oracle, quadrature, finite-difference, and device checks on the `gcc` and CUDA builds verify agreement within \f$6.1 \times 10^{-15}\f$ against exact library laws and within \f$1.6 \times 10^{-9}\f$ against finite differences.
+
+## Transformed law
+
+Let \f$X\f$ follow a continuous parent distribution `D` with density \f$f_X\f$ and parameters \f$\theta\f$, and let \f$g\f$ be a `laplace::bijector::scalar_bijector` held in the member `map`. Then `transformed_distrib<D>` is the law of \f$Y = g(X)\f$. With \f$h = g^{-1}\f$ denoting the inverse map and \f$h'\f$ its first derivative, the log-density at an observation \f$y\f$ inside the support is
+\f[
+\ell(y; \theta) = \log f_X(h(y); \theta) + \log |h'(y)|.
+\f]
+Outside the closed support `[support_lower(), support_upper()]`, `logpdf(y)` returns \f$-\infty\f$ (`-distrib_infinity`). In the convention of \ref bijector_scalar "the scalar bijector module", \f$g\f$ is `map.forward` and \f$h\f$ is `map.inverse`; setting `inverted` swaps the two, which is how the exponential map is obtained from `log`.
+
+Only bijections are carried: a map that sends two points to one, such as \f$|x|\f$, is not a `scalar_bijector` and is not handled by this wrapper. The parent `D` must be continuous (`D::kind == distrib_kind::continuous`). A discrete parent is refused at compile time because the image of a law on the integers under a map is not supported on the integers, which is what the discrete routes sum over.
+
+The map's own parameters are fixed values held inside `map`, such as location and scale of `affine`, exponent of `power`, `box_cox`, and `yeo_johnson`, sharpness of `softplus`, and endpoints of `bounded`. They are not parameters of the distribution: `n_params`, `params`, `kind`, `n_atoms`, and `y_regularity` are all inherited from the parent. The struct `transformed_distrib<D>` is an aggregate with fields `parent`, `map`, and `decreasing`, so it can be constructed directly inside a Kokkos kernel. Because the struct itself performs no validation, the host factory `transformed(parent, map)` is the standard way to build and check one.
+
+## Parameter derivatives and expected information
+
+Because the Jacobian term \f$\log|h'(y)|\f$ does not depend on \f$\theta\f$, differentiating with respect to the parameters requires no chain rule. Writing \f$\ell_X(x) = \log f_X(x; \theta)\f$ and \f$x = h(y)\f$,
+\f[
+\frac{\partial^K \ell}{\partial \theta^K}(y) = \frac{\partial^K \ell_X}{\partial \theta^K}(h(y)), \qquad K = 1, \dots, 6.
+\f]
+Member `logpdf_dk<K>(y)` (exposed as `logpdf_d1()` through `logpdf_d6()`) evaluates the parent's derivative tensor of order \f$K\f$ at `preimage(y)` inside the support, and returns zero outside.
+
+The expected Fisher information and its parameter derivatives to order \f$4\f$ are also the parent's. Members `expected_info()` and `expected_info_d1()` through `expected_info_d4()` invoke the parent's own members, or the generic route of \ref distrib_generic over the parent where it has none. For any function \f$a\f$, \f$E_Y[a(h(Y))] = E_X[a(X)]\f$ because \f$Y = g(X)\f$ and \f$h(g(X)) = X\f$. Since the observed parameter derivatives of \f$\ell\f$ at \f$y\f$ equal those of \f$\ell_X\f$ at \f$h(y)\f$, every expectation that forms the information and its derivatives is the same over \f$Y\f$ as over \f$X\f$. Because a parent's atom keeps its mass under a bijection, this argument covers a parent with atoms as well.
+
+## Derivatives in the observation
+
+Only differentiation in \f$y\f$ uses the chain rule. For \f$J \ge 1\f$ and \f$J + K \le 6\f$, `logpdf_dy_dk<J, K>(y)` applies Faà di Bruno's formula (\ref faa_di_bruno "the Faà di Bruno module"):
+\f[
+\frac{\partial^{J+K} \ell}{\partial y^J \partial \theta^K}(y)
+= \sum_{k=1}^{J} \frac{\partial^{k+K} \ell_X}{\partial x^k \partial \theta^K}(h(y))\,
+  B_{J,k}\big(h'(y), \dots, h^{(J-k+1)}(y)\big)
++ [K = 0]\, \frac{\mathrm{d}^J}{\mathrm{d}y^J} \log|h'(y)|,
+\f]
+where \f$B_{J,k}\f$ are the partial Bell polynomials evaluated by \ref laplace::math::bell_partial "bell_partial()". Here \f$h^{(m)}\f$ denotes the \f$m\f$-th derivative of \f$h\f$ from `map.inverse_d1()` through `map.inverse_d6()`, and \f$[K = 0]\f$ equals \f$1\f$ when \f$K = 0\f$ and \f$0\f$ otherwise. The last term comes from `map.inverse_log_jacobian_d1()` through `map.inverse_log_jacobian_d6()` and is added only when \f$K = 0\f$. The first factor in each summand comes from `parent.logpdf_dy_dk<k, K>(h(y))`, so calling `logpdf_dy_dk<J, K>` with \f$J \ge 1\f$ on a parent without that member is a compile-time error. The function has no meaning at the image of an atom. For \f$J = 0\f$, `logpdf_dy_dk<0, 0>(y)` returns `logpdf(y)` in a `sym_tensor<n_params, 0>`, and `logpdf_dy_dk<0, K>(y)` for \f$K \ge 1\f$ returns `logpdf_dk<K>(y)`.
+
+## Cumulative functions, quantiles, and support
+
+The direction of \f$g\f$ is read once by `transformed()` from the sign of \f$g'\f$ at `parent.center()` and stored in `decreasing`. It is never inferred from the map's name. Let \f$F_X\f$ and \f$F_Y\f$ denote the cumulative distribution functions of \f$X\f$ and \f$Y\f$. Below `support_lower()`, `log_cdf_tail(y, upper_tail)` returns \f$-\infty\f$ for \f$\log F_Y\f$ and \f$0\f$ for \f$\log(1 - F_Y)\f$. At or above `support_upper()`, it returns \f$0\f$ for \f$\log F_Y\f$ and \f$-\infty\f$ for \f$\log(1 - F_Y)\f$. Inside `[support_lower(), support_upper())`:
+
+- when `decreasing` is `false`, \f$F_Y(y) = F_X(h(y))\f$ and \f$1 - F_Y(y) = 1 - F_X(h(y))\f$;
+- when `decreasing` is `true`, \f$F_Y(y) = P(X \ge h(y))\f$ and \f$1 - F_Y(y) = P(X < h(y))\f$, so the parent's lower and upper tails swap. Where the parent has an atom at \f$h(y)\f$, its mass moves to the side that holds it: \f$\log F_Y\f$ is the logarithm of the parent's \f$1 - F_X\f$ plus the atom's mass, and \f$\log(1 - F_Y)\f$ is the logarithm of the parent's \f$F_X\f$ less the atom's mass, with parameter derivatives computed through the Bell relation of \ref distrib_generic "the generic routes".
+
+No difference of two close numbers is formed anywhere else. Members `log_cdf()`, `log_ccdf()`, `cdf()`, and `ccdf()` all call `log_cdf_tail()`, which reads the parent's own logarithms. Parameter derivatives `log_cdf_tail_dk<K>(y, upper_tail)` for \f$1 \le K \le 6\f$ (exposed as `log_cdf_d1()` through `log_cdf_d6()` and `log_ccdf_d1()` through `log_ccdf_d6()`) return the parent's derivatives on the same side. They return zero outside `[support_lower(), support_upper())`, and at an atom's image under a decreasing map where the combined tail is zero.
+
+For probability \f$p \in (0, 1)\f$, let \f$Q_X\f$ denote the parent's quantile function. When `decreasing` is `false`, `quantile(p)` returns \f$g(Q_X(p))\f$ via \ref laplace::distrib::distrib_quantile "distrib_quantile()". When `decreasing` is `true` and `n_atoms == 0`, it returns \f$g\f$ of the parent's upper quantile at \f$\log p\f$ via \ref laplace::distrib::distrib_quantile_from_log_upper "distrib_quantile_from_log_upper()", so that a small \f$p\f$ is not lost in \f$1 - p\f$. When `decreasing` is `true` and the parent declares atoms, it evaluates `distrib_quantile(parent, 1 - p)`. At \f$p = 0\f$ and \f$p = 1\f$, `quantile(p)` returns `support_lower()` and `support_upper()`, and outside \f$[0, 1]\f$ or on `NaN` it returns quiet `NaN`.
+
+Support ends `support_lower()` and `support_upper()` are the images under \f$g\f$ of the parent's ends, swapped when \f$g\f$ decreases. Helper `end_image(x)` reads matching endpoints from `map.forward_domain_lower()`, `map.forward_domain_upper()`, `map.inverse_domain_lower()`, and `map.inverse_domain_upper()` rather than evaluating \f$g\f$ at an infinite boundary. Member `inside(y)` checks `y >= support_lower() && y <= support_upper()`. Member `center()` returns \f$g\f$ of `parent.center()`, and `scale()` returns `parent.scale()` multiplied by \f$|g'|\f$ at `parent.center()`, a first-order push that only places quadrature panels.
+
+## Atoms, kinks, starting values, and refusals
+
+The atom count `n_atoms` equals \ref laplace::distrib::distrib_n_atoms "distrib_n_atoms\<D\>()" (\ref distrib_atoms "the atom descriptors"). When `n_atoms > 0`, `atom_point(i)` returns \f$g\f$ of `distrib_atom_point(parent, i)` and `atom_log_mass(i)` returns `distrib_atom_log_mass(parent, i)`, because a bijection carries a point mass unchanged. At the image of an atom, `logpdf(y)` returns the parent's log mass there with no Jacobian term. Member `at_atom(y)` recognizes that image by comparing \f$y\f$ with \f$g(c)\f$ for exact equality. Member `preimage(y)` returns \f$c\f$ itself when \f$y\f$ equals \f$g(c)\f$ and \f$h(y)\f$ otherwise, so that rounding in \f$h(g(c))\f$ does not move the point off the atom.
+
+Non-smooth points in \f$y\f$ are collected by `all_y_kinks()`. It maps the points of `parent.y_kinks()` (atoms included) through \f$g\f$, appends `map.inverse_kinks()`, removes duplicates, sorts the points, and records the least `continuous_order`. For example, `yeo_johnson` has a kink at \f$0\f$ with `continuous_order` equal to \f$2\f$ (\ref bijector_scalar "the scalar bijector page"). Member `y_kinks()` returns up to two of those points in a `distrib_kinks`, while `y_regularity` is `D::y_regularity` (the order at a kink of the map is reported by `y_kinks()`). Member `param_kinks(j, y)` returns `parent.param_kinks(j, preimage(y))` for parameter index \f$j\f$.
+
+On the host, `start_value(const std::vector<double>& y)` carries every observation back through `preimage()`, landing exactly on an atom when an observation equals an atom's image, and hands the result to \ref distrib_start "distrib_start_value(parent, x)". No moment of \f$Y\f$ is pushed through \f$h\f$, which would not give the moment of \f$X\f$.
+
+The host factory \ref laplace::distrib::transformed "transformed(parent, map)" throws `std::invalid_argument` in four situations:
+
+- the parent's support is not inside the closed domain `[map.forward_domain_lower(), map.forward_domain_upper()]` of \f$g\f$, such as a normal distribution under `log` (whose closed domain is \f$[0, \infty]\f$, whereas the lognormal comes from the normal under `log` inverted);
+- `map.forward_d1(parent.center())` is zero or not a number, so that the map's direction cannot be read there;
+- an atom of the parent has a non-finite image under \f$g\f$;
+- the parent's non-smooth points in \f$y\f$ carried through \f$g\f$ together with the map's own non-smooth points number more than two, which is all a `distrib_kinks` can declare.
+
+## Checks and measured agreement
+
+`tests/distrib/test_transformed.cpp` runs \f$12\f$ test cases on the `gcc` and CUDA builds. Every error below is the measured worst error, the same on both builds, paired with the bound asserted by the test.
+
+| Case in `tests/distrib/test_transformed.cpp` | Quantity checked | Measured error | Test bound |
+|---|---|---|---|
+| `gaussian2_distrib` with \f$(\mu, v)\f$ through `log` inverted vs `lognormal1_distrib` with \f$(\mu, v)\f$ (\f$7\f$ points in \f$[0.02, 40]\f$, \f$7\f$ probabilities in \f$[10^{-12}, 1 - 10^{-12}]\f$) | `logpdf()`, `logpdf_dk<1..6>()`, \f$\log F\f$, \f$\log(1 - F)\f$ and their order-\f$6\f$ derivatives, `quantile()`, `expected_info()` and order-\f$4\f$ derivatives | \f$0\f$ | \f$4 \times 10^{-16}\f$ |
+| `gaussian2_distrib` through `log` inverted vs `lognormal1_distrib` | `logpdf_dy_dk<J, K>()` for \f$J + K \le 6\f$ (relative) | \f$5.6 \times 10^{-16}\f$ | \f$1.5 \times 10^{-15}\f$ |
+| `exponential_distrib` (\f$\mu = 1.8\f$) through `power` (\f$1/k\f$, \f$k = 1.7\f$) vs `weibull_distrib` (\f$m = \mu^{1/k}\,\Gamma(1 + 1/k)\f$, \f$k\f$) | `logpdf()` | \f$3.8 \times 10^{-16}\f$ | \f$10^{-15}\f$ |
+| `exponential_distrib` through `power` vs `weibull_distrib` | \f$\log F\f$ and \f$\log(1 - F)\f$ | \f$5.2 \times 10^{-15}\f$ | \f$1.5 \times 10^{-14}\f$ |
+| `exponential_distrib` through `power` vs `weibull_distrib` | `quantile()` | \f$6.9 \times 10^{-16}\f$ | \f$2 \times 10^{-15}\f$ |
+| `exponential_distrib` through `power` vs `weibull_distrib` | Derivatives in \f$\mu\f$ to order \f$6\f$ vs Weibull derivatives in \f$m\f$ composed by Faà di Bruno through \f$m(\mu)\f$ | \f$3.0 \times 10^{-15}\f$ | \f$10^{-14}\f$ |
+| `exponential_distrib` through `power` vs `weibull_distrib` | Derivatives in \f$y\f$ to order \f$6\f$ | \f$6.1 \times 10^{-15}\f$ | \f$2 \times 10^{-14}\f$ |
+| `exponential_distrib` through `power` vs `weibull_distrib` | `expected_info()` vs \f$I_{mm}\,(\mathrm{d}m/\mathrm{d}\mu)^2\f$ | \f$1.8 \times 10^{-16}\f$ | \f$10^{-15}\f$ |
+| Decreasing `affine` (location \f$0.5\f$, scale \f$-2\f$) over `gaussian2_distrib` vs resulting `gaussian2_distrib` | `logpdf()`, \f$\log F\f$ and \f$\log(1 - F)\f$, `quantile()`, \f$y\f$ derivatives to order \f$6\f$ | \f$1.0 \times 10^{-16}\f$ (`logpdf`), \f$0\f$ (tails, \f$y\f$ derivs), \f$7.6 \times 10^{-16}\f$ (`quantile`) | \f$4 \times 10^{-16}\f$ (`logpdf`, tails, \f$y\f$ derivs), \f$2 \times 10^{-15}\f$ (`quantile`) |
+| `yeo_johnson` (exponent \f$0.6\f$, inverted) over `gaussian2_distrib` | Density integral minus \f$1\f$; `expected_info()` by quadrature over \f$Y\f$ vs parent's | \f$1.1 \times 10^{-16}\f$ (integral), \f$1.4 \times 10^{-16}\f$ (info) | \f$10^{-15}\f$ |
+| `yeo_johnson` over `gaussian2_distrib` | `cdf()` vs quadrature; \f$F(Q(p)) - p\f$ relative to \f$p\f$ | \f$1.8 \times 10^{-15}\f$ (`cdf`), \f$5.2 \times 10^{-16}\f$ (quantile) | \f$6 \times 10^{-15}\f$ (`cdf`), \f$2 \times 10^{-15}\f$ (quantile) |
+| `yeo_johnson` over `gaussian2_distrib` | Every `logpdf_dy_dk<J, K>()` vs five-point differences of the order below in \f$y\f$ | \f$2.9 \times 10^{-11}\f$ | \f$10^{-10}\f$ |
+| `box_cox` (exponent \f$0.5\f$) over `gamma2_distrib` on \f$(-2, \infty)\f$ | Density integral minus \f$1\f$; `cdf()` vs quadrature; \f$y\f$ derivatives vs five-point differences | \f$3.3 \times 10^{-16}\f$ (integral), \f$3.4 \times 10^{-15}\f$ (`cdf`), \f$1.6 \times 10^{-9}\f$ (\f$y\f$ derivs) | \f$10^{-15}\f$ (integral), \f$10^{-14}\f$ (`cdf`), \f$5 \times 10^{-9}\f$ (\f$y\f$ derivs) |
+| `bounded` on \f$(-1, 3)\f$, inverted, over `gaussian2_distrib` on \f$(-1, 3)\f$ | Density integral minus \f$1\f$; \f$F(Q(p)) - p\f$ relative; \f$y\f$ derivatives vs five-point differences | \f$2.2 \times 10^{-16}\f$ (integral), \f$4.2 \times 10^{-16}\f$ (quantile), \f$1.1 \times 10^{-10}\f$ (\f$y\f$ derivs) | \f$10^{-15}\f$ (integral), \f$2 \times 10^{-15}\f$ (quantile), \f$5 \times 10^{-10}\f$ (\f$y\f$ derivs) |
+| Zero-adjusted `gamma2_distrib` (\ref distrib_atom_mixture "atom-mixture wrapper") under `affine` (\f$-1\f$, \f$0.5\f$; \f$g(x) = 2x + 2\f$) | Density integral plus atom mass minus \f$1\f$ | \f$2.2 \times 10^{-16}\f$ | \f$10^{-15}\f$ |
+| Atom at \f$0.5\f$ on `gaussian1_distrib` under \f$g(x) = -x\f$ | \f$\log F\f$ and \f$\log(1 - F)\f$ derivatives to order \f$6\f$ at and away from atom vs five-point differences (relative) | \f$2.9 \times 10^{-10}\f$ | \f$10^{-9}\f$ |
+
+In the `yeo_johnson` case, `y_kinks()` declares the kink at \f$0\f$ with `continuous_order == 2`. For the transformed zero-adjusted `gamma2_distrib`, the atom sits at \f$2\f$ with the parent's exact log mass, `logpdf(2)` and `logpdf_d3(2)` equal the parent's at \f$0\f$ exactly, `y_kinks()` declares \f$2\f$, `cdf(2)` matches the atom mass within \f$10^{-15}\f$, and `start_value()` matches the parent's on the preimage sample. For the atom at \f$0.5\f$ on `gaussian1_distrib` under \f$g(x) = -x\f$, \f$F(-0.5)\f$ equals the parent's \f$1 - F(0.5)\f$ plus the atom's mass within \f$10^{-14}\f$, \f$1 - F(-0.5)\f$ equals the parent's \f$F(0.5)\f$ less the atom's mass within \f$10^{-13}\f$, the two sides add to \f$1\f$ within \f$10^{-15}\f$, and the total mass integrates to \f$1\f$ within \f$10^{-15}\f$.
+
+The remaining cases check that `start_value()` on a `gaussian2_distrib` carried through `exp` equals the parent's starting value on the sample mapped back through `log`, that all four refusal conditions throw `std::invalid_argument` (while two atoms under `bounded` inverted do not throw), and that a lognormal built with `transformed()` evaluated inside a Kokkos kernel (`logpdf()`, `logpdf_d2()`, `log_cdf_d1()`, `log_ccdf()`, `quantile()`, and `logpdf_dy_dk<1, 1>()`) agrees with host evaluation within \f$10^{-11}\f$.
+
+## Kokkos usage
+
+The following kernel constructs a lognormal law by carrying a `gaussian2_distrib` through the inverted `log` bijector on the host and evaluates its log-density, score, and cumulative distribution in parallel:
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/bijector/scalar.hpp>
+#include <laplace/distrib/gaussian2.hpp>
+#include <laplace/distrib/transformed.hpp>
+
+void eval_transformed_gaussian(Kokkos::View<const double*> y, Kokkos::View<double*> out,
+                               double mu, double v) {
+  laplace::bijector::scalar_bijector exp_map{laplace::bijector::scalar_bijector_map::log};
+  exp_map.inverted = true;
+  const auto d = laplace::distrib::transformed(laplace::distrib::gaussian2_distrib{mu, v}, exp_map);
+  Kokkos::parallel_for("eval_transformed_gau", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0] + d.cdf(y(i));
+  });
+}
+```
+
+## Members
+
+Namespace `laplace::distrib` provides:
+
+- \ref laplace::distrib::transformed_distrib "transformed_distrib\<D\>" — distribution wrapper with fields `parent`, `map`, and `decreasing`, static descriptors `kind`, `n_params`, `params`, `n_atoms`, and `y_regularity`, preimage and domain helpers `preimage()`, `at_atom()`, `inside()`, and `end_image()`, log-density and derivative evaluators `logpdf()`, `logpdf_dk()`, `logpdf_d1()` through `logpdf_d6()`, and `logpdf_dy_dk()`, cumulative and quantile members `log_cdf_tail()`, `log_cdf_tail_dk()`, `log_cdf()`, `log_ccdf()`, `cdf()`, `ccdf()`, `log_cdf_d1()` through `log_cdf_d6()`, `log_ccdf_d1()` through `log_ccdf_d6()`, and `quantile()`, expected information members `expected_info()` and `expected_info_d1()` through `expected_info_d4()`, atom queries `atom_point()` and `atom_log_mass()`, support and kink queries `support_lower()`, `support_upper()`, `center()`, `scale()`, `all_y_kinks()`, `y_kinks()`, and `param_kinks()`, and host starting value `start_value()`.
+- \ref laplace::distrib::transformed "transformed()" — host factory validating that the parent's support lies inside the closed domain of `map`, that `map.forward_d1(parent.center())` is neither zero nor `NaN`, that every atom has a finite image, and that the combined non-smooth points in \f$y\f$ number at most two.
+*/

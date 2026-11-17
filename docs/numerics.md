@@ -9610,6 +9610,62 @@ Open: the improper (intrinsic) class of mvstudent_t2; the double-double sums
 take the inputs d_U W in double, so the near-singular mvstudent_t1 cells keep
 the structure's own error (622 to 784 ulp1N).
 
+## transformed_distrib: a distribution carried through a fixed bijector (2026-11-17)
+
+What: `include/laplace/distrib/transformed.hpp` is new:
+`transformed_distrib<D>`, the law of Y = g(X) with X following a continuous
+parent D and g a `laplace::bijector::scalar_bijector` whose own parameters are
+fixed values, and the host factory `transformed(parent, map)`. The plan and the
+decisions are `note/piano_wrapper.md` section 5quater: bijections only, the
+map's parameter not modelled.
+
+How. With h = g^-1, l(y; theta) = log f_X(h(y); theta) + log |h'(y)|. The
+Jacobian term carries no theta, so `logpdf_dk<K>` is the parent's at h(y)
+unchanged, and so are the expected information and its derivatives, since
+E_Y[a(h(Y))] = E_X[a(X)] for any a. Only y needs the chain rule:
+`logpdf_dy_dk<J, K>` is Faa di Bruno over the parent's d^k_x d^K_theta l_X and
+the bijector's h^(m), with the bijector's d^J log|h'| added when K = 0. The
+cumulative functions are the parent's own logarithms at h(y), the two tails
+swapped for a decreasing map, the atom's mass moved to the side that holds it
+where the parent has one at h(y); the quantile is g of the parent's quantile, or
+of its upper quantile at log p for a decreasing map. The direction is read by
+the factory from the sign of g' at the parent's center. The atoms keep their
+mass and move to g(c); `logpdf` at an atom's image is read at c itself, so that
+rounding in h(g(c)) does not move it off the atom. `start_value` maps the
+sample back point by point. The ends of the support are taken from the
+bijector's image bounds where the parent's end is an end of the map's domain:
+`yeo_johnson` inverted returns NaN at plus and minus infinity rather than its
+limit, and an infinite support end would otherwise become NaN.
+
+Measured (`tests/distrib/test_transformed.cpp`, gcc and CUDA, the same numbers on both; worst error, bound in
+brackets):
+
+| case | quantity | worst | bound |
+|---|---|---|---|
+| gaussian2 through exp vs lognormal1 | value, d1-d6, log F and its d1-d6, quantile, information d0-d4 | 0 | 4e-16 |
+| | `logpdf_dy_dk`, J + K <= 6 | 5.6e-16 | 1.5e-15 |
+| exponential through x^(1/k) vs weibull | value | 3.8e-16 | 1e-15 |
+| | log F, log(1 - F) | 5.2e-15 | 1.5e-14 |
+| | quantile | 6.9e-16 | 2e-15 |
+| | d1-d6 in mu (weibull's in m through m(mu)) | 3.0e-15 | 1e-14 |
+| | d1-d6 in y | 6.1e-15 | 2e-14 |
+| | information vs I_mm (dm/dmu)^2 | 1.8e-16 | 1e-15 |
+| affine, scale -2, over gaussian2 vs gaussian2 | value; log F; quantile; y derivatives | 1.0e-16; 0; 7.6e-16; 0 | 4e-16; 4e-16; 2e-15; 4e-16 |
+| yeo_johnson 0.6 inverted over gaussian2 | total mass - 1 | 1.1e-16 | 1e-15 |
+| | information over Y by quadrature vs parent's | 1.4e-16 | 1e-15 |
+| | F vs quadrature; F(Q(p)) - p | 1.8e-15; 5.2e-16 | 6e-15; 2e-15 |
+| | y derivatives vs differences | 2.9e-11 | 1e-10 |
+| box_cox 0.5 over gamma2 | mass; F vs quadrature; y derivatives | 3.3e-16; 3.4e-15; 1.6e-9 | 1e-15; 1e-14; 5e-9 |
+| bounded (-1, 3) inverted over gaussian2 | mass; F(Q(p)); y derivatives | 2.2e-16; 4.2e-16; 1.1e-10 | 1e-15; 2e-15; 5e-10 |
+| zero-adjusted gamma2 under 2v + 2 | mass; atom point, mass, value, d3 | 2.2e-16; exact | 1e-15; == |
+| atom on gaussian1 under -v | mass; log F derivatives vs differences | 2.2e-16; 2.9e-10 | 1e-15; 1e-9 |
+
+What it says: where an oracle exists the wrapper reproduces it to the last bit
+or within a few ulp, and the information computed over Y agrees with the
+parent's, which checks the argument that it is the parent's.
+
+The CUDA build gives the same worst errors as gcc in every row.
+
 ## truncated_distrib: a parent restricted to a fixed window (2026-11-17)
 
 What: `include/laplace/distrib/truncated.hpp` is new: `truncated_distrib<D>`,
