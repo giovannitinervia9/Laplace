@@ -159,7 +159,7 @@ LAPLACE_HD double categorical_info_dk(const bijector::alr_bijector& b, const dou
 // component's parent indices can be read without recomputing a tensor.
 template <int Q, int K>
 struct flat_tensors {
-  static constexpr int offset(int t) {
+  LAPLACE_HD static constexpr int offset(int t) {
     int o = 0;
     for (int j = 1; j < t; ++j) o += sym_tensor_size(Q, j);
     return o;

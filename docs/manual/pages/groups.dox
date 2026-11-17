@@ -132,6 +132,8 @@ parent here, in tree order; the module pages define their groups without
 \brief Distributions built from another distribution. */
 /** \addtogroup distrib_atom_mixture
 \ingroup distrib_wrapper */
+/** \addtogroup distrib_truncated
+\ingroup distrib_wrapper */
 
 /** \defgroup distrib_real Continuous on the real line
 \ingroup distrib

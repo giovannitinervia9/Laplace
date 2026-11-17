@@ -1,0 +1,129 @@
+/**
+\defgroup distrib_truncated Truncated distribution
+\brief Wrapper restricting a univariate distribution to a fixed window and renormalizing it there.
+
+Defined in `<laplace/distrib/truncated.hpp>` in namespace `laplace::distrib`, this module provides \ref laplace::distrib::truncated_distrib "truncated_distrib\<D\>" and the host factory \ref laplace::distrib::truncated "truncated()". Evaluation, derivative, cumulative, quantile, atom, and descriptor members of `truncated_distrib` are marked `LAPLACE_HD` for host and Kokkos device execution, while `start_value()` and `truncated()` run on the host only. See \ref distrib_core for the shared distribution interface, \ref distrib_atoms "the atom descriptors" for declared atoms, \ref distrib_generic for the generic routes, and \ref distrib_atom_mixture for the atom-mixture wrapper. In `tests/distrib/test_truncated.cpp`, internal consistency checks on the `gcc` and CUDA (RTX 4070 SUPER) builds verify densities, sums, and integrals to \f$10^{-10}\f$, and cumulative inversion within \f$10^{-9}\f$. The same suite checks parameter derivatives to order \f$6\f$ against five-point central differences within \f$2 \times 10^{-5}\f$ (density) and \f$3 \times 10^{-5}\f$ (cumulative tails) relative, and device evaluation against host within \f$10^{-11}\f$.
+
+## Truncated law
+
+With fixed bounds \f$a\f$ (`lower`) and \f$b\f$ (`upper`), both belonging to the window and held as values independent of the natural parameters \f$\theta\f$, the truncated law has log-density (or log-mass)
+\f[
+\ell(y; \theta) = \log f(y; \theta) - \log Z(\theta), \qquad
+Z(\theta) = F(b; \theta) - F(a^-; \theta),
+\f]
+for \f$a \le y \le b\f$, and \f$-\infty\f$ (`-distrib_infinity`) outside. Here \f$y\f$ is the observation, \f$f\f$ is the parent's density or probability mass function, \f$F\f$ is the parent's cumulative distribution function, and \f$F(a^-)\f$ is its left limit at \f$a\f$, so that any point mass the parent puts at \f$a\f$ belongs to the window. For a discrete parent (`D::kind == distrib_kind::discrete`), whose support is the integers, `lower_end()` returns \f$\lceil a \rceil\f$ and `upper_end()` returns \f$\lfloor b \rfloor\f$, so the window consists of the integers from \f$\lceil a \rceil\f$ to \f$\lfloor b \rfloor\f$. For a continuous parent, `lower_end()` is \f$a\f$ and `upper_end()` is \f$b\f$.
+
+The wrapper adds no parameter: `n_params`, `params`, and `kind` are the parent's, and `n_atoms` equals \ref laplace::distrib::distrib_n_atoms "distrib_n_atoms\<D\>()" (with `y_regularity` matching the parent for continuous parents). Because the bounds do not move with \f$\theta\f$, the normalization \f$Z(\theta)\f$ is differentiated under the integral sign and no parameter moves the support. The type `truncated_distrib<D>` is an aggregate with fields `parent`, `lower`, and `upper`, so it can be built directly inside a Kokkos kernel; the struct itself checks nothing. On the host, `truncated(parent, lower, upper)` validates the window and collapses nested truncations.
+
+## Normalization
+
+To prevent either cumulative value from being the complement of a small probability, \f$Z(\theta)\f$ is taken from whichever tail of the parent holds the smaller numbers. Writing \f$S(y; \theta) = 1 - F(y; \theta)\f$ and taking \f$b\f$ at `upper_end()`, `from_lower_tail()` selects between two tails:
+
+- lower tail, used when \f$F(b; \theta) \le S(a^-; \theta)\f$: \f$Z(\theta) = F(b; \theta) - F(a^-; \theta)\f$;
+- upper tail otherwise: \f$Z(\theta) = S(a^-; \theta) - S(b; \theta)\f$.
+
+Infinite bounds \f$-\infty\f$ and \f$+\infty\f$ are read as limits \f$0\f$ and \f$1\f$ in the chosen tail. Either expression is a difference \f$Z = A - B\f$ of two numbers held on the log scale (\f$\log A\f$ and \f$\log B\f$), evaluated by `log_norm()` as
+\f[
+\log Z = \log A + \log\left(1 - e^{\log B - \log A}\right),
+\f]
+returning \f$-\infty\f$ when \f$\log B \ge \log A\f$ and \f$\log A\f$ when \f$\log B = -\infty\f$.
+
+Derivatives of \f$\log Z\f$ in \f$\theta\f$ to order \f$6\f$ (`log_norm_term<K>()`) come from the parent's own derivatives of \f$\log F\f$ or \f$\log S\f$ through the Bell relation of \ref distrib_generic read in the ratios. For a multiset \f$T\f$ of parameter indices,
+\f[
+\frac{\partial_T (A - B)}{A - B}
+= \frac{A}{Z}\,\frac{\partial_T A}{A} - \frac{B}{Z}\,\frac{\partial_T B}{B},
+\f]
+and the derivatives of \f$\log Z\f$ follow from those ratios by the same Bell relation solved for them. The parent's cumulative derivatives are read through the dispatchers \ref laplace::distrib::distrib_log_cdf_dk "distrib_log_cdf_dk()" and \ref laplace::distrib::distrib_log_ccdf_dk "distrib_log_ccdf_dk()" of \ref distrib_generic "the generic routes", so a parent without closed cumulative derivatives gets the generic ones.
+
+## Left limit and atoms
+
+By definition, \f$F(a^-) = F(a) - \mathbb{P}(Y = a)\f$. Both `left_limit_value()` and its derivative counterpart query the mass at \f$a\f$ from the parent object and never infer it from `D::kind`:
+
+- For a continuous parent, \f$\mathbb{P}(Y = a)\f$ is the mass of an atom declared at \f$a\f$, read through \ref laplace::distrib::distrib_atom_point "distrib_atom_point()" and \ref laplace::distrib::distrib_atom_log_mass "distrib_atom_log_mass()" (\ref distrib_atoms "the atom descriptors"), and its parameter derivatives are the parent's log-density derivatives at \f$a\f$. With no atom at \f$a\f$, \f$F(a^-) = F(a)\f$ and \f$S(a^-) = S(a)\f$; on the upper tail with an atom, \f$S(a^-) = S(a) + \mathbb{P}(Y = a)\f$ is added on the log scale.
+- For a discrete parent, \f$F(a^-)\f$ is evaluated directly as \f$F(\lceil a \rceil - 1)\f$ and \f$S(a^-)\f$ as \f$S(\lceil a \rceil - 1)\f$, which is the same value without performing a subtraction.
+
+As an example, a zero-adjusted gamma distribution (\ref distrib_atom_mixture "the atom-mixture wrapper") truncated to \f$[0, 3]\f$ keeps its atom at \f$0\f$. Because the wrapper asks the parent and finds the atom at \f$0\f$, it evaluates \f$F(0^-) = 0\f$ and \f$Z = F(3)\f$. Reading the bound as a continuous point without querying the atom would instead give \f$Z = F(3) - \pi_0\f$, where \f$\pi_0\f$ is the atom mass. That would produce a law that does not integrate to one; `tests/distrib/test_truncated.cpp` checks that this truncated zero-adjusted gamma integrates to one with its atom.
+
+## Member routes
+
+### Log-density, log-mass, and derivatives
+
+Member `log_value(y)` returns \f$\log f(y) - \log Z\f$ on `[lower_end(), upper_end()]` and \f$-\infty\f$ outside; `logpdf(y)` exposes it when `D::kind == distrib_kind::continuous`, and `logpmf(y)` exposes it when `D::kind == distrib_kind::discrete`. Parameter derivatives `log_value_dk<K>(y)` for order \f$1 \le K \le 6\f$ return the parent's tensor less that of \f$\log Z\f$ inside the window, and zero outside. They are exposed as `logpdf_dk<K>()`, `logpdf_d1()` through `logpdf_d6()`, `logpmf_dk<K>()`, and `logpmf_d1()` through `logpmf_d6()`.
+
+For continuous parents, `logpdf_dy_dk<J, K>(y)` with observation order \f$J\f$ and parameter order \f$K\f$ (\f$J + K \le 6\f$) returns `parent.logpdf_dy_dk<J, K>(y)` when \f$J \ge 1\f$ because \f$\log Z\f$ does not depend on \f$y\f$. For \f$J = 0\f$, it returns `log_value(y)` in a `sym_tensor<n_params, 0>` when \f$K = 0\f$, and `log_value_dk<K>(y)` when \f$K \ge 1\f$. Calling `logpdf_dy_dk<J, K>(y)` with \f$J \ge 1\f$ on a parent without that member is a compile-time error.
+
+### Cumulative functions and quantiles
+
+Let \f$F_{\mathrm{trunc}}(y)\f$ denote the cumulative distribution function of the truncated law. Below `lower_end()`, `log_cdf_tail(y, upper_tail)` gives \f$F_{\mathrm{trunc}}(y) = 0\f$ (`log_cdf` equal to \f$-\infty\f$ and `log_ccdf` equal to \f$0\f$); from `upper_end()` onward, it gives \f$F_{\mathrm{trunc}}(y) = 1\f$ (`log_cdf` equal to \f$0\f$ and `log_ccdf` equal to \f$-\infty\f$). Inside `[lower_end(), upper_end())`, `log_cdf_tail()` (wrapped by `log_cdf()`, `log_ccdf()`, `cdf()`, and `ccdf()`) evaluates each side as a difference of two of the parent's cumulative values over \f$Z\f$, taken on the tail that \f$Z\f$ is taken on:
+
+- on the lower tail: \f$F_{\mathrm{trunc}}(y) = (F(y) - F(a^-)) / Z\f$ and \f$1 - F_{\mathrm{trunc}}(y) = (F(b) - F(y)) / Z\f$;
+- on the upper tail: \f$F_{\mathrm{trunc}}(y) = (S(a^-) - S(y)) / Z\f$ and \f$1 - F_{\mathrm{trunc}}(y) = (S(y) - S(b)) / Z\f$.
+
+Here \f$b\f$ is `upper_end()`. Parameter derivatives `log_cdf_tail_dk<K>(y, upper_tail)` for \f$1 \le K \le 6\f$ (`log_cdf_d1()` through `log_cdf_d6()` and `log_ccdf_d1()` through `log_ccdf_d6()`) differentiate the two-term difference through the same ratios and subtract the derivatives of \f$\log Z\f$. Outside `[lower_end(), upper_end())` or when the log-difference is \f$-\infty\f$, they return zero.
+
+For probability \f$p \in (0, 1)\f$, `quantile(p)` evaluates \ref laplace::distrib::distrib_quantile "distrib_quantile()" at \f$F(a^-) + p Z\f$ (computed on the log scale) when `from_lower_tail()` holds. On the upper tail, it forms \f$\log(S(b) + (1 - p) Z)\f$ and calls \ref laplace::distrib::distrib_quantile_from_log_upper "distrib_quantile_from_log_upper()" when the parent declares no atoms (`distrib_n_atoms<D>() == 0`), or `distrib_quantile()` via `-Kokkos::expm1(...)` otherwise. The returned value is kept inside `[support_lower(), support_upper()]`; at \f$p = 0\f$ and \f$p = 1\f$ it returns `support_lower()` and `support_upper()`, and outside \f$[0, 1]\f$ or on `NaN` it returns quiet `NaN`.
+
+### Expected information, atoms, support, and starting values
+
+The wrapper declares no `expected_info()` or `expected_info_dk()` members, because the expected Fisher information of a truncated law is not the parent's; the generic route of \ref distrib_generic answers by integrating over the window. When `distrib_n_atoms<D>() > 0`, `atom_point(i)` returns `distrib_atom_point(parent, i)` and `atom_log_mass(i)` returns `distrib_atom_log_mass(parent, i) - log_norm()` for atom index \f$i\f$.
+
+Support bounds `support_lower()` and `support_upper()` cut the parent's support to `[lower_end(), upper_end()]`. Member `center()` moves `parent.center()` into `[support_lower(), support_upper()]`, and `scale()` returns the parent's scale or `support_upper() - support_lower()` when that width is smaller. Member `y_kinks()` (continuous parents) returns `parent.y_kinks()`, and `param_kinks(j, y)` returns `parent.param_kinks(j, y)` for parameter index \f$j\f$. On the host, `start_value(const std::vector<double>& y)` passes the whole sample `y` to \ref distrib_start "distrib_start_value(parent, y)" and returns a `truncated_distrib` with the same `lower` and `upper`.
+
+## Factory, refusals, and collapse
+
+The host factory \ref laplace::distrib::truncated "truncated(parent, lower, upper)" first cuts `[lower, upper]` to the parent's support `[parent.support_lower(), parent.support_upper()]`. When `parent` is already a `truncated_distrib`, `truncated()` collapses the nested truncation into a single `truncated_distrib` over the innermost parent at the intersection of the two windows. Writing the nested type `truncated_distrib<truncated_distrib<D>>` directly is refused at compile time by a `static_assert` telling the caller to use `truncated()`.
+
+After cutting the window to the parent's support, `truncated()` throws `std::invalid_argument` in three situations:
+
+- the rounded window holds no point or a single point (`!(t.lower_end() < t.upper_end())`), where no parameter is identified;
+- the window leaves out an atom of the parent, so the coordinate that weighs it would have an identically zero score; the message names the equivalent model, namely the atom mixture over the atoms inside the window truncated to it, or the parent alone truncated when no atom remains (for an `atom_mixture_distrib` over a discrete parent, whose atoms are support points and are not declared as atoms, the points it weighs are checked the same way);
+- the window holds no mass of the parent (`!(t.log_norm() > -distrib_infinity)`).
+
+A window that keeps every atom of the parent is accepted. Building an \ref distrib_atom_mixture "atom_mixture_distrib" over a `truncated_distrib` parent is also accepted whether its atoms lie inside or outside the truncation window.
+
+## Checks and narrow-window limit
+
+`tests/distrib/test_truncated.cpp` runs \f$15\f$ test cases and \f$2829\f$ assertions on the `gcc` build and the same on CUDA (RTX 4070 SUPER). Every quantity has a twin inside the test and there is no reference file.
+
+| Check in `tests/distrib/test_truncated.cpp` | Scope | Test tolerance |
+|---|---|---|
+| `log_norm()` vs `erfc` difference | `gaussian1(0.4, 1.3)` on middle, narrow (\f$[1, 1.01]\f$), deep-tail (\f$[10, 12]\f$, \f$[-12, -10]\f$), and half-line windows | \f$10^{-12}\f$ |
+| `logpdf()` vs parent less `log_norm()` | `gaussian1(0.4, 1.3)` across all six windows above (outside by \f$10^{-9}\f$ gives \f$-\infty\f$) | \f$10^{-12}\f$ |
+| `panels_quad()` integral of density | `gaussian1(0.4, 1.3)` across all six windows above | \f$10^{-10}\f$ |
+| Discrete masses, normalization, and CDF sum | `poisson(3.5)` on \f$[2, 9]\f$ and \f$[1.5, 9.7]\f$; `poisson(0.3)` on \f$[1, \infty)\f$ | \f$10^{-15}\f$ to \f$10^{-13}\f$ |
+| `logpdf_dk<1..6>()` and `logpmf_dk<1..6>()` vs five-point differences | Middle, near bounds, narrow window, both tails, half-line, and discrete bounds, relative to order scale | \f$2 \times 10^{-5}\f$ |
+| `cdf()` and `cdf() + ccdf() = 1` vs `panels_quad()` | `gaussian1(0.4, 1.3)` on middle, narrow, and both tail windows (`cdf` \f$10^{-10}\f$, sum \f$10^{-13}\f$) | \f$10^{-10}\f$ to \f$10^{-13}\f$ |
+| `log_cdf_dk<1..6>()` and `log_ccdf_dk<1..6>()` vs five-point differences | `gaussian1` and `poisson`, both tails, relative to order scale | \f$3 \times 10^{-5}\f$ |
+| `quantile(p)` inverts `cdf()` | `gaussian1` on middle and both tail windows (\f$10^{-9}\f$); `poisson` exact integer inequality | \f$10^{-9}\f$ |
+| Atom-carrying truncated laws (`panels_quad()` plus atoms, derivatives, quantile) | Zero-adjusted `gamma2` on \f$[0, 3]\f$, two-atom `gaussian1` on \f$[0, 2]\f$, and atom at \f$0\f$ over `gaussian1` on \f$[0.5, 3]\f$ | \f$10^{-10}\f$ for the mass, \f$2 \times 10^{-5}\f$ for the log-density derivatives and \f$3 \times 10^{-5}\f$ for the cumulative ones |
+| Generic `distrib_expected_info<0>()` and `distrib_expected_info<1>()` | `gaussian1(0.4, 1.3)` on \f$[-0.5, 2.0]\f$ vs `panels_quad()` of \f$-\mathbb{E}[\partial^2\ell / \partial\theta_j \partial\theta_k]\f$ (\f$10^{-9}\f$) and differences (\f$10^{-6}\f$) | \f$10^{-9}\f$ (`K = 0`), \f$10^{-6}\f$ (`K = 1`) |
+| `logpdf_dy_dk<1, 2>()` and `logpdf_dy_dk<0, 3>()` | `gaussian1(0.4, 1.3)` on \f$[-0.5, 2.0]\f$ vs parent and `logpdf_dk<3>()` | Exact |
+| Kokkos device kernel vs host evaluation | Truncated `gaussian1`, zero-adjusted `gamma2`, and `poisson` densities, derivatives, tails, and quantiles | \f$10^{-11}\f$ |
+
+One numerical limit applies to narrow windows: when \f$a\f$ and \f$b\f$ are close, the parent's cumulative values are close, and the relative error of \f$Z\f$ grows like \f$\varepsilon / (b - a)\f$, where \f$\varepsilon\f$ is double-precision machine epsilon. Writing \f$\log Z\f$ via \f$\log A + \log(1 - e^{\log B - \log A})\f$ avoids underflow when a window lies deep in a tail, not this loss, which comes from the cumulative values themselves.
+
+## Kokkos usage
+
+The following kernel builds a truncated Gaussian distribution on the host and evaluates its log-density, score, and cumulative distribution in parallel:
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/gaussian1.hpp>
+#include <laplace/distrib/truncated.hpp>
+
+void eval_truncated_gaussian(Kokkos::View<const double*> y, Kokkos::View<double*> out,
+                             double mu, double sigma, double lower, double upper) {
+  const auto d = laplace::distrib::truncated(laplace::distrib::gaussian1_distrib{mu, sigma}, lower, upper);
+  Kokkos::parallel_for("eval_trunc_gau", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0] + d.cdf(y(i));
+  });
+}
+```
+
+## Members
+
+Namespace `laplace::distrib` provides:
+
+- \ref laplace::distrib::truncated_distrib "truncated_distrib\<D\>" — distribution wrapper with fields `parent`, `lower`, and `upper`, static descriptors `kind`, `n_params`, `params`, `n_atoms`, and `y_regularity` (continuous parents), boundary and normalization helpers `lower_end()`, `upper_end()`, `left_limit_value()`, `from_lower_tail()`, `log_norm()`, and `log_norm_term()`, density and derivative evaluators `log_value()`, `log_value_dk()`, `logpdf()`, `logpdf_d1()`..`logpdf_d6()`, `logpdf_dk()`, `logpmf()`, `logpmf_d1()`..`logpmf_d6()`, `logpmf_dk()`, and `logpdf_dy_dk()`, cumulative and quantile members `log_cdf_tail()`, `log_cdf_tail_dk()`, `log_cdf()`, `log_ccdf()`, `cdf()`, `ccdf()`, `log_cdf_d1()`..`log_cdf_d6()`, `log_ccdf_d1()`..`log_ccdf_d6()`, and `quantile()`, atom queries `atom_point()` and `atom_log_mass()`, domain and kink queries `support_lower()`, `support_upper()`, `center()`, `scale()`, `y_kinks()`, and `param_kinks()`, and host starting value `start_value()`.
+- \ref laplace::distrib::truncated "truncated()" — host factory that intersects the window with the parent's support, collapses nested truncations, and checks that the window holds more than one point, keeps all weighed atom points, and carries positive parent mass.
+*/

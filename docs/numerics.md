@@ -9609,3 +9609,110 @@ measured on CUDA yet.
 Open: the improper (intrinsic) class of mvstudent_t2; the double-double sums
 take the inputs d_U W in double, so the near-singular mvstudent_t1 cells keep
 the structure's own error (622 to 784 ulp1N).
+
+## truncated_distrib: a parent restricted to a fixed window (2026-11-17)
+
+What: `include/laplace/distrib/truncated.hpp` is new: `truncated_distrib<D>`,
+the parent restricted to a window [a, b] and renormalized, an aggregate with
+the members `parent`, `lower` and `upper`, and the host factory
+`truncated(parent, lower, upper)`. The bounds are values, independent of the
+parameters theta, so the wrapper adds no parameter: `kind`, `n_params` and the
+parameter descriptors are the parent's. The plan is `note/piano_wrapper.md`
+sections 4, 5, 5bis and 5ter.
+
+How. Inside the window l(y; theta) = log f(y; theta) - log Z(theta), with
+Z = F(b) - F(a-), and minus infinity outside. Z is taken on the tail of the
+parent that holds the smaller numbers, so that neither cumulative value is the
+complement of a small one: F(b) - F(a-) when F(b) <= S(a-), with S = 1 - F,
+and S(a-) - S(b) otherwise. Either is a difference A - B of two numbers held on
+the log scale, log Z = log A + log1p(-exp(log B - log A)), which keeps a window
+deep in a tail from underflowing. Its derivatives in theta to order six come
+from the parent's own derivatives of log F or log S, read through the
+dispatchers of `generic_cdf.hpp` (so a parent without closed cumulative
+derivatives gets the generic ones), by the Bell relation read in the ratios:
+d_T (A - B) / (A - B) = (A / Z) d_T A / A - (B / Z) d_T B / B, and the
+derivatives of the logarithm follow by the same relation solved for them
+(`ratios_from_log_tail_dk` and `log_tail_dk_from_ratios`). The cumulative
+functions of the truncated law are differences of the same kind over Z, on the
+tail Z is taken on, and go through the same routine.
+
+The left limit reads the mass at the bound from the object, never from `kind`:
+for a continuous parent it is the mass of an atom the parent declares at a
+(`distrib_atom_point`, `distrib_atom_log_mass`), subtracted from F(a) on the
+lower tail and added to S(a) on the upper; for a discrete parent F(a-) is
+F(ceil(a) - 1), the same number without the subtraction. A zero-adjusted gamma
+truncated to [0, 3] keeps its atom at zero, F(0-) = 0 and Z = F(3); reading
+the bound as a continuous point gives Z = F(3) - pi_0 and a law that does not
+integrate to one.
+
+The factory cuts the window to the parent's support, collapses a truncation of
+a truncation to one truncation at the intersection (the nested type itself is
+a static_assert), and refuses with `std::invalid_argument` a window with no
+mass, a window of one point, and a window that leaves out a cell of the parent,
+whose coordinate would have an identically zero score; the message names the
+equivalent model. An atom mixture over a discrete parent declares no atoms, its
+points being support points, so its cells are read from `n_atom_points`. The
+cells are values, so this refusal can only be made at run time.
+
+The expected information is not declared: the information of a truncated law
+is not the parent's, and the generic route of `generic_info.hpp` answers,
+integrating over the window.
+
+**Measured.** `tests/distrib/test_truncated.cpp`, 15 cases and 2829
+assertions, green on gcc and on CUDA (RTX 4070 SUPER) with the same counts. No
+reference file: every quantity has a twin inside the test. log Z of a Gaussian
+agrees with a difference of erfc values to 1e-12, in the middle, in a narrow
+window [1, 1.01], deep in each tail ([10, 12] and [-12, -10], mean 0.4,
+standard deviation 1.3) and on half lines, and the density integrates to one
+to 1e-10; a truncated Poisson sums to one to 1e-14, and the zero-truncated
+Poisson agrees with its closed form to 1e-14; every component of the orders one
+to six is within 2e-5 of five-point central differences of the order below,
+in the middle, near both bounds, in the narrow window, in both tails and for
+the Poisson; the cumulative functions agree with a quadrature to 1e-10,
+F + (1 - F) = 1 to 1e-13, and their derivatives to order six on both tails
+with differences to 3e-5; the quantile inverts the cumulative function to
+1e-9; the zero-adjusted gamma on [0, 3], an atom mixture with atoms at 0 and
+1 on [0, 2] (the atom on the lower bound kept) and an atom at 0 on a Gaussian
+truncated to [0.5, 3] integrate to one with their atoms to 1e-10; the generic
+expected information agrees with -E[l_ab] by a quadrature over the window to
+1e-9, and its first derivative with differences to 1e-6; three kernels agree
+with the host to 1e-11.
+
+The narrow window costs precision that the log form cannot give back: the two
+cumulative values are close, and the relative error of Z grows like the
+machine epsilon over the width of the window. In [1, 1.01] at its middle the
+mu score is 2e-6 while the noise of the differences is about 5e-11, so the
+check point sits at y = 1.0095, away from the middle.
+
+**A device defect found on the way, in `atom_mixture.hpp`.**
+`detail_atom_mixture::flat_tensors::offset()` was a host-only `constexpr`
+function. Called with a run-time order from device code (`set`, `at`,
+`fill_value_order`), which the truncation does at every order, it is not
+allowed without `--expt-relaxed-constexpr`, and nvcc said so in a warning
+(#20013) rather than an error. On the RTX 4070 SUPER the derivatives of log Z
+came out as zeros (the Poisson's order-two component read the parent's
+-0.408163 instead of -0.295226), and the order-two kernel of the Gaussian
+never returned. Marking `offset()` `LAPLACE_HD` repaired both: every term agrees
+with the host to the last few ulp, and the atom mixture's own 15 cases and
+3046 assertions still pass on gcc.
+
+**The kernel, and what it costs ptxas.** One kernel that called the order-six
+derivatives of three truncated laws (Gaussian, zero-adjusted gamma, Poisson)
+stopped ptxas with "Memory allocation failure"; split into three, the
+translation unit took about two hours and 20 GB in ptxas. The kernels now call
+orders one and two only; the orders three to six are the host cases' and run
+through the same code. The translation unit compiles in about ten minutes.
+
+**Chosen.** As above. `logpdf_dy_dk<J, K>` is constrained on the parent's kind
+alone: nvcc rejected the nested requires-expression that probed the parent for
+the member, where gcc accepted it.
+
+**Open.** `atom_mixture_distrib::expected_info()` calls
+`parent.expected_info()` directly, so an atom mixture over a truncated parent
+does not compile its closed information; it should go through
+`distrib_expected_info(parent)`. The generic routes have no atom branches, so
+the generic expected information of a truncated zero-adjusted law misses the
+atom's mass. The narrow-window loss above, which comes from the cumulative
+values themselves. Other host-only `constexpr` helpers called from device code
+appear in nvcc's #20013 warnings (`sgn` and `fact` in the bijectors); whether
+they give wrong values on the device was not checked.
