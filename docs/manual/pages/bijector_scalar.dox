@@ -71,7 +71,7 @@ For total order \f$K \in \{1, \dots, 6\}\f$, \ref laplace::bijector::bijector_pa
 | `lower_bounded` | \f$+\infty\f$ | \f$e^u\f$ |
 | `upper_bounded` | \f$e^{-u}\f$ | \f$+\infty\f$ |
 
-Other maps and inverted bijectors use generic bound differences, returning \f$+\infty\f$ for infinite bounds.
+The other maps, and inverted bijectors in either direction, take the difference itself. At an end of the closed domain of \f$h\f$ the difference is taken in the limit, so it is zero where \f$h(u)\f$ reaches the bound from which the distance is measured, the width \f$v_{\max} - v_{\min}\f$ where it reaches the other bound and both bounds are finite, and \f$+\infty\f$ where it reaches the other bound and that one is infinite. A bound that is itself infinite gives \f$+\infty\f$ at every point of the closed domain, the end included, where \f$h(u)\f$ is that same infinity.
 
 ## Domain and special values
 

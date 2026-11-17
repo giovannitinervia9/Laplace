@@ -37,12 +37,6 @@
 //                                 packed tensor of order J over y, Kronecker (y
 //                                 first) with the layout of logpdf_dk
 //   normalization                 proper, degenerate or improper (below)
-//   kind                          continuous (logpdf, logpdf_dk, logpdf_dy_dk) or
-//                                 discrete (logpmf, logpmf_dk; no y derivatives)
-//   y_coord_size()                the number of y coordinates the y derivatives run
-//                                 over, dim() unless the unit is constrained (the
-//                                 Dirichlet stores d values on the simplex and
-//                                 differentiates in d - 1)
 //
 // The state stays valid while w and theta do. With a theta shared by the units
 // the state is computed once; with a theta per unit each unit computes its own.
@@ -142,15 +136,12 @@ inline constexpr int y_slot = -2;
  * \ingroup distrib_multivariate
  * \brief Concept satisfied by multivariate distributions in `laplace::distrib`.
  *
- * Requires the compile-time constants `normalization`, `kind` and `n_params`,
- * the parameter descriptor array `params`, an associated `state_type`,
- * dimension and size queries (`dim()`, `y_coord_size()`, `param_size()`,
- * `param_offset()`, `theta_size()`, `state_size()`, `scratch_size()`),
- * parameter precomputation (`theta_state()`), and the value with its
- * first-order derivative blocks: for a continuous law `logpdf()`,
- * `logpdf_dk<0, 1>()`, `logpdf_dk<1>()` and `logpdf_dy_dk<1, 0>()`; for a
- * discrete law `logpmf()`, `logpmf_dk<0, 1>()` and `logpmf_dk<1>()`, and no
- * derivatives in \f$y\f$.
+ * Requires the compile-time constants `normalization` and `n_params`, the
+ * parameter descriptor array `params`, an associated `state_type`, dimension
+ * and size queries (`dim()`, `param_size()`, `param_offset()`, `theta_size()`,
+ * `state_size()`, `scratch_size()`), parameter precomputation
+ * (`theta_state()`), `logpdf()`, and the first-order derivative blocks
+ * `logpdf_dk<0, 1>()` and `logpdf_dk<1>()`.
  *
  * \tparam D Multivariate distribution type to check.
  * \see distrib_normalization, distrib_mv_param_info, distrib_multivariate
@@ -159,30 +150,20 @@ template <class D>
 concept multivariate_distrib =
     requires(const D d, const double* p, double* w, const int* idx, const typename D::state_type& st) {
       { D::normalization } -> std::convertible_to<distrib_normalization>;
-      { D::kind } -> std::convertible_to<distrib_kind>;
       { D::n_params } -> std::convertible_to<int>;
       { D::params[0] } -> std::convertible_to<distrib_mv_param_info>;
       { d.dim() } -> std::convertible_to<int>;
-      { d.y_coord_size() } -> std::convertible_to<int>;
       { d.param_size(0) } -> std::convertible_to<int>;
       { d.param_offset(0) } -> std::convertible_to<int>;
       { d.theta_size() } -> std::convertible_to<int>;
       { d.state_size() } -> std::convertible_to<int>;
       { d.scratch_size() } -> std::convertible_to<int>;
       { d.theta_state(p, w) } -> std::same_as<typename D::state_type>;
-    } &&
-    (D::kind == distrib_kind::continuous
-         ? requires(const D d, const double* p, double* w, const int* idx, const typename D::state_type& st) {
-             { d.logpdf(st, p, p) } -> std::same_as<double>;
-             { d.template logpdf_dk<0, 1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
-             { d.template logpdf_dk<1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
-             { d.template logpdf_dy_dk<1, 0>(st, p, p, idx, w, w) } -> std::same_as<bool>;
-           }
-         : requires(const D d, const double* p, double* w, const int* idx, const typename D::state_type& st) {
-             { d.logpmf(st, p, p) } -> std::same_as<double>;
-             { d.template logpmf_dk<0, 1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
-             { d.template logpmf_dk<1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
-           });
+      { d.logpdf(st, p, p) } -> std::same_as<double>;
+      { d.template logpdf_dk<0, 1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
+      { d.template logpdf_dk<1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
+      { d.template logpdf_dy_dk<1, 0>(st, p, p, idx, w, w) } -> std::same_as<bool>;
+    };
 
 // Blocks (note/multivariate_typed_params.md section 4). A distrib may split y
 // and each dense parameter into G blocks, block g owning the contiguous range
@@ -196,7 +177,7 @@ concept multivariate_distrib =
  * \ingroup distrib_multivariate
  * \brief Number of coordinates in a block-query slot.
  *
- * Returns `d.y_coord_size()` when `slot == y_slot`, and `d.param_size(slot)` when
+ * Returns `d.dim()` when `slot == y_slot`, and `d.param_size(slot)` when
  * `slot` indexes a dense parameter in `D::params`.
  *
  * \tparam D Multivariate distribution type.
@@ -207,7 +188,7 @@ concept multivariate_distrib =
  */
 template <class D>
 LAPLACE_HD int mv_slot_size(const D& d, int slot) {
-  return slot == y_slot ? d.y_coord_size() : d.param_size(slot);
+  return slot == y_slot ? d.dim() : d.param_size(slot);
 }
 
 /**

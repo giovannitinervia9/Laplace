@@ -262,10 +262,6 @@ parent here, in tree order; the module pages define their groups without
 \ingroup distrib_mvstudent_t */
 /** \addtogroup distrib_mvstudent_t2
 \ingroup distrib_mvstudent_t */
-/** \addtogroup distrib_dirichlet
-\ingroup distrib_multivariate */
-/** \addtogroup distrib_multinomial
-\ingroup distrib_multivariate */
 
 /** \defgroup penalty Penalties
 \brief Penalty concept, compile-time descriptors, and adapters from multivariate distributions. */

@@ -160,10 +160,6 @@ laplace_kokkos_sources(distrib_mvstudent_t.cpp)
 add_executable(distrib_mvstudent_t distrib_mvstudent_t.cpp)
 target_link_libraries(distrib_mvstudent_t PRIVATE Laplace::laplace)
 
-laplace_kokkos_sources(distrib_simplex.cpp)
-add_executable(distrib_simplex distrib_simplex.cpp)
-target_link_libraries(distrib_simplex PRIVATE Laplace::laplace)
-
 laplace_kokkos_sources(pdmat_ws_dd.cpp)
 add_executable(pdmat_ws_dd pdmat_ws_dd.cpp)
 target_link_libraries(pdmat_ws_dd PRIVATE Laplace::laplace Laplace::dense)

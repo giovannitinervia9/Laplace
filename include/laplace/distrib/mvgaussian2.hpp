@@ -75,8 +75,6 @@ struct mvgaussian2_distrib<S> {
 
   /// Normalization regime (`proper`: positive definite precision).
   static constexpr distrib_normalization normalization = distrib_normalization::proper;
-  /// Kind of the law (`continuous`: a density, with derivatives in \f$y\f$).
-  static constexpr distrib_kind kind = distrib_kind::continuous;
   /// Number of parameters: \f$\mu\f$ and \f$Q\f$.
   static constexpr int n_params = 2;
   /// Descriptors of \f$\mu\f$ (dense) and \f$Q\f$ (indexed, the parameters \f$\theta\f$ of its structure).
@@ -99,8 +97,6 @@ struct mvgaussian2_distrib<S> {
    * \return Dimension `structure.dim`.
    */
   LAPLACE_HD int dim() const { return structure.dim; }
-  /// Number of \f$y\f$ coordinates of the derivatives in \f$y\f$ (`dim()`: the unit is not constrained).
-  LAPLACE_HD int y_coord_size() const { return structure.dim; }
   /**
    * \brief Return the number of coordinates of parameter `j`.
    * \param j Parameter index in `params`.
@@ -212,27 +208,19 @@ struct mvgaussian2_distrib<S> {
    * Supports \f$K \in \{0, \dots, 4\}\f$ across `(0, 0)`, `(0, theta_slot)`, and `(theta_slot, theta_slot)`.
    *
    * \tparam K Derivative order with respect to \f$\theta\f$ (`0 <= K <= 4`).
-   * \tparam A Derivative orders in the dense parameters (all zero here: any positive order returns `false`).
    * \param st Precomputed state from `theta_state`.
    * \param slot_a Slot of the row parameter: 0 for \f$\mu\f$ or `theta_slot`.
    * \param slot_b Slot of the column parameter: 0 for \f$\mu\f$ or `theta_slot`.
    * \param ab Two-element index pair `(a, b)` selecting an entry within `(theta_slot, theta_slot)` (unused otherwise).
-   * \param x Dense parameters (unused: the information does not depend on \f$\mu\f$).
    * \param idx Sorted parameter indices of length `K` in \f$\theta\f$ (unused when `K == 0`).
    * \param out Output buffer of length `pdmat::packed_size(dim())` (packed lower-triangular) for `(0, 0)`, or length `1` (`out[0]`) for `(theta_slot, theta_slot)`.
    * \param w Caller workspace of at least `info_scratch_size()` doubles.
    * \return `true` if evaluated; `false` for `(0, theta_slot)` or structurally zero derivatives.
    */
-  template <int K, int... A>
+  template <int K>
   LAPLACE_HD bool expected_info_dk(const mvgaussian2_state& st, int slot_a, int slot_b, const int* ab,
-                                   const double* x, const int* idx, double* out, double* w) const {
-    // the information does not depend on mu: every derivative in it is zero
-    if constexpr ((0 + ... + A) > 0) {
-      return false;
-    } else {
-      (void)x;
-      return detail_mvgaussian::expected_info_dk<true, K>(structure, st, slot_a, slot_b, ab, idx, out, w);
-    }
+                                   const int* idx, double* out, double* w) const {
+    return detail_mvgaussian::expected_info_dk<true, K>(structure, st, slot_a, slot_b, ab, idx, out, w);
   }
   /**
    * \ingroup distrib_mvgaussian2
@@ -387,8 +375,6 @@ struct mvgaussian2_distrib<S> {
    * \brief Normalization regime (`distrib_normalization::improper`: singular precision).
    */
   static constexpr distrib_normalization normalization = distrib_normalization::improper;
-  /// Kind of the law (`continuous`: a density, with derivatives in \f$y\f$).
-  static constexpr distrib_kind kind = distrib_kind::continuous;
   /// Number of parameters: \f$\mu\f$ and \f$Q\f$.
   static constexpr int n_params = 2;
   /// Descriptors of \f$\mu\f$ (dense) and \f$Q\f$ (indexed, the parameters \f$\theta\f$ of its structure).
@@ -414,8 +400,6 @@ struct mvgaussian2_distrib<S> {
    * \return Dimension `structure.dim`.
    */
   int dim() const { return structure.dim; }
-  /// Number of \f$y\f$ coordinates of the derivatives in \f$y\f$ (`dim()`: the unit is not constrained).
-  int y_coord_size() const { return structure.dim; }
   /**
    * \brief Return the number of coordinates of parameter `j`.
    * \param j Parameter index in `params`.
@@ -585,29 +569,21 @@ struct mvgaussian2_distrib<S> {
    * \f$I_{ab} = -\frac{1}{2}\partial_{ab}\log\lvert Q\rvert_+ + \frac{1}{2}\delta_{ab}\partial_a\log\lvert Q\rvert_+\f$.
    *
    * \tparam K Derivative order with respect to \f$\theta\f$ (`0 <= K <= 4`).
-   * \tparam A Derivative orders in the dense parameters (all zero here: any positive order returns `false`).
    * \param st Precomputed state from `theta_state()` or `constrained_state()`.
    * \param slot_a Slot of the row parameter: 0 for \f$\mu\f$ or `theta_slot`.
    * \param slot_b Slot of the column parameter: 0 for \f$\mu\f$ or `theta_slot`.
    * \param ab Two-element index pair `(a, b)` selecting an entry within `(theta_slot, theta_slot)` (unused otherwise).
-   * \param x Dense parameters (unused: the information does not depend on \f$\mu\f$).
    * \param idx Sorted parameter indices of length `K` in \f$\theta\f$ (unused when `K == 0`).
    * \param out Output buffer of length `pdmat::packed_size(dim())` (`(0, 0)`) or length `1` (`(theta_slot, theta_slot)`).
    * \param w Caller workspace of at least `info_scratch_size()` doubles.
    * \return `true` if evaluated; `false` for `(0, theta_slot)` or structurally zero derivatives.
    * \see info_scratch_size(), theta_slot, distrib_multivariate
    */
-  template <int K, int... A>
+  template <int K>
     requires detail_mvgaussian::exp_linear_structure<S>
   bool expected_info_dk(const mvgaussian_rank_deficient_state& st, int slot_a, int slot_b, const int* ab,
-                        const double* x, const int* idx, double* out, double* w) const {
-    // the information does not depend on mu: every derivative in it is zero
-    if constexpr ((0 + ... + A) > 0) {
-      return false;
-    } else {
-      (void)x;
-      return detail_mvgaussian::rank_deficient_info<true, K>(structure, st, slot_a, slot_b, ab, idx, out, w);
-    }
+                        const int* idx, double* out, double* w) const {
+    return detail_mvgaussian::rank_deficient_info<true, K>(structure, st, slot_a, slot_b, ab, idx, out, w);
   }
   /**
    * \ingroup distrib_mvgaussian2

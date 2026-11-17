@@ -56,8 +56,8 @@ const char* sname[] = {"diagonal", "ar1", "compound_symmetry", "log_cholesky", "
 template <class D, int A, int K>
 KOKKOS_INLINE_FUNCTION bool block_ak(const D& g, const typename D::state_type& st, const double* y, const double* mu,
                                      const int* idx, const int* ab, double* out, double* w) {
-  if constexpr (A == -2) return g.template expected_info_dk<K>(st, 0, 0, ab, nullptr, idx, out, w);
-  else if constexpr (A == -1) return g.template expected_info_dk<K>(st, ld::theta_slot, ld::theta_slot, ab, nullptr, idx, out, w);
+  if constexpr (A == -2) return g.template expected_info_dk<K>(st, 0, 0, ab, idx, out, w);
+  else if constexpr (A == -1) return g.template expected_info_dk<K>(st, ld::theta_slot, ld::theta_slot, ab, idx, out, w);
   else return g.template logpdf_dk<K, A>(st, y, mu, idx, out, w);
 }
 template <class D, int A>
@@ -518,9 +518,9 @@ bool degenerate_block(const ld::mvstudent_t1_distrib<ws_t>& g, const ld::mvstude
     if constexpr (A + KK > 6 || (A < 0 && KK > 4)) {
       return false;
     } else if constexpr (A == -2) {
-      return g.template expected_info_dk<KK>(st, 0, 0, c.ab, nullptr, idx, out, w);
+      return g.template expected_info_dk<KK>(st, 0, 0, c.ab, idx, out, w);
     } else if constexpr (A == -1) {
-      return g.template expected_info_dk<KK>(st, ld::theta_slot, ld::theta_slot, c.ab, nullptr, idx, out, w);
+      return g.template expected_info_dk<KK>(st, ld::theta_slot, ld::theta_slot, c.ab, idx, out, w);
     } else {
       return g.template logpdf_dk<KK, A>(st, y, mu, idx, out, w);
     }

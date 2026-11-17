@@ -178,16 +178,12 @@ template <class... M>
 struct independent_product_distrib {
   static_assert(sizeof...(M) >= 1, "independent_product_distrib: at least one component");
   static_assert((true && ... && (detail_product::check_component<M>(), true)));
-  static_assert(((M::kind == distrib_kind::continuous) && ...),
-                "independent_product_distrib: the components must be continuous");
 
   /// The components.
   detail_product::component_list<M...> components;
 
   /// Normalization: improper if a component is, degenerate if a component is, proper otherwise.
   static constexpr distrib_normalization normalization = detail_product::product_normalization<M...>();
-  /// Kind of the law (`continuous`: every component is).
-  static constexpr distrib_kind kind = distrib_kind::continuous;
   /// Number of typed parameters: \f$\mu\f$, then the indexed parameters of each component.
   static constexpr int n_params = 1 + ((M::n_params - 1) + ... + 0);
   /// Parameter descriptors: \f$\mu\f$ (vector), then those of each `M_k` after its location.
@@ -209,9 +205,6 @@ struct independent_product_distrib {
     each([&](const auto& c, auto) { n += c.copies * c.distribution.dim(); });
     return n;
   }
-  /// \return The number of \f$y\f$ coordinates of the derivatives in \f$y\f$, `dim()`. ponytail: a
-  /// component whose unit is constrained (y_coord_size() < dim(), the Dirichlet) is not supported yet.
-  LAPLACE_HD int y_coord_size() const { return dim(); }
   /// \return The number of blocks, \f$\sum_k G_k\f$.
   LAPLACE_HD int n_blocks() const {
     int n = 0;

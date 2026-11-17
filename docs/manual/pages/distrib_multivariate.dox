@@ -26,7 +26,7 @@ A multivariate distribution models \ref laplace::distrib::multivariate_distrib "
 | `logpdf_dk<K, A...>(state, y, x, idx, out, w)` | Derivative block of order \f$K\f$ in \f$\theta\f$ and \f$A_j\f$ in the dense parameters, \f$K + \sum_j A_j \le 6\f$ |
 | `logpdf_dy_dk<J, K, A...>(state, y, x, idx, out, w)` | Derivative block of order \f$J\f$ in \f$y\f$, \f$K\f$ in \f$\theta\f$ and \f$A_j\f$ in the dense parameters, \f$J + K + \sum_j A_j \le 6\f$ |
 
-The concept requires `normalization`, `kind`, `n_params`, `params`, `state_type`, `dim()`, `y_coord_size()`, `param_size()`, `param_offset()`, `theta_size()`, `state_size()`, `scratch_size()`, and `theta_state()`. Here `kind` is a \ref laplace::distrib::distrib_kind "distrib_kind" (`continuous` or `discrete`), and `y_coord_size()` is the number of \f$y\f$ coordinates over which derivatives in \f$y\f$ run (`dim()` unless the unit is constrained; the Dirichlet stores \f$d\f$ values on the simplex and differentiates in \f$d - 1\f$). A continuous distribution provides `logpdf()`, `logpdf_dk<0, 1>()`, `logpdf_dk<1>()`, and `logpdf_dy_dk<1, 0>()`; a discrete distribution provides `logpmf()`, `logpmf_dk<0, 1>()`, and `logpmf_dk<1>()`, with no derivatives in \f$y\f$. Each distribution page lists the further members it provides (expected information, draws, moments, starting values).
+The concept requires `normalization`, `n_params`, `params`, `state_type`, `dim()`, `param_size()`, `param_offset()`, `theta_size()`, `state_size()`, `scratch_size()`, `theta_state()`, `logpdf()`, `logpdf_dk<0, 1>()`, `logpdf_dk<1>()`, and `logpdf_dy_dk<1, 0>()`. Each distribution page lists the further members it provides (expected information, draws, moments, starting values).
 
 ## Typed parameters
 
@@ -45,10 +45,8 @@ The \ref laplace::distrib::distrib_mv_param_kind "distrib_mv_param_kind" `kind` 
 | \ref distrib_mvgaussian2 "mvgaussian2" | \f$\mu\f$ (`vector`), \f$Q\f$ (`matrix`) | \f$\mu\f$ | structure \f$\theta\f$ |
 | \ref distrib_mvstudent_t1 "mvstudent_t1" | \f$\mu\f$ (`vector`), \f$\Sigma\f$ (`matrix`), \f$\nu\f$ (`scalar`, \f$(0, \infty)\f$) | \f$\mu\f$ | structure \f$\theta\f$, then \f$\nu\f$ |
 | \ref distrib_mvstudent_t2 "mvstudent_t2" | \f$\mu\f$ (`vector`), \f$Q\f$ (`matrix`), \f$\nu\f$ (`scalar`, \f$(0, \infty)\f$) | \f$\mu\f$ | structure \f$\theta\f$, then \f$\nu\f$ |
-| \ref distrib_dirichlet "dirichlet" | \f$\mu\f$ (`simplex_vector`), \f$\phi\f$ (`scalar`, \f$(0, \infty)\f$) | \f$\mu\f$ | \f$\phi\f$ |
-| \ref distrib_multinomial "multinomial" | \f$\mu\f$ (`simplex_vector`) | \f$\mu\f$ | none |
 
-With one dense parameter, as in all six distributions, `x` holds the coordinates of \f$\mu\f$ (additive log-ratio coordinates for `simplex_vector`), while \f$\theta\f$ holds the structure's parameters (plus \f$\nu\f$ for the Student t), \f$\phi\f$ for the Dirichlet, and is empty for the multinomial.
+With one dense parameter, as in all four distributions, `x` is \f$\mu\f$ and \f$\theta\f$ holds the structure's parameters (plus \f$\nu\f$ for the Student t).
 
 ## State and scratch
 
@@ -62,14 +60,14 @@ Symmetric \f$d \times d\f$ matrices are stored packed by rows of the lower trian
 
 ## Expected information blocks
 
-`expected_info_dk<K, A...>(state, slot_a, slot_b, ab, x, idx, out, w)` takes the dense parameters `x` and derivative orders `A_j` in them (omitted trailing orders are \f$0\f$), writing the order-\f$K\f$ \f$\theta\f$-derivative along `idx` and order-\f$A_j\f$ dense derivatives of the expected Fisher information block for `(slot_a, slot_b)`. The output is laid out as `logpdf_dk`'s Kronecker product after the information block (information entry first, row-major). A slot is a dense parameter's index in `params`, or \ref laplace::distrib::theta_slot "theta_slot" (\f$-1\f$) for \f$\theta\f$. For one dense parameter, `(slot, slot)` writes its packed symmetric matrix; for two distinct dense parameters of sizes \f$n_a\f$ and \f$n_b\f$, `(slot_a, slot_b)` writes the full \f$n_a \times n_b\f$ matrix (none of the distributions above has two); `(slot, theta_slot)` writes the dense parameter's vector for \f$\theta\f$-coordinate `ab[0]`; `(theta_slot, theta_slot)` writes the entry at `ab` = \f$(a, b)\f$. The information of the multivariate Gaussian and Student t distributions does not depend on \f$\mu\f$, so they return `false` for any positive `A_j` and for `(0, theta_slot)` (which vanishes by symmetry), leaving `out` untouched; the information of the Dirichlet and the multinomial depends on \f$\mu\f$.
+`expected_info_dk<K>(state, slot_a, slot_b, ab, idx, out, w)` writes the order-\f$K\f$ \f$\theta\f$-derivative along `idx` of the expected Fisher information block for `(slot_a, slot_b)`. A slot is a dense parameter's index in `params`, or \ref laplace::distrib::theta_slot "theta_slot" (\f$-1\f$) for \f$\theta\f$. For one dense parameter, `(slot, slot)` writes its packed symmetric matrix; for two distinct dense parameters of sizes \f$n_a\f$ and \f$n_b\f$, `(slot_a, slot_b)` writes the full \f$n_a \times n_b\f$ matrix (none of the four distributions has two); `(slot, theta_slot)` writes the dense parameter's vector for \f$\theta\f$-coordinate `ab[0]`; `(theta_slot, theta_slot)` writes the entry at `ab` = \f$(a, b)\f$. For the four distributions above, `(0, theta_slot)` vanishes by symmetry and returns `false` with `out` untouched.
 
 ## Blocks
 
 A distribution may split \f$y\f$ and each dense parameter into \f$G\f$ blocks, each owning a contiguous coordinate range, and return derivatives concatenated over \f$g = 0, \dots, G - 1\f$ in the dense layout restricted to block \f$g\f$. Without declared blocks (as in all four distributions above), \f$G = 1\f$. Here `slot` is \ref laplace::distrib::y_slot "y_slot" (\f$-2\f$) for \f$y\f$ or a dense parameter index:
 
 - \ref laplace::distrib::mv_n_blocks "mv_n_blocks(d)" returns \f$G\f$ (`d.n_blocks()` if declared, else \f$1\f$).
-- \ref laplace::distrib::mv_slot_size "mv_slot_size(d, slot)" returns `d.y_coord_size()` for `y_slot`, else `d.param_size(slot)`.
+- \ref laplace::distrib::mv_slot_size "mv_slot_size(d, slot)" returns `d.dim()` for `y_slot`, else `d.param_size(slot)`.
 - \ref laplace::distrib::mv_block_start "mv_block_start(d, slot, g)" (\f$0 \le g \le G\f$) returns the start \f$s_g\f$ of block \f$g\f$, which owns \f$[s_g, s_{g+1})\f$ (for \f$G = 1\f$: \f$0\f$ and `mv_slot_size(d, slot)`).
 - \ref laplace::distrib::mv_block_tensor_size "mv_block_tensor_size(d, slot, order)" returns \f$\sum_{g=0}^{G-1}\f$ `sym_tensor_size(n_g, order)`, where \f$n_g\f$ is block \f$g\f$'s size in `slot`.
 - \ref laplace::distrib::mv_block_tensor_size "mv_block_tensor_size\<A...\>(d, J)" returns the `out` length of `mv_logpdf_dy_dk_blocks<J, K, A...>()` (of `mv_logpdf_dk_blocks<K, A...>()` when \f$J = 0\f$, the default), summing `sym_tensor_size(n_{yg}, J)` \f$\prod_j\f$ `sym_tensor_size(n_{jg}, A_j)` over blocks \f$g\f$, where \f$n_{yg}\f$ and \f$n_{jg}\f$ are the sizes of \f$y\f$ and of dense parameter \f$j\f$ in block \f$g\f$.
