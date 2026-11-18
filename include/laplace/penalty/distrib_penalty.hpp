@@ -65,6 +65,10 @@ template <class M>
 concept has_prox_y = requires(const M m, const typename M::state_type& s, const double* p, double* q) {
   m.prox_y(s, p, p, 0.0, q, q);
 };
+template <class M>
+concept has_prox_y_steps = requires(const M m, const typename M::state_type& s, const double* p, double* q) {
+  m.prox_y(s, p, p, p, q, q);
+};
 }  // namespace detail_penalty
 
 /**
@@ -241,6 +245,24 @@ struct distrib_penalty {
    */
   LAPLACE_PENALTY_FORWARD_HD void prox_beta(const state_type& st, const double* v, double t, double* out, double* w) const
     requires detail_penalty::has_prox_y<M>
+  {
+    distribution.prox_y(st, v, location(w), t, out, w);
+  }
+
+  /**
+   * \brief Proximal operator with a step per coordinate, \f$\arg\min_b \{\mathrm{pen}(b; \theta) + \sum_i (b_i - v_i)^2/(2t_i)\}\f$.
+   *
+   * `M::prox_y` with a vector of steps at the location \f$\mu_0\f$; present
+   * when `M` has it (a product of univariate laws with `prox_y`).
+   * \param st State from `theta_state()`.
+   * \param v Point, length `dim()`.
+   * \param t Step per coordinate, length `dim()`, every \f$t_i > 0\f$.
+   * \param out Minimizer, length `dim()`.
+   * \param w Scratch of `scratch_size()` doubles.
+   */
+  LAPLACE_PENALTY_FORWARD_HD void prox_beta(const state_type& st, const double* v, const double* t, double* out,
+                                            double* w) const
+    requires detail_penalty::has_prox_y_steps<M>
   {
     distribution.prox_y(st, v, location(w), t, out, w);
   }

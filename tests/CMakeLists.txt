@@ -76,6 +76,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_mvgaussian_rank_deficient.cpp
   penalty/test_distrib_penalty.cpp
   penalty/test_independent_product.cpp
+  penalty/test_linear_map.cpp
   distrib/test_univariate_as_multivariate.cpp
   penalty/test_prox.cpp
   distrib/test_mvstudent_t.cpp

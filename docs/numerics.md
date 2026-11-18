@@ -12254,3 +12254,102 @@ objective's kernels. The whole laplace_tests passes on the CUDA build, and the
 5 bundle cases (with the header case) give 72 assertions, none failing, on gcc
 and on CUDA. On the device every LAD fit lands on the vertex at the default
 rule (d4: 452 trial points, 0.42 s, f - f* = 9.1e-12; d5: 71, 0.044 s).
+
+## Penalties through a linear map: c(D) and Condat's prox (2026-11-18)
+
+What. `linear_map_penalty<P, Map>` (include/laplace/penalty/linear_map_penalty.hpp)
+is pen(beta) = P(D beta) + c(D) for a separable penalty P on u = D beta, with
+D = W = diag(w), w_j > 0 (`diagonal_map`), or the forward differences of
+order K (`difference_map<K>`, (p - K) x p). Two numerical pieces are new: the
+constant c(D) = -1/2 log det(D D^T) of the difference map, and the proximal
+operator through first differences of a Laplace penalty (the 1-D total
+variation). Everything else is the chain rule over P's derivatives and the
+per-coordinate prox of P.
+
+**c(D).** The closed form
+
+  det(D_K D_K^T) = prod_{j=0}^{K-1} binom(p + j, 2j + 1) / binom(2j, j)
+
+(p for K = 1, p^2 (p^2 - 1)/12 for K = 2) holds exactly for K = 1..4 and
+p = K + 1..30, 40, 50 (SymPy, Bareiss determinant of the integer matrix
+D D^T against the product as a rational; tools/reference/penalty_difference_logdet.py).
+Its log is computed as a sum of logs of ratios (p + j - i)/(i + 1), O(K^2)
+terms, with no cancellation at large p (differences of lgamma lose about
+eps lgamma(p) in absolute terms). Against mpmath at 200 bits on the log of
+the exact integer determinant (118 values): worst relative error 3.8e-16, the
+same on gcc and CUDA.
+
+The alternative, a Cholesky factorization of D D^T (banded, O(p K^2)), was
+measured against the closed form (numpy, dense):
+
+| p | K = 1 | K = 2 | K = 3 | K = 4 |
+|---|---|---|---|---|
+| 200 | 6e-14 | -2.8e-10 | -5.0e-8 | -1.0e-4 |
+| 2000 | 4e-12 | -2.0e-8 | -0.073 | fails |
+
+The condition number of D D^T grows as p^(2K): Cholesky loses the digits and
+then breaks. Kept: the closed form; Cholesky only for a general sparse D if
+one is ever offered.
+
+Consistency. For P the product of N(0, 1/lambda) on the m = p - K
+coordinates, pen = lambda/2 |D beta|^2 - m/2 log lambda + m/2 log 2 pi -
+1/2 log det(D D^T), which is the intrinsic mvgaussian2 with Q = lambda D^T D
+since |Q|_+ = lambda^m det(D D^T). Tested for K = 1, 2, 3, p up to 12,
+lambda 0.3 and 2: value 7.9e-16, beta derivatives of orders 1, 2, 3 4.8e-16,
+1.5e-16, 0, the theta derivative (d/dv = -v d/drho) 1.3e-15, mixed 5.6e-16
+(relative; host only, weighted_sum_psdmat being a host structure).
+
+**Condat's prox.** For K = 1 and P the lasso product of laplace1 (rate
+a = 1/sigma) or laplace2 (a = lambda) at one shared rate, prox_t of
+a |D beta - mu0|_1 is b0 + TV_{ta}(v - b0), with b0 the cumulative sum of mu0
+(D b0 = mu0) and TV_w(y) = argmin_x 1/2 |x - y|^2 + w sum_i |x_{i+1} - x_i|,
+computed by L. Condat's direct algorithm (IEEE Signal Processing Letters
+20(11), 2013), transcribed from his reference C code: exact in a finite
+number of steps, O(p) in practice, O(p^2) in the worst case. A prototype in
+Python agreed with the dual problem solved by FISTA at gap 1e-12 to 1.1e-12
+(p = 100) and 2.6e-11 (p = 1000).
+
+Test (kernel, gcc and CUDA identical): the exact certificate. With x the
+output and z_i = sum_{j<=i} (v_j - x_j), optimality is |z_i| <= t a for all
+i, z_i = -t a sign((Dx)_i - mu0_i) where the jump is not zero, and
+z_{p-1} = 0. On p = 2, 3, 5, 17, 100, 1000, 1e4, t = 1e-10, 0.05, 0.5, 3,
+1e8, with and without mu0, the violations relative to sum(|v| + |x|) + t a
+are 1.1e-16 (bound), 1.1e-16 (jumps), 9.0e-15 (closing). At t = 1e8 the
+output is the mean of v within 6.0e-9 (vmin = y_0 - lambda rounds at the
+scale of lambda), at t = 1e-10 every coordinate moves by 2 t a at most (to
+a relative 1e-5, rounding of v - x at |v| ~ 1). Against the dual solved by
+FISTA on the host to gap 1e-13, p = 10 and 100: 6.4e-13. Different rates
+across the sets of the product give NaN by design (Condat's algorithm has
+one weight); a weighted TV prox is not offered.
+
+Speed (host, one thread, gcc -O2, the algorithm copied into a standalone
+program; a step signal of 50 levels plus uniform noise, weight 0.05, 1, 20):
+
+| p | 1e3 | 1e4 | 1e5 | 1e6 |
+|---|---|---|---|---|
+| ns per coordinate | 1.4 - 5.0 | 1.6 - 12 | 9.1 - 11 | 4.9 - 11 |
+
+linear in p over three decades: 11 ms for p = 1e6 at worst, against 0.77 ms
+for p = 1000 in the Python prototype (5 us here).
+
+Rejected for K >= 2: an iterative prox by FISTA on the dual box
+|z|_inf <= t a with step 1/4^K. Iterations to a gap of 1e-8 (Python
+prototype): K = 2, 12476 (p = 100) and 55407 (p = 1000); K = 3, 78920 and
+194066; K = 1 needed 7341 and 38804 to 1e-12. Far too many for a prox called
+at every step of an outer method; for K >= 2 the prox is `none`, and
+f(beta) + P(D beta) is split by a primal-dual optimizer through inner() and
+map() (with norm_squared_bound() = 4^K >= ||D||_2^2 for its steps).
+
+**Other checks.** Diagonal map against the scales moved onto beta (gaussian2
+with v/w_j^2; laplace1 with sigma/w_j and mu0_j/w_j, an exact identity with
+the constant): 7.1e-15 and 1.8e-15 on value and derivatives, the prox
+identical. Student t1 on second differences: beta derivatives of orders
+1, 2, 3 against central differences 1.3e-10, 6.2e-10, 9.4e-11. rho through
+W = diag(0.5, 3): rho_P max w_j^2 = 2.19727 equals max(-pen'') on a grid.
+All in tests/penalty/test_linear_map.cpp, 8 cases, 48 assertions, none
+failing on gcc and CUDA (the whole laplace_tests green on CUDA).
+
+Open. The dense derivative layout over p for the difference map (binom(p +
+J - 1, J) doubles: 4 MB at p = 1000, J = 2; 1.3 GB at J = 3) where the true
+Hessian is banded (p (K + 1)); a banded layout comes with the engine. P must
+be separable.

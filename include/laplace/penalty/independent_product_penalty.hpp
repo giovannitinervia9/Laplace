@@ -52,6 +52,8 @@ struct univariate_penalty_reading<distrib::laplace1_distrib> {
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::exponential_variance;
   /// \return 0, convex.
   LAPLACE_HD static double weak_convexity(const double*) { return 0.0; }
+  /// \return The rate \f$1/\sigma\f$ of the kink term \f$|\beta - \mu|/\sigma\f$.
+  LAPLACE_HD static double l1_rate(const double* theta) { return 1.0 / theta[0]; }
 };
 
 /// \ingroup distrib_independent_product
@@ -62,6 +64,8 @@ struct univariate_penalty_reading<distrib::laplace2_distrib> {
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::exponential_variance;
   /// \return 0, convex.
   LAPLACE_HD static double weak_convexity(const double*) { return 0.0; }
+  /// \return The rate \f$\lambda\f$ of the kink term \f$\lambda |\beta - \mu|\f$.
+  LAPLACE_HD static double l1_rate(const double* theta) { return theta[0]; }
 };
 
 /// \ingroup distrib_independent_product

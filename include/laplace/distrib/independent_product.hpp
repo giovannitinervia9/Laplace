@@ -176,6 +176,11 @@ template <class M>
 concept has_mv_prox_y = requires(const M m, const typename M::state_type& s, const double* p, double* q) {
   m.prox_y(s, p, p, 0.0, q, q);
 };
+// whether M has the prox_y with a step per coordinate (note/penalties.md section 5d)
+template <class M>
+concept has_mv_prox_y_steps = requires(const M m, const typename M::state_type& s, const double* p, double* q) {
+  m.prox_y(s, p, p, p, q, q);
+};
 
 }  // namespace detail_product
 
@@ -425,6 +430,32 @@ struct independent_product_distrib {
       const int dk = c.distribution.dim();
       for (int g = 0; g < c.copies; ++g, off += dk)
         c.distribution.prox_y(set_state(c, r, c.set(g)), v + off, x + off, t, out + off, w);
+      r += c.n_sets * region_size(c);
+    });
+  }
+
+  /**
+   * \brief Proximal operator in \f$y\f$ with a step per coordinate, copy by copy; present when every component has it.
+   *
+   * The minimizer of \f$-\log p(y) + \sum_i (y_i - v_i)^2/(2t_i)\f$, each
+   * copy's own `prox_y` at the steps of its coordinates.
+   * \param st State from `theta_state()`.
+   * \param v Point, length `dim()`.
+   * \param x Location \f$\mu\f$, length `dim()`.
+   * \param t Step per coordinate, length `dim()`, every \f$t_i > 0\f$.
+   * \param out Minimizer, length `dim()`.
+   * \param w Scratch of `scratch_size()` doubles.
+   */
+  LAPLACE_HD void prox_y(const state_type& st, const double* v, const double* x, const double* t, double* out,
+                         double* w) const
+    requires(detail_product::has_mv_prox_y_steps<M> && ...)
+  {
+    int off = 0;
+    const double* r = st.regions;
+    each([&](const auto& c, auto) {
+      const int dk = c.distribution.dim();
+      for (int g = 0; g < c.copies; ++g, off += dk)
+        c.distribution.prox_y(set_state(c, r, c.set(g)), v + off, x + off, t + off, out + off, w);
       r += c.n_sets * region_size(c);
     });
   }

@@ -1,0 +1,130 @@
+/** \addtogroup penalty_linear_map
+
+A linear map penalty applies a separable penalty to a linear transform of the coefficients. This page defines the penalty, the two maps that the library implements, and the normalizing constant, the derivatives and the proximal operator of the penalty. Include `<laplace/penalty/linear_map_penalty.hpp>`. The class \ref laplace::penalty::linear_map_penalty "linear_map_penalty\<P, Map\>" lives in namespace `laplace::penalty`, and its members are marked `LAPLACE_HD`. On the gcc and CUDA builds each part agrees with an independent reference: the values, the derivatives and the normalizing constant within a few units of rounding, and the proximal operators with their exact optimality conditions (see Accuracy).
+
+## Definition
+
+Let \f$\beta \in \mathbb{R}^p\f$ be the coefficients, \f$D\f$ an \f$m \times p\f$ matrix and \f$u = D\beta \in \mathbb{R}^m\f$ the mapped coefficients. Let \f$P\f$ be a separable penalty on \f$u\f$ with hyperparameters \f$\theta\f$ and prior location \f$\mu_0\f$, which is the location of \f$P\f$. The linear map penalty is
+\f[
+\mathrm{pen}(\beta;\theta) = P(D\beta;\theta) + c(D),
+\f]
+where \f$c(D)\f$ is the normalizing constant of the map, which does not depend on \f$\theta\f$ (see Normalizing constant below).
+
+The class requires \f$P\f$ to be separable and not intrinsic, and it refuses an intrinsic \f$P\f$ at compile time. A Gaussian on a map is written instead as the intrinsic multivariate Gaussian \ref distrib_mvgaussian2 "mvgaussian2" with precision \f$Q = \lambda D^\top D\f$, where \f$\lambda > 0\f$ is a scalar, through \ref penalty_distrib_penalty "Distribution penalty".
+
+The descriptors of the penalty follow from those of \f$P\f$ and of the map. The kinks are `none` when \f$P\f$ is smooth, `per_coordinate` for a diagonal map over a \f$P\f$ with kinks in each coordinate, and `linear_map` otherwise. The structure is that of \f$P\f$ for the diagonal map and `coupled` for the differences. The scale mixture, the regularity in \f$\theta\f$ and in \f$\beta\f$, and the linearity in \f$\theta\f$ are those of \f$P\f$.
+
+## The maps
+
+Two maps are implemented. Each has the members `m()` and `p()`, which give the numbers of rows and columns; `apply(beta, u)`, which computes \f$u = D\beta\f$; `apply_transpose(g, out)`, which computes \f$D^\top g\f$; `norm_squared_bound()`, a bound on \f$\lVert D\rVert_2^2\f$; and `log_normalizer()`, which returns \f$c(D)\f$.
+
+The diagonal map \ref laplace::penalty::diagonal_map "diagonal_map" is \f$u = W\beta\f$ with \f$W = \operatorname{diag}(w)\f$ and every \f$w_j > 0\f$, so \f$m = p\f$. The weights \f$w_j\f$ are read through a pointer and not copied, so the array must stay alive while the map is in use. Its norm bound is \f$\max_j w_j^2\f$, which equals \f$\lVert W\rVert_2^2\f$.
+
+The difference map \ref laplace::penalty::difference_map "difference_map\<K\>" has order \f$K \ge 1\f$, and its rows are
+\f[
+u_i = \sum_{j=0}^{K} (-1)^{K-j} \binom{K}{j} \beta_{i+j}, \qquad i = 0, \dots, m-1,
+\f]
+with \f$m = p - K\f$. For \f$K = 1\f$ the map takes first differences, and for \f$K \ge 2\f$ it takes differences of higher order. The matrix \f$D\f$ has full row rank, and its null space is the set of polynomials of degree below \f$K\f$, which does not depend on \f$\theta\f$. The constructor takes \f$p\f$, which is at least \f$K+1\f$. The order \f$K\f$ is a template parameter, because the proximal descriptor is fixed at compile time and depends on it. The member `norm_squared_bound()` returns \f$4^K\f$, an upper bound on \f$\lVert D\rVert_2^2\f$.
+
+## Normalizing constant
+
+For the diagonal map the constant is \f$c(W) = -\sum_j \log w_j\f$. Since \f$W\f$ is square and invertible, a proper \f$P\f$ gives a proper penalty. For the difference map the constant is
+\f[
+c(D) = -\tfrac12 \log \det(DD^\top),
+\f]
+so a proper \f$P\f$ gives an intrinsic penalty. The determinant has the closed form
+\f[
+\det(DD^\top) = \prod_{j=0}^{K-1} \frac{\binom{p+j}{2j+1}}{\binom{2j}{j}},
+\f]
+which equals \f$p\f$ for \f$K = 1\f$ and \f$p^2(p^2-1)/12\f$ for \f$K = 2\f$. Each binomial is a product of ratios, and the logarithm is a sum of logarithms of these ratios. This avoids the cancellation that differences of log-gamma values suffer at large \f$p\f$.
+
+As a consistency check, let \f$P\f$ be the product of normal laws with variance \f$1/\lambda\f$ on the \f$m\f$ coordinates. Then the penalty equals the intrinsic multivariate Gaussian with precision \f$Q = \lambda D^\top D\f$, because the pseudo-determinant \f$\lvert Q\rvert_+\f$, the product of the nonzero eigenvalues of \f$Q\f$, equals \f$\lambda^m \det(DD^\top)\f$. If \f$P\f$ is unnormalizable, \f$c(D)\f$ is taken as zero and the penalty stays unnormalizable.
+
+## Derivatives
+
+The derivative of order \f$J\f$ in \f$\beta\f$ follows from the chain rule as the tensor
+\f[
+\sum_{i=0}^{m-1} T_i \, d_i^{\otimes J},
+\f]
+where \f$T_i\f$ is the order-\f$J\f$ derivative of \f$P\f$ in \f$u_i\f$, \f$d_i\f$ is row \f$i\f$ of \f$D\f$ written as a column vector, and \f$d_i^{\otimes J}\f$ is its \f$J\f$-fold tensor power.
+
+For the diagonal map the result has one double per coordinate, equal to \f$w_j^J\f$ times the derivative of \f$P\f$. For the difference map the result is stored in the dense layout over \f$p\f$ of the multivariate distributions, which holds a scalar, a vector, the lower triangle packed by rows and sorted tuples. This layout takes \f$\binom{p+J-1}{J}\f$ doubles. For \f$p = 1000\f$ it takes about 4 MB at \f$J = 2\f$ and 1.3 GB at \f$J = 3\f$. The Hessian of the penalty is banded, and a banded storage would need \f$p(K+1)\f$ doubles, but no banded layout is offered.
+
+The value, with \f$J = 0\f$ and no derivative in \f$\theta\f$, includes \f$c(D)\f$. The derivatives in \f$\theta\f$ are those of \f$P\f$, since \f$c(D)\f$ does not depend on \f$\theta\f$. The member `value_dbeta_dk<J, K>` returns `false` and leaves the output untouched when the derivative is structurally zero.
+
+## Proximal operator
+
+The proximal operator with step \f$t > 0\f$ at a point \f$v \in \mathbb{R}^p\f$ is
+\f[
+\operatorname{prox}_t(v) = \operatorname*{arg\,min}_{b \in \mathbb{R}^p} \left\{ \mathrm{pen}(b;\theta) + \frac{\lVert b - v\rVert^2}{2t} \right\},
+\f]
+where \f$b\f$ is the variable of the minimization. The member `prox_beta(st, v, t, out, w)` computes it, and it exists only when the descriptor `prox` is `closed_form`. The general definition is on the page \ref penalty_prox "Proximal operators".
+
+For the diagonal map the \f$j\f$-th output is \f$\operatorname{prox}_{t w_j^2 f_j}(w_j v_j)/w_j\f$, where \f$f_j\f$ is the penalty of coordinate \f$j\f$ of \f$P\f$. This uses the proximal operator of \f$P\f$ with one step per coordinate.
+
+For the difference map of order \f$K = 1\f$, the descriptor is `closed_form` when \f$P\f$ is the lasso product of \ref distrib_laplace1 "laplace1" or \ref distrib_laplace2 "laplace2". Such a product has the kink terms \f$a\lvert u_i - \mu_{0i}\rvert\f$, with rate \f$a = 1/\sigma\f$ for \ref distrib_laplace1 "laplace1", where \f$\sigma\f$ is its scale, and \f$a = \lambda\f$ for \ref distrib_laplace2 "laplace2", where \f$\lambda\f$ is its rate. The minimizer is \f$b_0 + x\f$, where \f$b_0\f$ is the vector with \f$b_{0,0} = 0\f$ and \f$b_{0,i} = \sum_{j<i} \mu_{0j}\f$, so that \f$Db_0 = \mu_0\f$. The vector \f$x\f$ is the one-dimensional total-variation denoising of \f$y = v - b_0\f$ with weight \f$\omega = t a\f$, that is, the minimizer of \f$\tfrac12 \lVert x - y\rVert^2 + \omega \sum_i \lvert x_{i+1} - x_i\rvert\f$. It is computed by the direct algorithm for one-dimensional total-variation denoising of Condat (2013). The algorithm is exact after a finite number of steps, with no tolerance and no convergence flag. It takes \f$O(p)\f$ operations in practice and \f$O(p^2)\f$ in the worst case. It needs one rate shared by all the differences: when the sets of the product have different rates, the output is NaN.
+
+For every other penalty, and for differences of order \f$K \ge 2\f$, the descriptor `prox` is `none` and `prox_beta` is not available.
+
+## Weak convexity
+
+Let \f$\rho_P\f$ be the weak-convexity constant of \f$P\f$, defined on the page \ref penalty_prox "Proximal operators". The member `weak_convexity(theta)` returns \f$\rho_P\f$ times `norm_squared_bound()`. This is an upper bound on the supremum of \f$-\mathrm{pen}''\f$ off the kinks. For the diagonal map with one rate, the bound is equal to that supremum.
+
+## Splitting
+
+The member `inner()` returns \f$P\f$, and the member `map()` returns the map \f$D\f$. The two parts of the penalty can therefore be used on their own. The penalty \f$P\f$ is used through its value, derivatives and proximal operator, and the map through `apply()`, `apply_transpose()` and `norm_squared_bound()`.
+
+## Classes
+
+The module has the class \ref laplace::penalty::linear_map_penalty "linear_map_penalty\<P, Map\>", the two maps \ref laplace::penalty::diagonal_map "diagonal_map" and \ref laplace::penalty::difference_map "difference_map\<K\>", and the state \ref laplace::penalty::linear_map_penalty_state "linear_map_penalty_state\<S\>". The state holds the state of \f$P\f$ and the rate \f$a\f$ used by Condat's algorithm, which is NaN when the rates differ.
+
+## Accuracy
+
+The tests in `tests/penalty/test_linear_map.cpp` check the class on the gcc build and on the CUDA build, where every value below is the same to the digits shown. The bounds and the measurement conventions are on the page \ref accuracy "How accuracy is measured".
+
+The Gaussian on differences of orders \f$K = 1, 2, 3\f$, with \f$p\f$ up to 12 and \f$\lambda = 0.3\f$ and \f$2\f$, is compared with the intrinsic multivariate Gaussian of precision \f$\lambda D^\top D\f$. This comparison runs on the host, because the precision type of that law is host only. The table gives the largest relative difference over these cases.
+
+| Quantity | Largest relative difference | Bound |
+|---|---|---|
+| Value | \f$7.9 \times 10^{-16}\f$ | \f$10^{-14}\f$ |
+| Derivative in \f$\beta\f$, order 1 | \f$4.8 \times 10^{-16}\f$ | \f$10^{-14}\f$ |
+| Derivative in \f$\beta\f$, order 2 | \f$1.5 \times 10^{-16}\f$ | \f$10^{-14}\f$ |
+| Derivative in \f$\beta\f$, order 3 | \f$0\f$ | \f$10^{-14}\f$ |
+| Derivative in \f$\theta\f$, order 1 | \f$1.3 \times 10^{-15}\f$ | \f$10^{-14}\f$ |
+| Mixed, order 1 in \f$\beta\f$ and order 1 in \f$\theta\f$ | \f$5.6 \times 10^{-16}\f$ | \f$10^{-14}\f$ |
+
+The diagonal map is checked in a Kokkos kernel against a product in which the weights are moved onto \f$\beta\f$. In that product each Gaussian has its variance divided by \f$w_j^2\f$, and each \ref distrib_laplace1 "laplace1" law has its scale and its location divided by \f$w_j\f$. The value, the derivatives and the proximal operator are compared, with these results.
+
+| Quantity | Largest difference | Bound |
+|---|---|---|
+| Gaussian, value and derivatives | \f$7.1 \times 10^{-15}\f$ | \f$5 \times 10^{-14}\f$ |
+| Laplace, value and derivatives | \f$1.8 \times 10^{-15}\f$ | \f$10^{-14}\f$ |
+| Proximal operator | \f$0\f$ | \f$10^{-15}\f$ |
+
+Condat's algorithm is checked in a Kokkos kernel by an exact certificate. The dual variable \f$z_i = \sum_{j \le i} (v_j - x_j)\f$ of the output \f$x\f$ must satisfy \f$\lvert z_i \rvert \le t a\f$ for every \f$i\f$, must satisfy \f$z_i = -t a\, \operatorname{sgn}((Dx)_i - \mu_{0i})\f$ wherever \f$(Dx)_i - \mu_{0i} \neq 0\f$, and must satisfy \f$z_{p-1} = 0\f$. The test uses the sizes \f$p = 2, 3, 5, 17, 100, 1000\f$ and \f$10000\f$, the steps \f$10^{-10}\f$, \f$0.05\f$, \f$0.5\f$, \f$3\f$ and \f$10^{8}\f$, and both with and without \f$\mu_0\f$. The violations are relative to the sums of \f$\lvert v_j \rvert\f$ and \f$\lvert x_j \rvert\f$ plus \f$t a\f$.
+
+| Quantity | Largest value | Bound |
+|---|---|---|
+| Violation of the bound on \f$z_i\f$ | \f$1.1 \times 10^{-16}\f$ | \f$10^{-15}\f$ |
+| Violation at the jumps | \f$1.1 \times 10^{-16}\f$ | \f$10^{-15}\f$ |
+| Closing condition \f$z_{p-1} = 0\f$ | \f$9.0 \times 10^{-15}\f$ | \f$5 \times 10^{-14}\f$ |
+| Output at step \f$10^{8}\f$ against the mean of \f$v\f$ | \f$6.0 \times 10^{-9}\f$ | \f$10^{-7}\f$ |
+| Against the dual problem solved by FISTA, on the host | \f$6.4 \times 10^{-13}\f$ | \f$10^{-11}\f$ |
+
+The FISTA comparison runs on the host, with \f$p = 10\f$ and \f$100\f$, the steps \f$0.1\f$ and \f$1\f$, the scale \f$\sigma = 0.5\f$, and a duality gap of \f$10^{-13}\f$ for the dual solver. The test also checks that at step \f$10^{-10}\f$ each coordinate moves by at most \f$2 t a\f$, up to a relative \f$10^{-5}\f$ for rounding.
+
+The Student t law \ref distrib_student_t1 "student_t1", with scale \f$\sigma = 0.6\f$ and \f$\nu = 3\f$ degrees of freedom, is used on second differences of six coefficients with a nonzero \f$\mu_0\f$. Its derivatives in \f$\beta\f$ of orders 1, 2 and 3 are compared, in a kernel, with central differences of the order below. The largest relative differences are \f$1.3 \times 10^{-10}\f$, \f$6.2 \times 10^{-10}\f$ and \f$9.4 \times 10^{-11}\f$, and the bound is \f$5 \times 10^{-9}\f$.
+
+The normalizing constant \f$c(D) = -\tfrac12 \log\det(DD^\top)\f$ is compared in a kernel with a reference from the explicit matrix \f$D\f$, for \f$K = 1\f$ to \f$4\f$ and \f$p\f$ up to 50, which gives 118 values. The determinant of \f$DD^\top\f$ is computed exactly in integer arithmetic with SymPy (Meurer and others, 2017), and its logarithm is taken at 200 bits with mpmath (The mpmath development team, 2023). The same script checks the closed form exactly for every case. The largest relative error is \f$3.8 \times 10^{-16}\f$, and the bound is \f$10^{-15}\f$. The script is `tools/reference/penalty_difference_logdet.py`.
+
+For the diagonal map with weights \f$(0.5, 3)\f$ on a Student penalty with \f$\sigma = 0.8\f$ and \f$\nu = 4\f$, the value of `weak_convexity(theta)` is \f$2.19727\f$. It agrees with the closed form of the test within \f$10^{-14}\f$, and with the largest value of \f$-\mathrm{pen}''\f$ on a line in \f$\beta\f$, sampled with step \f$10^{-4}\f$, within \f$10^{-7}\f$ relative.
+
+## References
+
+[1] L. Condat (2013), A Direct Algorithm for 1-D Total Variation Denoising, IEEE Signal Processing Letters, 20(11), 1054-1057. https://doi.org/10.1109/lsp.2013.2278339
+
+[2] A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+
+[3] The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+
+*/

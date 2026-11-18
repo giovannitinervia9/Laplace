@@ -263,6 +263,23 @@ struct univariate_as_multivariate {
     out[0] = law(x[0], st.theta).prox_y(v[0], t);
   }
 
+  /**
+   * \brief Proximal operator in \f$y\f$ with a step per coordinate, `D::prox_y` at step `t[0]`; present when `D` has it.
+   * \param st State from `theta_state()`.
+   * \param v Point, length 1.
+   * \param x Location, length 1.
+   * \param t Step per coordinate, length 1, \f$t_0 > 0\f$.
+   * \param out Minimizer, length 1.
+   * \param w Unused.
+   */
+  LAPLACE_HD void prox_y(const state_type& st, const double* v, const double* x, const double* t, double* out,
+                         double* w) const
+    requires detail_uam::has_prox_y<D>
+  {
+    (void)w;
+    out[0] = law(x[0], st.theta).prox_y(v[0], t[0]);
+  }
+
  private:
   // the prototype with (mu, theta) written over its first P doubles
   LAPLACE_HD D law(double mu, const double* theta) const {
