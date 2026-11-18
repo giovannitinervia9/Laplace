@@ -10286,13 +10286,49 @@ parameters gives P + 6, and the order-6 tensor has binomial(P + 11, 6)
 components, which is 924 at P = 1, 1716 at P = 2, 3003 at P = 3 and 5005 at
 P = 4. That is the user's to pay.
 
-One practical ceiling, worth knowing before a GPU run: the generic derivative
-route of the log cdf keeps one set of log-density partials per atom on the stack,
-so a six-atom law over a two-parameter parent needs six times 3002 doubles, about
-144 kB, at order six. The tests set the CUDA per-thread stack to 8192 bytes, so
-that combination needs a raised `cudaLimitStackSize`. It is not reached by an
-atom mixture over a continuous parent, which has its own closed cumulative
-routes; it would be reached by a law that declares six atoms and owns none.
+**The stack the generic derivative route needs, and why neither obvious repair
+closes it** (measured on 2026-11-17, after an earlier entry here put the figure
+at 144 kB, which was an underestimate: it counted the atoms' partials and left
+out the route's own). The frame of `log_cdf_side_dk_by_integral` at order K holds
+`log_density_partials<P, K>` for the density at y, the `A[]` table of integral
+ratios of the same size, and one more set of partials per atom, so
+
+    bytes = (2 + n_atoms) * sizeof(log_density_partials<P, K>)
+
+with P the number of parameters. At order six, in bytes:
+
+| P | no atoms | 1 atom | 6 atoms |
+| --- | --- | --- | --- |
+| 2 | 440 | 656 | 1736 |
+| 3 | 1336 | 2000 | 5320 |
+| 4 | 3352 | 5024 | 13384 |
+| 5 | 7384 | 11072 | 29512 |
+| 6 | 14776 | 22160 | 59080 |
+| 8 | 48040 | 72056 | 192136 |
+| 9 | 80072 | 120104 | 320264 |
+
+The tests set the CUDA per-thread stack to 8192 bytes, measured for a
+three-parameter family (`tests/main.cpp` records that 3072 fails and 4096 works).
+So 8192 covers P up to 4 with at most one atom, and anything above needs a raised
+`cudaLimitStackSize` from the host. Two things follow that are easy to get wrong.
+
+The limit is NOT a property of the atoms. The route is already over 8192 at
+P >= 6 with no atom at all, so what decides the frame is the parameter count at
+order six; the atoms only move the crossing earlier, and P = 8 arises at all only
+because a two-parameter parent may now carry six of them.
+
+And neither repair that suggests itself works. Streaming the atoms, refilling one
+buffer instead of keeping one per atom, takes the six-atom P = 8 case from 192 kB
+to 72 kB, which is still nine times over the 8192 bytes, while replacing 36
+derivative-tensor evaluations by 61776, a factor of 1716: it costs a great deal
+exactly where it fixes nothing. A `static_assert` on a fixed budget would refuse
+code that is perfectly sound on a host, where 192 kB is unremarkable, and would
+still say nothing about the no-atom P >= 6 case. So the formula above is
+documented and the code is left as it is (Giovanni, 2026-11-17).
+
+The case is not reached by an atom mixture over a continuous parent, which has
+its own closed cumulative routes; it is reached by a law that declares atoms and
+owns none.
 
 Tested: `tests/distrib/test_generic_atoms.cpp`, "more than two atoms over a
 continuous parent". Three atoms over `gamma1` (five parameters): the three
@@ -10825,9 +10861,23 @@ lambda = 0 alone; 2 to 3 of the inverse map's and 1 of log|h'|'s at 1e60, for
 every lambda; 4 to 10 and 3 at 1e100; and 6 to 21 and 6 at 1e300. The forward
 map's partials and the forward log-Jacobian's are clean at every argument up to
 1e300. This is a loss inside the forms at a finite point and not a missing limit
-at an end, so it is recorded and not repaired; its consequence for any test of
-the partials is that the arguments that approach an end must stop at 1e20 for
-the inverse, where nothing is lost yet.
+at an end; its consequence for any test of the partials is that the arguments
+that approach an end must stop at 1e20 for the inverse, where nothing is lost
+yet.
+
+**The log-Jacobian's half of that was repaired later the same day, by the
+yeo_johnson session and inside the function the two maps share, with one hole
+left.** It put the guard in `yeo_johnson_inv_lj_pos_partials`, which
+`box_cox_inv_lj_partials` forwards to, so above |lambda u| = 1e3 the
+lambda-derivatives come from their structure instead of from the forms, where
+psi^(j)(z) underflows while z^(j+1) overflows. Re-measured here against the
+column above: log|h'|'s partials are now clean at 1e60, 1e100 and 1e300 for
+every lambda tested EXCEPT lambda = 0, where 6 of the 7 entries are still NaN at
+1e300. The guard keys on |lambda u|, which is identically zero at lambda = 0, so
+that one column never takes the rescaled route; it is clean at 1e100 and below
+because the forms themselves still hold there. The inverse MAP's partials are
+unchanged by that work, 3 NaN at 1e60, 10 at 1e100 and 21 at 1e300, their route
+being a different function.
 
 One function name, checked because the two are easy to confuse.
 `box_cox_inv_lj_partials` forwards to `yeo_johnson_inv_lj_pos_partials`, the
@@ -11240,3 +11290,118 @@ either platform, since the guards were in fact firing; what each gap would have
 hidden is a guard that stopped firing later. The missing assertions are
 `yj_inv_partials_at_edge`'s in `test_yeo_johnson.cpp` and the block (4c) of
 `test_box_cox.cpp`.
+
+**The inverse partials at a large finite argument, repaired by adopting the
+yeo_johnson session's rescaled route (Giovanni, 2026-11-17).** The measurement
+two paragraphs above recorded the defect and left it: above |lambda u| = 1e3 the
+forms compute inf times 0, psi^(j)(x) underflowing while the power of u
+overflows, and the column came out NaN -- 3 of the 7 entries at u = 1e60, 10 at
+1e100 and 21 at 1e300 over orders 1 to 6. That session then wrote a route which
+keeps q_j = x^(j+1) psi^(j)(x) bounded, put it in the shared positive branch of
+its own header, and offered it. `box_cox_inv_partials` now takes
+`yj_inv_partials_rescaled_pos<K>` above that threshold.
+
+**It is Box-Cox's column unchanged, and the instruction to adapt it was
+unnecessary.** The session said to drop its trailing
+`if (n0 == 0 && n1 == 0) out[n1] -= 1.0;`, which is the -1 of
+h = exp(S) - 1 against Box-Cox's exp(S). That line never fires for a partial:
+n0 = 0 needs n1 = K, and n1 = 0 then forces K = 0, which `bijector_partials` is
+never instantiated for. So the routine is called unchanged rather than copied,
+which keeps one source for both maps. It takes lambda and u directly and
+performs no Yeo-Johnson reflection, which is what makes it correct here.
+
+**CUDA, from the yeo_johnson session's own build of the whole tree.** Its
+build-cuda-yjlarge compiled this tree, my uncommitted box_cox changes included,
+and its ctest passed at 100 per cent; run on its binary, the box_cox cases give 8
+cases and 16718 assertions against 16710 on gcc. The eight extra are not
+device-conditional assertions, which this file has none of: localised per case,
+every case matches except "the limits at the ends of both domains", 4700 on gcc
+against 4708. That case's approach check branches on the data -- a finite limit
+costs one assertion, a limit already attained none, a plateau three, an
+approaching infinity two -- so the count follows which branch each entry takes,
+and the approach values differ in their last bits between the platforms under
+FMA contraction. Eight entries therefore take a branch with more assertions on
+the device. Every assertion passes on both, so this is a property of a
+data-dependent test and not a difference in the map. So the adoption is device-verified without a
+second build of the GPU's time, which is what one build for every session buys.
+
+**Measured against references that share nothing with the C++ but the
+definition.** (1 + lambda u)^(1/lambda) differentiated symbolically by SymPy and
+only then evaluated by mpmath at 60 digits, 189 values over lambda in {1/2,
+-3/2, 1/6, 3, 2/3} and u from 1e4 to 1e300. No NaN, and the worst relative
+difference 1.373e-13, at lambda = 1/6 and u = 1e100 in the order-5 column at
+n1 = 1; by order, 2.1e-14 at orders 1 and 2 rising to 1.37e-13 at 4 to 6. That is
+the floor rather than the route's fault: the column carries
+exp((1 - n0 lambda) S), so one ulp of S is amplified by it, and a test bound
+tighter than about 2e-13 would be measuring S. A numerical differentiator cannot
+produce these references at all, the yeo_johnson session having measured
+mpmath's own returning entries wrong by two hundred orders of magnitude at
+u = 1e60.
+
+**The threshold, and what it costs.** 1e3, the same constant as the sibling's.
+Measured rather than assumed: just above it, at lambda u = 5e3 and 6.7e5, the
+forms are the more accurate route by a factor of 1.8, 6.0e-15 against 1.07e-14,
+both far inside any bound. Kept all the same, on the ground that above the
+threshold the failure is a cliff into NaN while below it the cost is under a
+factor of two, and that one constant for both maps is worth more than the
+factor. A later choice may move it; the numbers are here for that.
+
+**The band was repaired too, within minutes of the paragraph above being
+written, and only one regime is left.** The yeo_johnson session built a second
+route for it on Giovanni's word: the band is |lambda x| below about 1e3 together
+with |x| large, where the same inf times 0 is reached from the other side, the
+power of x standing in front of a bracket in psi^(j) which cancels as its
+argument goes to 0. Its route takes the sum of z^m psi^(j+m)(z) first and applies
+one power of the argument once, so a sum that is exactly zero returns zero
+instead of meeting an overflowed power. It sits in
+`yeo_johnson_inv_lj_pos_partials` again, which is what `box_cox_inv_lj_partials`
+forwards to, so box_cox's log-Jacobian partials are repaired by it as well.
+
+Measured here over 72 cells, lambda in {0, 1e-310, 1e-305, 1e-300, 1e-200,
+1e-100, 1e-50, 1e-20, 1e-3} by u in {1e40, 1e60, 1e100, 1e125, 1e150, 1e200,
+1e225, 1e300}: the log-Jacobian's partials are now clean in EVERY cell, 0 NaN of
+the 7 entries at order 6 everywhere, where lambda = 0 had lost 6 of them at
+1e300 before.
+
+What is left is the inverse MAP's partials, in two pieces that are worth keeping
+apart because only one of them is shared.
+
+The shared piece: inside the rescaled route, for a tiny lambda with a large
+argument. Measured here as 106 NaN over 56 of those 72 cells at order 6, from
+lambda = 1e-310 up to 1e-50 and from u = 1e40 upward. The yeo_johnson session
+re-measured its own at 1147 cells and found 370 NaN over 183, for lambda from
+1e-30 down to 1e-310 with |x| from 1e50 up, correcting an earlier figure of 36
+in 12 cells that a coarse grid had produced. Its cause is not lambda^(j+1)
+underflowing, which stays representable: at lambda = 1e-30 and x = 1e60 that
+power is 1e-210, while the chain built on it overflows, the exponent's first
+derivative being about 1e210 so that a sixth Bell polynomial would be 1e1260, and
+an inf minus inf appears. Nothing finite is lost: that session evaluated
+exp((1 - n0 lambda) S), which carries the value, for each of its 370 entries and
+found it infinite in every one, 0 exceptions, so what is returned is NaN in place
+of an infinity of a known sign.
+
+The piece that is box_cox's alone: lambda = 0 exactly. There |lambda u| is 0, so
+the rescaled route is never taken and the NaN comes from box_cox's own forms,
+`bc_bell` and `bc_inv_mixed`, where the Bell polynomial of
+u^(j+1) psi^(j)(0) overflows. Measured from u = 1e40 upward, 1 entry of the 7 at
+order 6 and 2 from u = 1e100. The sibling's map has no NaN at lambda = 0 at all,
+its own forms handling z = 0 and returning infinities, which is the one place the
+two maps differ in this corner. box_cox's truth there is an infinity whatever u
+is above about 710, h being exp(u), so again nothing finite is lost.
+
+Nothing was implemented for either piece. Closing them means deriving the signs
+of those infinities, which is a separate piece of work; the shared half is with
+Giovanni through the yeo_johnson session, under its instruction to build the band
+and nothing more, and the lambda = 0 half is box_cox's own and is recorded here
+rather than repaired.
+
+**The test** is the case "box_cox: the inverse partials at a large finite
+argument" in `tests/bijector/test_box_cox.cpp`, with the references printed by
+`tools/reference/bijector_box_cox_large.py`: the two columns whose every entry a
+double can hold, lambda = 1/2 at u = 1e60 and lambda = -3/2 at u = -1e60 at
+orders 3 and 6, the bound 2e-13; P_6 at lambda = 1/6 surviving the rescaled
+route, 5!/6^5; and no NaN in any order over ten values of lambda and four
+arguments. Two of the references are below the smallest double, 2.19e-398 and
+-2.31e-337, and are written as zero with the entry required to underflow:
+a literal of that size is truncated by the compiler with a warning, and a test
+file that warns costs every other session the same noise.
