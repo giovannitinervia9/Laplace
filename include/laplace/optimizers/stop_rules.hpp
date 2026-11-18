@@ -5,7 +5,9 @@
 // the current iteration (stop_rule_input) and returns a stop_verdict.
 //
 // - Stationarity rules may declare convergence: decrement_stop_rule (the
-//   default with curvature) and gradient_stop_rule.
+//   default with curvature), gradient_stop_rule and prox_mapping_stop_rule
+//   (the default of the proximal gradient method), and search_size_stop_rule
+//   for the derivative-free methods (Brent's bracket, in the units of x).
 // - Change rules, objective_change_stop_rule and parameter_change_stop_rule,
 //   stop the run as "stopped on change", never as converged.
 //
@@ -47,6 +49,20 @@ inline constexpr unsigned stop_needs_decrement = 2u;  // the stationarity measur
  * \see \ref optimizers, stop_rule, stop_rule_for
  */
 inline constexpr unsigned stop_needs_previous = 4u;   // the previous point and value
+/**
+ * \ingroup optimizers
+ * \brief Capability bit indicating that a stopping rule reads `stop_rule_input::prox_mapping`.
+ *
+ * \see \ref optimizers, \ref optimizers_proximal, stop_rule, stop_rule_for, prox_mapping_stop_rule
+ */
+inline constexpr unsigned stop_needs_prox_mapping = 8u;  // (1/2) gamma |G_t|^2 of a composite objective
+/**
+ * \ingroup optimizers
+ * \brief Capability bit indicating that a stopping rule reads `stop_rule_input::search_size`.
+ *
+ * \see \ref optimizers, stop_rule, stop_rule_for, search_size_stop_rule
+ */
+inline constexpr unsigned stop_needs_search_size = 16u;  // the size of a derivative-free search, in x's units
 
 /**
  * \ingroup optimizers
@@ -106,6 +122,23 @@ struct stop_rule_input {
    * \brief Predicted decrease in the objective's units, or quiet NaN when not provided.
    */
   double decrement = std::numeric_limits<double>::quiet_NaN();
+  /**
+   * \ingroup optimizers
+   * \brief Proximal gradient mapping measure \f$\frac{1}{2} \gamma \lVert G_t\rVert^2\f$ in the objective's units, or quiet NaN when not provided.
+   *
+   * Here \f$G_t(x) = (x - \operatorname{prox}_{t r}(x - t \nabla s(x))) / t\f$ is the proximal gradient mapping and \f$\gamma\f$ is a scale chosen by the method (`proximal_gradient_optimizer` uses \f$\gamma = \max(t, \gamma_{\max})\f$).
+   */
+  // (1/2) gamma |G_t(x)|^2 with G_t(x) = (x - prox_{t r}(x - t grad s(x))) / t
+  // and gamma the method's scale (FISTA: max(t, gamma_max)), in the objective's
+  // units (decision 6); NaN when the method does not provide it.
+  double prox_mapping = std::numeric_limits<double>::quiet_NaN();
+  /**
+   * \ingroup optimizers
+   * \brief Size of the region still searched by a derivative-free method, in the units of \f$x\f$, or quiet NaN when not provided.
+   */
+  // The half-width of Brent's bracket, the diameter of a simplex, the step of
+  // a poll; in the units of x, not of f. NaN when the method does not provide it.
+  double search_size = std::numeric_limits<double>::quiet_NaN();
   /**
    * \ingroup optimizers
    * \brief Whether `previous_value` and `previous_point` hold data from the preceding iteration.
@@ -191,6 +224,94 @@ struct decrement_stop_rule {
     const double resolution = resolution_multiple * std::numeric_limits<double>::epsilon() * std::abs(in.value);
     if (in.decrement <= resolution) return stop_verdict::converged_at_resolution;
     return stop_verdict::none;  // NaN compares false above
+  }
+};
+
+/**
+ * \ingroup optimizers
+ * \brief Stationarity rule testing the proximal gradient mapping of a composite objective.
+ *
+ * Returns `stop_verdict::converged` when `prox_mapping` (\f$\frac{1}{2} \gamma \lVert G_t\rVert^2\f$, in the objective's units) is at most `tolerance`,
+ * `stop_verdict::converged_at_resolution` when it is at most \f$m \varepsilon |f|\f$ (where \f$m\f$ is `resolution_multiple` and \f$\varepsilon\f$ is double-precision machine epsilon), and `stop_verdict::none` otherwise (including when `prox_mapping` is NaN).
+ *
+ * \see \ref optimizers, \ref optimizers_proximal, decrement_stop_rule, stop_rule_input::prox_mapping, stop_verdict
+ */
+// The decrement rule read on the proximal gradient mapping: G_t is 0 exactly
+// at the stationary points of s + r, kinks included, and (1/2) t |G_t|^2 is in
+// the objective's units (decision 6).
+struct prox_mapping_stop_rule {
+  /**
+   * \ingroup optimizers
+   * \brief Required quantities bitmask (`stop_needs_prox_mapping`).
+   */
+  static constexpr unsigned needs = stop_needs_prox_mapping;
+  /**
+   * \ingroup optimizers
+   * \brief Convergence threshold in the objective's units.
+   */
+  double tolerance = 1e-6;
+  /**
+   * \ingroup optimizers
+   * \brief Multiplier on \f$\varepsilon |f|\f$ for the resolution check.
+   */
+  double resolution_multiple = 1.0;
+  /**
+   * \ingroup optimizers
+   * \brief Evaluates the stopping rule on `in`.
+   *
+   * \param in Current iteration quantities.
+   * \return `stop_verdict::converged`, `stop_verdict::converged_at_resolution`, or `stop_verdict::none`.
+   */
+  stop_verdict verdict(const stop_rule_input& in) const {
+    if (in.prox_mapping <= tolerance) return stop_verdict::converged;
+    if (in.prox_mapping <= resolution_multiple * std::numeric_limits<double>::epsilon() * std::abs(in.value))
+      return stop_verdict::converged_at_resolution;
+    return stop_verdict::none;
+  }
+};
+
+/**
+ * \ingroup optimizers
+ * \brief Stationarity rule of the derivative-free methods, testing the size of the region still searched.
+ *
+ * Returns `stop_verdict::converged` when `search_size` is at most \f$\tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} \max_i |x_i|\f$
+ * (where \f$\tau_{\mathrm{abs}}\f$ is `absolute_tolerance` and \f$\tau_{\mathrm{rel}}\f$ is `relative_tolerance`),
+ * and `stop_verdict::none` otherwise (including NaN).
+ *
+ * \see \ref optimizers, decrement_stop_rule, stop_verdict
+ */
+// Converged when the search size (Brent's bracket half-width, a simplex's
+// diameter, a poll step) is at most absolute_tolerance + relative_tolerance
+// max_i |x_i|. In the units of x: a derivative-free method has no measure in
+// the objective's units.
+struct search_size_stop_rule {
+  /**
+   * \ingroup optimizers
+   * \brief Required quantities bitmask (`stop_needs_search_size`).
+   */
+  static constexpr unsigned needs = stop_needs_search_size;
+  /**
+   * \ingroup optimizers
+   * \brief Absolute tolerance on the search size.
+   */
+  double absolute_tolerance = 1e-8;
+  /**
+   * \ingroup optimizers
+   * \brief Relative tolerance multiplying \f$\max_i |x_i|\f$.
+   */
+  double relative_tolerance = 0.0;
+  /**
+   * \ingroup optimizers
+   * \brief Evaluates the stopping rule on `in`.
+   *
+   * \param in Current iteration quantities.
+   * \return `stop_verdict::converged` or `stop_verdict::none`.
+   */
+  stop_verdict verdict(const stop_rule_input& in) const {
+    double size = 0.0;
+    for (std::size_t i = 0; i < in.point.extent(0); ++i) size = std::max(size, std::abs(in.point(i)));
+    return in.search_size <= absolute_tolerance + relative_tolerance * size ? stop_verdict::converged
+                                                                            : stop_verdict::none;
   }
 };
 

@@ -152,6 +152,9 @@ laplace_kokkos_sources(optimizers_fit_distrib.cpp)
 add_executable(optimizers_fit_distrib optimizers_fit_distrib.cpp)
 target_link_libraries(optimizers_fit_distrib PRIVATE Laplace::laplace Laplace::dense)
 target_compile_definitions(optimizers_fit_distrib PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
+laplace_kokkos_sources(optimizers_proximal.cpp)
+add_executable(optimizers_proximal optimizers_proximal.cpp)
+target_link_libraries(optimizers_proximal PRIVATE Laplace::laplace Laplace::dense)
 
 laplace_kokkos_sources(distrib_mvgaussian.cpp)
 add_executable(distrib_mvgaussian distrib_mvgaussian.cpp)
@@ -172,3 +175,7 @@ target_compile_definitions(pdmat_ws_dd PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_
 laplace_kokkos_sources(distrib_mvgaussian_rank_deficient.cpp)
 add_executable(distrib_mvgaussian_rank_deficient distrib_mvgaussian_rank_deficient.cpp)
 target_link_libraries(distrib_mvgaussian_rank_deficient PRIVATE Laplace::laplace Laplace::dense)
+
+laplace_kokkos_sources(optimizers_block_coordinate.cpp)
+add_executable(optimizers_block_coordinate optimizers_block_coordinate.cpp)
+target_link_libraries(optimizers_block_coordinate PRIVATE Laplace::laplace Laplace::dense)

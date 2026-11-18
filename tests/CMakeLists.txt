@@ -104,6 +104,8 @@ set(LAPLACE_TEST_SOURCES
   optimizers/test_fit_distrib.cpp
   optimizers/test_all_headers.cpp
   optimizers/test_second_order.cpp
+  optimizers/test_block_coordinate.cpp
+  optimizers/test_proximal.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

@@ -296,3 +296,10 @@ parent here, in tree order; the module pages define their groups without
 /** \defgroup optimizers_multistart Multiple starts
 \ingroup optimizers
 \brief A wrapper that runs any optimizer from several starts and keeps the best run. */
+/** \defgroup optimizers_block_coordinate Brent and block alternation
+\ingroup optimizers
+\brief Derivative-free minimization in one variable and cyclic block alternation over sub-optimizers. */
+
+/** \defgroup optimizers_proximal Proximal methods
+\ingroup optimizers
+\brief Proximal gradient and proximal Newton methods for a smooth objective plus penalties with a proximal operator. */

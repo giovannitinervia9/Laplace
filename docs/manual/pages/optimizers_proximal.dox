@@ -1,0 +1,163 @@
+/**
+\addtogroup optimizers_proximal
+
+This page documents composite minimization of \f$f(x) = s(x) + r(x)\f$ in namespace `laplace::optimizers`: the penalty adapter \ref laplace::optimizers::penalized_objective "penalized_objective" (`<laplace/optimizers/penalized_objective.hpp>`), accelerated proximal gradient \ref laplace::optimizers::proximal_gradient_optimizer "proximal_gradient_optimizer" (`<laplace/optimizers/proximal_gradient.hpp>`), and proximal Newton \ref laplace::optimizers::proximal_newton_optimizer "proximal_newton_optimizer" (`<laplace/optimizers/proximal_newton.hpp>`). All three are header-only templates that run on the host only; nothing is marked `LAPLACE_HD`. A program using `proximal_newton_optimizer` links `Laplace::dense`. Runs are invoked through \ref laplace::optimizers::minimize "minimize()" (`minimize(optimizer, f, x0)`). Objective concepts, `optimizer_report`, `optimizer_status`, stopping rules, and \ref laplace::optimizers::dense_curvature_solver "dense_curvature_solver" are documented on \ref optimizers "the optimizers page", second-order curvature methods on \ref optimizers_second_order "Newton and trust region", and penalties and their proximal operators on \ref penalty "Penalties" and \ref penalty_prox "Proximal operators". Against 30 frozen `glmnet` lasso and elastic-net fits, both methods find the exact support on every fit, FISTA converges on all 30, and proximal Newton converges on 29 of 30 with \f$f - f^*\f$ at most \f$1.8 \times 10^{-10}\f$.
+
+## Composite objective and adapter
+
+Proximal methods minimize \f$f(x) = s(x) + \sum_{b=0}^{B-1} r_b(x_b)\f$ for \f$x \in \mathbb{R}^n\f$, where \f$s\f$ is smooth, \f$B\f$ is the number of blocks, and each \f$r_b\f$ has a proximal operator
+\f[
+\operatorname{prox}_{t r}(v) = \operatorname*{arg\,min}_{z} \left\{ r(z) + \frac{\lVert z - v \rVert^2}{2t} \right\}
+\f]
+for step \f$t > 0\f$. The concept \ref laplace::optimizers::composite_objective "composite_objective" is defined on \ref optimizers "the optimizers page".
+
+The adapter \ref laplace::optimizers::penalized_objective "penalized_objective" (`penalized_objective<Smooth, P...>`) builds a `composite_objective` from a smooth objective \f$s\f$ satisfying \ref laplace::optimizers::gradient_objective "gradient_objective" (held by reference), the dimension \f$n\f$ of \f$x\f$, and one \ref laplace::optimizers::attached_penalty "attached_penalty" per penalty created by \ref laplace::optimizers::attach_penalty "attach_penalty()". Calling `attach_penalty(penalty, offset, theta)` binds `penalty` from `laplace::penalty` to the contiguous coordinates \f$[o_b, o_b + d_b)\f$, where \f$o_b\f$ is `offset` and \f$d_b\f$ equals `penalty.dim()`, with hyperparameters \f$\theta_b\f$ held fixed. The ranges must lie in \f$[0, n)\f$ and must not overlap, and \f$\theta_b\f$ must have `penalty.theta_size()` entries; otherwise the constructor throws `std::invalid_argument`. Coordinates outside every range are unpenalized, and `nonsmooth_prox()` leaves them unchanged.
+
+The smooth members `value()`, `value_gradient()`, and (when `Smooth` provides it) `value_gradient_curvature()` forward to \f$s\f$ alone. The nonsmooth member `nonsmooth_value()` sums the penalties' values, including their normalizing constants (minus log densities). Calling `nonsmooth_prox()` applies each penalty's `prox_beta()` on its coordinate range, and `weak_convexity_constant(b)` returns `penalty.weak_convexity(theta)`. A penalty without `prox_beta()`, such as a smooth penalty, does not compile with `penalized_objective`.
+
+To support coordinate descent in proximal Newton, `penalized_objective` also satisfies \ref laplace::optimizers::coordinate_composite_objective "coordinate_composite_objective". Calling `nonsmooth_block_range(b)` returns the pair \f$(o_b, d_b)\f$. Calling `nonsmooth_block_separable(b)` returns `true` when the penalty's `structure` is `separable` and its `kinks` are `per_coordinate` or `none` (see \ref penalty_framework "Penalty framework"). Calling `nonsmooth_coordinate_prox(b, j, vj, t)` returns coordinate \f$j\f$ of block \f$b\f$'s proximal map by evaluating `prox_beta()` on a scratch copy of the block. This costs \f$O(d_b)\f$ operations per coordinate, matching the order of one coordinate update with a dense curvature matrix \f$H\f$. Each call recomputes the penalty's state from \f$\theta_b\f$ without internal self-pointers, so `penalized_objective` can be copied safely.
+
+## Accelerated proximal gradient
+
+The optimizer \ref laplace::optimizers::proximal_gradient_optimizer "proximal_gradient_optimizer" (`proximal_gradient_optimizer<StopRule = prox_mapping_stop_rule>`) minimizes any `composite_objective`. Starting from a momentum point \f$y\f$ with step \f$t > 0\f$, it forms \f$z = \operatorname{prox}_{t r}(y - t \nabla s(y))\f$. The step is accepted when
+\f[
+s(z) - s(y) - \nabla s(y)^\top (z - y) \le \frac{\lVert z - y \rVert^2}{2t} + c_{\mathrm{round}}\,\varepsilon \max(1, |s(y)|),
+\f]
+where \f$c_{\mathrm{round}}\f$ is `rounding_slack` (default \f$8\f$) and \f$\varepsilon = 2^{-52}\f$ is double-precision machine epsilon. When the excess over the quadratic upper bound is within \f$\sqrt{\varepsilon}\max(1, |s(y)|)\f$, the rounding scale of a long sum, the step is decided on gradients instead (Becker, Candès and Grant, 2011): it is accepted when
+\f[
+(z - y)^\top (\nabla s(z) - \nabla s(y)) \le \frac{\lVert z - y \rVert^2}{2t},
+\f]
+which implies the value inequality above when \f$s\f$ is convex. Otherwise \f$t\f$ is multiplied by `shrink` (default \f$0.5\f$), and \f$t\f$ never grows; a non-finite \f$s(z)\f$ also shrinks \f$t\f$. More than `max_backtracks` (default \f$100\f$) shrinkings end the run with `line_search_failed`. The first step is `initial_step` when positive, or \f$1/L_0\f$ estimated from one gradient secant along \f$-\nabla s(x_0)\f$.
+
+When every weak-convexity constant \f$\rho_b = 0\f$, the optimizer runs FISTA (Beck and Teboulle, 2009a) with momentum \f$\omega_{k+1} = (1 + \sqrt{1 + 4\omega_k^2}) / 2\f$ from \f$\omega_0 = 1\f$ and \f$y = z + ((\omega_k - 1)/\omega_{k+1})(z - x_k)\f$. Adaptive restart (O'Donoghue and Candès, 2015) resets the momentum (\f$y = x_k\f$, \f$\omega = 1\f$) and retries the step within the same iteration whenever \f$f(z) > f(x_k) + c_{\mathrm{round}}\,\varepsilon \max(1, |f(x_k)|)\f$; this allowance keeps floating-point rounding near the solution from restarting every step. When some \f$\rho_b > 0\f$, it runs monotone FISTA (Beck and Teboulle, 2009b). It sets \f$x_{k+1}\f$ to the better of \f$z\f$ and \f$x_k\f$, and updates \f$y = x_{k+1} + (\omega_k / \omega_{k+1})(z - x_{k+1}) + ((\omega_k - 1)/\omega_{k+1})(x_{k+1} - x_k)\f$. The step is kept at \f$t \le\f$ `rho_safety` \f$/ \max_b \rho_b\f$ (default `rho_safety` \f$0.99\f$) even inside backtracking so every proximal map is exact (\f$t\rho_b < 1\f$).
+
+Stationarity uses the proximal gradient mapping \f$G_t(x) = (x - \operatorname{prox}_{t r}(x - t \nabla s(x))) / t\f$, read as \f$\frac{1}{2}\gamma\lVert G_t\rVert^2\f$ in the objective's units with \f$\gamma = \max(t, \gamma_{\max})\f$. Here \f$\gamma_{\max}\f$ is the largest secant ratio \f$\delta_x^\top \delta_x / (\delta_x^\top \delta_g)\f$ over the pairs of points at which \f$\nabla s\f$ was evaluated, with \f$\delta_x\f$ the difference of the two points and \f$\delta_g\f$ that of their gradients. This is the long Barzilai-Borwein step estimating \f$1/\mu\f$, where \f$\mu\f$ is the smallest curvature (Barzilai and Borwein, 1988). Using \f$\gamma = t = 1/L\f$ alone would underestimate \f$f - f^*\f$ by up to \f$L/\mu\f$. The measure passes to the stopping rule as `prox_mapping` and is returned as `decrement`. When the stopping rule accepts a measure read at \f$y \ne x_k\f$, momentum resets and the step is retried from \f$x_k\f$, ensuring convergence is declared only at the reported point. Other outcomes are `stalled` when a step from \f$x_k\f$ does not move it, `iteration_budget` (`max_iterations`, default \f$10^5\f$), `evaluation_budget` (`max_value_evaluations`, default \f$10^7\f$), and `start_not_admissible`. The report's `gradient` is \f$\nabla s\f$ at `point`, and the optional `trace` runs once per iteration. The stopping rule may need at most `stop_needs_prox_mapping` and `stop_needs_previous`, so `gradient_stop_rule` is rejected at compile time because \f$\nabla s\f$ is nonzero at a minimum of \f$s + r\f$.
+
+## Proximal Newton method
+
+The optimizer \ref laplace::optimizers::proximal_newton_optimizer "proximal_newton_optimizer" (`proximal_newton_optimizer<StopRule = decrement_stop_rule>`) minimizes an objective satisfying both `composite_objective` and \ref laplace::optimizers::curvature_objective "curvature_objective" with \ref laplace::optimizers::dense_curvature_matrix "dense_curvature_matrix". At \f$x\f$ with \f$g = \nabla s(x)\f$ and \f$H = H(x)\f$, the step \f$d\f$ solves
+\f[
+\min_d \; g^\top d + \frac{1}{2} d^\top H d + r(x + d)
+\f]
+inexactly from \f$d = 0\f$ (Lee, Sun and Saunders, 2014).
+
+The setting `inner_solver` of type \ref laplace::optimizers::proximal_newton_inner_solver "proximal_newton_inner_solver" chooses the subproblem solver. The default `automatic` uses coordinate descent when the objective models `coordinate_composite_objective` and every block is separable, and FISTA on the quadratic model otherwise. The values `coordinate_descent` and `proximal_gradient` force one route. Coordinate descent updates coordinate \f$j\f$ to \f$\operatorname{prox}_{r_j/a_j}(z_j - (g_j + [H(z - x)]_j)/a_j)\f$ with \f$a_j = H_{jj}\f$ in \f$O(n)\f$ operations per coordinate. A penalized coordinate with \f$H_{jj} \le \rho_j\f$ receives \f$a_j = \rho_j / \f$`rho_safety` (default \f$0.99\f$) and an unpenalized coordinate with \f$H_{jj} \le 0\f$ receives a small positive floor; each damped update increments `damped_coordinates` in `optimizer_report`. FISTA on the quadratic model takes fixed step \f$1/L\f$, where \f$L = \max_i \sum_j |H_{ij}|\f$ is the Gershgorin bound (at least \f$\rho / \f$`rho_safety`), with gradient restart.
+
+The inner solve uses the measure \f$\frac{1}{2} G^\top H^{-1} G\f$ at iterate \f$z\f$, where \f$G\f$ is the model's proximal gradient mapping at \f$z\f$ with step \f$1/L\f$ and \f$H^{-1}\f$ uses the Cholesky factor of \f$H\f$. It stops when this measure is at most `inner_fraction` (default \f$0.01\f$) times the current decrement \f$\frac{1}{2} d^\top H d\f$, or after `max_inner_sweeps` (default \f$1000\f$) sweeps or iterations. Without a Cholesky factor of \f$H\f$, the Cholesky factor of \f$H\f$ restricted to the free coordinates is used on them; without either factor, the inner measure falls back to \f$\frac{1}{2} t \lVert G\rVert^2\f$.
+
+Stationarity is measured by the proximal Newton decrement \f$\delta = \frac{1}{2} d^\top H d\f$ in the objective's units, which equals the Newton decrement when \f$r = 0\f$ and vanishes exactly at stationary points of \f$s + r\f$, kinks included. It is quiet NaN whenever \f$H\f$ restricted to the free coordinates has no Cholesky factor, so singular or indefinite curvature there never passes for convergence. The free coordinates are the unpenalized coordinates and the penalized ones not held at a kink at the subproblem's solution: coordinate \f$j\f$ is held when its scalar proximal operator returns \f$z_j\f$ for targets shifted by \f$\sqrt{\varepsilon}\f$ of their size to both sides. For example, a lasso with \f$p > N\f$ has a singular design curvature \f$X^\top X\f$ yet generally a positive-definite block on its support. Without coordinate access, every coordinate is free. Let \f$\delta_{\mathrm{in}}\f$ be the last inner measure and \f$\kappa_{\mathrm{in}}\f$ be `inner_fraction`; when the inner solve misses its target, the stopping rule reads \f$\max(\delta, \delta_{\mathrm{in}} / \kappa_{\mathrm{in}})\f$.
+
+The step \f$x + \alpha d\f$ is accepted by Armijo backtracking on the full objective, \f$f(x + \alpha d) - f(x) \le c_1 \alpha \Delta\f$ with \f$\Delta = g^\top d + r(x + d) - r(x)\f$ and \f$c_1 =\f$ `sufficient_decrease` (default \f$10^{-4}\f$), halving \f$\alpha\f$ from \f$1\f$ up to `max_backtracks` (default \f$60\f$) times. A failed search ends with `stalled` if the step falls below the rounding of \f$x\f$, and `line_search_failed` otherwise. Budgets are `max_iterations` (default \f$200\f$) and `max_value_evaluations` (default \f$10^5\f$). In `optimizer_report`, `final_factorization` reports the last factorization of \f$H\f$ or its free restriction. The stopping rule may need at most `stop_needs_decrement` and `stop_needs_previous`.
+
+## Measurements
+
+Against 30 lasso and elastic-net fits computed with `glmnet` and frozen as references across five dense designs (\f$N\f$ from \f$100\f$ to \f$10^5\f$, \f$p\f$ from \f$10\f$ to \f$200\f$, including one with \f$p > N\f$, and three values of \f$\lambda\f$ each), both methods recover `glmnet`'s support exactly in all 60 runs. In `tests/optimizers/test_proximal.cpp`, proximal Newton runs at decrement tolerance \f$10^{-10}\f$ and FISTA runs at tolerance \f$\max(10^{-10}, 10^3\varepsilon|f^*|)\f$. For proximal Newton, the tests check coefficient error within \f$5 \times 10^{-6}\f$ for \f$p \ge N\f$ and \f$5 \times 10^{-7}\f$ elsewhere, and \f$|f - f^*| \le 4 \times 10^{-10}\f$ when the free block is nonsingular. For FISTA, they check coefficient error within \f$2 \times 10^{-5}\f$, and \f$f - f^* \le 1.5\,\delta_{\mathrm{prox}} + 64\,\varepsilon\,|f^*|\f$ against FISTA's measure \f$\delta_{\mathrm{prox}}\f$.
+
+| Metric | Proximal Newton (\f$10^{-10}\f$) | FISTA (\f$\max(10^{-10}, 10^3\varepsilon|f^*|)\f$) |
+|---|---|---|
+| Exact support | 30 of 30 | 30 of 30 |
+| Converged | 29 of 30 | 30 of 30 |
+| Coefficient error / \f$\max|\beta|\f$ | at most \f$2.4 \times 10^{-6}\f$ (`d2`), \f$3.3 \times 10^{-7}\f$ elsewhere | at most \f$9.6 \times 10^{-6}\f$ (`d2`), \f$1.4 \times 10^{-6}\f$ elsewhere |
+| \f$f - f^*\f$ | at most \f$1.8 \times 10^{-10}\f$ | at most \f$1.11\f$ times the declared measure |
+
+The one run that does not converge is the elastic net on the \f$p > N\f$ design (`d2`, \f$N = 100\f$, \f$p = 200\f$) at the smallest \f$\lambda\f$. Its support has \f$113\f$ slopes plus the intercept, so \f$H\f$ is singular on the free coordinates. Proximal Newton ends `stalled` at \f$1.4 \times 10^{-7}\f$ from the reference point because the ridge penalty lies in \f$r\f$ and is not exposed to the optimizer; FISTA converges there. At tolerances within a few \f$\varepsilon |f|\f$ of the resolution of \f$f\f$, FISTA crawls (\f$86148\f$ iterations on `d5` at \f$10^{-10}\f$) and proximal Newton stalls (`d2` at \f$10^{-12}\f$).
+
+The benchmark table below was measured with `gcc` 14.2 and OpenMP on 8 threads (\f$p = 51\f$ with an unpenalized intercept, \f$\lambda = 0.1 N\f$, or \f$0.02 N\f$ on the equicorrelated design, tolerance \f$10^{-8}\f$, `inner_fraction` \f$0.01\f$; times in milliseconds with iteration counts).
+
+| Problem | \f$N\f$ | FISTA | Proximal Newton, coordinate descent | Proximal Newton, FISTA inside |
+|---|---|---|---|---|
+| Lasso | \f$10^4\f$ | 3.7 (11 it) | 1.1 (4 it) | 1.5 (5 it) |
+| Lasso | \f$10^5\f$ | 20.5 (9 it) | 5.9 (4 it) | 7.3 (5 it) |
+| Elastic net | \f$10^5\f$ | 26.1 (10 it) | 8.0 (4 it) | 8.7 (5 it) |
+| Lasso, correlation \f$0.9\f$ | \f$10^4\f$ | 60.9 (263 it) | 6.4 (6 it) | 4.8 (6 it) |
+| Lasso, correlation \f$0.9\f$ | \f$10^5\f$ | 391 (291 it) | 12.9 (6 it) | 13.3 (7 it) |
+
+Proximal Newton with coordinate descent takes \f$4\f$ to \f$6\f$ iterations where FISTA takes \f$9\f$ to \f$291\f$, and is \f$3.3\f$ to \f$30\f$ times faster on these problems. On the weakly convex MCP penalty written in `tests/optimizers/test_proximal.cpp` with \f$\rho = 1/\gamma\f$ declared, monotone FISTA and proximal Newton converge to stationary points and proximal Newton reports damped updates (\f$210\f$ in the test run). See `docs/numerics.md` for details of the measurements.
+
+## Example
+
+The example minimizes \f$s(x) + 2(|x_1| + |x_2|)\f$ for \f$x = (x_0, x_1, x_2)\f$ with \f$s(x) = \frac{1}{2}\lVert x - c\rVert^2\f$ and \f$c = (1, 3, -0.5)\f$, using both `proximal_gradient_optimizer<>` and `proximal_newton_optimizer<>` after `Kokkos::initialize`.
+
+```cpp
+#include <laplace/distrib/independent_product.hpp>
+#include <laplace/distrib/laplace2.hpp>
+#include <laplace/distrib/univariate_as_multivariate.hpp>
+#include <laplace/optimizers/minimize.hpp>
+#include <laplace/optimizers/penalized_objective.hpp>
+#include <laplace/optimizers/proximal_gradient.hpp>
+#include <laplace/optimizers/proximal_newton.hpp>
+#include <laplace/penalty/independent_product_penalty.hpp>
+
+struct quadratic_3d_objective {
+  using curvature_type = laplace::optimizers::dense_curvature_matrix;
+  double c[3] = {1.0, 3.0, -0.5};
+
+  double value(const laplace::optimizers::optimizer_point& x) const {
+    double s = 0.0;
+    for (int i = 0; i < 3; ++i) {
+      const double d = x(i) - c[i];
+      s += 0.5 * d * d;
+    }
+    return s;
+  }
+
+  double value_gradient(const laplace::optimizers::optimizer_point& x,
+                        const laplace::optimizers::optimizer_vector& g) const {
+    for (int i = 0; i < 3; ++i) g(i) = x(i) - c[i];
+    return value(x);
+  }
+
+  double value_gradient_curvature(const laplace::optimizers::optimizer_point& x,
+                                  const laplace::optimizers::optimizer_vector& g,
+                                  curvature_type& H) const {
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) H(i, j) = (i == j) ? 1.0 : 0.0;
+    return value_gradient(x, g);
+  }
+};
+
+bool proximal_example() {
+  using uam_laplace2 = laplace::distrib::univariate_as_multivariate<laplace::distrib::laplace2_distrib>;
+  using lasso_penalty = laplace::penalty::distrib_penalty<laplace::distrib::independent_product_distrib<uam_laplace2>>;
+
+  lasso_penalty pen(laplace::distrib::independent_product_distrib<uam_laplace2>(
+      laplace::distrib::independent_product_component<uam_laplace2>{{}, 2, 1, nullptr}));
+  quadratic_3d_objective smooth;
+  laplace::optimizers::penalized_objective<quadratic_3d_objective, lasso_penalty> obj(
+      smooth, 3, laplace::optimizers::attach_penalty(pen, 1, {2.0}));
+
+  laplace::optimizers::optimizer_vector x0("x0", 3);
+  x0(0) = 0.0;
+  x0(1) = 0.0;
+  x0(2) = 0.0;
+
+  laplace::optimizers::proximal_gradient_optimizer<> fista;
+  laplace::optimizers::proximal_newton_optimizer<> pnewton;
+  const auto r1 = laplace::optimizers::minimize(fista, obj, x0);
+  const auto r2 = laplace::optimizers::minimize(pnewton, obj, x0);
+  return laplace::optimizers::optimizer_succeeded(r1.status) &&
+         laplace::optimizers::optimizer_succeeded(r2.status);
+}
+```
+
+## Module functions and types
+
+In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::attached_penalty "attached_penalty"
+- \ref laplace::optimizers::attach_penalty "attach_penalty()"
+- \ref laplace::optimizers::penalized_objective "penalized_objective"
+- \ref laplace::optimizers::proximal_gradient_optimizer "proximal_gradient_optimizer"
+- \ref laplace::optimizers::coordinate_composite_objective "coordinate_composite_objective"
+- \ref laplace::optimizers::proximal_newton_inner_solver "proximal_newton_inner_solver"
+- \ref laplace::optimizers::proximal_newton_optimizer "proximal_newton_optimizer"
+
+## References
+
+- A. Beck and M. Teboulle (2009), A fast iterative shrinkage-thresholding algorithm for linear inverse problems, SIAM Journal on Imaging Sciences, 2(1), 183–202. https://doi.org/10.1137/080716542
+- A. Beck and M. Teboulle (2009), Fast gradient-based algorithms for constrained total variation image denoising and deblurring problems, IEEE Transactions on Image Processing, 18(11), 2419–2434. https://doi.org/10.1109/TIP.2009.2028250
+- B. O'Donoghue and E. Candès (2015), Adaptive restart for accelerated gradient schemes, Foundations of Computational Mathematics, 15(3), 715–732. https://doi.org/10.1007/s10208-013-9150-3
+- J. D. Lee, Y. Sun and M. A. Saunders (2014), Proximal Newton-type methods for minimizing composite functions, SIAM Journal on Optimization, 24(3), 1420–1443. https://doi.org/10.1137/130921428
+- J. Barzilai and J. M. Borwein (1988), Two-point step size gradient methods, IMA Journal of Numerical Analysis, 8(1), 141–148. https://doi.org/10.1093/imanum/8.1.141
+- S. R. Becker, E. J. Candès and M. C. Grant (2011), Templates for convex cone problems with applications to sparse signal recovery, Mathematical Programming Computation, 3(3), 165–218. https://doi.org/10.1007/s12532-011-0029-5
+
+*/

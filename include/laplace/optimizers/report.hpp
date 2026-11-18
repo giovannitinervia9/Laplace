@@ -115,6 +115,13 @@ struct optimizer_report {
   double decrement = std::numeric_limits<double>::quiet_NaN();
   /**
    * \ingroup optimizers
+   * \brief Size of the region still searched by a derivative-free method at the end, in the units of \f$x\f$, or quiet NaN.
+   */
+  // Brent's final bracket half-width, a simplex's diameter, a poll step; NaN
+  // for the methods with derivatives.
+  double search_size = std::numeric_limits<double>::quiet_NaN();
+  /**
+   * \ingroup optimizers
    * \brief Outcome of the final curvature factorization, or `curvature_factorization::not_evaluated`.
    */
   curvature_factorization final_factorization = curvature_factorization::not_evaluated;
@@ -140,6 +147,11 @@ struct optimizer_report {
    * \brief Total curvature matrix evaluations.
    */
   long curvature_evaluations = 0;
+  /**
+   * \ingroup optimizers
+   * \brief Number of coordinate updates whose diagonal curvature was damped by proximal Newton (penalized coordinates with \f$H_{jj} \le \rho_j\f$ or unpenalized coordinates with \f$H_{jj} \le 0\f$); \f$0\f$ for the other methods.
+   */
+  int damped_coordinates = 0;
   /**
    * \ingroup optimizers
    * \brief Wall-clock duration of the run in seconds.

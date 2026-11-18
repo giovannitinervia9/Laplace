@@ -11658,3 +11658,318 @@ the Laplace regression with sigma fitted by block alternation.
 **What is open.** The SCAD and MCP references from ncvreg (installed, 3.16.0)
 are added to the same script when the penalties land them (note/penalties.md,
 step 5).
+
+## Brent's method and block alternation (2026-11-18)
+
+**What.** Two optimizers of wave 2 (note/optimizers.md section 12, decisions
+2 and 6): `brent_optimizer` (`include/laplace/optimizers/brent.hpp`), which
+minimizes a function of one variable from its values alone, and
+`block_coordinate_optimizer` (`block_coordinate.hpp`), which splits x into
+contiguous blocks and minimizes each in turn with its own sub-optimizer while
+the other coordinates are held. With them, one stopping rule for every method
+without derivatives, `search_size_stop_rule` in `stop_rules.hpp`, and a field
+`search_size` in `stop_rule_input` and in `optimizer_report`.
+
+**Brent.** The bracketing phase evaluates x0 and x0 + h (h = `initial_step`,
+default 1), turns round when the second value is the higher, and expands by
+the golden ratio until the value no longer falls; a non-finite value is
++infinity, so a refused point ends the expansion on its side. Without a bracket
+after `max_expansions` (50) the run stops at the lowest point seen with
+`iteration_budget`, or `evaluation_budget` when the budget ran out first. The
+reduction is Brent's (1973, chapter 5): the vertex of the parabola through the
+three best points when it lies in the bracket and moves less than half the step
+before last, a golden-section step into the larger part otherwise. Its
+stationarity measure is the half-width of the bracket, in the units of x;
+`search_size_stop_rule` declares convergence when it is at most
+`absolute_tolerance + relative_tolerance max_i |x_i|` (defaults 1e-8 and 0).
+Brent's own test, the bracket within sqrt(eps) |x| + 1e-12 of the best point,
+ends the run as converged at resolution, since no further point can be told
+apart from x there. On the test functions: (x - 2)^2 + exp(-x) from 0 in 12
+evaluations (half-width 3.1e-8, at resolution); sum |y_i - x| over seven points
+from -20 in 34 evaluations, the median within the half-width 6.4e-8; x - log x
+from 3, whose expansion crosses 0 where the function is NaN, in 16
+evaluations; -x ends on the expansion budget, never converged.
+
+**Block alternation.** Each block's sub-optimizer runs on a view of the
+objective that evaluates the full objective and returns the block's slice of
+the gradient and diagonal block of the curvature, so a block-aware objective
+is not needed. The blocks are visited cyclically (Gauss-Seidel), each from the
+current values (warm start). Solves are inexact: from the second sweep, a
+sub-optimizer whose rule has a tolerance in the objective's units (a rule that
+reads the decrement or the proximal gradient mapping) runs at
+max(final, 0.1 D), where "final" is its configured tolerance and D is the
+decrease of f over the previous sweep; the first sweep runs at the final
+tolerances. Convergence is declared only on a sweep run entirely at the final
+tolerances in which every block declared its own stationarity at its start
+without moving beyond resolution: its sub-run succeeded, and it either left
+the block unchanged, or moved it by at most twice its final search size (a
+Brent block whose start lies in its final bracket), or moved it along a set
+where f falls by at most 64 eps |f| (a flat set of minimizers). A sweep at the
+final tolerances that moves nothing without converging ends the run as
+stalled; otherwise the run ends after at most 100 sweeps. The report gives the
+sweeps as iterations, the sub-runs' counts summed, the sum of the blocks'
+decrements of the last sweep (where the sub-optimizers give one) and the
+largest search size of the last sweep.
+
+One repair made while testing: the first version ended as stalled any sweep
+that moved nothing, and the coupled problem below stopped at sweep 2 with a
+decrement of 0.93. At sweep 2 the tolerance 0.1 D, with D the large decrease
+of the first sweep, let every block declare convergence at its start; a sweep
+that moves nothing at loosened tolerances only says the tolerances were loose,
+and the next one runs at the final tolerances because D is then 0.
+
+**The Laplace against its closed form.** laplace1 (mu, sigma) and laplace2
+(mu, lambda = 1/sigma), in the free coordinates (mu, log scale), mu by Brent
+and the scale by Newton on the expected curvature, from the library start plus
+1 on each free coordinate, on data drawn in C++ at mu = 1.5 and scale 2. The
+closed form is mu at the median and the scale equal to the mean absolute
+deviation from it; at even n every point of the median interval
+[y_(n/2), y_(n/2+1)] is a minimizer, with the same mean absolute deviation.
+All sixteen runs (both parametrizations; n = 1000, 1001, 1e5, 1e5 + 1) end
+converged at resolution in 3 sweeps. At odd n mu is the median bit for bit; at
+even n it lies inside the interval; the scale is within 1.6e-6 relative of its
+closed form, inside the bound sqrt(2 tol / n) that the decrement tolerance
+1e-6 of the Newton block allows. The same counts and outcomes on gcc and CUDA
+(5 cases, 98 assertions on each build).
+
+**Smooth problems against Newton.** f(x) = x'Ax/2 - b'x + sum_i log(1 +
+exp(x_i)) in four coordinates, blocks solved by Newton and by BFGS: with A
+diagonal (separable, blocks 2 + 2) in 4 sweeps; with A coupling every pair of
+coordinates in 23 sweeps (blocks 1 + 3) and 12 (blocks 3 + 1), the linear rate
+of Gauss-Seidel. The values agree with joint Newton within 1e-5.
+
+**The negative case.** f(x1, x2) = |x1 - x2| + 0.1 (x1 + x2 - 2)^2, minimum 0
+at (1, 1), from (0, 0): along each coordinate alone (0, 0) is a minimum, with
+one-sided slopes -1.4 and 0.6. With both blocks solved by Newton the kink is
+seen by the blocks' line searches, which fail, and the run ends stalled at
+f = 0.4 after one sweep. A block solved by a method meant for kinks (Brent)
+would declare itself stationary there, and the alternation would be declared
+converged at a point that is not jointly stationary: the limit recorded in
+decision 6, and the reason why a kink must stay inside one block. A test pins
+it: with Brent on both blocks the run is declared converged after one sweep at
+(0, 0) within 1e-7, f = 0.4 against the minimum 0.
+
+**A composite block.** Over a composite objective (s + r, as
+`penalized_objective`), the view is composite too: its value and derivatives
+are those of s and its non-smooth part is r of the full point, so that a
+proximal sub-optimizer's value s + r is f of the full point; its non-smooth
+blocks are the penalties whose range lies inside the view's block, with the
+per-coordinate members of proximal Newton's coordinate descent forwarded. A
+penalty that straddles two blocks is refused, and so is a sub-optimizer that
+never asks for the penalty of its block (the view counts the calls of the
+non-smooth members); a sub-optimizer of a block without penalty reports s,
+and r is added at its point. Measured on the lasso of the proximal tests
+(gaussian regression, n = 500, p = 21 with the intercept unpenalized, weight
+60 on the 20 slopes), the intercept by Newton and the slopes by FISTA in 11
+sweeps or by proximal Newton in 12, sub-tolerances 1e-12: the same support as
+proximal Newton on the whole of x (6 of 20 slopes) and the same value within
+7e-16 relative (662.551358380276); the test checks the point within 1e-5 of
+the largest coefficient and the value within 1e-8 relative.
+
+**Measurements** (`benchmarks/optimizers_block_coordinate.cpp`, gcc 14.2,
+OpenMP; n even, from the library start plus 1; time of the fastest of repeated
+fits; passes are reductions over the data):
+
+| distrib | n | method | sweeps or iterations | passes | 1 thread | 16 threads |
+|---|---|---|---|---|---|---|
+| laplace1 | 1e3 | Brent + Newton | 3 | 111 | 0.88 ms | 4.9 ms |
+| laplace1 | 1e3 | Newton, expected curvature | 6 | 14 | 0.13 ms | 0.64 ms |
+| laplace1 | 1e5 | Brent + Newton | 3 | 74 | 38 ms | 7.9 ms |
+| laplace1 | 1e5 | Newton, expected curvature | 7 | 16 | 10 ms | 1.9 ms |
+| laplace1 | 1e6 | Brent + Newton | 3 | 67 | 351 ms | 43 ms |
+| laplace1 | 1e6 | Newton, expected curvature | 7 | 15 | 98 ms | 11 ms |
+| laplace2 | 1e6 | Brent + Newton | 3 | 92 | 442 ms | 51 ms |
+| laplace2 | 1e6 | Newton, expected curvature | 16 | 41 | 220 ms | 26 ms |
+
+**What it says.** On the Laplace, where the expected information is smooth,
+joint Fisher scoring is 2 to 7 times faster: Brent spends 20 to 30 value passes
+per sweep shrinking a bracket on a kink, where the scoring step reaches the
+median interval in a few passes. Both reach the closed form. Alternation is the
+general route for a block with r_j = 0 and no usable expected information, as
+decision 6 says, not the fast route here. The count of passes differs by a few
+between thread counts, because the reduction's order changes the last bits of
+f and with them Brent's path.
+
+**What is open.** The CUDA timings of the bench were not taken (the CUDA
+build ran the tests only).
+
+## The proximal methods: FISTA and proximal Newton (2026-11-18)
+
+**What.** The composite form of wave 2 (note/optimizers.md section 12,
+decisions 1-5): f(x) = s(x) + sum_b r_b(x_b), s smooth and each r_b a penalty
+with a proximal operator. Three headers in `include/laplace/optimizers/`:
+`penalized_objective.hpp` (the adapter that attaches each penalty of
+laplace::penalty to a contiguous range of x, with its theta held fixed, and
+forwards value, prox_beta and weak_convexity), `proximal_gradient.hpp`
+(`proximal_gradient_optimizer`) and `proximal_newton.hpp`
+(`proximal_newton_optimizer` and the concept `coordinate_composite_objective`).
+With them `prox_mapping_stop_rule`, the bit `stop_needs_prox_mapping = 8u` and
+the field `prox_mapping` in `stop_rule_input`, and `damped_coordinates` in
+`optimizer_report`.
+
+**The adapter.** The penalized ranges must lie in [0, n) and must not overlap;
+coordinates outside every range are unpenalized, and the prox is the identity
+there. Each call recomputes the penalty's state from theta (a gather), so the
+object holds no pointers into its own buffers. For proximal Newton the adapter
+also gives the range of each block, whether the block is separable with its
+kinks on the coordinates, and the prox of one coordinate. That prox is one
+prox_beta of the whole block on a scratch copy, O(d_b) per coordinate: the
+same order as one coordinate update with a dense H, so the penalties need no
+per-coordinate member yet.
+
+**FISTA.** A step from y with step t = 1/L is z = prox_{t r}(y - t grad s(y)).
+It is accepted when s(z) - s(y) - grad s(y)'(z - y) <= |z - y|^2/(2t) + 8 eps
+max(1, |s(y)|); otherwise t is halved, and t never grows. The first t comes
+from one secant along -grad s(x_0). The momentum is Beck and Teboulle's. The
+adaptive restart of O'Donoghue and Candes fires when f(z) > f(x) + 8 eps
+max(1, |f(x)|); the step is then retried from x within the same iteration (the
+slack is optimizers7's lesson: a bare comparison fires on the rounding of f
+near the solution). With some rho_b > 0 the method is monotone FISTA (MFISTA),
+with t <= 0.99/max_b rho_b also inside the backtracking.
+
+One repair, found at n = 1e5 on one thread: s is then a serial sum of 1e5
+squares, and its rounding exceeds the 8 eps |s| allowance. Near the solution
+the test failed on rounding alone, t fell from 2.2e-7 to 1.1e-13 in 4000
+iterations, and the run had not finished after 240 s. An excess below sqrt(eps)
+max(1, |s(y)|) is now judged on gradients, as TFOCS does: the step is accepted
+when (z - y)'(grad s(z) - grad s(y)) <= |z - y|^2/(2t). For a convex s this
+implies the inequality above, and a difference of gradients has no rounding at
+the scale of |s|. The same run now takes 370 iterations and 4.0 s.
+
+**FISTA's stationarity measure (decided by Giovanni, 2026-11-18).** Decision 6
+read the proximal gradient mapping G_t = (x - prox_{t r}(x - t grad s(x)))/t as
+(1/2) t |G_t|^2. With t = 1/L this is smaller than f - f* by up to L/mu (mu the
+smallest curvature), the defect found in BFGS's (1/2) g'Bg. Measured at a
+declared 1e-8, on the lasso with equicorrelated columns (correlation 0.9,
+p = 51), f - f* was 3.9e-6 at n = 1e4 and 4.5e-6 at n = 1e5. The measure is
+now (1/2) gamma |G_t|^2, gamma = max(t, gamma_max), where gamma_max is the
+largest secant ratio s's/s'y over the points at which grad s was evaluated:
+the long Barzilai-Borwein step, which estimates 1/mu from below. With it, f -
+f* at the declared 1e-8 is 4.2e-9 and 7.0e-9 (263 and 291 iterations, against
+219 and 229). On the 30 glmnet fits below, f - f* is at most 1.11 times the
+declared measure, so no confirmation on the next iteration (as BFGS has) was
+added (decided by Giovanni on this measurement). With momentum
+the step is taken from y; when the rule accepts a measure read at y, the
+momentum is reset and the step retried from x, and convergence is declared
+only on a measure read at the point reported.
+
+A tolerance within a few eps |f| of the resolution of f makes FISTA crawl:
+glmnet's d5 (n = 1e5, f = 5.8e4) took 86148 iterations at 1e-10, about 7 eps
+|f|, and a resolution multiple of 8 in the rule did not help. The tests keep
+the tolerance at max(1e-10, 1e3 eps |f*|).
+
+**Proximal Newton.** At x the step d solves min_d g'd + d'Hd/2 + r(x + d)
+inexactly, from d = 0. When every block is separable with its kinks on the
+coordinates, the inner solver is coordinate descent on the model: coordinate
+j goes to prox_{r_j/a_j}(z_j - (g_j + [H(z - x)]_j)/a_j) with a_j = H_jj,
+O(n) per coordinate. A coordinate with H_jj <= rho_j is damped to rho_j/0.99
+and counted in damped_coordinates. Otherwise the inner solver is FISTA on the
+model, with step 1/L, L the Gershgorin bound on the largest eigenvalue of H,
+and the gradient restart. The step is accepted on Armijo's condition on the
+full objective, f(x + s d) - f(x) <= 1e-4 s Delta with Delta = g'd + r(x + d)
+- r(x), halving s from 1.
+
+The inner solve stops when its measure at the iterate is at most
+inner_fraction times the current decrement (1/2) d'Hd. A repair, accepted by
+Giovanni: the measure is (1/2) G'H^-1 G, where G is the model's proximal
+gradient mapping at the iterate, with the Cholesky factor of H. The cheaper
+measures, the last sweep's decrease or (1/2) t |G|^2, are smaller by up to the
+condition number of H: on columns equicorrelated at 0.99 they stopped the
+inner solve so early that proximal Newton ran 200 outer iterations without
+converging; with (1/2) G'H^-1 G it converges in 12.
+
+**The proximal Newton decrement (decided by Giovanni, 2026-11-18).** Decision
+4 made the decrement (1/2) d'Hd NaN without a Cholesky factor of H. A lasso
+with p > n always has a singular X'X, so proximal Newton could never declare
+convergence there: on glmnet's d2 (p = 200, n = 100) it ended stalled or at
+the iteration budget on all 6 fits. The factor is now that of H restricted to
+the free coordinates: the unpenalized ones, and the penalized ones not held at
+a kink at the subproblem's solution. Coordinate j counts as held when its
+scalar prox returns z_j for targets moved by sqrt(eps) of their size to either
+side of z_j - (g_j + u_j)/a_j. When H has no factor, the same restricted
+factor also gives the inner measure, which otherwise falls back to the blind
+(1/2) t |G|^2. An inner solve that misses its target inner_fraction (1/2) d'Hd
+within max_inner_sweeps gives the stop rule max(decrement, inner measure /
+inner_fraction), so a convergence verdict still needs the inner measure below
+inner_fraction times the outer tolerance (a repair: discarding the verdict
+instead never converged on d2's lasso at 0.01 of lambda_max, where the decrement
+fell to 5.7e-17 while the inner measure, read through the factor of an
+ill-conditioned block of 91 coordinates with n = 100, kept a rounding floor
+above 0.01 times it). On d2, at the decrement tolerance 1e-10 and inner_fraction
+0.01, 5 of the 6 fits now converge: the lasso at 0.5, 0.1 and 0.01 of
+lambda_max in 4, 7 and 23 iterations, and the enet at 0.5 and 0.1 in 4 and 5.
+Their coefficients lie within 2.4e-6 of glmnet's and f - f* is at most 1.8e-10.
+The sixth, the enet at 0.01 of lambda_max, has 113 coefficients in its support
+and the intercept, more than n. H on those coordinates is singular, and the run
+ends stalled at 1.4e-7 from glmnet's point. The enet's ridge curvature c is
+part of r, which the composite form does not expose to the optimizer.
+
+**inner_fraction, measured.** Proximal Newton with coordinate descent on the
+bench below, 0.1 against 0.01: identical on the independent designs (9
+evaluations of s, 5 sweeps). On the equicorrelated design (0.9) the
+evaluations of s go from 27 to 13 at n = 1e4 and from 29 to 13 at n = 1e5,
+the inner sweeps from 648 to 756 and from 692 to 750, and the time on 8
+threads from 5.9 to 5.1 ms and from 22.7 to 12.5 ms (on 1 thread from 11.8 to
+8.1 ms and from 132.8 to 61.9 ms). An outer iteration costs a pass over the
+data, an inner sweep O(p^2) without data. The default is 0.01 (decided by
+Giovanni, 2026-11-18).
+
+**Tests** (`tests/optimizers/test_proximal.cpp`, the objective in
+`regression_objective.hpp`, the reader of the references in
+`wave2_reference.hpp`). The regression objective is -l of a gaussian or
+Laplace likelihood with a dense X, one Kokkos reduction of 1 + p sums per
+evaluation, X'X formed once (the Laplace's curvature is the expected
+information X'X/sigma^2). Internal cases: the lasso, the elastic net and the
+lasso on columns equicorrelated at 0.99, by FISTA, proximal Newton with
+coordinate descent and proximal Newton with FISTA inside, which agree on the
+point within 1e-6 of max |b| and on the exact support, and satisfy the KKT
+conditions and the prox mapping within 1e-5 of the kink weight. MCP, a weakly
+convex penalty with rho = 1/gamma written in the test: with rho declared, MFISTA
+and proximal Newton converge to stationary points and proximal Newton damps
+210 coordinate updates; with rho wrongly declared 0, a run either fails or
+stops at a stationary point (on this problem both converge correctly). The
+adapter's value, prox, ranges and errors; gradient_stop_rule refused by both
+methods at compile time.
+
+Against the 30 glmnet fits frozen from R (section "Frozen R references for
+wave 2 of the optimizers"), both methods from zero:
+
+| | proximal Newton (1e-10) | FISTA (max(1e-10, 1e3 eps f*)) |
+|---|---|---|
+| exact support | 30 of 30 | 30 of 30 |
+| converged | 29 of 30 (not d2 enet at 0.01) | 30 of 30 |
+| coefficient error / max \|b\| | at most 2.4e-6 (d2), 3.3e-7 elsewhere | at most 9.6e-6 (d2), 1.4e-6 elsewhere |
+| f - f* | at most 1.8e-10 | at most 1.11 times the declared measure |
+
+At 1e-12, about 30 eps |f| on d2, proximal Newton ends stalled on d2's lasso at
+0.01 of lambda_max (its point within 9e-9 of glmnet's): Armijo cannot show a
+decrease below the rounding of f before the decrement reaches the tolerance.
+
+**Bench** (`benchmarks/optimizers_proximal.cpp`, gcc 14.2, OpenMP 8 threads,
+p = 51 with an unpenalized intercept, lambda = 0.1 n, or 0.02 n on the
+equicorrelated design; tolerance 1e-8; ms):
+
+| problem | n | FISTA | proximal Newton, coordinate descent | proximal Newton, FISTA inside |
+|---|---|---|---|---|
+| lasso | 1e4 | 3.7 (11 it) | 1.1 (4 it) | 1.5 (5 it) |
+| lasso | 1e5 | 20.5 (9 it) | 5.9 (4 it) | 7.3 (5 it) |
+| enet | 1e5 | 26.1 (10 it) | 8.0 (4 it) | 8.7 (5 it) |
+| lasso, correlation 0.9 | 1e4 | 60.9 (263 it) | 6.4 (6 it) | 4.8 (6 it) |
+| lasso, correlation 0.9 | 1e5 | 391 (291 it) | 12.9 (6 it) | 13.3 (7 it) |
+
+Both proximal Newton columns at the default inner_fraction 0.01; final code,
+one run.
+
+**What is open.** (1) Tolerances near the resolution of f: within a few eps
+|f| of it FISTA crawls (d5 at 1e-10: 86148 iterations) and proximal Newton
+ends stalled (d2 at 1e-12), and the stop rule's resolution test (multiple 1, or
+8) does not catch it; the tests keep FISTA at max(1e-10, 1e3 eps |f*|) and
+proximal Newton at 1e-10. (2) Proximal Newton on the enet
+with a support of n coordinates or more (d2 at 0.01 of lambda_max: 113 > 100)
+ends stalled at 1.5e-7 from glmnet's point: H on the free coordinates is
+singular, and the enet's ridge curvature c, which would make the problem
+strongly convex there, lives in r and is not exposed to the optimizer. (3) On
+CUDA the regression test objective computes the gradient with a team reduction
+per column, since an array reduction of 1 + p sums exceeded CUDA's per-block
+scratch at p = 201; host backends keep the single pass. The CUDA timings of the
+bench were not taken.

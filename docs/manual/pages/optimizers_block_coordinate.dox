@@ -1,0 +1,111 @@
+/**
+\addtogroup optimizers_block_coordinate
+
+This page documents two optimizers in namespace `laplace::optimizers`: \ref laplace::optimizers::brent_optimizer "brent_optimizer" (`<laplace/optimizers/brent.hpp>`) for derivative-free minimization in one variable, and \ref laplace::optimizers::block_coordinate_optimizer "block_coordinate_optimizer" (`<laplace/optimizers/block_coordinate.hpp>`) for cyclic alternation over contiguous blocks of coordinates. Both are header-only templates that run on the host only; nothing is marked `LAPLACE_HD`. When any sub-optimizer inside block alternation uses \ref laplace::optimizers::dense_curvature_solver "dense_curvature_solver", such as Newton's method, the program links `Laplace::dense`. A run is invoked with `minimize(optimizer, f, x0)` using the objective concepts, stopping rules, statuses, and \ref laplace::optimizers::optimizer_report "optimizer_report" documented on \ref optimizers "the optimizers page", together with sub-optimizers from \ref optimizers_second_order "Newton and trust region" or \ref optimizers_quasi_newton "Quasi-Newton methods".
+
+## Brent's method
+
+The class template `brent_optimizer<StopRule>` minimizes a \ref laplace::optimizers::value_objective "value_objective" whose starting point has length \f$1\f$; any other length throws `std::invalid_argument`. Because it reads only function values, it applies to objectives with kinks as well as smooth ones.
+
+Bracketing begins by evaluating \f$x_0\f$ and \f$x_0 + h\f$, where \f$h\f$ is `initial_step` (default \f$1\f$), swapping the two points when the second value is higher. From those two points, golden expansion multiplies the current step by \f$1.618\f$ in the descending direction until the value no longer falls. A non-finite value counts as \f$+\infty\f$, so any point where the objective cannot be evaluated ends expansion on its side. Expansion yields three points \f$p_1, p_2, p_3\f$ with \f$p_2\f$ between \f$p_1\f$ and \f$p_3\f$ such that \f$f(p_2) \le f(p_1)\f$ and \f$f(p_2) \le f(p_3)\f$, confining a minimizer to the bracket.
+
+If no bracket is found after `max_expansions` expansions (default \f$50\f$), the run stops at the lowest point seen with status `iteration_budget`, or `evaluation_budget` if `max_value_evaluations` (default \f$10^5\f$) ran out first; such a run never converges. A starting point whose value is not finite returns `start_not_admissible`.
+
+Once a bracket is found, reduction follows Brent's algorithm (Brent, 1973, chapter 5). At each iteration, the vertex of the parabola through the three best points is taken when it falls inside the bracket and moves less than half the step before last; otherwise the method takes a golden-section step of fraction \f$0.381966\f$ into the larger part of the bracket. Parabolic steps converge quickly near a smooth minimum, while golden-section steps bound the work when the objective is not parabolic, such as at a kink.
+
+Stationarity is measured by the bracket half-width in the units of \f$x\f$ and passed to `stop_rule` as `search_size`. The default rule, \ref laplace::optimizers::search_size_stop_rule "search_size_stop_rule", declares `converged` when this half-width is at most \f$\tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} \max_i |x_i|\f$ (defaults \f$10^{-8}\f$ and \f$0\f$). Brent's own resolution test ends the run as `converged_at_resolution` when the bracket lies within \f$\sqrt{\varepsilon}\,|x| + r_{\mathrm{abs}}\f$ of the best point \f$x\f$, where \f$\varepsilon = 2^{-52}\f$ and \f$r_{\mathrm{abs}}\f$ is `absolute_resolution` (default \f$10^{-12}\f$), because no further point can be distinguished from \f$x\f$ there. At most `max_iterations` (default \f$200\f$) reduction steps are taken.
+
+On a convex function with a kink, the bracket holds a minimizer at every step; on a flat set of minimizers, the run ends at some point of the set. In the returned `optimizer_report`, `point` and `value` hold the best point, `search_size` holds the final half-width (quiet NaN when no bracket was found), `iterations` counts reduction steps, `value_evaluations` counts objective calls, `gradient` is empty, and `decrement` is quiet NaN. The optional `trace` callback is invoked once per reduction step after iteration \f$0\f$. Measured on the one-dimensional test problems: \f$(x - 2)^2 + e^{-x}\f$ from \f$0\f$ converges at resolution in \f$12\f$ evaluations with half-width \f$3.1 \times 10^{-8}\f$; \f$\sum_i |y_i - x|\f$ over seven points from \f$-20\f$ finishes in \f$34\f$ evaluations with the median within the half-width \f$6.4 \times 10^{-8}\f$; \f$x - \log x\f$ from \f$3\f$, whose expansion crosses \f$0\f$ where the objective is NaN, converges in \f$16\f$ evaluations; and \f$-x\f$ stops on the expansion budget.
+
+## Block alternation
+
+The class template `block_coordinate_optimizer<SubOptimizer...>` partitions `x` into contiguous blocks whose positive sizes in `block_sizes` must sum to the length of `x0`, throwing `std::invalid_argument` otherwise. Its member `sub_optimizers` holds one sub-optimizer per block in block order. Each block is minimized over a \ref laplace::optimizers::block_objective_view "block_objective_view" (`block_objective_view<O>`), which copies `x`, writes the block's trial coordinates into it, evaluates the full objective, and returns the block's slice of the gradient and diagonal block of the curvature. The gradient and curvature members of `block_objective_view<O>` exist only when the objective provides them, and its curvature must be `dense_curvature_matrix`. A user does not normally construct a view directly; because each sub-optimizer sees only this view, blocks solved by Brent (values only), Newton (curvature), or BFGS (gradient) can be combined in the same run.
+
+Sweeps visit the blocks cyclically from the current coordinates (Gauss-Seidel with warm starts). A block's result is accepted when its value is finite, does not exceed the current value, and moves at least one coordinate. On the first sweep, every sub-optimizer runs at its configured tolerances. From the second sweep onward, any sub-optimizer whose stopping rule reads `stop_needs_decrement` or `stop_needs_prox_mapping` and exposes a `tolerance` member runs with tolerance \f$\max(\tau, \kappa D)\f$, where \f$\tau\f$ is its configured tolerance, \f$\kappa\f$ is `inexact_fraction` (default \f$0.1\f$), and \f$D\f$ is the decrease of \f$f\f$ over the previous sweep. Other stopping rules, such as `search_size_stop_rule` or combinators, always run as configured.
+
+Convergence is never inferred from the sub-runs' statuses alone. It is declared only on a sweep executed entirely at the configured tolerances in which every block established stationarity at its start without moving beyond resolution. For a single block, this holds when its sub-run succeeded and either left the block unchanged, moved it by at most twice its final `search_size` (a Brent block whose start lies inside its final bracket), or moved it along a set where \f$f\f$ falls by at most \f$m\,\varepsilon\,|f|\f$ with \f$m\f$ equal to `value_resolution_multiple` (default \f$64\f$, covering flat sets of minimizers). The run returns `converged_at_resolution` if at least one block ended at resolution, and `converged` otherwise.
+
+A sweep at the configured tolerances that moves no coordinate without converging ends the run as `stalled`. Reaching `max_sweeps` (default \f$100\f$) sweeps ends with `iteration_budget`, and a non-finite initial value gives `start_not_admissible`. In `optimizer_report`, `iterations` counts sweeps, the evaluation counts sum the sub-runs' counts plus one initial value evaluation, `decrement` sums the blocks' decrements on the last sweep where available (quiet NaN when none provides one), `search_size` is the largest block search size on the last sweep where available (quiet NaN when none provides one), and `gradient` is empty. The optional `trace` callback runs once per sweep.
+
+## Composite objectives
+
+When the objective satisfies \ref laplace::optimizers::composite_objective "composite_objective", such as \ref laplace::optimizers::penalized_objective "penalized_objective" on \ref optimizers_proximal "the proximal methods page", it must also supply each non-smooth block's range or compilation fails. Alternation then minimizes \f$f = s + r\f$, where \f$s\f$ is the smooth part and \f$r\f$ the block-separable non-smooth part.
+
+The `block_objective_view` over such an objective is composite too. Its value and derivatives are those of \f$s\f$, and its non-smooth part is \f$r\f$ at the full point because penalties outside the block are constant there. Its non-smooth blocks are the penalties inside the view's block, with the per-coordinate members that \ref laplace::optimizers::proximal_newton_optimizer "proximal_newton_optimizer" uses.
+
+A block holding a penalty is solved by a proximal method such as \ref laplace::optimizers::proximal_gradient_optimizer "proximal_gradient_optimizer" (FISTA) or `proximal_newton_optimizer`, and an unpenalized block by any method. A non-proximal sub-optimizer reports \f$s\f$, and \f$r\f$ is added at its point. Two cases throw `std::invalid_argument`: a penalty straddling two blocks, and a sub-optimizer that never requests its block's penalty, tracked through `nonsmooth_calls()` and `local_nonsmooth_blocks()`.
+
+Measured on the lasso over \f$20\f$ slopes of a Gaussian regression with \f$n = 500\f$, weight \f$60\f$, and an unpenalized intercept, Newton on the intercept alternates with FISTA in \f$11\f$ sweeps or proximal Newton in \f$12\f$. Both match joint proximal Newton on the full vector in support, \f$6\f$ of \f$20\f$ slopes, and value within \f$7 \times 10^{-16}\f$ relative; the test checks the point within \f$10^{-5}\f$ of the largest coefficient and the value within \f$10^{-8}\f$ relative.
+
+## Limits
+
+Cyclic block alternation reaches stationary points when the non-smooth part of the objective is separable across blocks, under the conditions given by Tseng (2001). A kink that couples coordinates in different blocks can hold every block stationary at a point that is not jointly stationary. On such a problem, a block solved by a method assuming smoothness (such as Newton) sees the kink, its line search fails, and the run ends `stalled`. A block solved by a method for kinks (such as Brent) declares itself stationary at the kink, and the run is declared converged at a point that is not a minimum. A test pins this limit on \f$|x_1 - x_2| + 0.1(x_1 + x_2 - 2)^2\f$ from \f$(0, 0)\f$, whose minimum is \f$0\f$ at \f$(1, 1)\f$: with Brent on both blocks, the run is declared converged after \f$1\f$ sweep at \f$(0, 0)\f$ within \f$10^{-7}\f$ and \f$f = 0.4\f$. Any non-separable kink must therefore stay inside a single block.
+
+## Measurements
+
+The tests and benchmarks exercise alternation on objectives defined inside the test suite. On a test objective equal to the negative log-likelihood of a sample under the Laplace law (`laplace1` and `laplace2`) in the free coordinates (\f$\mu\f$, log scale), with \f$\mu\f$ solved by Brent and the scale by Newton on the expected curvature from a start \f$1\f$ away in each free coordinate, runs at sample sizes \f$n \in \{1000, 1001, 10^5, 10^5 + 1\}\f$ all converged at resolution in \f$3\f$ sweeps. At odd \f$n\f$, \f$\mu\f$ equals the sample median bit for bit; at even \f$n\f$, \f$\mu\f$ lies in the median interval; and the scale lies within \f$1.6 \times 10^{-6}\f$ relative of the mean absolute deviation from the median. These tests pass on gcc/OpenMP and on CUDA with the same assertions.
+
+On the smooth four-dimensional objective \f$\frac{1}{2} x^\top A x - b^\top x + \sum_{i=1}^4 \log(1 + e^{x_i})\f$ with Newton and BFGS blocks, alternation converges in \f$4\f$ sweeps when \f$A\f$ is diagonal and in \f$12\f$ or \f$23\f$ sweeps, depending on how the blocks are split, when \f$A\f$ couples every pair of coordinates; the test checks agreement with joint Newton within \f$10^{-5}\f$ in value. On the coupled-kink objective \f$|x_1 - x_2| + 0.1(x_1 + x_2 - 2)^2\f$ from \f$(0, 0)\f$ (minimum \f$0\f$ at \f$(1, 1)\f$), solving both blocks by Newton ends `stalled` at \f$f = 0.4\f$.
+
+The table compares alternation against joint Newton with the expected curvature on the Laplace negative log-likelihood (gcc 14.2 with OpenMP, even \f$n\f$, started \f$1\f$ above the library start; fastest of repeated fits, passes are reductions over the data). See `docs/numerics.md` for details of the measurements.
+
+| Distribution | \f$n\f$ | Method | Sweeps or iterations | Passes | 1 thread | 16 threads |
+|---|---|---|---|---|---|---|
+| `laplace1` | \f$10^3\f$ | Brent + Newton | 3 | 111 | 0.88 ms | 4.9 ms |
+| `laplace1` | \f$10^3\f$ | Newton with the expected curvature | 6 | 14 | 0.13 ms | 0.64 ms |
+| `laplace1` | \f$10^5\f$ | Brent + Newton | 3 | 74 | 38 ms | 7.9 ms |
+| `laplace1` | \f$10^5\f$ | Newton with the expected curvature | 7 | 16 | 10 ms | 1.9 ms |
+| `laplace1` | \f$10^6\f$ | Brent + Newton | 3 | 67 | 351 ms | 43 ms |
+| `laplace1` | \f$10^6\f$ | Newton with the expected curvature | 7 | 15 | 98 ms | 11 ms |
+| `laplace2` | \f$10^6\f$ | Brent + Newton | 3 | 92 | 442 ms | 51 ms |
+| `laplace2` | \f$10^6\f$ | Newton with the expected curvature | 16 | 41 | 220 ms | 26 ms |
+
+On this objective, whose expected curvature is smooth, joint Newton with the expected curvature is \f$2\f$ to \f$7\f$ times faster because Brent spends \f$20\f$ to \f$30\f$ value passes per sweep shrinking a bracket on the kink; both methods reach the closed form.
+
+## Example
+
+The example minimizes the separable objective \f$f(x) = |x_1 - 3| + (x_2 + 1)^2\f$ using `block_coordinate_optimizer` with one Brent sub-optimizer per coordinate, after `Kokkos::initialize`.
+
+```cpp
+#include <laplace/optimizers/block_coordinate.hpp>
+#include <laplace/optimizers/brent.hpp>
+#include <laplace/optimizers/minimize.hpp>
+
+#include <cmath>
+
+struct separable_kink_objective {
+  double value(const laplace::optimizers::optimizer_point& x) const {
+    const double d = x(1) + 1.0;
+    return std::abs(x(0) - 3.0) + d * d;
+  }
+};
+
+bool block_brent_example() {
+  laplace::optimizers::optimizer_vector x0("x0", 2);
+  x0(0) = 0.0;
+  x0(1) = 4.0;
+  separable_kink_objective f;
+  laplace::optimizers::block_coordinate_optimizer<
+      laplace::optimizers::brent_optimizer<>,
+      laplace::optimizers::brent_optimizer<>>
+      opt;
+  opt.block_sizes = {1, 1};
+  const laplace::optimizers::optimizer_report r =
+      laplace::optimizers::minimize(opt, f, x0);
+  return laplace::optimizers::optimizer_succeeded(r.status);
+}
+```
+
+## Module types
+
+In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::brent_optimizer "brent_optimizer"
+- \ref laplace::optimizers::block_objective_view "block_objective_view"
+- \ref laplace::optimizers::block_coordinate_optimizer "block_coordinate_optimizer"
+
+## References
+
+- R. P. Brent (1973), Algorithms for Minimization without Derivatives, Prentice-Hall.
+- P. Tseng (2001), Convergence of a block coordinate descent method for nondifferentiable minimization, Journal of Optimization Theory and Applications, 109(3), 475–494. https://doi.org/10.1023/A:1017501703105
+
+*/
