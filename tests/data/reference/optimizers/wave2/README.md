@@ -45,3 +45,51 @@ the coefficient of `x<j>` (1-based). All CSV files start with `#` comment lines.
   < 1), and the basis (the p + 1 rows with zero residual).
 - `rq.csv`: one row per coefficient; `vertex` is the reference (the basis
   system re-solved), `rq` quantreg's own output.
+
+## Penalties through a linear map
+
+Written by `tools/reference/optimizers_wave2_linear_map.R` (run after
+`optimizers_wave2.R`, with R 4.6.0, glmnet 5.0 and genlasso 1.6.1); see the section "Frozen R references for penalties
+through a linear map" of `docs/numerics.md`.
+
+### Adaptive lasso (glmnet with penalty.factor, datasets d1 to d5, y_gaussian)
+
+- `adaptive_lasso_weights.csv`: one row per (dataset, coefficient), the weight
+  `w_j = 1 / |b_j|` (hex), b from OLS on centred data when p < n, from the
+  ridge `(Xc'Xc + 10 I) b = Xc'yc` on d2 (p > n).
+- `adaptive_lasso_fits.csv`: one row per (dataset, lambda_fraction in {0.5,
+  0.1, 0.01} of glmnet's lambda_max with these factors). glmnet rescales
+  penalty.factor to `pf' = w p / sum(w)`, so in Laplace's units the objective is
+  `RSS/2 + r sum_j w_j |beta_j|` with `rate_laplace = r = n lambda_glmnet p /
+  sum_weights`: laplace2 at rate r on `u = W beta`, whose value adds
+  `penalty_constant = -p log(r/2) - sum_j log w_j`. Columns as in
+  `glmnet_fits.csv`, plus `kkt_violation_glmnet_unscaled` (glmnet's point read
+  with kink weights `n lambda_glmnet w_j`, which it violates by orders of
+  magnitude: the check that the rescaling is real).
+- `adaptive_lasso.csv`: one row per coefficient (`b0`, `beta<j>`); `polished`
+  is the reference (KKT system on glmnet's support), `glmnet` glmnet's own.
+
+### Fused lasso, trend filtering, elastic net on differences (genlasso)
+
+- `difference_datasets.csv`: two datasets with no intercept, X AR(1) with
+  correlation 0.5: `f1_n200_p50` (n = 200, p = 50, `f1_n200_p50.csv`, hex) and
+  `f2_n1000_p200` (n = 1000, p = 200, `f2_n1000_p200.f64`, raw little-endian
+  column-major). Columns `x1..xp, y_fused, y_trend`: `y_fused = X beta_fused +
+  N(0, 1)` with piecewise-constant coefficients, `y_trend = X beta_trend +
+  N(0, 1)` with piecewise-linear ones (both listed in the file).
+- `difference_fits.csv`: one row per (dataset, penalty, lambda_fraction in
+  {0.5, 0.1, 0.01} of the first knot of genlasso's path). The objective, with no
+  intercept, is `RSS/2 + a |D beta|_1 + c |D beta|^2/2`, D the differences of
+  order `order`, `a = lambda alpha`, `c = lambda (1 - alpha)`:
+  - `fused`: y_fused, order 1, alpha 1, `fusedlasso1d(y, X)`;
+  - `trend`: y_trend, order 2, alpha 1, `trendfilter(y, X, ord = 1)`;
+  - `fused_enet`: y_fused, order 1, alpha 0.5, `genlasso` on the augmented data
+    `[y; 0]`, `[X; sqrt(c) D]` at lambda = a.
+  Laplace's penalty (laplace2 at rate lambda, or enet at (lambda, alpha), on
+  each row of D through `difference_map<order>`) has the value
+  `a |D beta|_1 + c |D beta|^2/2 + (p - order) penalty_constant_per_row -
+  log_det_ddt / 2`. `nonzero_rows` lists the 1-based rows i with
+  `(D beta)_i != 0`; `dual_max` (< 1: strict) and `dual_residual` certify the
+  polished point (the KKT system solved on genlasso's fusion pattern).
+- `difference.csv`: one row per coefficient (`beta<j>`); `polished` is the
+  reference, `genlasso` genlasso's own.

@@ -315,3 +315,6 @@ parent here, in tree order; the module pages define their groups without
 /** \defgroup optimizers_bundle Proximal bundle method
 \ingroup optimizers
 \brief Proximal bundle minimization of a convex, possibly non-smooth objective from values and subgradients. */
+/** \defgroup optimizers_primal_dual Primal-dual method
+\ingroup optimizers
+\brief Primal-dual minimization of a smooth objective plus a convex penalty through a linear map. */

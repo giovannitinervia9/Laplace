@@ -63,6 +63,13 @@ inline constexpr unsigned stop_needs_prox_mapping = 8u;  // (1/2) gamma |G_t|^2 
  * \see \ref optimizers, stop_rule, stop_rule_for, search_size_stop_rule
  */
 inline constexpr unsigned stop_needs_search_size = 16u;  // the size of a derivative-free search, in x's units
+/**
+ * \ingroup optimizers
+ * \brief Capability bit indicating that a stopping rule reads `stop_rule_input::primal_dual`.
+ *
+ * \see \ref optimizers, \ref optimizers_primal_dual, stop_rule, stop_rule_for, primal_dual_stop_rule
+ */
+inline constexpr unsigned stop_needs_primal_dual = 32u;  // e_d + gamma |r_p|^2 of the primal-dual method, in f's units
 
 /**
  * \ingroup optimizers
@@ -139,6 +146,17 @@ struct stop_rule_input {
   // The half-width of Brent's bracket, the diameter of a simplex, the step of
   // a poll; in the units of x, not of f. NaN when the method does not provide it.
   double search_size = std::numeric_limits<double>::quiet_NaN();
+  /**
+   * \ingroup optimizers
+   * \brief Primal-dual stationarity measure \f$V = e_d + \max(\gamma_{\max}, \tau) \lVert r_p\rVert^2\f$ in the objective's units, or quiet NaN when not provided.
+   *
+   * Here \f$r_p = \nabla s(x) + D^\top y\f$, \f$e_d = g(Dx) - g(u') - y^\top(Dx - u')\f$, and \f$\gamma_{\max}\f$ is the largest secant ratio of \f$\nabla s\f$; see \ref optimizers_primal_dual "Primal-dual method".
+   */
+  // The primal-dual measure e_d + max(gamma_max, tau) |r_p|^2 of s(x) + g(D x),
+  // in the objective's units: r_p = grad s(x) + D' y, e_d the dual
+  // linearization error g(D x) - g(u') - y'(D x - u') >= 0 (primal_dual.hpp).
+  // NaN when the method does not provide it.
+  double primal_dual = std::numeric_limits<double>::quiet_NaN();
   /**
    * \ingroup optimizers
    * \brief Whether `previous_value` and `previous_point` hold data from the preceding iteration.
@@ -312,6 +330,48 @@ struct search_size_stop_rule {
     for (std::size_t i = 0; i < in.point.extent(0); ++i) size = std::max(size, std::abs(in.point(i)));
     return in.search_size <= absolute_tolerance + relative_tolerance * size ? stop_verdict::converged
                                                                             : stop_verdict::none;
+  }
+};
+
+/**
+ * \ingroup optimizers
+ * \brief Stationarity rule testing the primal-dual measure of a smooth plus linear-map composite objective.
+ *
+ * Returns `stop_verdict::converged` when `primal_dual` (\f$e_d + \max(\gamma_{\max}, \tau) \lVert r_p\rVert^2\f$, in the objective's units) is at most `tolerance`,
+ * `stop_verdict::converged_at_resolution` when it is at most \f$m \varepsilon |f|\f$ (where \f$m\f$ is `resolution_multiple` and \f$\varepsilon\f$ is double-precision machine epsilon), and `stop_verdict::none` otherwise (including when `primal_dual` is NaN).
+ *
+ * \see \ref optimizers, \ref optimizers_primal_dual, decrement_stop_rule, stop_rule_input::primal_dual, stop_verdict
+ */
+// The decrement rule read on the primal-dual measure (primal_dual.hpp), an
+// upper bound on f(x) - f* for convex s and g up to the distance to x*.
+struct primal_dual_stop_rule {
+  /**
+   * \ingroup optimizers
+   * \brief Required quantities bitmask (`stop_needs_primal_dual`).
+   */
+  static constexpr unsigned needs = stop_needs_primal_dual;
+  /**
+   * \ingroup optimizers
+   * \brief Convergence threshold in the objective's units.
+   */
+  double tolerance = 1e-6;
+  /**
+   * \ingroup optimizers
+   * \brief Multiplier on \f$\varepsilon |f|\f$ for the resolution check.
+   */
+  double resolution_multiple = 1.0;
+  /**
+   * \ingroup optimizers
+   * \brief Evaluates the stopping rule on `in`.
+   *
+   * \param in Current iteration quantities.
+   * \return `stop_verdict::converged`, `stop_verdict::converged_at_resolution`, or `stop_verdict::none`.
+   */
+  stop_verdict verdict(const stop_rule_input& in) const {
+    if (in.primal_dual <= tolerance) return stop_verdict::converged;
+    if (in.primal_dual <= resolution_multiple * std::numeric_limits<double>::epsilon() * std::abs(in.value))
+      return stop_verdict::converged_at_resolution;
+    return stop_verdict::none;
   }
 };
 

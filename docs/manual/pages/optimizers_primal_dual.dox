@@ -1,0 +1,148 @@
+/**
+\addtogroup optimizers_primal_dual
+
+This page documents \ref laplace::optimizers::primal_dual_optimizer "primal_dual_optimizer" (`<laplace/optimizers/primal_dual.hpp>`), which minimizes \f$s(x) + g(Dx)\f$ in namespace `laplace::optimizers`, where \f$s\f$ is smooth, \f$g\f$ is a convex penalty with a proximal operator in \f$u = Dx\f$, and \f$D\f$ is a linear map. Everything is header-only on the host with nothing marked `LAPLACE_HD` and no library to link. Runs use \ref laplace::optimizers::minimize "minimize()" (`minimize(optimizer, objective, x0)`) or `run()`. Objective concepts, `optimizer_report`, `optimizer_status`, and stopping rules appear on \ref optimizers "the optimizers page", `attach_penalty()` on \ref optimizers_proximal "Proximal methods", and linear-map penalties on \ref penalty_linear_map "Linear maps". Tested on `gcc`/OpenMP and CUDA against exact proximal gradient runs and \f$18\f$ `genlasso` fits, \f$f - f^*\f$ was at most \f$1.01\f$ times the reported measure on every problem where \f$f^*\f$ was known.
+
+## Objective
+
+The concept \ref laplace::optimizers::linear_map_composite_objective "linear_map_composite_objective" refines \ref laplace::optimizers::gradient_objective "gradient_objective" for \f$f(x) = s(x) + g(Dx)\f$ on \f$x \in \mathbb{R}^n\f$, where `value()` and `value_gradient()` evaluate \f$s(x)\f$ alone. Seven additional members expose the \f$m \times n\f$ map \f$D\f$ and \f$g\f$: `map_rows()` returns \f$m\f$; `map_apply(x, u)` writes \f$u = Dx\f$ for the whole \f$x\f$; `map_apply_transpose(y, g)` writes all \f$n\f$ entries of \f$D^\top y\f$; `map_norm_squared_bound()` returns \f$B \ge \lVert D\rVert_2^2\f$; `map_value(u)` returns \f$g(u)\f$ with normalizing constants included; `map_prox(v, t, out)` writes \f$\operatorname{prox}_{t g}(v) = \arg\min_u \{g(u) + \lVert u - v\rVert^2 / (2t)\}\f$ in \f$u\f$; and `map_weak_convexity()` returns the weak-convexity constant \f$\rho \ge 0\f$ of \f$g\f$.
+
+The adapter \ref laplace::optimizers::linear_map_penalized_objective "linear_map_penalized_objective" (`linear_map_penalized_objective<Smooth, P, Map>`) builds a `linear_map_composite_objective` from a smooth `gradient_objective` \f$s\f$ (held by reference), dimension \f$n\f$, and one \ref laplace::optimizers::attached_penalty "attached_penalty" of a \ref laplace::penalty::linear_map_penalty "linear_map_penalty\<P, Map\>" from \ref laplace::optimizers::attach_penalty "attach_penalty(penalty, offset, theta)", acting on \f$x_{[o, o+p)}\f$ with \f$o\f$ equal to `offset` and \f$p\f$ equal to `penalty.dim()`. Then \f$g\f$ is \f$P\f$ (`inner()`, whose `prox_beta()` gives the proximal operator in \f$u\f$) plus \f$c(D)\f$ (\ref penalty_linear_map "Linear maps"), and \f$D\f$ is `map()` on that range. One linear-map penalty is attached per objective. The constructor throws `std::invalid_argument` when the range leaves \f$[0, n)\f$ or `theta` has the wrong length. Without `prox_beta()` on \f$P\f$, the adapter does not compile.
+
+## Method
+
+The optimizer \ref laplace::optimizers::primal_dual_optimizer "primal_dual_optimizer" (`primal_dual_optimizer<StopRule = primal_dual_stop_rule>`) implements the iteration of Condat (2013) and Vũ (2013) with \f$s\f$ linearized:
+\f[
+x^+ = x - \tau \bigl(\nabla s(x) + D^\top y\bigr), \qquad
+w = y + \sigma D(2x^+ - x), \qquad
+u' = \operatorname{prox}_{g/\sigma}\!\left(\frac{w}{\sigma}\right), \qquad
+y^+ = w - \sigma u'.
+\f]
+The dual variable starts at \f$y = 0\f$. The dual step uses Moreau's identity, so only the proximal operator of \f$g\f$ is called, and \f$y^+\f$ is a subgradient of \f$g\f$ at \f$u'\f$. Setting \f$\tau = 0.99 / (L/2 + \sigma B)\f$ ensures \f$1/\tau - \sigma\lVert D\rVert_2^2 > L/2\f$ (Condat, 2013; Vũ, 2013), where \f$L\f$ is the Lipschitz constant of \f$\nabla s\f$.
+
+If `initial_lipschitz` (default \f$0\f$) is positive, \f$L\f$ starts there; otherwise it is estimated from a secant along a short gradient step of length \f$10^{-4}\max(1, \max_i |x_i|) / \max_i |g_i|\f$, as in the proximal gradient method. Along the run, \f$L\f$ doubles whenever
+\f[
+s(x^+) \le s(x) + \nabla s(x)^\top (x^+ - x) + \frac{L}{2}\lVert x^+ - x\rVert^2
+\f]
+fails by more than `rounding_slack` \f$\cdot\,\varepsilon \max(1, |s(x)|)\f$ (default `rounding_slack` \f$8\f$, \f$\varepsilon = 2^{-52}\f$), or when \f$s(x^+)\f$ is non-finite. Because \f$L\f$ never decreases, after finitely many doublings the steps follow the fixed-step theory.
+
+The dual step \f$\sigma\f$ starts at `initial_dual_ratio` \f$\cdot\, L / B\f$ (default \f$50\f$). After each iteration it is balanced between the two parts of the stationarity measure below: divided by \f$1 + a_k\f$ when the primal part exceeds `balance_threshold` (default \f$1.5\f$) times the dual part, and multiplied by \f$1 + a_k\f$ in the opposite case. At each adjustment, \f$a_k\f$ (starting at `balance_rate`, default \f$0.5\f$) is multiplied by `balance_decay` (default \f$0.95\f$) so the steps settle, and \f$\tau\f$ updates by the formula above.
+
+## Stationarity
+
+With \f$r_p = \nabla s(x) + D^\top y\f$ (the next primal direction, at no extra cost) and \f$e_d = g(Dx) - g(u') - y^\top(Dx - u') \ge 0\f$ (one extra evaluation of \f$g\f$ per iteration), convexity of \f$s\f$ and \f$g\f$ gives \f$f(x) - f^* \le e_d + \lVert r_p\rVert\,\lVert x - x^*\rVert\f$, where \f$f^*\f$ is the minimum at \f$x^*\f$. The stationarity measure is
+\f[
+V = e_d + \max(\gamma_{\max}, \tau)\,\lVert r_p\rVert^2,
+\f]
+where \f$\gamma_{\max}\f$ is the largest secant ratio \f$\delta_x^\top \delta_x / (\delta_x^\top \delta_g)\f$ along the iterates, with \f$\delta_x = x^+ - x\f$ and \f$\delta_g = \nabla s(x^+) - \nabla s(x)\f$. In the objective's units, \f$V\f$ is reported as `decrement` and passed to `stop_rule` as `stop_rule_input::primal_dual`.
+
+The default \ref laplace::optimizers::primal_dual_stop_rule "primal_dual_stop_rule" has `needs` equal to `stop_needs_primal_dual` (\f$32\f$). It returns `converged` when `primal_dual` is at most `tolerance` (default \f$10^{-6}\f$), `converged_at_resolution` when at most `resolution_multiple` \f$\cdot\,\varepsilon |f|\f$ (default \f$1\f$), and `none` otherwise or when NaN. The measured \f$f - f^*\f$ was at most \f$1.01\,V\f$ on every problem where \f$f^*\f$ was known, while the residual measure \f$\frac{1}{2}(\tau\lVert r_p\rVert^2 + \sigma\lVert u' - Dx\rVert^2)\f$ understated it by factors of \f$10^3\f$ to \f$10^{14}\f$.
+
+## Statuses and report
+
+`StopRule` admits any rule needing at most `stop_needs_primal_dual` and `stop_needs_previous`; reading `gradient` or `prox_mapping` is a compile error. `run()` throws `std::invalid_argument` when `map_weak_convexity()` is positive.
+
+A run returns `converged`, `converged_at_resolution`, or `stopped_on_change` from `stop_rule`; `stalled` when neither \f$x\f$ nor \f$y\f$ moves; `line_search_failed` after more than `max_backtracks` (default \f$100\f$) doublings of \f$L\f$ in one step; `iteration_budget` (`max_iterations`, default \f$10^5\f$); `evaluation_budget` (`max_value_evaluations`, default \f$10^7\f$); or `start_not_admissible` when \f$f(x_0)\f$ is not finite.
+
+In `optimizer_report`, `point` is \f$x\f$, `value` is \f$s(x) + g(Dx)\f$ (constants included), `gradient` is \f$\nabla s(x)\f$ alone, `decrement` is \f$V\f$, and `iterations` counts iterations. Both `value_evaluations` and `gradient_evaluations` count `value_gradient()` calls, including backtracking trials; `trace` runs once per iteration. The point \f$x\f$ has no exact zeros in \f$Dx\f$; only \f$u'\f$ has them, and \f$u'\f$ is not reported. Where a penalty has a proximal operator in \f$x\f$ (the fused lasso via Condat's algorithm or adaptive weights), the proximal gradient method of \ref optimizers_proximal "Proximal methods" gives exact zeros and was \f$35\f$ to \f$170\f$ times faster in the measurements.
+
+## Measurements
+
+In `tests/optimizers/test_primal_dual.cpp`, the smooth sums run in Kokkos kernels on `gcc`/OpenMP and CUDA, giving the same statuses and iteration counts equal or within \f$7\f$.
+
+Against the proximal gradient method with the exact proximal operator in \f$x\f$ on the fused lasso (identity design, \f$p = 200\f$; regressions with \f$n = 300\f$, \f$41\f$ columns, correlations \f$0\f$ and \f$0.9\f$), the adaptive lasso, and the fused lasso of a Laplace log-scale likelihood \f$s(x) = \sum_i (x_i + \eta_i\mathrm{e}^{-x_i})\f$, where \f$\eta_i\f$ is the absolute value of observation \f$i\f$: at tolerance \f$10^{-9}\f$ the values exceed the proximal gradient method's by \f$8.9 \times 10^{-10}\f$ to \f$1.0 \times 10^{-9}\f$ (each equal to \f$V\f$ to three digits), and points agree within \f$2.1 \times 10^{-7}\f$ in \f$628\f$ to \f$13739\f$ iterations. The test checks \f$|f - f_{\mathrm{FISTA}}| \le 2 \times 10^{-9}\f$ and point difference at most \f$10^{-4}\f$ (identity) and \f$10^{-3}\f$ (regressions and log-scale).
+
+Without a proximal operator in \f$x\f$ (trend filtering of orders \f$2\f$ and \f$3\f$ (Tibshirani, 2014) and the elastic net on second differences), optimality is checked through a least-squares dual vector \f$z\f$ solving \f$D^\top z = -\nabla s(x)\f$: at tolerance \f$10^{-8}\f$, residuals are at most \f$4.0 \times 10^{-10}\f$ (bound \f$10^{-6}\f$) and subgradient violations at most \f$1.2 \times 10^{-8}\f$ (bound \f$10^{-2}\f$). The Laplace log-scale likelihood with trend filtering of order \f$2\f$, run at the default tolerance \f$10^{-6}\f$, gives a subgradient violation of \f$1.3 \times 10^{-5}\f$.
+
+Against \f$18\f$ frozen `genlasso` references (Arnold and Tibshirani, 2016) covering the fused lasso, trend filtering of order \f$2\f$ (Tibshirani, 2014), and the elastic net on first differences on two no-intercept datasets: on \f$n = 200, p = 50\f$, all nine converge at \f$10^{-8}\f$ in \f$702\f$ to \f$8104\f$ iterations with coefficients within \f$3.7 \times 10^{-8}\f$ of the reference relative to \f$\max |b|\f$ (bound \f$10^{-6}\f$). On \f$n = 1000, p = 200\f$, four of nine converge, and five (the three trend fits, and the fused lasso and elastic net at the smallest \f$\lambda\f$) end with `iteration_budget` after \f$10^5\f$ iterations with \f$f - f^* \le V\f$ (capped at \f$10^4\f$ in the test). Over all \f$18\f$ fits, \f$f - f^* \le 1.01\,V\f$, checked against \f$1.5\,V + 64\,\varepsilon |f^*|\f$.
+
+Speed measured with `gcc` on \f$8\f$ OpenMP threads (`benchmarks/optimizers_primal_dual.cpp`):
+
+| Problem | Size | Iterations | Time | Status |
+|---|---|---|---|---|
+| Denoising, fused | \f$p = 200\f$ | \f$1926\f$ | \f$6.8\f$ ms | `converged` |
+| Denoising, order 2 | \f$p = 200\f$ | \f$6324\f$ | \f$23\f$ ms | `converged` |
+| Denoising, order 3 | \f$p = 200\f$ | \f$10^5\f$ | \f$385\f$ ms | `iteration_budget` (\f$V = 1.6 \times 10^{-3}\f$) |
+| Regression, fused | \f$n = 10^3\f$, \f$41\f$ columns | \f$6372\f$ | \f$0.45\f$ s | `converged` |
+| Regression, order 2 | \f$n = 10^3\f$ | \f$39385\f$ | \f$2.8\f$ s | `converged` |
+
+See `docs/numerics.md` for details of the measurements.
+
+## Limits
+
+As a first-order method with rate of order \f$1/k\f$, `primal_dual_optimizer` is slow when \f$DD^\top\f$ is ill-conditioned (condition number growing as \f$p^{2K}\f$ for order-\f$K\f$ differences) or when \f$s\f$ is ill-conditioned; trend filtering at \f$p \ge 200\f$ needs \f$10^4\f$ to more than \f$10^5\f$ iterations. Only convex \f$s\f$ and \f$g\f$ are supported because \f$V\f$ bounds \f$f - f^*\f$ only then; a penalty with \f$\rho > 0\f$ is refused with `std::invalid_argument`.
+
+## Example
+
+The example minimizes \f$s(x) + \mathrm{pen}(x)\f$ on \f$\mathbb{R}^6\f$ with \f$s(x) = \frac{1}{2}\lVert x - q\rVert^2\f$, where \f$q\f$ is a fixed data vector, and trend filtering of order \f$2\f$ at rate \f$2\f$, starting from zeros on the host after `Kokkos::initialize`.
+
+```cpp
+#include <laplace/distrib/independent_product.hpp>
+#include <laplace/distrib/laplace2.hpp>
+#include <laplace/distrib/univariate_as_multivariate.hpp>
+#include <laplace/optimizers/minimize.hpp>
+#include <laplace/optimizers/primal_dual.hpp>
+#include <laplace/penalty/linear_map_penalty.hpp>
+
+#include <vector>
+
+struct denoising_smooth {
+  std::vector<double> y{1.0, 2.1, 2.9, 4.0, 3.1, 2.0};
+
+  double value(const laplace::optimizers::optimizer_point& x) const {
+    double s = 0.0;
+    for (std::size_t i = 0; i < y.size(); ++i) {
+      const double d = x(i) - y[i];
+      s += 0.5 * d * d;
+    }
+    return s;
+  }
+
+  double value_gradient(const laplace::optimizers::optimizer_point& x,
+                        const laplace::optimizers::optimizer_vector& g) const {
+    for (std::size_t i = 0; i < y.size(); ++i) g(i) = x(i) - y[i];
+    return value(x);
+  }
+};
+
+bool primal_dual_example() {
+  using uam = laplace::distrib::univariate_as_multivariate<laplace::distrib::laplace2_distrib>;
+  using P = laplace::penalty::distrib_penalty<laplace::distrib::independent_product_distrib<uam>>;
+  using penalty_type = laplace::penalty::linear_map_penalty<P, laplace::penalty::difference_map<2>>;
+
+  const P inner(laplace::distrib::independent_product_distrib<uam>(
+      laplace::distrib::independent_product_component<uam>{{}, 4, 1, nullptr}));
+  const penalty_type pen(inner, laplace::penalty::difference_map<2>(6));
+
+  denoising_smooth smooth;
+  laplace::optimizers::linear_map_penalized_objective<denoising_smooth, P, laplace::penalty::difference_map<2>>
+      objective(smooth, 6, laplace::optimizers::attach_penalty(pen, 0, {2.0}));
+
+  laplace::optimizers::optimizer_vector x0("x0", 6);
+  for (int i = 0; i < 6; ++i) x0(i) = 0.0;
+
+  const laplace::optimizers::primal_dual_optimizer<> optimizer;
+  const laplace::optimizers::optimizer_report report =
+      laplace::optimizers::minimize(optimizer, objective, x0);
+  return laplace::optimizers::optimizer_succeeded(report.status);
+}
+```
+
+## Module types
+
+In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::linear_map_composite_objective "linear_map_composite_objective"
+- \ref laplace::optimizers::linear_map_penalized_objective "linear_map_penalized_objective"
+- \ref laplace::optimizers::primal_dual_optimizer "primal_dual_optimizer"
+
+## References
+
+[1] L. Condat (2013), A primal-dual splitting method for convex optimization involving Lipschitzian, proximable and linear composite terms, Journal of Optimization Theory and Applications, 158(2), 460–479. https://doi.org/10.1007/s10957-012-0245-9
+
+[2] B. C. Vũ (2013), A splitting algorithm for dual monotone inclusions involving cocoercive operators, Advances in Computational Mathematics, 38(3), 667–681. https://doi.org/10.1007/s10444-011-9254-8
+
+[3] R. J. Tibshirani (2014), Adaptive piecewise polynomial estimation via trend filtering, The Annals of Statistics, 42(1), 285–323. https://doi.org/10.1214/13-aos1189
+
+[4] T. B. Arnold and R. J. Tibshirani (2016), Efficient implementations of the generalized lasso dual path algorithm, Journal of Computational and Graphical Statistics, 25(1), 1–27. https://doi.org/10.1080/10618600.2015.1008638
+
+*/

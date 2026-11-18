@@ -12354,6 +12354,218 @@ J - 1, J) doubles: 4 MB at p = 1000, J = 2; 1.3 GB at J = 3) where the true
 Hessian is banded (p (K + 1)); a banded layout comes with the engine. P must
 be separable.
 
+## Frozen R references for penalties through a linear map (2026-11-18)
+
+**What.** Adaptive-lasso, fused-lasso, trend-filtering and elastic-net-on-differences
+fits produced in R once, so that the proximal optimizers can be tested on
+`linear_map_penalty` (note/penalties.md section 5d) without R at test time.
+Versions: R 4.6.0, glmnet 5.0, genlasso 1.6.1. The script is
+`tools/reference/optimizers_wave2_linear_map.R`, run from the repository root
+with `Rscript --vanilla` after `optimizers_wave2.R`; it writes about 2.1 MB to
+`tests/data/reference/optimizers/wave2/` (layout in the README there).
+
+**The adaptive lasso and glmnet's penalty factors.** On the five wave-2
+datasets (y with N(0, 1) errors), the weights are w_j = 1 / |b_j|, b the OLS
+coefficients on centred data, or on the dataset with p > n the ridge
+coefficients of (Xc'Xc + 10 I) b = Xc'yc; they range from 0.50 to 6.1e4.
+glmnet, called with `penalty.factor = w`, rescales the factors to
+pf'_j = w_j p / sum_k w_k and minimizes RSS / (2 n) + lambda_g sum_j pf'_j |beta_j|.
+In Laplace's units (times n) this is
+
+  F_L = RSS / 2 + r sum_j w_j |beta_j|,   r = n lambda_g p / sum_k w_k,
+
+the smooth part plus `laplace2_distrib`'s penalty at rate r on u = W beta
+(`linear_map_penalty` over `diagonal_map(w)`), less its constants
+-p log(r / 2) and c(W) = -sum_j log w_j, which `adaptive_lasso_fits.csv` gives
+together. The rescaling was checked through the KKT conditions: glmnet's own
+point satisfies them with kink weights r w_j to within 5.5e-3 (in F_L's units,
+at n = 1e5; 1e-14 to 2.4e-5 on the other datasets), and violates them by 86 to
+8.7e6 when read with the unscaled weights n lambda_g w_j. Each fit is polished as
+in the wave-2 references (the KKT system on glmnet's support, accepted only with
+the same signs and a strict inequality off the support): all 15 fits (lambda =
+0.5, 0.1 and 0.01 times glmnet's lambda_max with these factors) were accepted,
+with glmnet's support, supports of 1 to 59 coefficients, KKT violations of at
+most 1.9e-9, and a smallest slack off the support of 0.026. glmnet's
+coefficients differ from the polished ones by up to 5.4e-6.
+
+**The differences and genlasso.** Two new datasets with no intercept and an
+AR(1) design (correlation 0.5): n = 200, p = 50 and n = 1000, p = 200, each with
+a response on piecewise-constant coefficients (four levels) and one on
+piecewise-linear coefficients (two kinks), N(0, 1) errors. genlasso minimizes
+(1/2) |y - X beta|^2 + lambda |D beta|_1 with no intercept, which is already
+Laplace's objective: `laplace2_distrib` at rate lambda on each row of
+u = D beta (`difference_map<K>`), less -log(lambda / 2) per row and
+c(D) = -(1/2) log det(D D^T). Three penalties: the fused lasso (K = 1,
+`fusedlasso1d`), trend filtering of order 1 (K = 2, `trendfilter` with
+`ord = 1`), and the elastic net on first differences,
+RSS / 2 + a |D beta|_1 + c |D beta|^2 / 2 with a = lambda alpha, c = lambda (1 - alpha),
+alpha = 0.5, which is genlasso on the augmented data [y; 0], [X; sqrt(c) D] at
+lambda = a (the penalty is `enet_distrib` at (lambda, alpha) on each row,
+whose constant per row is in the file). lambda is 0.5, 0.1 and 0.01 times the
+first knot of the path of the unaugmented problem.
+
+**Polishing and the certificate.** genlasso's path is exact up to its linear
+algebra, and its points are polished as well: with Z the rows where
+|(D beta)_i| <= 1e-8 max(1, max|beta|) and s the signs on the others, the
+objective is minimized exactly on {beta : D_Z beta = 0} (spanned, for K = 1,
+by the indicators of the fused groups, so that the fused differences are exact
+zeros; for K = 2 by an orthonormal basis of the null space of D_Z), and the
+point is certified by the dual: X'(X beta - y) + c D'D beta + a D'u = 0 with
+u_A = s_A and u_Z found by least squares. All 18 fits were accepted with
+max |u_Z| < 1 strictly (0.929 to 0.9990 for the fused lasso, 0.939 to 0.9997
+for the elastic net, 0.9982 to 0.99994 for trend filtering) and residuals of
+the dual system of at most 1.1e-9 in gradient units. genlasso's coefficients
+differ from the polished ones by at most 1.3e-12, and its objective exceeds
+the polished one by at most 9e-12 relative. The fused-lasso fits have 1 to 5
+nonzero differences, trend filtering 1 to 6 kinks, the elastic net 11 to 32
+nonzero differences.
+
+**The tests** (`tests/optimizers/test_linear_map_fits.cpp`, on the regression
+test objective, gcc and CUDA, the whole suite green on CUDA). The adaptive lasso by proximal Newton (coordinate
+descent inside, at tolerance 1e-10) and FISTA, 15 fits: the exact support in
+every fit by both; proximal Newton in 2 to 7 iterations, coefficients within
+1.1e-6 of the reference (relative to max |b|), |f - f*| at most 8.4e-11;
+FISTA in 7 to 497 iterations (497 on the p > n dataset at the smallest
+lambda), coefficients within 3.0e-6, f - f* at most 1.01 times its
+stationarity measure. The fused lasso by FISTA with Condat's prox, 6 fits: the
+fusion pattern exact (the prox returns fused groups as equal values, so the
+differences off the pattern are zero exactly), 8 to 25 iterations,
+coefficients within 6.1e-6, f - f* at most 0.99 times FISTA's measure but on
+one fit, where it is 8.1e-10 on gcc and 9.3e-10 on CUDA against a measure of
+5.6e-10: 14 and 16 ulps of f = 3.4e5, at the resolution of the objective. gcc and
+CUDA give the same iteration counts and statuses, and the same errors to the
+digits printed. Trend filtering and the elastic net on
+differences have no prox through the map and are left to a primal-dual
+method.
+
+## The primal-dual method for a penalty through a linear map (2026-11-18)
+
+**What.** `primal_dual_optimizer` (`include/laplace/optimizers/primal_dual.hpp`)
+minimizes s(x) + g(D x), where s is smooth with a gradient, g is a convex
+penalty whose prox exists in u = D x, and D is a linear map known through its
+action, the action of its transpose and a bound B >= ||D||_2^2. It is the route
+for the penalties of `linear_map_penalty<P, Map>` that have no prox in beta:
+trend filtering (`difference_map<K>`, K >= 2) and the elastic net on
+differences. The objective is `linear_map_penalized_objective<Smooth, P, Map>`,
+built from the smooth part and one `linear_map_penalty` attached to a range of
+x; it gives the method P's value and prox (`inner()`), and the map's apply,
+apply_transpose and norm bound (`map()`). A penalty with rho > 0 is refused,
+since the method needs g convex.
+
+**How.** The iteration of Condat (2013) and Vu (2013) with the smooth part
+linearized and no third term:
+
+    x+ = x - tau (grad s(x) + D'y)
+    w  = y + sigma D(2 x+ - x),  u' = prox_{g/sigma}(w / sigma),  y+ = w - sigma u'
+
+The dual step uses Moreau's identity, so only P's own prox is called, and
+y+ lies in the subdifferential of g at u'. The steps satisfy
+1/tau - sigma ||D||^2 > L/2 through tau = 0.99 / (L/2 + sigma B), where L is
+the Lipschitz constant of grad s. L is estimated from a secant along a short
+gradient step at the start, and doubled whenever the descent lemma fails
+between consecutive iterates (a non-finite s counts as a failure); it never
+decreases, so after finitely many doublings the steps follow the fixed-step
+theory. sigma starts at 50 L / B and is balanced between the two parts of the
+stationarity measure below: when one part exceeds 1.5 times the other, sigma
+is multiplied or divided by 1 + a_k, with a_0 = 0.5 and a_k multiplied by 0.95
+at each adjustment, so that the steps settle.
+
+**The stationarity measure.** With r_p = grad s(x) + D'y (exactly the
+direction of the next primal step, so it costs nothing) and
+e_d = g(D x) - g(u') - y'(D x - u') >= 0 (the linearization error of g at u',
+one more value of P per iteration), convexity of s and g gives
+f(x) - f* <= e_d + |r_p| |x - x*|. The measure is
+V = e_d + max(gamma_max, tau) |r_p|^2, where gamma_max is the largest secant
+ratio s's / s'y of grad s seen along the iterates (the same device as FISTA's
+measure). It is in the units of the objective and is read by
+`primal_dual_stop_rule` (default tolerance 1e-6) through a new field
+`primal_dual` of `stop_rule_input`. Measured on a Python prototype first (exact
+f* from Condat's prox or from the box-constrained dual solved by BVLS), then in
+C++: the largest ratio (f - f*) / V in the tail of the runs is 1.00 on every
+problem; with a factor 1/2 on the r_p term it reaches 1.06. The naive measure
+(1/2)(tau |r_p|^2 + sigma |r_d|^2), with r_d = u' - D x the dual residual,
+understates f - f* by factors of 1e3 to 1e14 and was rejected.
+
+**Choices measured.** Iterations to V <= 1e-6 on the prototype:
+
+| problem | fixed sigma = 50 L/B | adaptive (decay 0.95) | adaptive (decay 0.99) |
+|---|---|---|---|
+| regression n = 300, p = 50, fused, correlation 0.5 | 32882 | 1041 | 912 |
+| same, correlation 0.95 | not converged in 2e5 | 9153 | not converged (f - f* = 305) |
+| Laplace log-scale, p = 200, fused | 14899 | 2359 | 7932 |
+| Laplace log-scale, p = 200, order 2 | 12799 | 11048 | 22733 |
+
+A fixed sigma is fast only near a problem-dependent constant (sigma_0 = 5, 50
+and 500 L/B were each the best on some problem, by factors of 10 to 30). The
+adaptive rule is insensitive to sigma_0 within a factor of about 2 over 5 to
+500 L/B. Balancing tau |r_p|^2 against sigma |r_d|^2 instead of the two parts of
+V was worse on trend filtering (order 2, lambda 50: f - f* = 1e-2 after 5e4
+iterations against convergence in 19303). Decaying a_k only when the direction
+of the adjustment changes, or adjusting every tenth iteration, was slower on
+every problem tried.
+
+**Tests** (`tests/optimizers/test_primal_dual.cpp`, the sums of s in Kokkos
+kernels, gcc and CUDA). Against FISTA with the exact prox in beta (Condat's TV
+prox through `difference_map<1>`, the weighted soft threshold through
+`diagonal_map`): fused lasso on an identity design (p = 200, lambda 2 and 20)
+and on regressions (n = 300, 41 columns, intercept unpenalized, correlation 0
+and 0.9), the adaptive lasso, the fused lasso of a Laplace log-scale
+likelihood s(x) = sum x_i + |y_i| e^{-x_i}: at tolerance 1e-9 the primal-dual
+values exceed FISTA's by 8.9e-10 to 1.0e-9, each equal to V to three digits,
+and the points agree within 2.1e-7; 628 to 13739 iterations (FISTA 15 to 797).
+Without a prox in beta, by the optimality conditions (z solving D'z = -grad s
+in least squares, then z_i - c u_i in a d|u_i| coordinate by coordinate):
+trend filtering of order 2 and 3 and the elastic net on second differences,
+identity designs and a regression, residuals of D'z = -grad s at most 4.0e-10
+and subgradient violations at most 1.2e-8 at tolerance 1e-8 (the Laplace
+log-scale case of order 2 at tolerance 1e-6: 1.3e-5). The 18 genlasso fits
+frozen in `tests/data/reference/optimizers/wave2` (fused lasso, trend
+filtering of order 2, elastic net on first differences): on n = 200, p = 50
+all nine converge at 1e-8 in 702 to 8104 iterations, with coefficients within
+3.7e-8 of the polished reference (relative to max |b|) and f - f* at most
+1.01 V. On n = 1000, p = 200 four of nine converge at their tolerance
+(1e3 eps |f|) in 2580 to 5564 iterations; the other five do not within 1e5
+iterations (trend filtering at fraction 0.01 stops at f - f* = 1.8, V = 2.0),
+and end with iteration_budget and f - f* <= V; the test caps them at 1e4 and
+checks the honesty of the status. An objective unbounded below
+(s = c'x with sum c != 0, fused penalty) ends with iteration_budget and
+V = 74 after 2e4 iterations; a non-finite start is refused. gcc and CUDA give
+the same statuses, and iteration counts equal or within 7 of each other.
+
+**Speed** (`benchmarks/optimizers_primal_dual.cpp`, gcc, 8 OpenMP threads,
+time per run):
+
+| problem | size | iterations | time | status |
+|---|---|---|---|---|
+| denoising, fused (FISTA with Condat's prox) | p = 200 | 9 | 0.09 ms | converged |
+| denoising, fused | p = 200 | 1926 | 6.8 ms | converged |
+| denoising, order 2 | p = 200 | 6324 | 23 ms | converged |
+| denoising, order 3 | p = 200 | 1e5 | 385 ms | budget, V = 1.6e-3 |
+| denoising, fused | p = 1000 | 1e5 | 1.5 s | budget, V = 1.0e-3 |
+| regression, fused | n = 1e3, 41 columns | 6372 | 0.45 s | converged (FISTA: 86, 13 ms) |
+| regression, order 2 | n = 1e3 | 39385 | 2.8 s | converged |
+| regression, fused | n = 1e5 | 30571 | 12.4 s | converged (FISTA: 87, 72 ms) |
+| regression, order 2 | n = 1e4, 1e5 | 1e5 | 11.5 s, 40.5 s | budget |
+
+**What it says.** The method is correct and its measure is a tight, honest
+bound on f - f* wherever it was checked, converged or not. It is first order,
+with a rate of order 1/k, and slow when D'D is ill-conditioned (the condition
+number of D_K D_K' grows as p^(2K)) or when s is: trend filtering of order 2 or
+3 at p >= 200 and regressions with correlated columns need 1e4 to more than
+1e5 iterations. Where a prox in beta exists (the fused lasso, adaptive
+weights) FISTA with that prox is 35 to 170 times faster and gives exact zeros
+in D x, which the primal-dual point does not (only u' has them).
+
+**Open.** On the genlasso dataset with n = 1000 and p = 200, five of the
+nine fits do not converge within 1e5 iterations: the three trend-filtering
+fits (fractions 0.5, 0.1 and 0.01, ending at V = 2.7e-6, 2.5e-3 and 2.0) and
+the fused lasso and the elastic net on differences at fraction 0.01 (V = 6.5e-3
+and 4.2e-6), all with the honest status iteration_budget. A specialized method
+for trend filtering, ADMM with the banded solves of (X'X + rho D'D) (Ramdas
+and Tibshirani, 2016), is left for later; a
+third, separable term h(x) with its own prox (the sparse fused lasso) is not
+in the objective; the report gives x, not the exact zeros of u'.
+
 ## SCAD and MCP: scad_penalty and mcp_penalty (2026-11-18)
 
 What. `scad_penalty` and `mcp_penalty` (include/laplace/penalty/nonconvex_penalty.hpp),

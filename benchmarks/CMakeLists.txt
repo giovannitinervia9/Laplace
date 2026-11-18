@@ -186,3 +186,7 @@ laplace_kokkos_sources(optimizers_bundle.cpp)
 add_executable(optimizers_bundle optimizers_bundle.cpp)
 target_link_libraries(optimizers_bundle PRIVATE Laplace::laplace)
 target_compile_definitions(optimizers_bundle PRIVATE LAPLACE_REFERENCE_DIR="${PROJECT_SOURCE_DIR}/tests/data/reference")
+
+laplace_kokkos_sources(optimizers_primal_dual.cpp)
+add_executable(optimizers_primal_dual optimizers_primal_dual.cpp)
+target_link_libraries(optimizers_primal_dual PRIVATE Laplace::laplace)

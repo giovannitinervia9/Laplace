@@ -18,6 +18,7 @@
 #include <laplace/optimizers/newton.hpp>
 #include <laplace/optimizers/objective.hpp>
 #include <laplace/optimizers/penalized_objective.hpp>
+#include <laplace/optimizers/primal_dual.hpp>
 #include <laplace/optimizers/proximal_gradient.hpp>
 #include <laplace/optimizers/proximal_newton.hpp>
 #include <laplace/optimizers/report.hpp>
