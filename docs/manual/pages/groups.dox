@@ -136,6 +136,8 @@ parent here, in tree order; the module pages define their groups without
 \ingroup distrib_wrapper */
 /** \addtogroup distrib_transformed
 \ingroup distrib_wrapper */
+/** \addtogroup distrib_fixed
+\ingroup distrib_wrapper */
 
 /** \defgroup distrib_real Continuous on the real line
 \ingroup distrib

@@ -1,0 +1,123 @@
+/**
+\defgroup distrib_fixed Fixed parameters
+\brief Wrapper that holds some parameters of a distribution at given values and removes them from the parameter vector.
+
+Defined in `<laplace/distrib/fixed.hpp>` in namespace `laplace::distrib`, this module provides \ref laplace::distrib::fixed_distrib "fixed_distrib\<D, C...\>" and the factory \ref laplace::distrib::fixed "fixed()". The wrapper wraps a univariate distribution or a multivariate one, and its members are marked `LAPLACE_HD`, so they run on the host and inside Kokkos kernels. The factories run on the host only, and the aggregate that they return can be copied into a kernel. The wrapper performs no arithmetic of its own: each value and each derivative it returns is one that the parent returns, so its accuracy is the parent's. The parent distribution and its parameters are described on \ref distrib_core "the structure of a distribution", and the typed parameter list of a multivariate parent on \ref distrib_multivariate "the multivariate page".
+
+## Held law
+
+Let \f$\theta = (\theta_F, \theta_H)\f$ split the parameter vector of the parent into the free coordinates \f$\theta_F\f$ and the held coordinates \f$\theta_H\f$, and let \f$c\f$ be the vector of constants that \f$\theta_H\f$ is held at. The wrapper has the log-density (or log-mass) of the parent evaluated at the completed vector:
+\f[
+  \ell(y; \theta_F) = \ell(y; \theta_F, c).
+\f]
+Here \f$\ell\f$ is the log-density or log-mass of the parent, \f$y\f$ is the observation and \f$\theta_F\f$ is the vector of free coordinates.
+
+Holding a parameter is a restriction of the domain. It is not a reparametrization: the completion \f$\theta_F \mapsto (\theta_F, c)\f$ is the identity on the free coordinates and carries no Jacobian. The free parameters are therefore the parent's own, read at the same values, and no change of variables enters any derivative.
+
+## Derivatives as a selection
+
+For \f$1 \le K \le 6\f$ and free indices \f$a_1, \dots, a_K\f$, the derivative of order \f$K\f$ of the wrapper equals the parent's derivative at the completed vector:
+\f[
+  \frac{\partial^K \ell}{\partial \theta_{a_1} \cdots \partial \theta_{a_K}}(y; \theta_F)
+  = \frac{\partial^K \ell}{\partial \theta_{a_1} \cdots \partial \theta_{a_K}}(y; \theta_F, c).
+\f]
+The order-\f$K\f$ tensor of the wrapper is therefore the parent's symmetric tensor of the same order, restricted to the multi-indices whose every entry is free. Each surviving component is the parent's exactly, to the last bit. The components that involve a held coordinate are absent from the result, rather than present and zero.
+
+The same selection carries the other members. The mixed derivatives in \f$y\f$ are the parent's, selected on the parameter part and untouched on the \f$y\f$ part. The expected information of the wrapper is the free block of the parent's. The law of \f$Y\f$ under the held model is the parent's law at \f$(\theta_F, c)\f$, so for free \f$a\f$ and \f$b\f$
+\f[
+  I^{\mathrm{fix}}_{ab} = -\mathbb{E}[\partial_a \partial_b \ell] = I_{ab}(\theta_F, c),
+\f]
+where \f$I_{ab}\f$ is the parent's expected information. The result is the block of the parent's information and not the inverse of a submatrix of the parent's inverse information, so no parameter is profiled out. Its derivatives of orders 1 to 4 are the parent's blocks selected twice: on the pair \f$(a, b)\f$ and on the indices that differentiate it.
+
+## Forwarded members
+
+Some members are not indexed by a parameter, so the wrapper returns the parent's value at the completed vector. These are `kind`, `y_regularity`, `logpdf()` or `logpmf()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `quantile()`, `quantile_from_log()`, `quantile_from_log_upper()`, `support_lower()`, `support_upper()`, `center()`, `scale()` and `y_kinks()`. The atoms are forwarded too, as `n_atoms`, `atom_point()` and `atom_log_mass()`, as described in \ref distrib_atoms "the atoms section". A parent with a proximal operator in \f$y\f$ has it forwarded as `prox_y()`.
+
+Holding a parameter that moves the ends of the support makes those ends constants. The descriptors of the free parameters keep their own `moves_support` flag unchanged.
+
+## Parameter indices
+
+The wrapper has `n_params` free parameters, which is the parent's count less the number of wholly held parameters. The static array `params` holds the descriptors of the free parameters in the parent's order, each copied from the parent. The free parameter with index \f$j\f$ corresponds to the parent's index \f$\mathrm{free}[j]\f$, and `free_slots()` writes these parent indices. `parent_slot(j)` returns \f$\mathrm{free}[j]\f$ for one \f$j\f$.
+
+Every member indexed by a parameter maps a free index back to the parent's index before it reads the parent. The member that shows this most clearly is `param_kinks(j, y)`, which reports the kinks of the parameter that \f$j\f$ stands for. Take the `enet_distrib`, whose parameters are \f$\mu\f$, \f$\lambda\f$ and \f$\alpha\f$. Its only kink in a parameter sits at \f$y\f$ on \f$\mu\f$. Holding \f$\mu\f$ leaves \f$\lambda\f$ as free index 0, and `param_kinks(0, y)` then reports no kink. Holding \f$\lambda\f$ instead leaves \f$\mu\f$ as free index 0, and `param_kinks(0, y)` then reports the kink at \f$y\f$. An identity map would report the parent's kink of \f$\mu\f$ in both cases.
+
+## Held coordinates and factories
+
+A held coordinate is one `int` that encodes two numbers: the index of the parameter in the parent's `D::params`, and the index of the coordinate inside that parameter. \ref laplace::distrib::fixed_coord_code "fixed_coord_code()" builds the code, \ref laplace::distrib::fixed_coord_slot "fixed_coord_slot()" and \ref laplace::distrib::fixed_coord_element "fixed_coord_element()" read it back, and \ref laplace::distrib::fixed_coord_stride "fixed_coord_stride" separates the two. The element \ref laplace::distrib::whole_slot "whole_slot", which is \f$-1\f$, selects every coordinate of the parameter, and it is the default. A parameter of a univariate distribution has one coordinate, so only `whole_slot` is accepted there.
+
+The template argument is an `int` and not a small structure of two integers because nvcc writes a template argument of class type into its generated host code as a braced initializer, which is not a template argument, and the host compiler then ends that pass with a bare `fatal error C1903`. A structure compiled in every other position, and failed inside the closure of an extended lambda, which is where a distribution goes to reach a kernel.
+
+The set of held coordinates is a template parameter and not data, because `n_params` and `params` are static. Only the values are runtime data. The function \ref laplace::distrib::coord_of "coord_of()" builds a code from a parameter name at compile time, reading `D::params[j].name`, which the univariate and the multivariate descriptors both carry. For example, `coord_of<gaussian2_distrib>("v")` holds the parameter \f$v\f$ of a Gaussian, and `coord_of<mvgaussian2_distrib<diagonal_pdmat>>("mu")` names the whole vector \f$\mu\f$ of a multivariate Gaussian. If no parameter carries the name, `coord_of()` returns \f$-1\f$, and the wrapper refuses it with a `static_assert`.
+
+The factory \ref laplace::distrib::fixed "fixed()" takes one value per held coordinate, in the order of the template arguments. It is the only way to build a wrapper whose values are checked, the aggregate itself checking nothing.
+
+For a univariate parent, each value is a `double`. The factory refuses a value outside the open domain \f$(a_j, b_j)\f$ of its parameter, where \f$a_j\f$ and \f$b_j\f$ are the bounds in the descriptor. It also refuses a value that equals a point of the parameter's own axis at which the law is not differentiable in that parameter, which the descriptor lists as `axis_kinks`. After the checks, `fixed()` writes the values into the parent, so the wrapper and its parent agree and every read takes the values from the parent.
+
+For a multivariate parent, a value is a `double` for one coordinate or for every coordinate of a parameter, or a pointer to the coordinates of a whole parameter. The pointer is not copied. It must outlive the wrapper and be reachable where the call runs, which for a device call means on the device. A null pointer means that every coordinate takes the scalar, so a null pointer with a scalar of zero is the zero vector. Each coordinate must lie strictly inside its bounds in the parent, read through `mv_coord_lower` and `mv_coord_upper`. A matrix parameter is not checked coordinate by coordinate, because its constraint is the definiteness of its structure and not an interval per coordinate.
+
+## Multivariate wrapper
+
+The typed parameter list of the wrapper is rebuilt from the parent's. A parameter that is held as a whole leaves `params`. An indexed parameter, which is a scalar or a matrix, that is held in part keeps its place with fewer coordinates. So `param_size()`, `param_offset()` and `theta_size()` all shrink, and the free coordinates of \f$\theta\f$ and of \f$x\f$ stay contiguous. A partly held parameter shrinks to its free coordinates and does not keep its shape with constants in it, so that no coordinate that is not a parameter enters an information block.
+
+The wrapper reaches the parent in four ways.
+
+1. The index tuple of each derivative in \f$\theta\f$ is mapped back to the parent's index by one pass over the parent's \f$\theta\f$ that skips the held coordinates.
+2. The full \f$\theta\f$ is completed with the held values and written once into the scratch, after the parent's own scratch. The scratch size is therefore the parent's, plus the parent's \f$\theta\f$ length when an indexed coordinate is held.
+3. A held dense parameter is passed to the parent as the pointer that the wrapper holds, and the parent is called with order 0 for it. The Kronecker factor of order 0 is one double, so the layout of the output block stays the wrapper's own.
+4. The slots of the expected information and the block descriptors are mapped back, and the coordinate bounds map both the parameter and the coordinate back to the parent's.
+
+The dimension, the normalization, the kind, the state, the rng, the mean and the proximal operator are the parent's. The `start_value()` members of the wrapper put the held values back after the parent has started every coordinate from the sample. So a start never moves a coordinate that the model does not estimate.
+
+The limits on dense parameters come from the interface and not from a choice of this wrapper. The function `logpdf(st, y, x)` takes no scratch, so the wrapper has nowhere to interleave free and held dense coordinates. A dense parameter, which is a `vector` or a `simplex_vector`, can therefore be held only whole, and only when it is the only dense parameter of the law. Holding part of a dense parameter is a `static_assert` failure. Holding a whole dense parameter is also a `static_assert` failure when the law has another dense parameter. The factory refuses a null pointer for a whole held dense parameter, which throws `std::invalid_argument`, because no scratch exists to spread one scalar over its coordinates. Single coordinates of a scalar or of a matrix are indexed, so they are held like any other coordinate.
+
+## Composition
+
+`fixed_distrib` can wrap a parent that is itself a wrapper, such as the \ref distrib_truncated "truncated", \ref distrib_transformed "transformed" or \ref distrib_atom_mixture "atom mixture" distributions, or another `fixed_distrib`. The parent is reached only through its own members.
+
+`start_value()` is the one member that writes a parameter and not one that reads it. It descends a nest of `fixed_distrib` and maps each free index to the parent's index at each level. At the bottom it writes the leading doubles of the law, which hold that law's parameters. A `fixed_distrib` does not have its parameters at its own leading doubles, because its leading doubles are the full vector of the parent. The descent is needed for this reason.
+
+## Checks
+
+The tests are in `tests/distrib/test_fixed.cpp`. Each comparison is exact (`==`) where the member is a selection of the parent's components. The rows below list what the tests compare.
+
+| Case | What is compared |
+|---|---|
+| `student_t2_distrib` with \f$\sigma\f$ held, so that the free set \f$\{\mu, \nu\}\f$ is not a prefix of the parameter vector | The value, `cdf()`, `log_ccdf()`, `quantile()`, the ends of the support, `center()`, `scale()`, the derivatives of orders 1 to 6 of the log-density and of \f$\log F\f$ and \f$\log(1 - F)\f$, the mixed derivatives at \f$(J, K) = (1, 0), (3, 0), (1, 1), (2, 2)\f$, and the expected information with its derivatives of orders 1 to 4. All exact. |
+| `enet_distrib` | The re-indexing of `param_kinks()` in the enet example above. |
+| `gaussian2_distrib` with \f$v\f$ held at 4 | The start leaves \f$v\f$ at exactly the held value and gives the free \f$\mu\f$ the value that the unheld law's start gives it. |
+| Values refused by `fixed()` | A variance of zero for `gaussian2_distrib`, and a value of 1 for \f$\nu\f$ of `student_t2_distrib`, whose domain requires \f$\nu > 2\f$, both throw `std::invalid_argument`. A value of 5 for \f$\nu\f$ is accepted. |
+| `fixed` over `truncated_distrib` | The value, `log_cdf()`, the derivatives of the log-density of orders 1 to 6 and of \f$\log F\f$ of orders 1 to 6, and the ends of the support. All exact. |
+| `fixed` over `atom_mixture_distrib` | The value, the atoms, and the derivatives of the log-density of orders 1 to 4. The free set spans a parameter of the gamma and the coordinate of the atom. All exact. |
+| `fixed` over `fixed_distrib` | The derivatives of the log-density of orders 1 to 6 at the mapped indices, and a start that keeps both held values. |
+| `mvgaussian2_distrib` over `diagonal_pdmat` in dimension 3, with \f$\mu\f$ held at zero | `n_params` is 1, `theta_size()` and `scratch_size()` equal the parent's, `dense_size()` is 0, and the value, the order-2 blocks in \f$\theta\f$ and the start equal the parent's at \f$\mu = 0\f$. All exact. |
+| The same law with one coordinate of \f$Q\f$ held | `theta_size()` is one less than the parent's, `scratch_size()` is the parent's plus its `theta_size()`, free coordinate 1 of \f$Q\f$ is the parent's coordinate 2, and the value and the order-2 block equal the parent's at the completed \f$\theta\f$; the value is unchanged by a derivative call, which uses the parent's scratch. All exact. |
+| A univariate wrapper built inside a Kokkos kernel | One scalar combining the value, derivatives, the expected information, a quantile and a count of kinks, against the host, to \f$10^{-12}\f$ relative. |
+| A multivariate wrapper built inside a Kokkos kernel | Its value and its order-2 block equal the parent's exactly. |
+
+## Kokkos usage
+
+The wrapper is built on the host by `fixed()`, which checks the values, and copied into the kernel. The example holds the \f$\sigma\f$ of a Student t law, so the kernel sees a law of the two free parameters \f$\mu\f$ and \f$\nu\f$, whose first derivatives `logpdf_d1()` returns in that order.
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/fixed.hpp>
+#include <laplace/distrib/student_t2.hpp>
+
+void eval_held_student_t(Kokkos::View<const double*> y, Kokkos::View<double*> out,
+                         double mu, double sigma, double nu) {
+  using st2 = laplace::distrib::student_t2_distrib;
+  const auto d = laplace::distrib::fixed<laplace::distrib::coord_of<st2>("sigma")>(st2{mu, sigma, nu}, sigma);
+  Kokkos::parallel_for("eval_held_student_t", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0] + d.logpdf_d1(y(i))[1];
+  });
+}
+```
+
+## Members
+
+- \ref laplace::distrib::fixed_distrib "fixed_distrib\<D, C...\>" for a univariate parent, and the same name for a multivariate one, which carries the typed parameter list described above.
+- \ref laplace::distrib::coord_of "coord_of()" names a held coordinate, and \ref laplace::distrib::fixed_coord_code "fixed_coord_code()", \ref laplace::distrib::fixed_coord_slot "fixed_coord_slot()" and \ref laplace::distrib::fixed_coord_element "fixed_coord_element()" build and read its code.
+- \ref laplace::distrib::whole_slot "whole_slot" selects every coordinate of a parameter.
+- \ref laplace::distrib::fixed_value "fixed_value" carries the value or values of one held coordinate.
+- \ref laplace::distrib::fixed "fixed()" builds the wrapper, with a check of the values.
+*/

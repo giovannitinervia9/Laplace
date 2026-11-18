@@ -11405,3 +11405,170 @@ arguments. Two of the references are below the smallest double, 2.19e-398 and
 -2.31e-337, and are written as zero with the entry required to underflow:
 a literal of that size is truncated by the compiler with a warning, and a test
 file that warns costs every other session the same noise.
+
+## fixed_distrib: parameters held at given values (2026-11-18)
+
+What: `include/laplace/distrib/fixed.hpp` is new: `fixed_distrib<D, C...>`, the
+parent distribution D with some of its parameters held at given values and
+removed from the parameter vector, specialized for a univariate parent and for a
+multivariate one, with the host factory `fixed<C...>(parent, values...)`. The
+plan is `note/piano_wrapper.md` section 4; its section 5 had recommended not
+carrying `fixed` as a wrapper, and Giovanni asked for it on 2026-11-18, so that
+recommendation is superseded.
+
+How, and why it is cheap. Write theta = (theta_F, theta_H) for the free
+coordinates and the held ones, with theta_H = c a vector of constants; the law is
+l(y; theta_F) = l(y; theta_F, c). This is a restriction of the domain and NOT a
+reparametrization: the completion theta_F -> (theta_F, c) is the identity on the
+free coordinates and carries no Jacobian. So for 1 <= K <= 6 and free indices
+a_1, ..., a_K, the derivative of order K is the parent's own tensor of order K
+RESTRICTED to the multi-indices that lie in the free set: a selection of
+components, with no chain rule and no new arithmetic, so every surviving
+component is bit for bit the parent's and the components involving a held
+coordinate are absent rather than present and zero. The same selection carries
+the mixed derivatives in y (selected on the theta part, untouched on the y part),
+the derivatives of log F and log(1 - F), and the expected information: the law of
+Y under the fixed model IS the parent's at (theta_F, c), so I^fix_ab = I_ab for a
+and b free, the free BLOCK of the parent's information and not the inverse of a
+submatrix of its inverse, so nothing is profiled out. Its derivatives to order
+four are the parent's blocks selected twice, on the pair (a, b) and on the K
+differentiating indices. The value, the cumulative functions, the quantile, the
+atoms, the ends of the support, center, scale, y_kinks and y_regularity are the
+parent's, none of them being indexed by a parameter.
+
+The work is the index surface. A free index is mapped back to the parent's before
+any member indexed by a parameter: `param_kinks(j, y)` on the univariate side,
+and on the multivariate side `param_size`, `param_offset`, `theta_size()`, the
+`idx` tuple of `logpdf_dk<K, A...>`, the slots and the index pair of
+`expected_info_dk`, `coord_lower`, `coord_upper` and the block descriptors
+`n_blocks()` and `block_start(slot, g)`. Two of those were found by reading
+`multivariate_core.hpp` rather than from the list the work started with:
+`coord_lower(j, i)` and `coord_upper(j, i)`, indexed by parameter AND coordinate,
+and the block descriptors, whose boundaries a partially held dense parameter
+would move.
+
+Cost by kind of held coordinate. Any subset of the INDEXED coordinates theta (a
+whole scalar parameter, a whole matrix parameter, single elements of either)
+costs the remap of the at-most-six `idx` integers plus a completed theta written
+once into the scratch, and leaves the derivative layout alone, a derivative in
+theta being asked for by an explicit index tuple and not as a tensor over theta;
+`scratch_size()` grows by the parent's `theta_size()`. A whole DENSE parameter (a
+vector or a simplex_vector) is passed to the parent as the pointer the wrapper
+holds and the parent is called with order 0 for it, whose Kronecker factor is one
+double, so the layout is again unchanged and nothing is added to the scratch.
+Both are free: no gather anywhere. On the univariate side the selection reads one
+parent tensor on the stack, 28 doubles at order 6 over three parameters.
+
+Two refusals on the multivariate side come from the interface and not from a
+choice. `logpdf(st, y, x)` takes no scratch, so there is nowhere to interleave
+free and held DENSE coordinates: a dense parameter may be held only whole, and
+only when it is the law's only dense parameter, which is the case of every
+multivariate law here. Single coordinates of a MATRIX are not affected, being
+indexed. Holding part of a dense parameter, or one of several, would need a
+logpdf that takes w, which is a change to `multivariate_core.hpp` and to every
+multivariate law.
+
+Two decisions taken with Giovanni on 2026-11-18, before the code. The held set is
+a template parameter, since `n_params` and `params` are static and only the values
+can be data; a held coordinate is named by `coord_of<D>("mu")` or
+`coord_of<D>("mu", 2)`, which builds it from the parameter's name in a constant
+expression. The two alternatives were a flat index into theta, which does not
+exist on the multivariate side where theta and x are separate arrays, and a
+compile-time string NTTP, which would add a type the library does not have. The
+chosen spelling is what a call site writes; what it builds is an int that encodes
+the parameter index and the coordinate inside it, and not a small struct of the
+two, for the reason in the next section. And a partially held parameter SHRINKS
+to its free coordinates rather than keeping its shape with constants in it: a
+kept shape would report an information block over coordinates that are not
+parameters, singular once their rows were zeroed, and would push the mask of free
+coordinates into every caller. Measured before recommending it, for a dense slot
+of n = 10 with m = 9 free at order 6: the shrinking reading gathers C(14, 6) =
+3003 components out of the parent's C(15, 6) = 5005, which is 40 KB of added
+scratch against a device block's 48 to 100 KB of shared memory; the kept shape
+forwards the 5005 with no gather. The reason above decided it, not the figures,
+and the figures are moot for a dense parameter, which the refusal above holds
+whole.
+
+Measured (`tests/distrib/test_fixed.cpp`, 14 cases and 1144 assertions, the same
+counts and none failing on gcc and on CUDA). The comparisons are exact wherever the
+member is a selection rather than a computation: the parent is built with the held
+value in place and each surviving component must equal the parent's component at
+the mapped multi-index bit for bit.
+
+| case | quantity | result |
+|---|---|---|
+| student_t2, sigma held, free {mu, nu} | value, F, log(1 - F), quantile, support ends, center, scale | exact |
+| | d1-d6 of the log-density, every component at every mapped tuple | exact |
+| | d1-d6 of log F and of log(1 - F) | exact |
+| | `logpdf_dy_dk<J, K>`, J + K <= 6 | exact |
+| | information and its d1-d4, pair and tuple both selected | exact |
+| enet, mu held | `param_kinks(0, y)` reports no kink (the parent's lambda) | count 0, was 1 unmapped |
+| enet, lambda held | `param_kinks(0, y)` reports mu's kink at y | count 1, point == y |
+| gaussian2, v held | the start leaves v at the held value; mu equals the unheld law's start | exact |
+| fixed over truncated(gaussian2, -1, 2.5), v held | value, log F, d1-d6 of both | exact |
+| fixed over zero-adjusted gamma2, sigma2 held | value, d1-d4, atom point and log mass | exact |
+| fixed over fixed (student_t2, sigma then nu) | value, d1-d6; the nested start keeps both held values | exact |
+| mvgaussian2 over diagonal_pdmat, d = 3, mu held at zero | n_params 1, theta_size and scratch_size the parent's, dense_size 0 | as stated |
+| | value and the order-2 blocks in theta against the parent at mu = 0 | exact |
+| | the start writes every coordinate of theta | exact |
+| mvgaussian2, coordinate 1 of Q held | theta_size d - 1, scratch_size + the parent's theta_size, free coordinate 1 of Q is the parent's 2 | as stated |
+| | value and the order-2 block against the parent at the completed theta | exact |
+| | the start drops the held coordinate | exact |
+| a univariate wrapper built inside a kernel | against the host | <= 1e-12 relative |
+| mu held at zero inside a kernel | value and the order-2 block against the parent in the same kernel | exact |
+
+What it says: nothing is recomputed, so there is nothing to lose. Every quantity
+that the mathematics says is a selection is measured as one, to the last bit, and
+the two cases that are about indices rather than values (the `param_kinks` remap
+and the free-to-parent coordinate map of a partially held matrix) are checked
+against the value an unmapped implementation would give.
+
+### Four things nvcc does not accept that gcc does (2026-11-18)
+
+The first CUDA build of `test_fixed.cpp` failed four times where gcc had been
+green, each time for a reason worth keeping, and none of them about arithmetic.
+
+A requires-expression written inline in a member's constraint evaluates to false
+under nvcc where gcc evaluates it to true. All five errors of the first build
+were `requires(const D p) { p.template logpdf_dy_dk<1, 0>(0.0); }` on the
+member that forwards the mixed derivatives in y, which made the member vanish
+from the wrapper over a parent that has it. The optional members of a parent are
+now detected through named concepts in `detail_fixed`, which is what
+`univariate_as_multivariate.hpp` had already found and said in a comment.
+
+A `static constexpr` table read at a RUNTIME index has no definition in device
+code. The second build stopped with nine errors of the form "identifier
+`...::params_` is undefined in device code", from the members that asked whether
+a parameter is dense by reading `params[j].kind` and `D::params[j].kind` inside
+`LAPLACE_HD` functions. The question is now a fold over the parameter indices
+(`detail_fixed::dense_slot`), so the descriptor is read only at compile-time
+indices. The same reason is why `mv_coord_lower()` and `mv_coord_upper()` are
+host functions, which their comment says.
+
+A `static constexpr int` member forwarded from the parent is instantiated
+eagerly by nvcc where gcc waits for a use, so `y_regularity = D::y_regularity`
+is an error over a discrete parent, which declares none. It is inherited from a
+helper specialized on the continuous kind, as `atom_mixture_distrib` already
+inherits it.
+
+A template argument of CLASS type cannot cross into an extended lambda's
+closure. The third and fourth builds ended with MSVC's `fatal error C1903:
+unable to recover from previous error(s)` on nvcc's generated host file, and
+with no diagnostic of its own before it, which is what made this one hard to
+read. nvcc writes the closure type into that file, and a template argument of
+class type is printed there as a braced initializer:
+
+    ::laplace::distrib::fixed_distrib< ::laplace::distrib::student_t2_distrib,
+                                       ::laplace::distrib::fixed_coord{(int)1, (int)-1} >
+
+which is not a template argument, so the host compiler cannot parse it. A probe
+of eighteen lines settled it: one class template with a `coord{int, int}`
+argument and one with an `int` argument, each captured by a `KOKKOS_LAMBDA`; the
+first fails and the second compiles. The structural class type had passed an
+earlier probe that used it only inside a `__global__` function, which is not
+where a distribution goes. So the held coordinates are encoded as ints, the call
+site keeping the spelling `coord_of<D>("mu")`, whose return type is the only
+thing that changed. A braced list over the pack, `for (const fixed_coord c :
+{C...})`, is also out of device code, its `std::initializer_list` having static
+storage; the one in a `LAPLACE_HD` member is now a fold over
+`std::index_sequence`.
