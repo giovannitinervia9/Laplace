@@ -407,3 +407,72 @@ void transformed_kernel_case() {
 }
 
 TEST_CASE("transformed: a lognormal inside a kernel") { transformed_kernel_case(); }
+
+// An atom's image computed on the host must be matched on the device. g(c) evaluated on the device can differ
+// from the host's in the last bit (measured on CUDA before the images were stored: 14 to 44 of 64 atoms missed
+// per map, gap up to 5.4e-15 relative), so the factory stores the images and the device compares against them.
+namespace {
+using tzan1 = ld::transformed_distrib<zan1>;
+lb::scalar_bijector atom_case_map(int m) {
+  lb::scalar_bijector b{lb::scalar_bijector_map::log};
+  if (m == 1) b = lb::scalar_bijector::bounded(-1.0, 3.0);
+  if (m == 2) b = lb::scalar_bijector::yeo_johnson(0.6);
+  if (m == 3) b = lb::scalar_bijector{lb::scalar_bijector_map::asinh};
+  if (m == 4) b = lb::scalar_bijector{lb::scalar_bijector_map::probit};
+  b.inverted = true;  // exp, the logistic onto (-1, 3), Yeo-Johnson's inverse, sinh, Phi
+  return b;
+}
+}  // namespace
+void transformed_atoms_on_device_case() {
+  const int n = 5 * 64;
+  Kokkos::View<tzan1*> d("d", n);
+  Kokkos::View<double*> y("y", n), lp("lp", n), regap("regap", n);
+  auto dh = Kokkos::create_mirror_view(d);
+  auto yh = Kokkos::create_mirror_view(y);
+  for (int i = 0; i < n; ++i) {
+    const double c = -2.3 + 0.0731 * (i % 64);
+    dh(i) = ld::transformed(zan1{.parent = ld::gaussian1_distrib{0.0, 1.0}, .atom_alr = {-1.0}, .point = {c}},
+                            atom_case_map(i / 64));
+    yh(i) = dh(i).atom_point(0);
+  }
+  Kokkos::deep_copy(d, dh);
+  Kokkos::deep_copy(y, yh);
+  Kokkos::parallel_for("distrib_transformed_atoms", n, KOKKOS_LAMBDA(const int i) {
+    const tzan1 t = d(i);
+    lp(i) = t.at_atom(y(i)) ? t.logpdf(y(i)) : 1.0;  // 1 marks a miss: a log mass is never positive
+    // g(c) recomputed here, to show what the stored image protects against
+    regap(i) = t.map.forward(t.parent.point[0]) == y(i) ? 0.0 : 1.0;
+  });
+  auto lph = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), lp);
+  auto gh = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), regap);
+  int missed = 0, recomputed_off = 0;
+  double e = 0.0;
+  for (int i = 0; i < n; ++i) {
+    INFO("map " << i / 64 << ", atom " << i % 64);
+    CHECK(lph(i) <= 0.0);
+    missed += lph(i) > 0.0;
+    recomputed_off += gh(i) != 0.0;
+    e = std::fmax(e, std::fabs(lph(i) - dh(i).logpdf(yh(i))));
+  }
+  std::printf("transformed atoms on the device: %d of %d missed; g(c) recomputed in the kernel differs from the "
+              "host's for %d; log mass against the host %.2e\n",
+              missed, n, recomputed_off, e);
+  CHECK(e <= 1e-15);
+}
+TEST_CASE("transformed: an atom's image from the host is matched inside a kernel") {
+  transformed_atoms_on_device_case();
+}
+
+TEST_CASE("transformed: the quantile under a decreasing map with an atom keeps a small p") {
+  // Y = -X, X a gaussian with an atom at 0.5: the lower tail of Y is the upper tail of X, read at log p
+  // rather than at 1 - p, which rounds to 1 below p = 1e-16; p = 0.3 falls in the atom's jump
+  const auto d = ld::transformed(zan1{.parent = ld::gaussian1_distrib{0.2, 1.3}, .atom_alr = {-1.0}, .point = {0.5}},
+                                 lb::scalar_bijector::affine(0.0, -1.0));
+  CHECK(d.cdf(-0.5) >= 0.3);
+  CHECK(d.cdf(std::nextafter(-0.5, -1.0)) < 0.3);
+  CHECK(d.quantile(0.3) == -0.5);
+  double e = 0.0;
+  for (double p : {1e-3, 1e-8, 1e-14, 1e-17, 1e-30, 1e-100}) e = std::fmax(e, std::fabs(d.log_cdf(d.quantile(p)) - std::log(p)));
+  std::printf("transformed decreasing quantile with an atom: |log F(Q(p)) - log p| %.2e for p down to 1e-100\n", e);
+  CHECK(e <= 1e-13);
+}

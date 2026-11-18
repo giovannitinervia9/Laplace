@@ -9669,6 +9669,36 @@ parent's, which checks the argument that it is the parent's.
 
 The CUDA build gives the same worst errors as gcc in every row.
 
+### transformed_distrib: atoms on the device and the decreasing quantile (2026-11-18)
+
+Two defects of the atom routes, found by inspection and then measured.
+
+The image of an atom on the device. `at_atom` and `preimage` compared y with
+g(c) recomputed at each call. On the device g(c) need not round to the same
+double as on the host: the platform's elementary functions differ in the last
+bit, and nvcc contracts a * b + c into an FMA. This is the same class of
+defect as a comparison moved by FMA contraction. An observation computed on
+the host as an atom's image then missed the atom inside a kernel, and its mass
+was read as a density. Measured on CUDA with 320 atoms (gaussian1 with an atom
+at c = -2.3 + 0.0731 k, k = 0..63, under exp, the logistic onto (-1, 3),
+Yeo-Johnson's inverse with exponent 0.6, sinh and Phi): g(c) recomputed in the
+kernel differs from the host's value for 59 of them. Repair: transformed()
+computes the images once on the host and stores them in the field
+`atom_image`, against which both comparisons now run. After the repair 0 of
+320 are missed on CUDA, and the log mass read in the kernel equals the host's
+exactly. An aggregate built without the factory over a parent with atoms must
+fill `atom_image` itself.
+
+The quantile under a decreasing map with atoms. It was g(Q_X(1 - p)), and
+1 - p rounds to 1 below p = 1.1e-16. Over gaussian1 (0.2, 1.3) with an atom
+at 0.5, mapped by g(x) = -x, the error |log F(Q(p)) - log p| was 6.7e-9 at
+p = 1e-8 and 9.9e-3 at 1e-14, and Q was -inf from p = 1e-17 down. Repair: the
+parent's upper quantile at log p, as without atoms, since the generic upper
+route returns the atom point when log p falls in the atom's jump. After the
+repair the error is at most 2.8e-14 for p from 1e-3 down to 1e-100 (the bound
+is 1e-13), and quantile(0.3), which lies inside the jump, is the atom's image
+exactly. The same numbers hold on gcc and CUDA.
+
 ## truncated_distrib: a parent restricted to a fixed window (2026-11-17)
 
 What: `include/laplace/distrib/truncated.hpp` is new: `truncated_distrib<D>`,

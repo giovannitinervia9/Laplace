@@ -45,8 +45,10 @@
 // The builder transformed() refuses what is not a law, following the two other
 // wrappers: a parent whose support is not inside the domain of g, an atom whose
 // image is not finite, and a union of kinks in y longer than the two points
-// distrib_kinks holds. The aggregate itself checks nothing, so that it can be
-// built inside a kernel.
+// distrib_kinks holds; it also stores the images of the parent's atoms, which
+// the device then compares against instead of recomputing g(c), whose last bit
+// may differ there. The aggregate itself checks nothing, so that it can be built
+// inside a kernel; over a parent with atoms whoever builds it fills atom_image.
 #pragma once
 
 #include <laplace/bijector/scalar.hpp>
@@ -110,7 +112,8 @@ LAPLACE_HD void add_faa_di_bruno(sym_tensor<D::n_params, K>& t, const D& p, doub
  * \brief The law of \f$Y = g(X)\f$, with \f$X\f$ following a parent distribution and \f$g\f$ a fixed scalar bijector.
  *
  * Build it with transformed(), which checks that the parent's support lies in the domain of \f$g\f$ and reads the
- * direction of the map; the aggregate itself checks nothing, so that it can be built inside a kernel.
+ * direction of the map, and which fills the images of the parent's atoms; the aggregate itself checks nothing,
+ * so that one built on the host can be copied into a kernel.
  * \tparam D Parent distribution type, continuous.
  */
 template <class D>
@@ -125,6 +128,13 @@ struct transformed_distrib {
   bijector::scalar_bijector map;
   /// Whether \f$g\f$ decreases, read by transformed() from the sign of \f$g'\f$.
   bool decreasing = false;
+  /// The images \f$g(c_i)\f$ of the parent's atoms, computed once by transformed() on the host, so that an
+  /// observation equal to an atom's image matches it bit for bit on every device (the platform's \f$g\f$ may
+  /// differ in the last bit between host and device). An aggregate built without transformed() over a parent
+  /// with atoms must fill them itself, with \f$g(c_i)\f$ computed where the observations were; left at zero,
+  /// at_atom() and preimage() match only an observation equal to zero. Over a parent without atoms the field
+  /// is unused.
+  double atom_image[distrib_n_atoms<D>() > 0 ? distrib_n_atoms<D>() : 1] = {};
 
   /// Distribution kind, the parent's.
   static constexpr distrib_kind kind = D::kind;
@@ -145,16 +155,14 @@ struct transformed_distrib {
    *         the atom; \f$h(y)\f$ otherwise.
    */
   LAPLACE_HD double preimage(double y) const {
-    for (int i = 0; i < n_atoms; ++i) {
-      const double c = distrib_atom_point(parent, i);
-      if (y == map.forward(c)) return c;
-    }
+    for (int i = 0; i < n_atoms; ++i)
+      if (y == atom_image[i]) return distrib_atom_point(parent, i);
     return map.inverse(y);
   }
   /// \brief Whether \f$y\f$ is the image of one of the parent's atoms. \param y Observation point. \return The answer.
   LAPLACE_HD bool at_atom(double y) const {
     for (int i = 0; i < n_atoms; ++i)
-      if (y == map.forward(distrib_atom_point(parent, i))) return true;
+      if (y == atom_image[i]) return true;
     return false;
   }
   /// \brief Whether \f$y\f$ lies in the closed support. \param y Observation point. \return The answer.
@@ -311,8 +319,8 @@ struct transformed_distrib {
    * \brief Evaluates the quantile \f$F^{-1}(p)\f$.
    *
    * \f$g\f$ of the parent's quantile at \f$p\f$ for an increasing map; for a decreasing one \f$g\f$ of the
-   * parent's upper quantile at \f$\log p\f$, so that a small \f$p\f$ is not lost in \f$1 - p\f$ (at
-   * \f$1 - p\f$ itself where the parent has atoms).
+   * parent's upper quantile at \f$\log p\f$, so that a small \f$p\f$ is not lost in \f$1 - p\f$; where
+   * \f$p\f$ falls in an atom's jump that quantile is the atom point.
    * \param p Probability in \f$[0, 1]\f$.
    * \return The quantile.
    */
@@ -320,8 +328,7 @@ struct transformed_distrib {
     if (!(p > 0.0)) return p == 0.0 ? support_lower() : math::detail::quiet_nan();
     if (!(p < 1.0)) return p == 1.0 ? support_upper() : math::detail::quiet_nan();
     if (!decreasing) return map.forward(distrib_quantile(parent, p));
-    if constexpr (n_atoms == 0) return map.forward(distrib_quantile_from_log_upper(parent, math::log(p)));
-    else return map.forward(distrib_quantile(parent, 1.0 - p));
+    return map.forward(distrib_quantile_from_log_upper(parent, math::log(p)));
   }
 
   /**
@@ -345,7 +352,7 @@ struct transformed_distrib {
    * \return \f$g\f$ of the parent's atom position.
    */
   LAPLACE_HD double atom_point(int i) const requires(distrib_n_atoms<D>() > 0) {
-    return map.forward(distrib_atom_point(parent, i));
+    return atom_image[i];
   }
   /**
    * \brief Log mass on atom \f$i\f$, the parent's: a bijection carries the mass unchanged.
@@ -476,9 +483,10 @@ transformed_distrib<D> transformed(const D& parent, const bijector::scalar_bijec
   if (!(slope > 0.0 || slope < 0.0))
     throw std::invalid_argument("transformed: the map's derivative at the parent's center is " + std::to_string(slope) +
                                 ", so its direction cannot be read there");
-  const transformed_distrib<D> t{.parent = parent, .map = map, .decreasing = slope < 0.0};
+  transformed_distrib<D> t{.parent = parent, .map = map, .decreasing = slope < 0.0};
+  for (int i = 0; i < distrib_n_atoms<D>(); ++i) t.atom_image[i] = map.forward(distrib_atom_point(parent, i));
   for (int i = 0; i < distrib_n_atoms<D>(); ++i)
-    if (!std::isfinite(map.forward(distrib_atom_point(parent, i))))
+    if (!std::isfinite(t.atom_image[i]))
       throw std::invalid_argument("transformed: the parent's atom at " + std::to_string(distrib_atom_point(parent, i)) +
                                   " has no finite image under the map");
   double p[6];
