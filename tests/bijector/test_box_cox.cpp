@@ -821,6 +821,80 @@ TEST_CASE("box_cox: the partials at the ends of both domains") {
         }
 }
 
+TEST_CASE("box_cox: the inverse partials at a large finite argument") {
+  // Above |lambda u| = 1e3 the forms compute inf times 0, psi^(j)(x) underflowing while the power
+  // of u overflows, and the column came out NaN: 3 of the 7 entries at u = 1e60, 10 at 1e100 and
+  // 21 at 1e300 over orders 1 to 6. box_cox_inv_partials now takes the rescaled route of
+  // scalar_yeo_johnson.hpp there, which is already this column.
+  //
+  // The references are the definition (1 + lambda u)^(1/lambda) differentiated SYMBOLICALLY by
+  // SymPy and then evaluated at 60 digits by mpmath, printed by
+  // tools/reference/bijector_box_cox_large.py. A numerical differentiator cannot produce them:
+  // mpmath's own returned entries wrong by two hundred orders of magnitude at u = 1e60, measured
+  // by the yeo_johnson session. The two columns below are the ones whose every entry a double can
+  // hold; the others of that script underflow or overflow, at lambda = 3 and u = 1e300 down to
+  // 1e-1699 and at lambda = 1/6 and u = 1e100 up to 1e619.
+  //
+  // The bound is 2e-13 relative. Tighter would measure S rather than the route: the column carries
+  // exp((1 - n0 lambda) S), so an ulp of S is amplified by it, and the worst measured over 189
+  // reference values is 1.4e-13 at lambda = 1/6 and u = 1e100.
+  const double bound = 2e-13;
+
+  // lambda = 1/2, u = 1e60. Order 3: the first entry is exactly zero, P_3 vanishing at lambda = 1/2
+  const double c3[4] = {0.0, -275.92391679816559, 1.5115832005528935e+65, -4.1552650623562085e+127};
+  const auto p3 = box(0.5).inverse_partials_d3(1e60);
+  for (int n1 = 0; n1 <= 3; ++n1) {
+    INFO("lambda = 1/2, u = 1e60, K = 3, n1 = ", n1);
+    if (c3[n1] == 0.0) CHECK(p3.c[n1] == 0.0);
+    else CHECK(close_rel(p3.c[n1], c3[n1], bound));
+  }
+  const double c6[7] = {0.0,          -4.0e-180,          -2.1993913343853247e-117,
+                        -1.8535848846824081e-54, 48383806920.288363, -2.6506861308637284e+73,
+                        7.3635921977184855e+135};
+  const auto p6 = box(0.5).inverse_partials_d6(1e60);
+  for (int n1 = 0; n1 <= 6; ++n1) {
+    INFO("lambda = 1/2, u = 1e60, K = 6, n1 = ", n1);
+    if (c6[n1] == 0.0) CHECK(p6.c[n1] == 0.0);
+    else CHECK(close_rel(p6.c[n1], c6[n1], bound));
+  }
+
+  // lambda = -3/2 with u = -1e60, where 1 + lambda u is 1.5e60 and the argument is on the other
+  // side of zero: the whole column decays, nothing cancels, and no entry is zero
+  const double n3[4] = {2.261163935907816e-220, -5.1049759529438962e-159, 1.8193372446241748e-97,
+                        -1.631525269281592e-35};
+  const auto q3 = box(-1.5).inverse_partials_d3(-1e60);
+  for (int n1 = 0; n1 <= 3; ++n1) {
+    INFO("lambda = -3/2, u = -1e60, K = 3, n1 = ", n1);
+    CHECK(close_rel(q3.c[n1], n3[n1], bound));
+  }
+  // the first two references, 2.1924915497061713e-398 and -2.3145584342078932e-337, are below the
+  // smallest double and are written as zero: a literal of that size is truncated to zero by the
+  // compiler with a warning, and the check below asks only that the computed entry underflow too
+  const double n6[7] = {0.0,                      0.0,                     2.9100138618964877e-276,
+                        -4.5700133614910717e-215, 9.7046574191373598e-154, -3.2640616227213137e-92,
+                        2.8215738071473927e-30};
+  const auto q6 = box(-1.5).inverse_partials_d6(-1e60);
+  for (int n1 = 0; n1 <= 6; ++n1) {
+    INFO("lambda = -3/2, u = -1e60, K = 6, n1 = ", n1);
+    // the two references written as zero are below the smallest double: the entry must underflow
+    if (n6[n1] == 0.0) CHECK(std::fabs(q6.c[n1]) < 1e-300);
+    else CHECK(close_rel(q6.c[n1], n6[n1], bound));
+  }
+
+  // the knife-edge prefactor survives the rescaled route: P_6 at lambda = 1/6 is 5!/6^5
+  CHECK(close_rel(box(1.0 / 6.0).inverse_partials_d6(1e100).c[0], 120.0 / 7776.0, bound));
+
+  // and no entry of any order is NaN at any of those arguments, for any lambda of the grid
+  for (double l : {-1.5, -0.5, 1.0 / 6.0, 0.5, 2.0 / 3.0, 1.0, 1.5, 2.0, 3.0, 6.0}) {
+    for (double x : {1e20, 1e60, 1e100, 1e300}) {
+      const double xi = l >= 0.0 ? x : -x;
+      INFO("lambda = ", l, " u = ", xi);
+      const auto r = box(l).inverse_partials_d6(xi);
+      for (int n1 = 0; n1 <= 6; ++n1) CHECK(!std::isnan(r.c[n1]));
+    }
+  }
+}
+
 TEST_CASE("box_cox: components in the absent second parameter are zero") {
   const auto p3 = box(0.7).forward_partials_d3(2.0);
   for (int i = 4; i < 10; ++i) CHECK(p3.c[i] == 0.0);

@@ -66,6 +66,10 @@
 
 namespace laplace::bijector::detail_scalar {
 
+// Above this |lambda u| the inverse partials take the rescaled route rather than the
+// forms; the value is measured in docs/numerics.md.
+inline constexpr double bc_rescale_threshold = 1.0e3;
+
 // lambda finite: NaN and the infinities fail x - x == 0
 LAPLACE_HD_FORCEINLINE bool bc_finite(double x) { return x - x == 0.0; }
 
@@ -722,6 +726,17 @@ LAPLACE_HD void box_cox_inv_partials(double u, double lam, double p2, double* ou
       else bc_inv_partials_at_inf<K>(end > 0, lam, out);
       return;
     }
+  }
+  // At a large lambda u the forms below compute inf times 0, psi^(j)(x) underflowing while
+  // u^(j+1) overflows, and the column comes out NaN (measured: 3 of the 7 entries at u = 1e60,
+  // 10 at 1e100, 21 at 1e300 over orders 1 to 6). The rescaled route of the yeo_johnson session
+  // takes the same structure with q_j = x^(j+1) psi^(j)(x) kept bounded, and is exactly this
+  // column: its only Yeo-Johnson-specific line, the -1 of h = exp(S) - 1, is guarded by
+  // n0 == 0 && n1 == 0, which needs K = 0 and so never fires for a partial. It takes lambda and u
+  // directly and performs no reflection, which is what makes it right here.
+  if (Kokkos::fabs(lam * u) > bc_rescale_threshold) {
+    yj_inv_partials_rescaled_pos<K>(lam, u, out);
+    return;
   }
   double A[7];
   bc_bell(K, u, lam, A);
