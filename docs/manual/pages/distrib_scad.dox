@@ -1,0 +1,90 @@
+/**
+\defgroup distrib_scad Properized SCAD
+\brief Continuous real-line distribution whose negative log-density is the smoothly clipped absolute deviation penalty of Fan and Li on an interval around the location and a Gaussian beyond it, with a normalizing constant in closed form through Dawson's integral.
+
+Defined in `<laplace/distrib/scad.hpp>` as \ref laplace::distrib::scad_distrib "scad_distrib", this module has the same members as \ref distrib_mcp "the Properized MCP", with the shape \f$a\f$ in place of the concavity. The construction shared with that law is explained once, on \ref distrib_mcp "the Properized MCP page": the Gaussian tail, the recursions for the derivatives of \f$\log Z\f$, the rule that gives each derivative of the log-density, and the method of the cumulative functions. This page gives what is specific to the SCAD law. Every member that evaluates the law is marked `LAPLACE_HD`, so it runs on the host and inside Kokkos kernels; `start_value()` runs on the host only, and takes the sample median as \f$\mu\f$, the reciprocal of the mean absolute deviation about the median as \f$\lambda\f$, the value 3.7 as \f$a\f$ and the sample variance as \f$V\f$ (\ref distrib_start \"Starting values\"). Its accuracy is the one measured for both laws in the table of the MCP page.
+
+## Classic form and parametrization
+
+The smoothly clipped absolute deviation penalty of Fan and Li (Fan and Li, 2001) is a function of \f$u = |y - \mu|\f$, the distance of an observation \f$y \in \mathbb{R}\f$ from a location \f$\mu \in \mathbb{R}\f$. It has a level \f$\lambda > 0\f$ and a shape \f$a > 1\f$, and its two knots lie at \f$u = \lambda\f$ and \f$u = a\lambda\f$. It is written in three pieces,
+\f[
+\rho(u) = \begin{cases} \lambda u, & u \le \lambda, \\[4pt] \dfrac{2a\lambda u - u^2 - \lambda^2}{2(a - 1)}, & \lambda < u \le a\lambda, \\[8pt] \dfrac{(a+1)\lambda^2}{2}, & u > a\lambda. \end{cases}
+\f]
+Fan and Li write the middle piece in this form. Expanding the square in \f$\lambda u - (u - \lambda)^2 / (2(a - 1))\f$ shows that it equals the middle piece above, so the two forms are the same function. The implementation uses the second form, with \f$c = a - 1\f$:
+\f[
+\rho(u) = \begin{cases} \lambda u, & u \le \lambda, \\[4pt] \lambda u - \dfrac{(u - \lambda)^2}{2c}, & \lambda < u \le a\lambda, \\[8pt] \dfrac{(a+1)\lambda^2}{2}, & u > a\lambda. \end{cases}
+\f]
+
+The last piece is flat, so \f$e^{-\rho(u)}\f$ has an infinite integral for every value of the parameters. As on \ref distrib_mcp "the Properized MCP page", the law keeps \f$\rho\f$ on the inner pieces and replaces the flat piece by a Gaussian tail of variance \f$V > 0\f$, the tail variance:
+\f[
+q(u) = \begin{cases} \lambda u, & u \le \lambda, \\[4pt] \lambda u - \dfrac{(u - \lambda)^2}{2c}, & \lambda < u \le a\lambda, \\[8pt] \dfrac{(a+1)\lambda^2}{2} + \dfrac{(u - a\lambda)^2}{2V}, & u > a\lambda, \end{cases}
+\f]
+and the density is
+\f[
+f(y) = \frac{e^{-q(|y - \mu|)}}{Z}, \qquad y \in \mathbb{R},
+\f]
+with \f$Z\f$ the normalizing constant. The log-density is \f$\log f(y) = -q(|y - \mu|) - \log Z\f$.
+
+The location \f$\mu\f$ is the mode and the median, and the density is symmetric about it, so its mean is \f$\mu\f$ as well. The rate \f$\lambda\f$ is the slope of \f$q\f$ up to the first knot, and the shape \f$a\f$ places the second knot at \f$a\lambda\f$. On the inner pieces the exponent of the density is the penalty \f$\rho\f$ of Fan and Li, which gives the parameters their meaning.
+
+## Density and normalizing constant
+
+The normalizing constant is
+\f[
+Z = 2\left[\frac{1 - e^{-\lambda^2}}{\lambda} + e^{-\lambda^2}\sqrt{2c}\;\mathcal{D}\!\left(\lambda\sqrt{c/2}\right) + e^{-(a+1)\lambda^2/2}\sqrt{\pi V/2}\right],
+\f]
+where \f$\mathcal{D}\f$ is Dawson's integral, \ref laplace::math::dawson "dawson()" on \ref dawson "its own page". The first term is \f$\int_0^\lambda e^{-\lambda u}\,\mathrm{d}u\f$, the integral over the first piece. The second is the middle piece, and the third is the tail. The middle and tail terms come from completing the square in the same way as on \ref distrib_mcp "the Properized MCP page". The function \f$(1 - e^{-\lambda^2})/\lambda\f$ and its derivatives in \f$\lambda\f$ are taken from its power series below \f$\lambda = 1\f$, and by the Leibniz rule above it, since the Leibniz rule loses accuracy for small \f$\lambda\f$.
+
+## Shape of the log-density
+
+The knots are \f$\lambda\f$ and \f$a\lambda\f$. The function \f$q\f$ and its first derivative are continuous at both. The derivative equals \f$\lambda\f$ on both sides of the first knot and vanishes on both sides of the second. The second derivative jumps from 0 to \f$-1/c\f$ at the first knot, and from \f$-1/c\f$ to \f$1/V\f$ at the second. So the density is \f$C^1\f$ in \f$y\f$ at both knots. At \f$u = 0\f$ the derivative \f$q'\f$ jumps from \f$-\lambda\f$ to \f$\lambda\f$, so the log-density has a kink at the location and is \f$C^0\f$ there. The field `y_regularity` is therefore 0.
+
+As \f$\lambda\f$ tends to zero, the inner pieces shrink to nothing and the density becomes the normal density with mean \f$\mu\f$ and variance \f$V\f$ (\ref distrib_gaussian2 "gaussian2"). The test takes \f$\lambda = 10^{-14}\f$ and compares the log-density with the Gaussian one.
+
+## Derivatives
+
+The derivatives of the log-density follow the rule given on \ref distrib_mcp "the Properized MCP page", with the parameters \f$(\lambda, a, V)\f$ in place of \f$(\lambda, \gamma, V)\f$. Here \f$i\f$ is the order in \f$\mu\f$, \f$J\f$ the order in \f$y\f$, and \f$(b, m, n)\f$ the orders in \f$(\lambda, a, V)\f$. The conventions at \f$y = \mu\f$ and at the knots are those given there.
+
+The first piece of \f$q\f$ does not depend on \f$a\f$ or \f$V\f$. On the middle piece, \f$c = a - 1\f$ and \f$\partial c / \partial a = 1\f$, so the derivatives in \f$a\f$ are those of \f$-(u - \lambda)^2/(2c)\f$ taken through \f$c\f$. The mixed partials of \f$q\f$ were derived with SymPy (Meurer and others, 2017) in `tools/reference/distrib_mcp_scad_forms.py`, and they agree with SymPy's own derivatives as described on the MCP page. The derivatives of \f$\log Z\f$ are built by the recursions given on the MCP page, applied to the tables over \f$(\lambda, a)\f$ of the two terms of \f$Z\f$ in the form \f$Z = 2[A + B\sqrt{\pi V/2}]\f$.
+
+## Cumulative functions
+
+Let \f$U(u) = \int_u^\infty e^{-q(t)}\,\mathrm{d}t\f$ for \f$u \ge 0\f$. Let \f$M = e^{-\lambda^2}\sqrt{2c}\,\mathcal{D}(\lambda\sqrt{c/2})\f$ be the whole middle piece, and \f$T = e^{-(a+1)\lambda^2/2}\sqrt{\pi V/2}\f$ the whole tail. With \f$\Phi\f$ the standard normal cumulative distribution function,
+\f[
+U(u) = \begin{cases} \dfrac{e^{-\lambda u}\left(1 - e^{-\lambda(\lambda - u)}\right)}{\lambda} + M + T, & u \le \lambda, \\[8pt] \sqrt{2c}\; e^{-q(u)}\,\mathcal{D}\!\left(\dfrac{a\lambda - u}{\sqrt{2c}}\right) + T, & \lambda < u \le a\lambda, \\[8pt] 2\,T\,\Phi\!\left(-\dfrac{u - a\lambda}{\sqrt{V}}\right), & u > a\lambda. \end{cases}
+\f]
+The cumulative distribution function is \f$F(y) = U(|y - \mu|)/Z\f$ for \f$y \le \mu\f$ and \f$F(y) = 1 - U(|y - \mu|)/Z\f$ for \f$y > \mu\f$. The factor \f$1 - e^{-\lambda(\lambda - u)}\f$ on the first piece is evaluated through `expm1`, so that nothing cancels as \f$u\f$ approaches \f$\lambda\f$. The logarithms `log_cdf()` and `log_ccdf()` treat the small side as on \ref distrib_mcp "the Properized MCP page".
+
+## Non-smooth points
+
+`y_kinks()` declares five points, \f$\mu - a\lambda\f$, \f$\mu - \lambda\f$, \f$\mu\f$, \f$\mu + \lambda\f$ and \f$\mu + a\lambda\f$, each with `continuous_order` 0. The four knots are not kinks, since the second derivative of the density jumps at them and the first does not. They are declared so that a quadrature which takes the declared points as cuts has a panel end at every knot.
+
+`param_kinks(j, y)` gives, for each parameter, the points of its own axis where the log-density is not smooth. For \f$\mu\f$ the point is \f$\mu = y\f$, with order 0. For \f$\lambda\f$, when \f$u = |y - \mu| > 0\f$, there are two points, \f$\lambda = u/a\f$ and \f$\lambda = u\f$, the values at which the first and the second knot reach \f$u\f$, both with order 1. For the shape \f$a\f$, when \f$u > \lambda\f$, the point is \f$a = u/\lambda\f$, the value at which the second knot reaches \f$u\f$, with order 1. For \f$u \le \lambda\f$ the value would not exceed 1, which lies outside the domain \f$a > 1\f$, so no point is declared. The tail variance has no points.
+
+## Accuracy and limits
+
+The accuracy figures of this law are those of the table on \ref distrib_mcp "the Properized MCP page". Their reference values come from mpmath (mpmath). The test that measures them covers both laws in one loop, so each figure there is the worst over both laws. The mass of the density is checked by quadrature with every knot declared as a cut, and the cumulative functions are checked against the quadrature of the definition, as on the MCP page.
+
+The expected information of this law is not closed, and neither is the quantile: the \ref distrib_generic "generic routes" compute them, as on the MCP page.
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/scad.hpp>
+
+void eval_scad(Kokkos::View<const double*> y, Kokkos::View<double*> out,
+               double mu, double lambda, double a, double tail_sigma2) {
+  const laplace::distrib::scad_distrib d{mu, lambda, a, tail_sigma2};
+  Kokkos::parallel_for("scad_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0] + d.cdf(y(i));
+  });
+}
+```
+
+## References
+
+- J. Fan and R. Li (2001), Variable Selection via Nonconcave Penalized Likelihood and its Oracle Properties, Journal of the American Statistical Association, 96(456), 1348-1360. https://doi.org/10.1198/016214501753382273
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

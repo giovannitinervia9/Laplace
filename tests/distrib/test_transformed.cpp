@@ -359,12 +359,16 @@ TEST_CASE("transformed: the refusals") {
   const zag z{.parent = ld::gamma2_distrib{2.0, 0.5}, .atom_alr = {-1.0}, .point = {0.0}};
   CHECK_THROWS_AS(ld::transformed(z, lb::scalar_bijector{lb::scalar_bijector_map::log}), std::invalid_argument);
   // laplace1's kink at 1 and Yeo-Johnson's at 0 make two; shifted by one and carried through Yeo-Johnson
-  // again, they land off 0 and the map adds its own, three non-smooth points (atoms are not kinks)
+  // again, they land off 0 and the map adds its own, three non-smooth points (atoms are not kinks).
+  // A distribution declares at most eight of them (distrib_kinks), so three are carried and the
+  // refusal needs a chain long enough to pass eight, which is not built here.
   const auto yj = inverted(lb::scalar_bijector::yeo_johnson(0.6));
   const auto two = ld::transformed(ld::transformed(ld::laplace1_distrib{1.0, 1.0}, yj),
                                    lb::scalar_bijector::affine(-1.0, 1.0));  // g(v) = v + 1
   CHECK(two.y_kinks().count == 2);
-  CHECK_THROWS_AS(ld::transformed(two, yj), std::invalid_argument);
+  const auto three = ld::transformed(two, yj);
+  CHECK(three.y_kinks().count == 3);
+  CHECK(three.y_kinks().continuous_order == 0);
   // two atoms under a smooth map are a law
   const zan2 w{.parent = ld::gaussian1_distrib{0.0, 1.0}, .atom_alr = {-1.0, -1.0}, .point = {-1.0, 1.0}};
   CHECK_NOTHROW(ld::transformed(w, inverted(lb::scalar_bijector::bounded(-1.0, 3.0))));

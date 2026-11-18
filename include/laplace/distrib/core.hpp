@@ -59,18 +59,28 @@ enum class distrib_kind : int { continuous, discrete };
  */
 inline constexpr int infinitely_smooth = 1 << 30;
 
-// Points at which l is not smooth in one parameter (or in y), at most 2, and
+// Points at which l is not smooth in one parameter (or in y), at most 8, and
 // the order up to which it stays continuous there.
+//
+// Eight because a law may have more than two: the properized MCP has three in y
+// (the location and the two knots) and the properized SCAD five, and the
+// quadratures take at most eight cuts (panels_quad). The order is one for the
+// whole set, so a law whose points differ in regularity declares the worst of
+// them, which costs panel granularity and nothing else; a per-point order would
+// touch every law (Giovanni, 2026-11-18, with the measurement: with the kink at
+// the location as the only cut, the mass of the properized MCP by the generic
+// panel quadrature is out by 8.7e-11 against 4.4e-16 with every knot, and the
+// generic expected information does not converge at all).
 /**
  * \ingroup distrib_core
  * \brief Description of non-smooth points in a parameter or in the observation argument.
  */
 struct distrib_kinks {
-  /// Number of non-smooth points (at most 2).
+  /// Number of non-smooth points (at most 8).
   int count = 0;
   /// Coordinates of the non-smooth points.
-  double point[2] = {0.0, 0.0};
-  /// Highest derivative order that remains continuous across the kink.
+  double point[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  /// Highest derivative order that remains continuous across the kink, the least over the points.
   int continuous_order = 0;
 };
 

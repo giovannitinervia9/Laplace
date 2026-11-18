@@ -12820,3 +12820,172 @@ against the bounds of the table with a margin of about half again, the value's
 relative error everywhere, the seven values F^(k)(0) exactly, the parity of
 every order bit for bit, the two routes meeting at |x| = 8 within 1e-13 in
 absolute value, and F'(x) = 1 - 2 x F(x) within 1e-14.
+
+## The properized MCP and SCAD: mcp_distrib and scad_distrib (2026-11-18)
+
+**What.** Two univariate laws continuous on the whole real line, the densities
+whose negative logarithms are Zhang's MCP and Fan and Li's SCAD on an interval
+around the location and a Gaussian beyond it. With `u = |y - mu|`, `lambda > 0`
+and `V` written for `tail_sigma2`,
+
+    MCP   q = lambda u - u^2/(2 gamma)                       u <= gamma lambda
+          q = gamma lambda^2/2 + (u - gamma lambda)^2/(2 V)  beyond
+    SCAD  q = lambda u                                       u <= lambda
+          q = lambda u - (u - lambda)^2/(2 c), c = a - 1      lambda < u <= a lambda
+          q = (a + 1) lambda^2/2 + (u - a lambda)^2/(2 V)     beyond
+
+and `f(y) = exp(-q(u))/Z`. The original penalties are flat beyond their last
+knot, so `exp(-pen)` has an infinite integral for every parameter value; the
+Gaussian tail makes the law proper and leaves the penalty untouched on the inner
+pieces, which is why `mcp_penalty` and `scad_penalty` and these two laws share
+their inner region exactly. Parameters, named with Giovanni on 2026-11-18:
+`(mu, lambda, gamma, tail_sigma2)` and `(mu, lambda, a, tail_sigma2)`, the
+fourth the variance of the Gaussian TAIL and not of the law, on `(0, inf)` with
+no further constraint.
+
+**How. The normalizing constants.** Every piece has an exponent that is a
+polynomial of degree two in `u`, so completing the square turns its integral
+into an integral of `e^(s^2)` where the exponent is convex in `u` (the inner
+piece of MCP, the middle piece of SCAD) and into the normal integral on the
+tail. The first is Dawson's integral `F` (`math/dawson.hpp`), which is why these
+laws needed it:
+
+    Z_MCP  = 2 [ sqrt(2 gamma) F(lambda sqrt(gamma/2))
+                 + e^(-gamma lambda^2/2) sqrt(pi V/2) ]
+    Z_SCAD = 2 [ (1 - e^(-lambda^2))/lambda
+                 + e^(-lambda^2) sqrt(2 c) F(lambda sqrt(c/2))
+                 + e^(-(a + 1) lambda^2/2) sqrt(pi V/2) ]
+
+Both are sums of positive terms, so nothing cancels, and `log_z` adds them in
+logarithms, which keeps the tail's contribution where `e^(-gamma lambda^2/2)`
+underflows (gamma lambda^2 above 1490). Measured against the quadrature of the
+definition `Z = 2 int_0^inf e^(-q) du`: worst relative error 3.8e-59 at 60
+digits over eight cases and 1.1e-48 at 400 bits over the twelve of the reference
+script. That comparison is also the check that the density integrates to one.
+
+**How. The derivatives.** `l = -q(u) - log Z`, `q` a polynomial of degree two in
+`u` on each piece whose coefficients are rational in the parameters, so every
+mixed partial is closed. `y` and `mu` enter through `u` only, so the component
+with `a` derivatives in `mu`, `J` in `y` and `(b, m, n)` in `(lambda, p, V)` is
+
+    -(-1)^a sign(y - mu)^(a + J) d^(a+J)_u d^b_lambda d^m_p d^n_V q
+    - [a + J = 0] d^b_lambda d^m_p d^n_V log Z,
+
+with `sign(y - mu)^t` read as 1 for even `t` and as the sign with `sign(0) = 0`
+for odd `t`: at the kink the odd orders are the mean of the two one-sided
+values, which is zero, and the even orders agree on the two sides and are taken
+from the inner piece. At a knot the value and every derivative come from the
+inner piece, as in the penalties. `q` is quadratic in `u`, so every component
+with `a + J >= 3` is zero inside a piece. The mixed partials were derived with
+SymPy and checked against SymPy's own derivatives for every `(j, i, m, n)` of
+total order up to six, at sixteen points inside the five pieces
+(`tools/reference/distrib_mcp_scad_forms.py`): worst relative error 1.4e-15,
+which is the double arithmetic of the forms and not the forms.
+
+The derivatives of `log Z` are not written out. In both laws `V` enters only
+through the factor `sqrt(pi V/2)`, so `Z = 2 [A(lambda, p) + B(lambda, p)
+sqrt(pi V/2)]` and the table of `Z` over the three parameters is assembled from
+two tables over `(lambda, p)` and the derivatives of `V^(1/2)`; the tables come
+from the Leibniz product, the exponential and the chain rule over multi-indices
+and `log Z` from the logarithm of a table, the same recursions `enet_distrib`
+uses for its own constant (`detail/properized_nonconvex.hpp`). Checked in the
+same script against SymPy's derivatives of `Z` written with `erfi`: worst
+relative error 1.2e-13 over five points at total order up to six, rising to 3e-9
+for the sixth pure derivative in `p` at `lambda = 0.01`, where that derivative
+is itself 2.7e-11 and the absolute error 8e-20. The whole C++ transcription
+agrees with that checked mirror to 5.7e-14 over eleven cases, both laws, every
+component of orders one to six and the mixed `(y, theta)` derivatives.
+
+Two sizes, not accuracy. A table over three variables is packed triangularly,
+over the multi-indices of total order at most `K` only, 84 entries at order six
+instead of the cube's 343, and the chain rule keeps two tables of the order
+below instead of `K + 1`: without both, an order-six call of `logpdf_dk` asks a
+CUDA thread for about ten kilobytes of stack against the 8192 bytes the tests
+set, and with them for about 3.9.
+
+SCAD's `(1 - e^(-lambda^2))/lambda` and its six derivatives are taken from the
+power series `sum_(k >= 1) (-1)^(k+1) lambda^(2k-1)/k!` below `lambda = 1` and
+by the Leibniz rule over `-expm1(-lambda^2)` and `1/lambda` above it: the
+Leibniz route cancels like `lambda^(-2)` per order, its terms reaching 7.2e8 at
+`lambda = 0.1` and order six against a result of 21.
+
+**How. The cumulative functions.** Closed, and free of cancellation on every
+piece, because the integral from `u` to infinity is a sum of products of
+positive factors and never a difference:
+
+    MCP, u <= gamma lambda:  sqrt(2 gamma) e^(-q(u)) F((gamma lambda - u)/sqrt(2 gamma))
+                             + e^(-gamma lambda^2/2) sqrt(pi V/2)
+    MCP, beyond:             2 e^(-gamma lambda^2/2) sqrt(pi V/2) Phi(-(u - gamma lambda)/sqrt(V))
+    SCAD, u <= lambda:       e^(-lambda u) (1 - e^(-lambda (lambda - u)))/lambda + M + T
+    SCAD, middle:            sqrt(2 c) e^(-q(u)) F((a lambda - u)/sqrt(2 c)) + T
+    SCAD, beyond:            2 T Phi(-(u - a lambda)/sqrt(V))
+
+with `M` the whole middle piece and `T` the whole tail, and `F(y)` that integral
+over `Z` below the location and one minus it above. The first piece of SCAD goes
+through `expm1`, so nothing cancels as `u` approaches `lambda`. `log_cdf` and
+`log_ccdf` take the small side in logarithms, where it reaches below the
+smallest double, and the other side as one minus a plain ratio: the logarithm of
+the small side carries the rounding error of its own exponent, one ulp of the
+result per unit of `|log F|`, which at `u = 25.6` with `lambda = 1.3`,
+`gamma = 3` and `V = 2` is 124 ulp and was measured as 86.
+
+The derivatives of `log F` in the parameters, the expected information and the
+quantile are left to the generic routes.
+
+**Measured, gcc (Serial and OpenMP) and CUDA (RTX 4070 SUPER).**
+
+| quantity | worst |
+|---|---|
+| the inner region against mcp_penalty and scad_penalty, the value | exact, bit for bit |
+| the same, the derivatives in y and in the hyperparameters | 2 eps of max(value, 1) |
+| log f and its orders 1 to 6 against mpmath, in ulp of the order's scale | 3.66, 11.4, 11.5, 8.75, 11.2, 41.7, 162 (orders 0 to 6) |
+| log F and log(1 - F) against mpmath | 2.46 ulp of max(abs(log F), 1); 437 ulp relative |
+| Z against mpmath | 1.33 ulp |
+| cdf and ccdf against the quadrature of the definition | 6.8e-16 relative |
+| the mass by the generic panel quadrature, every knot declared | 4.4e-16 |
+| the same with the kink at the location as the only cut | 8.7e-11 |
+| the normal limit of the log-density (gamma or lambda to 0) | 8.0e-14 absolute |
+| cdf(quantile(p)) against p, generic quantile, p from 1e-8 to 1 - 1e-8 | 2.5e-15 relative |
+| host against device, the sum of the components of each order | 1.18e-15 at order 1, 2.1e-16 to 5.5e-16 at the others |
+
+**Open.** No closed expected information: the generic quadrature route gives it,
+in the score form, which is the form that holds where a parameter's regularity
+is finite. No `prox_y`, although the inner region's prox is the penalty's firm
+and three-piece thresholds; nothing asks for it yet.
+
+The 437 ulp of the relative measure of `log F` are not a defect of the route but
+the conditioning of a Gaussian tail: the argument of `Phi` carries one ulp and
+`log Phi` has slope `-z`, so the relative error of a tail probability cannot be
+below about `z^2` ulp, `z` the standardized distance beyond the knot. In ulp of
+`max(abs(log F), 1)`, which is what a reader of a log-likelihood sees, the same
+rows are within 2.46.
+
+**Chosen.** This version, tested in `tests/distrib/test_mcp_scad.cpp`: 15 cases
+and 42378 assertions, the same count on the gcc build and on the CUDA build, both
+green. The whole `laplace_tests` suite is green on both with the two laws and the
+wider `distrib_kinks` in it (758 cases, 1471453 assertions on CUDA).
+
+**Two things found on the way, both outside these two laws.**
+
+`distrib_kinks` held two non-smooth points, and these laws have three and five
+in `y`. Raised to eight with the single shared `continuous_order` kept, a law
+whose points differ in regularity declaring the worst of them (Giovanni,
+2026-11-18); `transformed_distrib`'s merge buffer and cap follow. What the knots
+are worth as cuts, measured on the properized MCP: with the kink at the location
+as the only cut the mass is out by 8.7e-11 against 4.4e-16, and the generic
+expected information does not converge on any component, all ten NaN in both the
+score and the hessian form, while with the knots declared the score form
+converges on all ten and the hessian form on the nine it marks valid, its
+`(mu, mu)` component being invalid where a regularity is zero.
+
+mpmath's `quad` is not to be trusted on `int_u^inf e^(-q)` far out in the tail,
+where the integrand spans hundreds of e-folds. At `lambda = 30`, `gamma = 2`,
+`V = 2` and `u = 18` it returned 2.2011e-201 with the knot as the only cut and
+2.1696e-201 with four more, against the value 2.1732381118224717e-201, on which
+three routes agree: the same quadrature with the integrand factored by
+`e^(-q(u))` and geometric subdivisions, at 60 and at 120 digits; Dawson's
+integral through mpmath's `erfi`; and the asymptotic expansion of Dawson's
+integral. The reference script now factors and subdivides, and it uses `log1p`
+on the side of the cumulative function that is close to one, where `1 - r` at
+400 bits rounds to one as soon as `r` falls below 2^-400 and its logarithm would
+read as zero.

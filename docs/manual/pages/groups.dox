@@ -187,6 +187,10 @@ parent here, in tree order; the module pages define their groups without
 \ingroup distrib_real */
 /** \addtogroup distrib_skewt
 \ingroup distrib_real */
+/** \addtogroup distrib_mcp
+\ingroup distrib_real */
+/** \addtogroup distrib_scad
+\ingroup distrib_real */
 
 /** \defgroup distrib_positive Continuous on the positive half-line
 \ingroup distrib

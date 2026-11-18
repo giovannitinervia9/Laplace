@@ -408,7 +408,7 @@ struct transformed_distrib {
 
   /**
    * \brief Writes every non-smooth point of \f$\log f\f$ in \f$y\f$: the images of the parent's, then the map's own.
-   * \param point Output buffer of six doubles, sorted on return, no point repeated.
+   * \param point Output buffer of sixteen doubles, sorted on return, no point repeated.
    * \param order The least order of continuity among them.
    * \return The number of points.
    */
@@ -437,13 +437,13 @@ struct transformed_distrib {
     return n;
   }
 
-  /// \brief Non-smooth points of \f$\log f\f$ in \f$y\f$. \return At most two, checked by transformed().
+  /// \brief Non-smooth points of \f$\log f\f$ in \f$y\f$. \return At most eight, checked by transformed().
   LAPLACE_HD distrib_kinks y_kinks() const {
-    double p[6];
+    double p[16];  // the parent's eight at most, plus the map's four
     int order;
     const int n = all_y_kinks(p, order);
     distrib_kinks k;
-    k.count = n < 2 ? n : 2;
+    k.count = n < 8 ? n : 8;
     for (int i = 0; i < k.count; ++i) k.point[i] = p[i];
     k.continuous_order = n > 0 ? order : 0;
     return k;
@@ -489,13 +489,13 @@ transformed_distrib<D> transformed(const D& parent, const bijector::scalar_bijec
     if (!std::isfinite(t.atom_image[i]))
       throw std::invalid_argument("transformed: the parent's atom at " + std::to_string(distrib_atom_point(parent, i)) +
                                   " has no finite image under the map");
-  double p[6];
+  double p[16];
   int order;
   const int n = t.all_y_kinks(p, order);
-  if (n > 2)
+  if (n > 8)
     throw std::invalid_argument("transformed: the parent's non-smooth points in y carried through the map, together "
                                 "with the map's own, are " + std::to_string(n) +
-                                ", and a distribution declares at most two");
+                                ", and a distribution declares at most eight");
   return t;
 }
 
