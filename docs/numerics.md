@@ -12353,3 +12353,55 @@ Open. The dense derivative layout over p for the difference map (binom(p +
 J - 1, J) doubles: 4 MB at p = 1000, J = 2; 1.3 GB at J = 3) where the true
 Hessian is banded (p (K + 1)); a banded layout comes with the engine. P must
 be separable.
+
+## SCAD and MCP: scad_penalty and mcp_penalty (2026-11-18)
+
+What. `scad_penalty` and `mcp_penalty` (include/laplace/penalty/nonconvex_penalty.hpp),
+pen(beta) = sum_j q(|beta_j|) with theta = (lambda, a) or (lambda, gamma)
+shared by all coordinates, lambda > 0, a > 1, gamma > 0. MCP (Zhang 2010):
+q = lambda u - u^2/(2 gamma) for u <= gamma lambda, gamma lambda^2/2 beyond.
+SCAD (Fan and Li 2001): lambda u for u <= lambda, lambda u - (u - lambda)^2
+/(2(a - 1)) up to a lambda (Fan and Li's (2 a lambda u - u^2 - lambda^2)
+/(2(a - 1)) rewritten), (a + 1) lambda^2/2 beyond. Class unnormalizable, C0 in
+beta (kink at 0), C1 at the knots and in theta, rho = 1/gamma and 1/(a - 1).
+Derivatives J any (J >= 3 zero), K <= 1; sign(0) = 0 at beta_j = 0, the inner
+piece at the knots. No new special functions: piecewise polynomials.
+
+**Prox.** MCP, t <= gamma: 0 for u <= t lambda, s (u - t lambda) gamma/(gamma - t)
+up to gamma lambda, v beyond. SCAD, t <= a - 1: s (u - t lambda)_+ up to
+lambda (1 + t), s (u - t (a lambda - u)/(a - 1 - t)) up to a lambda, v beyond.
+Written with the exact differences gamma - t, a lambda - u and a - 1 - t
+(as an independent R implementation does), not 1 - t/gamma or (a - 1) u -
+t a lambda, which round first as t approaches the bound. Both forms hold at
+t rho = 1 (the middle region is empty), accepted up to a relative 4 eps so that
+t = 1/rho computed in floating point passes; t rho > 1 gives NaN. Checked
+before writing (Python, 500 random cases per regime against a refined grid):
+the closed forms reach the minimum within 5.3e-15 in the objective, and so do
+the global minimizers for t rho > 1, not implemented (MCP the hard threshold at
+lambda sqrt(t gamma), SCAD the better of two candidates).
+
+**Tests** (tests/penalty/test_nonconvex.cpp, kernels on gcc and CUDA; cases
+MCP (0.7, 1.5), (2, 3), (1, 0.4), SCAD (0.7, 2.2), (2, 3.7), (1, 1.3)):
+
+| check | gcc | CUDA | bound |
+|---|---|---|---|
+| value against the original forms (relative) | 4.2e-16 | 4.2e-16 | 2e-15 |
+| J = 1, 2 against central differences (h = 1e-6) | 1.2e-9 | 1.2e-9 | 5e-9 |
+| K = 1, J = 0, 1, 2 against central differences | 1.7e-9 | 1.4e-9 | 5e-9 |
+| prox optimality residual / max(1, abs(v)) | 2.2e-16 | 2.2e-16 | 1e-15 |
+| prox objective above golden section (relative) | 5.9e-16 | 5.9e-16 | 2e-15 |
+| rho against the grid maximum of -pen'' | 0 | 0 | exact |
+| diagonal map against q(w_j abs(beta_j)) and the scaled prox | 0 | 5.2e-18 | 1e-16 |
+| first differences, J = 1 against central differences | 2.4e-9 | 2.4e-9 | 5e-9 |
+| 744 frozen R rows (value, gradient, q'', prox) | 1.5e-16 | 1.5e-16 | 5e-16 |
+
+The conventions at 0 and at the knots hold by exact equality; value, J = 1
+and d/dtheta are continuous across the knots to 1e-10 at relative distance
+1e-12; t rho > 1 gives NaN; the scalar and per-coordinate prox overloads agree
+exactly. 5 cases, 7816 assertions, none failing on gcc and CUDA (the whole
+laplace_tests green on CUDA). The finite-difference sizes are the truncation
+error of the differences.
+
+Open. The properized versions (a Gaussian tail beyond the last knot, proper,
+for REML) are distribs, written by the distributions work; their Z needs
+Dawson's function F(x) = e^{-x^2} int_0^x e^{s^2} ds, not in Laplace yet.

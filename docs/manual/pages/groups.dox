@@ -287,6 +287,9 @@ parent here, in tree order; the module pages define their groups without
 /** \defgroup penalty_prox Proximal operators
 \ingroup penalty
 \brief The proximal operator of a penalty, forwarded from the distribution's prox_y, and the weak-convexity bound on the step. */
+/** \defgroup penalty_nonsmooth Non-smooth penalties
+\ingroup penalty
+\brief SCAD and MCP: separable non-convex penalties with a flat tail, unnormalizable, with closed-form proximal operators. */
 
 /** \defgroup optimizers Optimizers
 \brief Objectives, stopping rules, line searches and the dense curvature solver for unconstrained minimization on the host. */

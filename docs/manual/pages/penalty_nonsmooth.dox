@@ -1,0 +1,153 @@
+/** \addtogroup penalty_nonsmooth
+
+The two non-convex penalties of the library, SCAD and MCP. Both are separable sums of one scalar function of the absolute value of each coefficient, both are constant beyond a threshold, and both have a closed-form proximal operator. This page defines them, gives their derivatives in the coefficients and in the hyperparameters, their proximal operators and their accuracy. Include `<laplace/penalty/nonconvex_penalty.hpp>`. The types \ref laplace::penalty::mcp_penalty "mcp_penalty" and \ref laplace::penalty::scad_penalty "scad_penalty" live in namespace `laplace::penalty`. Their members are marked `LAPLACE_HD`, so they run on the host and inside Kokkos kernels. Each part is checked against the original forms, against central differences and against optimality conditions, with the bounds given in the Accuracy section.
+
+## Definition
+
+Let \f$\beta = (\beta_1, \dots, \beta_d) \in \mathbb{R}^d\f$ be the coefficients, where \f$d\f$ is the dimension of the penalty. Let \f$\theta\f$ be the vector of hyperparameters, which is the same for every coordinate. The penalty is the sum of one scalar function \f$q\f$ over the coordinates,
+\f[
+\mathrm{pen}(\beta;\theta) = \sum_{j=1}^{d} q(|\beta_j|;\theta).
+\f]
+Here \f$q(u;\theta)\f$ is written with the argument \f$u \ge 0\f$, the absolute value of a coordinate. Its derivatives in \f$u\f$ are written with primes.
+
+The minimax concave penalty (MCP) of Zhang (2010) has the hyperparameters \f$\theta = (\lambda, \gamma)\f$, with the level \f$\lambda > 0\f$ and the concavity \f$\gamma > 0\f$. Its scalar function is
+\f[
+q(u;\theta) = \begin{cases}
+\lambda u - \dfrac{u^2}{2\gamma}, & u \le \gamma\lambda, \\
+\dfrac{\gamma\lambda^2}{2}, & u > \gamma\lambda.
+\end{cases}
+\f]
+
+The smoothly clipped absolute deviation penalty (SCAD) of Fan and Li (2001) has the hyperparameters \f$\theta = (\lambda, a)\f$, with \f$\lambda > 0\f$ and \f$a > 1\f$. Its scalar function is
+\f[
+q(u;\theta) = \begin{cases}
+\lambda u, & u \le \lambda, \\
+\lambda u - \dfrac{(u - \lambda)^2}{2(a - 1)}, & \lambda < u \le a\lambda, \\
+\dfrac{(a + 1)\lambda^2}{2}, & u > a\lambda.
+\end{cases}
+\f]
+The middle piece equals \f$(2a\lambda u - u^2 - \lambda^2)/(2(a-1))\f$, the form in which Fan and Li (2001) wrote it. In both penalties the second hyperparameter is called the shape parameter. The code stores it in the member `shape` of the state, and the text below calls it \f$\gamma\f$ for MCP and \f$a\f$ for SCAD.
+
+The penalty accepts every \f$\gamma > 0\f$ for MCP and every \f$a > 1\f$ for SCAD. Beyond the last knot the scalar function is constant, so \f$\exp(-\mathrm{pen})\f$ has an infinite integral for every \f$\theta\f$. The penalty is therefore not minus the logarithm of a proper prior, in the sense of \ref penalty_framework "Framework". The knots are \f$u = \gamma\lambda\f$ for MCP and \f$u = \lambda\f$ and \f$u = a\lambda\f$ for SCAD.
+
+## Hyperparameters and descriptors
+
+The class `separable_nonconvex_penalty<Shape>` is a template on the shape of the scalar function, and `mcp_penalty` and `scad_penalty` are its two instances. The penalty is constructed with its dimension, as `mcp_penalty{d}`, and the member `size` holds \f$d\f$. The member `theta_size()` returns 2, and `state_size()` and `scratch_size()` return 0, so the penalty needs no scratch memory. The function `theta_state(theta, scratch)` reads \f$\theta\f$ into a \ref laplace::penalty::nonconvex_penalty_state "nonconvex_penalty_state", whose members are the level `lambda` and the shape `shape`.
+
+The domains of the hyperparameters are listed in \ref laplace::penalty::mcp_penalty_theta_params "mcp_penalty_theta_params", with \f$\lambda > 0\f$ and \f$\gamma > 0\f$, and in \ref laplace::penalty::scad_penalty_theta_params "scad_penalty_theta_params", with \f$\lambda > 0\f$ and \f$a > 1\f$. Both arrays state that the hyperparameters are continuously differentiable.
+
+The descriptors are the same for both penalties, and their meaning is given on \ref penalty_framework "Framework". The penalty is `unnormalizable`. Its regularity in the coefficients is 0, with a kink at each coordinate equal to zero, so the kinks are `per_coordinate`. The proximal operator is `closed_form`, the structure is `separable`, the regularity in \f$\theta\f$ is 1, the penalty is not quadratic in \f$\theta\f$, and it has no scale mixture. At each knot the first derivative in \f$u\f$ is continuous and the second derivative jumps. The knots are therefore not kinks. The first derivatives in \f$\theta\f$ are continuous across a knot, which moves with \f$\theta\f$, but the second ones jump. This is why the penalty is \f$C^1\f$ in \f$\theta\f$.
+
+The weak-convexity constant \f$\rho = \sup(-\mathrm{pen}'')\f$ is given by `weak_convexity(theta)`. It equals \f$1/\gamma\f$ for MCP and \f$1/(a-1)\f$ for SCAD. The role of \f$\rho\f$ in the proximal operator is explained on \ref penalty_prox "Proximal operators". Whether a penalized objective is convex depends on \f$\rho\f$ and on the rest of that objective.
+
+## Derivatives
+
+The member `value_dbeta_dk<J, K>(st, beta, idx, out, scratch)` computes the derivative of order \f$J\f$ in \f$\beta\f$ and of order \f$K\f$ in \f$\theta\f$. Only \f$K = 0\f$ and \f$K = 1\f$ are allowed, since a `static_assert` refuses \f$K \ge 2\f$ and the penalty is \f$C^1\f$ in \f$\theta\f$. The index `idx[0]` is 0 for the level \f$\lambda\f$ and 1 for the shape parameter. The output is as follows. For \f$J = 0\f$ one double is written, which is the value when \f$K = 0\f$ and the derivative in \f$\theta\f$ summed over the coordinates when \f$K = 1\f$. For \f$J = 1\f$ and \f$J = 2\f$ one double per coordinate is written. The Hessian in \f$\beta\f$ is diagonal, so the output for \f$J = 2\f$ is its diagonal. For \f$J \ge 3\f$ the derivative is zero almost everywhere, and the member returns `false` and leaves the output untouched.
+
+Write \f$\operatorname{sgn}(\beta_j)\f$ for the sign of \f$\beta_j\f$. The first derivative in \f$\beta_j\f$ is \f$\operatorname{sgn}(\beta_j)\, q'(|\beta_j|)\f$, and the second is \f$q''(|\beta_j|)\f$. At \f$\beta_j = 0\f$ the first derivative uses \f$\operatorname{sgn}(0) = 0\f$. At a knot every derivative is that of the inner piece, the piece with \f$u\f$ less than or equal to the knot. The table of the derivatives in \f$u\f$ is the following.
+
+| Piece | \f$q'(u)\f$ | \f$q''(u)\f$ |
+|---|---|---|
+| MCP, \f$u \le \gamma\lambda\f$ | \f$\lambda - u/\gamma\f$ | \f$-1/\gamma\f$ |
+| MCP, \f$u > \gamma\lambda\f$ | \f$0\f$ | \f$0\f$ |
+| SCAD, \f$u \le \lambda\f$ | \f$\lambda\f$ | \f$0\f$ |
+| SCAD, \f$\lambda < u \le a\lambda\f$ | \f$(a\lambda - u)/(a-1)\f$ | \f$-1/(a-1)\f$ |
+| SCAD, \f$u > a\lambda\f$ | \f$0\f$ | \f$0\f$ |
+
+The derivatives in \f$\theta\f$ of \f$q\f$ are given in the following table, with \f$\partial\f$ the partial derivative with respect to the level or to the shape parameter.
+
+| Piece | \f$\partial q / \partial\lambda\f$ | \f$\partial q / \partial\gamma\f$ or \f$\partial q / \partial a\f$ |
+|---|---|---|
+| MCP, \f$u \le \gamma\lambda\f$ | \f$u\f$ | \f$u^2/(2\gamma^2)\f$ |
+| MCP, \f$u > \gamma\lambda\f$ | \f$\gamma\lambda\f$ | \f$\lambda^2/2\f$ |
+| SCAD, \f$u \le \lambda\f$ | \f$u\f$ | \f$0\f$ |
+| SCAD, \f$\lambda < u \le a\lambda\f$ | \f$(au - \lambda)/(a-1)\f$ | \f$(u-\lambda)^2/(2(a-1)^2)\f$ |
+| SCAD, \f$u > a\lambda\f$ | \f$(a+1)\lambda\f$ | \f$\lambda^2/2\f$ |
+
+The derivatives of \f$q'\f$ and \f$q''\f$ in \f$\theta\f$ are the mixed derivatives, and they are listed in the following paragraph. For MCP on the inner piece, \f$\partial q'/\partial\lambda = 1\f$, \f$\partial q'/\partial\gamma = u/\gamma^2\f$, \f$\partial q''/\partial\lambda = 0\f$ and \f$\partial q''/\partial\gamma = 1/\gamma^2\f$. For SCAD on the middle piece, \f$\partial q'/\partial\lambda = a/(a-1)\f$, \f$\partial q'/\partial a = (u-\lambda)/(a-1)^2\f$, \f$\partial q''/\partial\lambda = 0\f$ and \f$\partial q''/\partial a = 1/(a-1)^2\f$. On the inner piece of SCAD, \f$\partial q'/\partial\lambda = 1\f$ and the other three mixed derivatives are zero. On the outer piece of both penalties, all four mixed derivatives are zero. When the derivative in \f$\beta_j\f$ is of order 1, the mixed derivatives of \f$q'\f$ in \f$\theta\f$ carry the factor \f$\operatorname{sgn}(\beta_j)\f$; the mixed derivatives of \f$q''\f$ do not.
+
+The first table shows that \f$q'\f$ is continuous at each knot, while \f$q''\f$ jumps. The second table shows that the derivatives of \f$q\f$ in \f$\theta\f$ match from both sides of each knot, which moves with \f$\theta\f$. This is the continuity in \f$\theta\f$ stated above.
+
+## Proximal operator
+
+The proximal operator with step \f$t > 0\f$ at a point \f$v\f$ is defined on \ref penalty_prox "Proximal operators". Because the penalty is separable, the minimization splits into one scalar problem per coordinate. The member `prox_beta(st, v, t, out, scratch)` takes one scalar step \f$t\f$ for all coordinates. The overload that takes a pointer to one step \f$t_j\f$ per coordinate solves the problem with the step \f$t_j\f$ for coordinate \f$j\f$. The two overloads agree exactly.
+
+Write \f$z = |v|\f$ for the absolute value of the point and \f$\operatorname{sgn}(v)\f$ for its sign. For MCP with \f$t \le \gamma\f$ the minimizer is
+\f[
+\operatorname{prox}_t(v) = \begin{cases}
+0, & z \le t\lambda, \\
+\operatorname{sgn}(v)\,\dfrac{(z - t\lambda)\gamma}{\gamma - t}, & t\lambda < z \le \gamma\lambda, \\
+v, & z > \gamma\lambda.
+\end{cases}
+\f]
+For SCAD with \f$t \le a - 1\f$ the minimizer is
+\f[
+\operatorname{prox}_t(v) = \begin{cases}
+\operatorname{sgn}(v)\max(z - t\lambda,\, 0), & z \le \lambda(1 + t), \\
+\operatorname{sgn}(v)\left(z - \dfrac{t(a\lambda - z)}{a - 1 - t}\right), & \lambda(1 + t) < z \le a\lambda, \\
+v, & z > a\lambda.
+\end{cases}
+\f]
+The bounds \f$t \le \gamma\f$ and \f$t \le a - 1\f$ are the conditions \f$t\rho \le 1\f$, since \f$\rho = 1/\gamma\f$ for MCP and \f$\rho = 1/(a-1)\f$ for SCAD. At \f$t\rho = 1\f$ the middle piece is empty, and the formulas above are the limit forms. The code accepts \f$t\rho = 1\f$ up to a relative \f$4\epsilon\f$, where \f$\epsilon\f$ is the machine epsilon, so that a step \f$t = 1/\rho\f$ computed in floating point is accepted. For \f$t\rho > 1\f$ every output is NaN, because the subproblem is then not convex and its minimizer is not unique.
+
+With \f$t = 1\f$, which is admissible for \f$a \ge 2\f$, the three pieces of the SCAD formula are the thresholding rule of Fan and Li (2001). The code forms the differences \f$\gamma - t\f$ for MCP, and \f$a\lambda - z\f$ and \f$a - 1 - t\f$ for SCAD, directly from their operands. It does not form them from rounded quantities close to the bound on \f$t\f$.
+
+## Through a linear map
+
+A non-convex penalty can be applied to a linear map of the coefficients, as described on \ref penalty_linear_map "Linear maps". With the diagonal map \f$u = W\beta\f$, where \f$W = \operatorname{diag}(w)\f$ and every weight \f$w_j > 0\f$, the penalty is \f$\sum_j q(w_j|\beta_j|;\theta)\f$. It stays separable, with a kink at each coordinate equal to zero, and it keeps a closed-form proximal operator. The \f$j\f$-th output of the proximal operator is then \f$\operatorname{prox}_{t w_j^2}(w_j v_j)/w_j\f$, which needs \f$t w_j^2 \rho \le 1\f$ for each \f$j\f$. The normalizing constant of the map is zero for an unnormalizable penalty, so the mapped penalty remains `unnormalizable`.
+
+With the first difference map \f$u_i = \beta_{i+1} - \beta_i\f$ for \f$i = 1, \dots, d-1\f$, the penalty is \f$\sum_i q(|\beta_{i+1} - \beta_i|;\theta)\f$. It is coupled through the differences. Its kinks lie on the hyperplanes where a difference is zero, its structure is `coupled`, and its proximal operator is not available, so the descriptor `prox` is `none`. The class stays `unnormalizable`.
+
+## Accuracy
+
+The tests in `tests/penalty/test_nonconvex.cpp` run on the gcc build and on the CUDA build. They evaluate the functions inside Kokkos kernels and compare the results on the host. The six test cases are MCP with \f$(\lambda, \gamma)\f$ equal to \f$(0.7, 1.5)\f$, \f$(2, 3)\f$ and \f$(1, 0.4)\f$, and SCAD with \f$(\lambda, a)\f$ equal to \f$(0.7, 2.2)\f$, \f$(2, 3.7)\f$ and \f$(1, 1.3)\f$. The bounds are those written in the test code. The measurement conventions are on the page \ref accuracy "How accuracy is measured".
+
+The value is compared with Zhang's form for MCP and with Fan and Li's original form for SCAD, at up to 800 points per case. The points are half positive and half negative, and points within \f$10^{-3}\lambda\f$ of a knot are skipped. The largest relative error is \f$4.2 \times 10^{-16}\f$, and the test requires it to be below \f$2 \times 10^{-15}\f$.
+
+The first derivative in \f$\beta\f$ is compared with central differences of the value, and the second derivative in \f$\beta\f$ with central differences of the first, both with step \f$10^{-6}\f$. The largest difference is \f$1.2 \times 10^{-9}\f$, and the test requires it to be below \f$5 \times 10^{-9}\f$. The derivatives in \f$\theta\f$ of orders 0, 1 and 2 are compared with central differences in the level and in the shape parameter, with the same step. The largest difference is \f$1.7 \times 10^{-9}\f$ (\f$1.4 \times 10^{-9}\f$ on the CUDA build), and the test requires it to be below \f$5 \times 10^{-9}\f$. These sizes are the truncation error of the differences, not the error of the formulas.
+
+At \f$\beta_j = 0\f$ the first derivative is exactly zero, and the second derivative is \f$-1/\gamma\f$ for MCP and 0 for SCAD. At each knot, the second derivatives in \f$\beta\f$ and in \f$\theta\f$ equal those of the inner piece exactly. At points at relative distance \f$10^{-12}\f$ on either side of a knot, the value, the first derivative in \f$\beta\f$ and the derivatives in \f$\theta\f$ of order 0 agree to within \f$10^{-10}\f$.
+
+The proximal operator is tested at the steps \f$10^{-8}\f$, \f$0.1/\rho\f$, \f$0.5/\rho\f$, \f$0.99/\rho\f$ and \f$1/\rho\f$, the last computed in floating point. The points are zero, the knots, the points between them and points beyond them, up to \f$50\lambda\f$ in magnitude, with both signs. The optimality residual is \f$t\,q'(|b|)\operatorname{sgn}(b) + b - v\f$ at the output \f$b\f$, divided by \f$\max(1, |v|)\f$. Its largest value is \f$2.2 \times 10^{-16}\f$, and the test requires it to be below \f$10^{-15}\f$. The objective at the output is compared with the minimum found by a 300-step golden-section search. The largest relative excess is \f$5.9 \times 10^{-16}\f$, and the test requires it to be below \f$2 \times 10^{-15}\f$. At the steps \f$1.01/\rho\f$ and \f$10/\rho\f$ the output is NaN.
+
+The weak-convexity constant is checked on a grid of 2001 points from 0 to six times the last knot, that is \f$\gamma\lambda\f$ for MCP and \f$a\lambda\f$ for SCAD. The largest value of \f$-\mathrm{pen}''\f$ on this grid equals `weak_convexity(theta)` exactly.
+
+With the diagonal map and weights from 0.5 to 2.5 on nine coefficients, the value, the derivatives and the proximal operator equal the per-coordinate forms at \f$w_j\beta_j\f$. The largest difference is 0 (\f$5.2 \times 10^{-18}\f$ on the CUDA build), and the test requires it to be below \f$10^{-16}\f$. With the first difference map, the largest difference over the value and the first derivative is \f$2.4 \times 10^{-9}\f$. The value is compared with the sum of \f$q\f$ over the differences, and the first derivative with central differences, and the test requires the difference to be below \f$5 \times 10^{-9}\f$.
+
+Finally, 744 values, first and second derivatives in \f$\beta\f$, and proximal outputs are computed by an independent implementation in R and frozen in the test data. The worst relative difference is \f$1.5 \times 10^{-16}\f$, and the test requires it to be below \f$5 \times 10^{-16}\f$.
+
+| Check | Largest difference | Test bound |
+|---|---|---|
+| Value against the original forms | \f$4.2 \times 10^{-16}\f$ | \f$2 \times 10^{-15}\f$ |
+| First and second derivatives in \f$\beta\f$ | \f$1.2 \times 10^{-9}\f$ | \f$5 \times 10^{-9}\f$ |
+| Derivatives in \f$\theta\f$ | \f$1.7 \times 10^{-9}\f$ (\f$1.4 \times 10^{-9}\f$ on the CUDA build) | \f$5 \times 10^{-9}\f$ |
+| Optimality residual of the proximal operator | \f$2.2 \times 10^{-16}\f$ | \f$10^{-15}\f$ |
+| Excess over the golden-section minimum | \f$5.9 \times 10^{-16}\f$ | \f$2 \times 10^{-15}\f$ |
+| Diagonal map | 0 (\f$5.2 \times 10^{-18}\f$ on the CUDA build) | \f$10^{-16}\f$ |
+| First differences | \f$2.4 \times 10^{-9}\f$ | \f$5 \times 10^{-9}\f$ |
+| Frozen values from the independent implementation | \f$1.5 \times 10^{-16}\f$ | \f$5 \times 10^{-16}\f$ |
+
+## Example
+
+The following call computes the value, the gradient and a proximal step of a SCAD penalty on four coefficients inside a Kokkos kernel.
+
+```cpp
+Kokkos::parallel_for("scad_example", Kokkos::RangePolicy<>(0, 1), KOKKOS_LAMBDA(int) {
+  const laplace::penalty::scad_penalty pen{4};
+  const double theta[2] = {0.7, 2.2};  // level lambda, shape a
+  const auto st = pen.theta_state(theta, nullptr);
+  const double beta[4] = {0.0, 0.5, -1.5, 3.0};
+  const double value = pen.value(st, beta, nullptr);
+  double grad[4];
+  pen.template value_dbeta_dk<1, 0>(st, beta, nullptr, grad, nullptr);
+  double b_hat[4];
+  pen.prox_beta(st, beta, 0.5, b_hat, nullptr);
+});
+```
+
+## References
+
+- C.-H. Zhang (2010), Nearly unbiased variable selection under minimax concave penalty, The Annals of Statistics, 38(2), 894-942. https://doi.org/10.1214/09-aos729
+- J. Fan and R. Li (2001), Variable Selection via Nonconcave Penalized Likelihood and its Oracle Properties, Journal of the American Statistical Association, 96(456), 1348-1360. https://doi.org/10.1198/016214501753382273
+
+*/

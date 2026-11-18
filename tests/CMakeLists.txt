@@ -79,6 +79,7 @@ set(LAPLACE_TEST_SOURCES
   penalty/test_linear_map.cpp
   distrib/test_univariate_as_multivariate.cpp
   penalty/test_prox.cpp
+  penalty/test_nonconvex.cpp
   distrib/test_mvstudent_t.cpp
   distrib/test_mvstudent_t_improper.cpp
   distrib/test_simplex.cpp
