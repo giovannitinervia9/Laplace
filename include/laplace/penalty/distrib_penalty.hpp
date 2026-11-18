@@ -15,7 +15,9 @@
 //
 // The descriptors of the penalty are those of M, written in
 // distrib_penalty_traits<M>, specialized for the laws that have a penalty
-// reading (so far mvgaussian2_distrib<S>); another M does not compile.
+// reading (so far mvgaussian2_distrib<S>); another M does not compile. The
+// prox descriptor is not among them: it follows from M's optional prox_y,
+// which prox_beta() forwards at mu_0 (section 5c).
 #pragma once
 
 #include <laplace/distrib/multivariate_core.hpp>
@@ -48,7 +50,7 @@ namespace laplace::penalty {
  * Undefined for a general `M`: it is specialized for each law that has a
  * penalty reading. For `distrib::mvgaussian2_distrib<S>` the penalty is
  * quadratic: \f$C^\infty\f$ in \f$\beta\f$ and in \f$\theta\f$, convex
- * (`weak_convexity` is 0), without kinks or proximal operator, coupled
+ * (`weak_convexity` is 0), without kinks, coupled
  * through \f$Q\f$, and with \f$Q\f$ linear in the weights \f$\lambda_k\f$
  * exactly when `S` is `pdmat::weighted_sum_psdmat`.
  *
@@ -56,6 +58,14 @@ namespace laplace::penalty {
  */
 template <class M>
 struct distrib_penalty_traits;
+
+namespace detail_penalty {
+// M has the optional member prox_y (note/penalties.md section 5c)
+template <class M>
+concept has_prox_y = requires(const M m, const typename M::state_type& s, const double* p, double* q) {
+  m.prox_y(s, p, p, 0.0, q, q);
+};
+}  // namespace detail_penalty
 
 /**
  * \ingroup penalty_distrib_penalty
@@ -68,8 +78,6 @@ struct distrib_penalty_traits<distrib::mvgaussian2_distrib<S>> {
   static constexpr int beta_regularity = distrib::infinitely_smooth;
   /// Kinks: none.
   static constexpr penalty_kink_geometry kinks = penalty_kink_geometry::none;
-  /// Proximal operator: none.
-  static constexpr penalty_prox_kind prox = penalty_prox_kind::none;
   /// Structure: coupled through the precision matrix.
   static constexpr penalty_structure structure = penalty_structure::coupled;
   /// Regularity in \f$\theta\f$: \f$C^\infty\f$.
@@ -101,6 +109,13 @@ struct distrib_penalty {
                 "distrib_penalty: a degenerate distribution is a constraint, not a penalty");
   static_assert(distrib::detail_mv::dense_param_index<M>(1) < 0,
                 "distrib_penalty: M has a dense parameter besides the location");
+  // A penalty is minus the log of a density with respect to Lebesgue measure in
+  // beta (Giovanni, 2026-11-17): a discrete law has none, and an atom is a point
+  // of infinite density, where the penalty would be -infinity.
+  static_assert(M::kind == distrib::distrib_kind::continuous,
+                "distrib_penalty: a discrete law has no density in beta, so it gives no penalty");
+  static_assert(!requires(const M m) { m.n_coord_atoms(0); },
+                "distrib_penalty: a law with atoms has infinite density at them, so it gives no penalty");
   /// Compile-time penalty descriptor traits of `M`.
   using traits = distrib_penalty_traits<M>;
 
@@ -117,8 +132,9 @@ struct distrib_penalty {
   static constexpr int beta_regularity = traits::beta_regularity;
   /// Kink geometry.
   static constexpr penalty_kink_geometry kinks = traits::kinks;
-  /// Proximal operator availability.
-  static constexpr penalty_prox_kind prox = traits::prox;
+  /// Proximal operator availability: `closed_form` when `M` has `prox_y`, `none` otherwise.
+  static constexpr penalty_prox_kind prox =
+      detail_penalty::has_prox_y<M> ? penalty_prox_kind::closed_form : penalty_prox_kind::none;
   /// Coupling of the coordinates.
   static constexpr penalty_structure structure = traits::structure;
   /// Regularity in \f$\theta\f$.
@@ -211,6 +227,22 @@ struct distrib_penalty {
     const int n = distrib::mv_block_tensor_size(distribution, distrib::y_slot, J);
     for (int k = 0; k < n; ++k) out[k] = -out[k];
     return true;
+  }
+
+  /**
+   * \brief Proximal operator \f$\arg\min_b \{\mathrm{pen}(b; \theta) + \lVert b - v\rVert^2/(2t)\}\f$.
+   *
+   * `M::prox_y` at the location \f$\mu_0\f$; present when `M` has it.
+   * \param st State from `theta_state()`.
+   * \param v Point, length `dim()`.
+   * \param t Step \f$t > 0\f$; for a weakly convex penalty the minimizer is unique when \f$t\rho < 1\f$.
+   * \param out Minimizer, length `dim()`.
+   * \param w Scratch of `scratch_size()` doubles.
+   */
+  LAPLACE_PENALTY_FORWARD_HD void prox_beta(const state_type& st, const double* v, double t, double* out, double* w) const
+    requires detail_penalty::has_prox_y<M>
+  {
+    distribution.prox_y(st, v, location(w), t, out, w);
   }
 
  private:

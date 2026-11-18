@@ -44,6 +44,10 @@ constexpr param_table<D> make_param_table() {
 }
 template <class D>
 inline constexpr param_table<D> params_of = make_param_table<D>();
+// whether D has the optional prox_y(v, t) (note/penalties.md section 5c); a named concept,
+// since nvcc rejects the requires-expression written inline in a member's constraint
+template <class D>
+concept has_prox_y = requires(const D d, double a) { d.prox_y(a, a); };
 }  // namespace detail_uam
 
 /**
@@ -159,6 +163,23 @@ struct univariate_as_multivariate {
   LAPLACE_HD bool logpdf_dk(const state_type& st, const double* y, const double* x, const int* idx, double* out,
                             double* w) const {
     return logpdf_dy_dk<0, K, A...>(st, y, x, idx, out, w);
+  }
+
+  /**
+   * \brief Proximal operator in \f$y\f$, `D::prox_y` at location \f$x_0\f$; present when `D` has it.
+   * \param st State from `theta_state()`.
+   * \param v Point, length 1.
+   * \param x Location, length 1.
+   * \param t Step \f$t > 0\f$.
+   * \param out Minimizer, length 1.
+   * \param w Unused.
+   */
+  LAPLACE_HD void prox_y(const state_type& st, const double* v, const double* x, double t, double* out,
+                         double* w) const
+    requires detail_uam::has_prox_y<D>
+  {
+    (void)w;
+    out[0] = law(x[0], st.theta).prox_y(v[0], t);
   }
 
  private:

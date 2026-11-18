@@ -1,0 +1,59 @@
+/** \addtogroup penalty_prox
+
+The proximal operator of a distribution, and of the penalty that the distribution defines. This page defines the operator, lists the laws whose closed forms the library implements, and gives the measured accuracy of those forms. The univariate laws have the member `prox_y(v, t)`, the multivariate laws have `prox_y(st, v, x, t, out, w)`, and \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>" has `prox_beta()`. Include `<laplace/penalty/distrib_penalty.hpp>` for the penalty and the header of each law for its `prox_y`. The members are marked `LAPLACE_HD` and run on the host and inside Kokkos kernels. On the test grid the closed forms satisfy the optimality condition to \f$4 \times 10^{-16}\f$ and lie within \f$10^{-7}\f$ of a direct numerical minimization.
+
+## Definition
+
+Let \f$p(y \mid \mu, \theta)\f$ be the density of a continuous law in the observation \f$y\f$, with location \f$\mu\f$ and the other parameters \f$\theta\f$ held fixed. The proximal operator with step \f$t > 0\f$ maps a point \f$v\f$ to the point
+\f[
+\operatorname{prox}_t(v) = \operatorname*{arg\,min}_{y} \left\{ -\log p(y \mid \mu, \theta) + \frac{(y - v)^2}{2t} \right\}.
+\f]
+Here \f$y\f$ is the variable of the minimization, \f$v\f$ is the point that is mapped, and \f$t\f$ is the step. The operator belongs to the distribution. Its member `prox_y` is optional: a law has it only when it has a closed form that the library implements, and the presence of the member is detected at compile time with a `requires` expression. No concept requires it.
+
+## Members
+
+For a univariate law the member is `double prox_y(double v, double t) const`. Its parameters are the struct's members, as in `logpdf(y)`. For a multivariate law the member is `void prox_y(const state_type& st, const double* v, const double* x, double t, double* out, double* w) const`. Here `x` is the location \f$\mu\f$, `out` receives the minimizer and has length `dim()`, and `w` is scratch of `scratch_size()` doubles.
+
+## Closed forms
+
+Let \f$u = v - \mu\f$ be the offset of the point from the location, and let
+\f[
+S(u, k) = \operatorname{sgn}(u) \max(|u| - k, 0)
+\f]
+be the soft threshold at the level \f$k \ge 0\f$. The three univariate laws with a closed form have the following minimizers. Here \f$\sigma\f$ is the scale of \ref distrib_laplace1 "laplace1", \f$\lambda\f$ is the rate of \ref distrib_laplace2 "laplace2" and the penalty weight of \ref distrib_enet "enet", and \f$\alpha \in (0, 1)\f$ is the mixing weight of \ref distrib_enet "enet".
+
+| Law | Threshold \f$k\f$ | Minimizer |
+|---|---|---|
+| \ref distrib_laplace1 "laplace1" | \f$t/\sigma\f$ | \f$\mu + S(u, t/\sigma)\f$ |
+| \ref distrib_laplace2 "laplace2" | \f$t\lambda\f$ | \f$\mu + S(u, t\lambda)\f$ |
+| \ref distrib_enet "enet" | \f$t\lambda\alpha\f$ | \f$\mu + S(u, t\lambda\alpha) / (1 + t\lambda(1 - \alpha))\f$ |
+
+The minimizer is \f$\mu\f$ whenever \f$|u|\f$ does not exceed the threshold. The two Laplace laws compute the minimizer as \f$\mu + (u - k)\f$ when \f$u > 0\f$ and as \f$\mu + (u + k)\f$ when \f$u < 0\f$, so that rounding never moves the result to the other side of \f$\mu\f$. The Gaussian laws, the Student t laws, the pseudo-Huber law and the multivariate Gaussian law \ref distrib_mvgaussian2 "mvgaussian2" have no `prox_y`.
+
+## Penalty
+
+The penalty \f$\mathrm{pen}(\beta) = -\log p_M(\beta \mid \mu_0, \theta)\f$ of \ref penalty_distrib_penalty "Distribution penalty" has the member `prox_beta(st, v, t, out, w)`, which calls `M::prox_y` at the prior location \f$\mu_0\f$. Here \f$\mu_0\f$ is a fixed vector that the penalty does not own, and a null pointer stands for the zero vector. The member returns the minimizer of \f$\mathrm{pen}(b) + \lVert b - v \rVert^2 / (2t)\f$ over \f$b\f$. The descriptor `prox` of the penalty is `penalty_prox_kind::closed_form` when `M` has `prox_y` and `penalty_prox_kind::none` otherwise, and `prox_beta()` exists only in the first case.
+
+## Step and weak convexity
+
+Let \f$\rho = \sup(-\mathrm{pen}'')\f$ be the weak-convexity constant, where \f$\mathrm{pen}''\f$ is the second derivative of the penalty and the supremum is taken over the argument off the kink. The member `weak_convexity(theta)` returns \f$\rho\f$ (see \ref penalty_framework "Framework"). When \f$\rho = 0\f$ the minimization above has a unique solution for every \f$t > 0\f$. When \f$\rho > 0\f$ the objective is strongly convex, and its minimizer unique, when \f$t\rho < 1\f$. The three laws with `prox_y` are convex, so their \f$\rho\f$ is \f$0\f$. The weak-convexity constants of the Student penalties are given on \ref distrib_independent_product "Independent product".
+
+## Accuracy
+
+The tests in `tests/penalty/test_prox.cpp` check the closed forms on the gcc build and on the CUDA build, where the largest values agree with those below except the optimality residual of laplace1, \f$2.0 \times 10^{-16}\f$. The optimality and golden-section checks run inside a Kokkos kernel. They take the steps \f$t\f$ equal to \f$10^{-8}\f$, \f$10^{-3}\f$, \f$0.1\f$, \f$1\f$, \f$3\f$, \f$10^{3}\f$ and \f$10^{8}\f$, and the points with \f$v - \mu\f$ equal to \f$0\f$, \f$\pm k\f$, \f$\pm k(1 + 10^{-12})\f$, \f$k/2\f$, \f$0.37\f$, \f$-2.5\f$ and \f$10^{8}\f$, where \f$k = t\,\kappa\f$ is the threshold and \f$\kappa\f$ is \f$1/\sigma\f$, \f$\lambda\f$ or \f$\lambda\alpha\f$ according to the law. The scale or rate is \f$0.3\f$, \f$1\f$ or \f$7\f$, and the mixing weights of the elastic net are \f$10^{-9}\f$, \f$1/2\f$ and \f$1 - 10^{-9}\f$. The weights \f$0\f$ and \f$1\f$ lie outside the open interval of \f$\alpha\f$, so they enter the optimality check only.
+
+The optimality residual is the residual of the condition \f$0 \in \partial \mathrm{pen}(y^\ast) + (y^\ast - v)/t\f$ at the output \f$y^\ast\f$ of `prox_y`. Off the kink the residual is \f$t\,\mathrm{pen}'(y^\ast) + y^\ast - v\f$, and at \f$y^\ast = \mu\f$ it is the excess \f$\max(0, |v - \mu| - k)\f$. Each residual is divided by \f$\max(1, |v|, k)\,(1 + t\,\mathrm{pen}''(y^\ast))\f$; the second factor is the one by which the rounding of \f$y^\ast\f$ is amplified in the residual. The second check compares \f$y^\ast\f$ with the minimum of \f$-\log p(y \mid \mu, \theta) + (y - v)^2/(2t)\f$ between \f$\mu\f$ and \f$v\f$, found by 200 steps of a golden-section search, and divides the distance by \f$\max(1, |v|)\f$. The enet laws enter this second check only for the mixing weights inside the open interval.
+
+| Law | Largest optimality residual | Bound | Largest distance to the golden-section minimum | Bound |
+|---|---|---|---|---|
+| \ref distrib_laplace1 "laplace1" | \f$2.8 \times 10^{-17}\f$ | \f$4 \times 10^{-16}\f$ | \f$2.9 \times 10^{-8}\f$ | \f$10^{-7}\f$ |
+| \ref distrib_laplace2 "laplace2" | \f$1.1 \times 10^{-16}\f$ | \f$4 \times 10^{-16}\f$ | \f$5.4 \times 10^{-8}\f$ | \f$10^{-7}\f$ |
+| \ref distrib_enet "enet" | \f$3.0 \times 10^{-16}\f$ | \f$4 \times 10^{-16}\f$ | \f$5.1 \times 10^{-8}\f$ | \f$10^{-7}\f$ |
+
+The penalty is checked against the law it wraps. For a lasso product of three copies, each with its own scale, and a prior location \f$\mu_0\f$ that is not zero, `prox_beta` equals the `prox_y` of \ref distrib_laplace1 "laplace1" exactly, in the kernel and for the steps \f$0.3\f$ and \f$5\f$. For a heterogeneous product, an elastic net on three coefficients in two groups together with a Laplace rate law on two, `prox_beta` equals the `prox_y` of each component exactly on the host, with and without \f$\mu_0\f$, for the steps \f$0.05\f$, \f$0.5\f$ and \f$4\f$.
+
+For \ref distrib_student_t2 "student_t2" with \f$\sigma = 1.5\f$ and \f$\nu = 5\f$, the largest value of \f$-\mathrm{pen}''\f$ on a grid off the kink equals \f$\rho\f$ within \f$10^{-7}\f$ relative, and \f$-\mathrm{pen}''\f$ at \f$|y - \mu| = \sqrt{3(\nu - 2)}\,\sigma\f$ equals \f$\rho\f$ within \f$10^{-14}\f$ relative. Here \f$\rho = 1/9\f$ for these values. On the same kind of grid, \f$\mathrm{pen}''\f$ is nonnegative for \ref distrib_laplace1 "laplace1", \ref distrib_laplace2 "laplace2", \ref distrib_enet "enet", \ref distrib_pseudohuber "pseudohuber", \ref distrib_gaussian1 "gaussian1" and \ref distrib_gaussian2 "gaussian2".
+
+Finally, a NaN point gives a NaN minimizer and an infinite point an infinite minimizer, checked for \ref distrib_laplace1 "laplace1" and \ref distrib_enet "enet".
+
+*/

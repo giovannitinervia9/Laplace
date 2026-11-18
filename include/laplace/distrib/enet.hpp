@@ -686,6 +686,23 @@ struct enet_distrib {
 
   /**
    * \ingroup distrib_enet
+   * \brief Proximal operator in \f$y\f$: \f$\arg\min_y \{-\log f(y) + (y - v)^2/(2t)\}\f$.
+   *
+   * With \f$u = v - \mu\f$, \f$a = \lambda\alpha\f$, \f$c = \lambda(1 - \alpha)\f$:
+   * \f$\mu + S(u, ta)/(1 + tc)\f$, where \f$S(u, k) = \mathrm{sign}(u)\max(|u| - k, 0)\f$
+   * is the soft threshold.
+   * \param v Point \f$v\f$.
+   * \param t Step \f$t > 0\f$.
+   * \return The minimizer.
+   * \see penalty_prox
+   */
+  LAPLACE_HD double prox_y(double v, double t) const {
+    const double u = v - mu, k = t * lambda * alpha, s = 1.0 + t * lambda * (1.0 - alpha);
+    return Kokkos::fabs(u) <= k ? mu : mu + (u > 0.0 ? u - k : u + k) / s;
+  }
+
+  /**
+   * \ingroup distrib_enet
    * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log f(y; \mu, \lambda, \alpha)\f$.
    *
    * Component with \f$i\f$ derivatives in \f$\mu\f$, \f$j = K - i - k\f$ in \f$\lambda\f$, and

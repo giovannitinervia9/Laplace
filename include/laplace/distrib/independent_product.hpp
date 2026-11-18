@@ -160,6 +160,13 @@ LAPLACE_HD void next_output_tuple(int* t, int K, int n) {
   }
 }
 
+// whether a multivariate M has the optional prox_y (note/penalties.md section 5c); a named
+// concept, since nvcc rejects the requires-expression written inline in a member's constraint
+template <class M>
+concept has_mv_prox_y = requires(const M m, const typename M::state_type& s, const double* p, double* q) {
+  m.prox_y(s, p, p, 0.0, q, q);
+};
+
 }  // namespace detail_product
 
 /**
@@ -338,6 +345,33 @@ struct independent_product_distrib {
       r += c.n_sets * region_size(c);
     });
     return s;
+  }
+
+  /**
+   * \brief Proximal operator in \f$y\f$, copy by copy; present when every component has `prox_y`.
+   *
+   * The log-density is a sum over copies, so the minimizer of
+   * \f$-\log p(y) + \lVert y - v\rVert^2/(2t)\f$ is each copy's own `prox_y`
+   * with the state of its set.
+   * \param st State from `theta_state()`.
+   * \param v Point, length `dim()`.
+   * \param x Location \f$\mu\f$, length `dim()`.
+   * \param t Step \f$t > 0\f$.
+   * \param out Minimizer, length `dim()`.
+   * \param w Scratch of `scratch_size()` doubles.
+   */
+  LAPLACE_HD void prox_y(const state_type& st, const double* v, const double* x, double t, double* out,
+                         double* w) const
+    requires(detail_product::has_mv_prox_y<M> && ...)
+  {
+    int off = 0;
+    const double* r = st.regions;
+    each([&](const auto& c, auto) {
+      const int dk = c.distribution.dim();
+      for (int g = 0; g < c.copies; ++g, off += dk)
+        c.distribution.prox_y(set_state(c, r, c.set(g)), v + off, x + off, t, out + off, w);
+      r += c.n_sets * region_size(c);
+    });
   }
 
   /**

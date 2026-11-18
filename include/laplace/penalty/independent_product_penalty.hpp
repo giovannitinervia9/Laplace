@@ -1,7 +1,7 @@
 // The penalty reading of univariate laws (through univariate_as_multivariate)
 // and of their independent products (note/penalties.md sections 5a and 9, step
 // 2): the specializations of distrib_penalty_traits that let distrib_penalty
-// take them. Lasso is laplace1, the elastic net enet, the Student penalty
+// take them. Lasso is laplace1 or laplace2, the elastic net enet, the Student penalty
 // student_t1 or student_t2, the pseudo-Huber penalty pseudohuber, the ridge
 // gaussian1 or gaussian2; repeated over the coefficients by
 // independent_product_distrib.
@@ -19,6 +19,7 @@
 #include <laplace/distrib/gaussian2.hpp>
 #include <laplace/distrib/independent_product.hpp>
 #include <laplace/distrib/laplace1.hpp>
+#include <laplace/distrib/laplace2.hpp>
 #include <laplace/distrib/pseudohuber.hpp>
 #include <laplace/distrib/student_t1.hpp>
 #include <laplace/distrib/student_t2.hpp>
@@ -47,6 +48,16 @@ struct univariate_penalty_reading;
 /// \brief Lasso, \f$|\beta - \mu| / \sigma\f$: convex, an exponential mixture of normal variances.
 template <>
 struct univariate_penalty_reading<distrib::laplace1_distrib> {
+  /// Exponential law of the variance.
+  static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::exponential_variance;
+  /// \return 0, convex.
+  LAPLACE_HD static double weak_convexity(const double*) { return 0.0; }
+};
+
+/// \ingroup distrib_independent_product
+/// \brief Lasso with a rate, \f$\lambda |\beta - \mu|\f$: convex, an exponential mixture of normal variances.
+template <>
+struct univariate_penalty_reading<distrib::laplace2_distrib> {
   /// Exponential law of the variance.
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::exponential_variance;
   /// \return 0, convex.
@@ -150,8 +161,6 @@ struct distrib_penalty_traits<distrib::univariate_as_multivariate<D>> {
   /// Kinks: on the coordinate when \f$\log f_D\f$ is not smooth in \f$y\f$.
   static constexpr penalty_kink_geometry kinks =
       D::y_regularity == distrib::infinitely_smooth ? penalty_kink_geometry::none : penalty_kink_geometry::per_coordinate;
-  /// Proximal operator: none yet.
-  static constexpr penalty_prox_kind prox = penalty_prox_kind::none;
   /// Structure: one coordinate.
   static constexpr penalty_structure structure = penalty_structure::separable;
   /// Regularity in \f$\theta\f$: the least over the scalar parameters of `D`.
@@ -197,8 +206,6 @@ struct distrib_penalty_traits<distrib::independent_product_distrib<M...>> {
   static constexpr int beta_regularity = detail_penalty::least({distrib_penalty_traits<M>::beta_regularity...});
   /// Kinks: the most general geometry among the components.
   static constexpr penalty_kink_geometry kinks = detail_penalty::largest({distrib_penalty_traits<M>::kinks...});
-  /// Proximal operator: none yet.
-  static constexpr penalty_prox_kind prox = penalty_prox_kind::none;
   /// Structure: separable when every component is, grouped by copies otherwise.
   static constexpr penalty_structure structure =
       ((distrib_penalty_traits<M>::structure == penalty_structure::separable) && ...) ? penalty_structure::separable

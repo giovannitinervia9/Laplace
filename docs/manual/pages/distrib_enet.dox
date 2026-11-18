@@ -108,6 +108,10 @@ void eval_enet(Kokkos::View<const double*> y, Kokkos::View<double*> out,
 
 Struct \ref laplace::distrib::enet_distrib "enet_distrib" implements \ref distrib_core "distrib_core" for `n_params = 3`: `mu`, `lambda`, `alpha`, `kind`, `n_params`, `y_regularity`, `params`, `logpdf()`, `logpdf_d1()`..`logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `expected_info()`, `expected_info_d1()`..`expected_info_d4()`, `expected_info_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `quantile()`, `log_cdf_d1()`..`log_cdf_d6()`, `log_cdf_dk()`, `log_ccdf_d1()`..`log_ccdf_d6()`, `log_ccdf_dk()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, and `start_value()`.
 
+## Proximal operator
+
+The member `prox_y(v, t)` returns the proximal operator of the law in \f$y\f$ (see \ref penalty_prox "Proximal operators"). Here \f$v\f$ is the point and \f$t > 0\f$ the step. With \f$u = v - \mu\f$, it equals \f$\mu + S(u, t\lambda\alpha) / (1 + t\lambda(1 - \alpha))\f$, where \f$S(u, k) = \operatorname{sgn}(u)\max(|u| - k, 0)\f$ is the soft threshold.
+
 ## References
 
 - H. Zou and T. Hastie (2005), Regularization and Variable Selection Via the Elastic Net, Journal of the Royal Statistical Society Series B: Statistical Methodology, 67(2), 301-320. https://doi.org/10.1111/j.1467-9868.2005.00503.x

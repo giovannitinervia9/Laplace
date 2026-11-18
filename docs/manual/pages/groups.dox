@@ -279,6 +279,9 @@ parent here, in tree order; the module pages define their groups without
 \ingroup penalty_from_distrib */
 /** \addtogroup distrib_independent_product
 \ingroup penalty_from_distrib */
+/** \defgroup penalty_prox Proximal operators
+\ingroup penalty
+\brief The proximal operator of a penalty, forwarded from the distribution's prox_y, and the weak-convexity bound on the step. */
 
 /** \defgroup optimizers Optimizers
 \brief Objectives, stopping rules, line searches and the dense curvature solver for unconstrained minimization on the host. */

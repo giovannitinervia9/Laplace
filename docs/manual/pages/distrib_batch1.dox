@@ -218,6 +218,10 @@ Measured on the gcc build (Kokkos Serial and OpenMP) against 300-bit and 400-bit
 | `log_cdf` derivatives (\f$K = 1 \dots 6\f$) | 5.64 | 8.5 |
 | `log_ccdf` derivatives (\f$K = 1 \dots 6\f$) | 24.8 | 37 |
 
+## Proximal operator
+
+The member `prox_y(v, t)` returns the proximal operator of the law in \f$y\f$ (see \ref penalty_prox "Proximal operators"). Here \f$v\f$ is the point and \f$t > 0\f$ the step. With \f$u = v - \mu\f$ and \f$k = t\lambda\f$, it equals \f$\mu\f$ when \f$|u| \le k\f$, and \f$\mu + (u - k)\f$ or \f$\mu + (u + k)\f$ otherwise, computed so that the result stays on the same side of \f$\mu\f$ as \f$v\f$.
+
 ## References
 
 - S. Kotz, T. J. Kozubowski and K. Podgórski (2001), The Laplace Distribution and Generalizations. https://doi.org/10.1007/978-1-4612-0173-1

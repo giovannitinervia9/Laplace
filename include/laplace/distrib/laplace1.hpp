@@ -177,6 +177,22 @@ struct laplace1_distrib {
 
   /**
    * \ingroup distrib_laplace1
+   * \brief Proximal operator in \f$y\f$: \f$\arg\min_y \{-\log f(y) + (y - v)^2/(2t)\}\f$, the soft threshold.
+   *
+   * With \f$k = t/\sigma\f$: \f$\mu\f$ when \f$|v - \mu| \le k\f$, \f$v - k\f$ above, \f$v + k\f$ below, computed as
+   * \f$\mu + (u \mp k)\f$ with \f$u = v - \mu\f$ so that rounding never puts it across \f$\mu\f$.
+   * \param v Point \f$v\f$.
+   * \param t Step \f$t > 0\f$.
+   * \return The minimizer.
+   * \see penalty_prox
+   */
+  LAPLACE_HD double prox_y(double v, double t) const {
+    const double u = v - mu, k = t / sigma;
+    return Kokkos::fabs(u) <= k ? mu : mu + (u > 0.0 ? u - k : u + k);
+  }
+
+  /**
+   * \ingroup distrib_laplace1
    * \brief Evaluates partial derivatives of order \f$K\f$ of \f$\log f(y; \mu, \sigma)\f$ in parameters \f$(\mu, \sigma)\f$.
    * \tparam K Derivative order (\f$1 \le K \le 6\f$).
    * \param y Observation point \f$y \in (-\infty, \infty)\f$.

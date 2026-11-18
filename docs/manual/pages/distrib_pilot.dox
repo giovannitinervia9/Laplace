@@ -154,6 +154,13 @@
  * `logpdf_dy_dk` within relative tolerance \f$10^{-8}\f$, and score-variance quadrature split at
  * \f$y = \mu\f$ matches `expected_info()` within \f$10^{-12}\f$.
  *
+ * ## Proximal operator
+ *
+ * The member `prox_y(v, t)` returns the proximal operator of the law in \f$y\f$ (see \ref penalty_prox
+ * "Proximal operators"). Here \f$v\f$ is the point and \f$t > 0\f$ the step. With \f$u = v - \mu\f$ and
+ * \f$k = t/\sigma\f$, it equals \f$\mu\f$ when \f$|u| \le k\f$, and \f$\mu + (u - k)\f$ or \f$\mu + (u + k)\f$
+ * otherwise, computed so that the result stays on the same side of \f$\mu\f$ as \f$v\f$.
+ *
  * ## References
  *
  * - W. P. Johnson (2002), The Curious History of Faa di Bruno's Formula, The American Mathematical Monthly, 109(3), 217. https://doi.org/10.2307/2695352
