@@ -1,0 +1,128 @@
+/**
+\addtogroup optimizers_bundle
+
+The \ref laplace::optimizers::bundle_optimizer "bundle_optimizer" class template (`<laplace/optimizers/bundle.hpp>`) minimizes a convex objective \f$f : \mathbb{R}^n \to \mathbb{R}\f$, not necessarily differentiable everywhere, from its value and one subgradient per point. It is header-only in namespace `laplace::optimizers`, runs on the host only with nothing marked `LAPLACE_HD`, and needs no library to link. Runs are invoked through \ref laplace::optimizers::minimize "minimize()" (`minimize(optimizer, f, x0)`) or `run()`, where `f` satisfies \ref laplace::optimizers::gradient_objective "gradient_objective" and `value_gradient(x, g)` returns a subgradient at non-smooth points. Objective concepts, \ref laplace::optimizers::optimizer_report "optimizer_report", \ref laplace::optimizers::optimizer_status "optimizer_status", and stopping rules are documented on \ref optimizers "the optimizers page".
+
+## The method
+
+### Cutting-plane model
+
+Each visited point \f$w_j\f$ gives an affine minorant \f$f(w_j) + g_j^\top(z - w_j)\f$ for \f$z \in \mathbb{R}^n\f$, with \f$g_j\f$ a subgradient at \f$w_j\f$. A cut is stored as \f$g_j\f$ and its linearization error at the stability centre \f$x\f$ (the best point so far),
+\f[
+\alpha_j = f(x) - f(w_j) - g_j^\top(x - w_j) \ge 0.
+\f]
+Whenever the centre moves from \f$x\f$ to \f$x_{\mathrm{new}}\f$, each error is updated by
+\f[
+\alpha_j \leftarrow \alpha_j + f(x_{\mathrm{new}}) - f(x) - g_j^\top(x_{\mathrm{new}} - x),
+\f]
+avoiding cancellation between \f$f\f$ and \f$g_j^\top x\f$ at large \f$n\f$. The cutting-plane model (Kelley, 1960) is
+\f[
+\hat{f}(x + d) = f(x) + \max_j \bigl(g_j^\top d - \alpha_j\bigr).
+\f]
+
+### Step and dual solver
+
+At proximity \f$t > 0\f$, minimizing \f$\hat{f}(x + d) + \lVert d \rVert^2 / (2t)\f$ gives \f$d = -t p\f$ with \f$p = G\lambda\f$, where \f$G\f$ has columns \f$g_j\f$ and \f$\lambda\f$ solves the dual over the unit simplex:
+\f[
+\min_{\lambda}\; \frac{t}{2}\lVert G\lambda \rVert^2 + \alpha^\top \lambda
+\qquad \text{subject to} \quad \lambda \ge 0, \quad \sum_j \lambda_j = 1,
+\f]
+with \f$\alpha\f$ holding \f$\alpha_j\f$ and predicted decrease \f$v = t\lVert p \rVert^2 + \alpha^\top \lambda\f$. Let \f$\Delta = f(x) - f(x + d)\f$. When \f$\Delta \ge m_L v\f$ (\f$m_L\f$ is `serious_fraction`, default \f$0.1\f$), \f$x + d\f$ is a serious step: the centre moves to \f$x + d\f$ and `trace` runs if set. Otherwise it is a null step: the centre stays and the new cut enters the bundle. A trial point where \f$f\f$ or its subgradient is not finite is refused: no cut is added and \f$t\f$ is divided by \f$10\f$.
+
+An active-set method of the kind of Wolfe's minimum-norm-point algorithm (Wolfe, 1976), warm-started from the previous \f$\lambda\f$, solves the dual. Its working set \f$F\f$ holds cuts whose extended vectors \f$(g_j, 1)\f$ are linearly independent. The equality-constrained minimizer on \f$F\f$ comes from two Cholesky solves of \f$t G_F^\top G_F + s^2 \mathbf{1}\mathbf{1}^\top\f$, where \f$G_F\f$ holds the columns of \f$F\f$ and \f$s^2\f$ is the mean of \f$t\lVert g_j \rVert^2\f$; when that minimizer has a coordinate at or below \f$0\f$, \f$\lambda\f$ moves toward it until the first coordinate reaches \f$0\f$, and that cut leaves \f$F\f$. An inactive cut enters when its dual gradient \f$(t Q \lambda + \alpha)_j\f$ (\f$Q = G^\top G\f$) falls below \f$\lambda^\top(t Q \lambda + \alpha)\f$ by more than \f$10^{-13}(t \max_j Q_{jj} + \max_j \alpha_j)\f$, replacing a cut of \f$F\f$ along a direction on which the dual falls linearly when \f$(g_j, 1)\f$ depends on \f$F\f$. Solving the dual exactly lets the method land on a polyhedral vertex.
+
+### Proximity parameter and compression
+
+With \f$h_0\f$ equal to `initial_step` (default \f$1\f$) and \f$g_0\f$ the subgradient at \f$x_0\f$, the initial proximity is \f$t_0 = h_0 / \lVert g_0 \rVert\f$ (or \f$h_0\f$ if \f$g_0 = 0\f$), giving a first step of length \f$h_0\f$ in \f$x\f$. Thereafter \f$t\f$ follows Kiwiel's rule (Kiwiel, 1990) in \f$u = 1/t\f$, \f$u_0 = 1/t_0\f$, and \f$u_{\mathrm{int}} = 2u(1 - \Delta / v)\f$:
+- On a serious step, \f$u\f$ becomes \f$u_{\mathrm{int}}\f$ when \f$\Delta \ge m_R v\f$ (\f$m_R\f$ is `interpolation_fraction`, default \f$0.5\f$) and the previous step was serious, or \f$u/2\f$ after more than three serious steps in a row, then at least \f$\max(u/10,\, u_{\min})\f$ with \f$u_{\min} = 10^{-10} u_0\f$.
+- On a null step, \f$u\f$ becomes \f$u_{\mathrm{int}}\f$ when the new cut's error exceeds \f$\max(\eta_v, 10v)\f$ after more than three null steps in a row, then at most \f$10u\f$.
+
+Here \f$\eta_v\f$ is Kiwiel's variation estimate in the objective's units, reading the stationarity measure below (\f$\eta_v \leftarrow \max(\eta_v, 2v)\f$ on serious steps, \f$\eta_v \leftarrow \min(\eta_v, v(\Gamma))\f$ on null steps). A null step with \f$v \le 64\,\varepsilon\,|f(x)|\f$, where \f$\varepsilon = 2^{-52}\f$ is double-precision machine epsilon, cannot be resolved by \f$f\f$: \f$t\f$ is multiplied by \f$10\f$, and at the cap \f$t_{\max} = 10^{10} t_0\f$ the run ends as `stalled`.
+
+When the bundle exceeds `max_bundle_size` cuts (default \f$0\f$, meaning \f$n + 2\f$), inactive cuts with \f$\lambda_j = 0\f$ are dropped first while keeping the newest cut. If still over budget, the aggregate cut \f$(p, \alpha^\top \lambda)\f$ formed at the centre before the step (and moved with it on a serious step) replaces all cuts except the newest `max_bundle_size` \f$- 1\f$. As a convex combination of minorants, the aggregate remains a minorant of \f$f\f$.
+
+## Stationarity
+
+Because \f$\hat{f}\f$ minorizes \f$f\f$, \f$f(x) - f^*\f$ is at most the cutting-plane gap \f$f(x) - \min_z \hat{f}(z)\f$ (Kelley, 1960), which is infinite while \f$0\f$ is outside the convex hull of the cuts' subgradients. Here \f$f^*\f$ denotes the minimum of \f$f\f$. The measure, passed to `stop_rule` as `decrement`, is the model's predicted decrease at a large proximity \f$\Gamma\f$:
+\f[
+v(\Gamma) = \Gamma \lVert p_\Gamma \rVert^2 + \alpha^\top \lambda_\Gamma,
+\f]
+from a second dual solve at \f$\Gamma\f$ warm-started from the first. It grows with \f$\Gamma\f$ toward the gap and falls short of it by at most \f$\lVert d^* \rVert^2 / (2\Gamma)\f$, where \f$d^*\f$ is the step to the model's minimizer. Here \f$\Gamma = c \max(\gamma, t)\f$, with \f$c\f$ equal to `certificate_ratio` (default \f$100\f$) and \f$\gamma\f$ the largest of \f$t_0\f$ and every \f$t\f$ of a serious step. Because \f$\gamma\f$ never falls on null steps, shrinking \f$t\f$ cannot drive the measure under tolerance. On least absolute deviations near a vertex, \f$f - f^*\f$ behaves like \f$\lVert p \rVert\f$ times the distance to it rather than a quadratic decrement, and the measure \f$\frac{1}{2}\gamma\lVert p \rVert^2 + \alpha^\top\lambda\f$ from the step's own dual declared convergence with \f$f - f^*\f$ \f$5\f$ to \f$54\f$ times above it.
+
+## Statuses and report
+
+The template `bundle_optimizer<StopRule>` defaults `StopRule` to \ref laplace::optimizers::decrement_stop_rule "decrement_stop_rule" and accepts any rule satisfying `stop_rule_for` with at most `stop_needs_decrement` and `stop_needs_previous`. Rules reading `gradient` fail to compile because a subgradient at a kink need not be small at a minimum.
+
+A run returns `converged`, `converged_at_resolution` (decrement at most \f$\varepsilon |f|\f$), or `stopped_on_change` from `stop_rule`. It ends as `stalled` when the trial point equals the centre in every coordinate or when an unresolvable null step hits \f$t_{\max}\f$. It ends as `line_search_failed` when a dual solve fails (non-finite data, or its cap of \f$10^4\f$ cycles) or when \f$v\f$ or the measure is not finite, `iteration_budget` at `max_iterations` (default \f$10^5\f$) trial points, `evaluation_budget` at `max_value_evaluations` (default \f$10^7\f$), and `start_not_admissible` when \f$f(x_0)\f$ or its subgradient is not finite.
+
+In `optimizer_report`, `point`, `value`, and `gradient` hold the centre, its value, and its subgradient, `decrement` holds \f$v(\Gamma)\f$, `iterations` counts trial points, `value_evaluations` and `gradient_evaluations` each count `value_gradient()` calls, and `curvature_evaluations` is \f$0\f$. The optimizer works as a block sub-optimizer of \ref laplace::optimizers::block_coordinate_optimizer "block_coordinate_optimizer" (\ref optimizers_block_coordinate "Brent and block alternation"); because its tolerance is in the objective's units, alternation may loosen it.
+
+## Measurements
+
+Least absolute deviations, \f$\sum_{i=1}^N |y_i - (X\beta)_i|\f$, is tested from \f$\beta = 0\f$ with bundle size \f$n + 2\f$ on four dense datasets with intercept and Laplace errors, of dimensions \f$(100, 11)\f$, \f$(1000, 51)\f$, \f$(10000, 101)\f$, and \f$(100000, 11)\f$ (\f$N\f$ rows by \f$n\f$ columns). References are the exact vertices from `quantreg`'s `rq` with method `"br"` (Barrodale and Roberts, 1974; quantreg), re-solved from `rq`'s basis. On 8 OpenMP threads, the table gives trial points, \f$f - f^*\f$, the measure, and the supremum-norm distance to the vertex at the default rule (\f$10^{-6}\f$) and at tolerance \f$\max(10^{-10}, 10^3\varepsilon|f^*|)\f$.
+
+| Dataset | Default trial points | Default \f$f - f^*\f$ | Default measure | Default distance | Tight trial points | Tight \f$f - f^*\f$ | Tight measure | Tight distance |
+|---|---|---|---|---|---|---|---|---|
+| \f$(100, 11)\f$ | 61 | \f$1.4 \times 10^{-14}\f$ | \f$2.5 \times 10^{-14}\f$ | \f$4.4 \times 10^{-15}\f$ | 61 | \f$1.4 \times 10^{-14}\f$ | \f$2.5 \times 10^{-14}\f$ | \f$4.4 \times 10^{-15}\f$ |
+| \f$(1000, 51)\f$ | 214 | \f$1.0 \times 10^{-12}\f$ | \f$1.1 \times 10^{-12}\f$ | \f$2.0 \times 10^{-13}\f$ | 214 | \f$1.0 \times 10^{-12}\f$ | \f$1.1 \times 10^{-12}\f$ | \f$2.0 \times 10^{-13}\f$ |
+| \f$(10000, 101)\f$ | 411 | \f$6.0 \times 10^{-8}\f$ | \f$7.8 \times 10^{-7}\f$ | \f$3.5 \times 10^{-6}\f$ | 438 | \f$5.2 \times 10^{-10}\f$ | \f$5.2 \times 10^{-10}\f$ | \f$2.9 \times 10^{-11}\f$ |
+| \f$(100000, 11)\f$ | 74 | \f$3.1 \times 10^{-10}\f$ | \f$3.4 \times 10^{-10}\f$ | \f$1.4 \times 10^{-10}\f$ | 74 | \f$3.1 \times 10^{-10}\f$ | \f$3.4 \times 10^{-10}\f$ | \f$1.4 \times 10^{-10}\f$ |
+
+At the default rule the run may stop just before the vertex, as on \f$(10000, 101)\f$, while at \f$\max(10^{-10}, 10^3\varepsilon|f^*|)\f$ it lands on it. The test in `tests/optimizers/test_bundle.cpp` checks \f$f - f^* \le 2\,\mathrm{measure} + 64\,\varepsilon|f^*|\f$ and coefficients within \f$10^{-4}\f$ at the default rule and \f$10^{-8}\f$ at the tight one.
+
+With 16 OpenMP threads, `max_bundle_size` \f$2n + 2\f$ converges in \f$1.0\f$ to \f$2.4\f$ times the time of \f$n + 2\f$, while \f$10\f$ cuts reach the \f$20000\f$-point budget on two of the four datasets. Values \f$10\f$, \f$100\f$, \f$10^3\f$, and \f$10^5\f$ of `certificate_ratio` all converge with the measure above \f$f - f^*\f$. On CUDA, the whole test suite passes and every LAD fit lands on the vertex at the default rule (on \f$(10000, 101)\f$: \f$452\f$ trial points, \f$0.42\f$ s, \f$f - f^* = 9.1 \times 10^{-12}\f$).
+
+A test objective in `tests/optimizers/test_bundle.cpp` minimizes \f$\mathrm{e}^{-u}\sum_{i=1}^N |r_i| + N u + N \log 2\f$ (the negative log-likelihood of the Laplace distribution with location \f$(X\beta)_i\f$ and scale \f$\sigma\f$, \f$r_i = y_i - (X\beta)_i\f$) in \f$(\beta, u = \log \sigma)\f$ by `block_coordinate_optimizer` with `bundle_optimizer` on \f$\beta\f$ and `newton_optimizer` on \f$u\f$. It finishes in \f$3\f$ sweeps on all four datasets, with \f$\sigma\f$ within \f$1.2 \times 10^{-6}\f$ relative of \f$\sum_{i=1}^N |r_i| / N\f$ at the vertex and the objective within \f$1.7 \times 10^{-8}\f$. By contrast, Newton with \f$X^\top X\f$ as curvature and BFGS converge on none of the four LAD problems, reporting `stalled`, `iteration_budget`, or `line_search_failed` at distances \f$4.5 \times 10^{-5}\f$ to \f$3.6 \times 10^{-2}\f$ from the vertex. See `docs/numerics.md` for details of the measurements.
+
+## Limits
+
+The cuts are global minorants only when \f$f\f$ is convex. Because the stationarity measure requires \f$0\f$ to lie in the convex hull of the cuts' subgradients, a run converges only once the bundle surrounds the minimum.
+
+## Example
+
+The example minimizes \f$f(x) = |x_1 - 1| + 2|x_2 + 0.5|\f$ from \f$(0, 0)\f$ with `bundle_optimizer<>` on the host, after `Kokkos::initialize`.
+
+```cpp
+#include <laplace/optimizers/bundle.hpp>
+#include <laplace/optimizers/minimize.hpp>
+
+#include <cmath>
+
+struct kinked_objective {
+  double value(const laplace::optimizers::optimizer_point& x) const {
+    return std::abs(x(0) - 1.0) + 2.0 * std::abs(x(1) + 0.5);
+  }
+  double value_gradient(const laplace::optimizers::optimizer_point& x,
+                        const laplace::optimizers::optimizer_vector& g) const {
+    g(0) = x(0) > 1.0 ? 1.0 : (x(0) < 1.0 ? -1.0 : 0.0);
+    g(1) = x(1) > -0.5 ? 2.0 : (x(1) < -0.5 ? -2.0 : 0.0);
+    return value(x);
+  }
+};
+
+bool bundle_example() {
+  laplace::optimizers::optimizer_vector x0("x0", 2);
+  x0(0) = 0.0;
+  x0(1) = 0.0;
+  kinked_objective objective;
+  const laplace::optimizers::bundle_optimizer<> optimizer;
+  const laplace::optimizers::optimizer_report r =
+      laplace::optimizers::minimize(optimizer, objective, x0);
+  return laplace::optimizers::optimizer_succeeded(r.status);
+}
+```
+
+## Module types
+
+In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::bundle_optimizer "bundle_optimizer"
+
+## References
+
+- K. C. Kiwiel (1990), Proximity control in bundle methods for convex nondifferentiable minimization, Mathematical Programming, 46(1-3), 105–122. https://doi.org/10.1007/BF01585731
+- P. Wolfe (1976), Finding the nearest point in a polytope, Mathematical Programming, 11(1), 128–149. https://doi.org/10.1007/BF01580381
+- J. E. Kelley, Jr. (1960), The cutting-plane method for solving convex programs, Journal of the Society for Industrial and Applied Mathematics, 8(4), 703–712. https://doi.org/10.1137/0108053
+- I. Barrodale and F. D. K. Roberts (1974), Algorithm 478: Solution of an overdetermined system of equations in the l1 norm, Communications of the ACM, 17(6), 319–320. https://doi.org/10.1145/355616.361024
+- R. Koenker (2025), quantreg: Quantile Regression, R package version 6.1. https://doi.org/10.32614/CRAN.package.quantreg
+
+*/

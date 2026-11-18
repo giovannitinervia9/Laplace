@@ -299,7 +299,13 @@ parent here, in tree order; the module pages define their groups without
 /** \defgroup optimizers_block_coordinate Brent and block alternation
 \ingroup optimizers
 \brief Derivative-free minimization in one variable and cyclic block alternation over sub-optimizers. */
+/** \defgroup optimizers_derivative_free Nelder-Mead and compass search
+\ingroup optimizers
+\brief Derivative-free minimization in several variables by Nelder-Mead and compass search. */
 
 /** \defgroup optimizers_proximal Proximal methods
 \ingroup optimizers
 \brief Proximal gradient and proximal Newton methods for a smooth objective plus penalties with a proximal operator. */
+/** \defgroup optimizers_bundle Proximal bundle method
+\ingroup optimizers
+\brief Proximal bundle minimization of a convex, possibly non-smooth objective from values and subgradients. */

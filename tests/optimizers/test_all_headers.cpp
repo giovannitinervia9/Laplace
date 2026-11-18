@@ -7,11 +7,14 @@
 #include <laplace/optimizers/bfgs.hpp>
 #include <laplace/optimizers/block_coordinate.hpp>
 #include <laplace/optimizers/brent.hpp>
+#include <laplace/optimizers/bundle.hpp>
+#include <laplace/optimizers/compass.hpp>
 #include <laplace/optimizers/dense_curvature_solver.hpp>
 #include <laplace/optimizers/lbfgs.hpp>
 #include <laplace/optimizers/line_search.hpp>
 #include <laplace/optimizers/minimize.hpp>
 #include <laplace/optimizers/multistart.hpp>
+#include <laplace/optimizers/nelder_mead.hpp>
 #include <laplace/optimizers/newton.hpp>
 #include <laplace/optimizers/objective.hpp>
 #include <laplace/optimizers/penalized_objective.hpp>

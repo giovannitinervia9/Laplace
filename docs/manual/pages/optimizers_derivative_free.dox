@@ -1,0 +1,129 @@
+/**
+\addtogroup optimizers_derivative_free
+
+This page documents \ref laplace::optimizers::nelder_mead_optimizer "nelder_mead_optimizer" (`<laplace/optimizers/nelder_mead.hpp>`) and \ref laplace::optimizers::compass_optimizer "compass_optimizer" (`<laplace/optimizers/compass.hpp>`), which minimize a function of \f$n \ge 1\f$ variables from its values alone on the host. Both are header-only templates; nothing is `LAPLACE_HD` and no library is linked. Runs use `minimize(optimizer, f, x0)` (\ref laplace::optimizers::minimize "minimize()") with the objectives, report, statuses, and stopping rules on \ref optimizers "the optimizers page". One-dimensional derivative-free minimization by Brent's method and block alternation are on \ref optimizers_block_coordinate "the Brent and block alternation page".
+
+## Shared interface and stopping
+
+Each class template takes `StopRule` (default \ref laplace::optimizers::search_size_stop_rule "search_size_stop_rule"), constrained by \ref laplace::optimizers::stop_rule_for "stop_rule_for" to rules needing at most `stop_needs_search_size` and `stop_needs_previous`; a rule needing the gradient fails to compile. The objective needs only \ref laplace::optimizers::value_objective "value_objective", and a starting point `x0` of length \f$0\f$ throws `std::invalid_argument`.
+
+Non-finite values count as \f$+\infty\f$ (refused points); a start whose value is not finite gives `start_not_admissible` with quiet NaN `search_size`. The stationarity measure, `search_size`, is in the units of \f$x\f$ rather than of \f$f\f$: `search_size_stop_rule` (\ref optimizers "the optimizers page") declares `converged` when `search_size` is at most \f$\tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} \max_i |x_i|\f$ (defaults \f$10^{-8}\f$ and \f$0\f$).
+
+A run ends with `converged`, `converged_at_resolution`, or `stopped_on_change` from `stop_rule`; `converged_at_resolution` from the method's rounding test; `stalled` when the spread check refuses a convergence verdict; `iteration_budget` after `max_iterations` (default \f$10000\f$); or `evaluation_budget` when `max_value_evaluations` (default \f$10^5\f$) runs out (checked once per iteration, so evaluations can exceed the budget by one iteration).
+
+A convergence verdict from `stop_rule` (`converged` or `converged_at_resolution`) or from the method's rounding test (`converged_at_resolution`) stands only when the spread of the values compared by the final search is at most `value_spread_tolerance` \f$+ 64\,\varepsilon\,|f|\f$. Here \f$f\f$ is the best value and \f$\varepsilon\f$ is machine epsilon; otherwise the run ends as `stalled`, while `stopped_on_change` is unaffected. For Nelder-Mead, the spread is \f$\max_j f(v_j) - \min_j f(v_j)\f$ over the vertices \f$v_0, \dots, v_n\f$ of the final simplex. For compass search, it is \f$\max |f(x \pm \delta d_j) - f(x)|\f$ over the evaluated trial points of the final failed poll (with step \f$\delta\f$ and directions \f$d_j\f$), or \f$0\f$ when every trial point rounds to \f$x\f$. The default of `value_spread_tolerance` is \f$10^{-6}\f$ in the units of \f$f\f$, and the check needs no extra evaluations because the values are already at hand. On a noisy objective, the search size certifies only that no lower value was found at that distance, and noise has such points at every scale. The spread tells a minimum, where values agree, from noise, where they differ, and \f$64\,\varepsilon\,|f|\f$ keeps a minimum whose values are flat to rounding at large \f$|f|\f$ from being refused.
+
+In \ref laplace::optimizers::optimizer_report "optimizer_report", `point` and `value` hold the best point, with `search_size`, `iterations`, and `value_evaluations`. The `gradient` is empty, `gradient_evaluations` and `curvature_evaluations` are \f$0\f$, and `decrement` is quiet NaN. The optional `trace` runs once per iteration (after iteration \f$0\f$ for Nelder-Mead, after every poll for compass search) with the best point, its value, and, as `step`, `search_size` for Nelder-Mead or the step of a successful poll and \f$0\f$ after a failed one for compass search. Both optimizers work as block sub-optimizers of \ref laplace::optimizers::block_coordinate_optimizer "block_coordinate_optimizer" (\ref optimizers_block_coordinate "Brent and block alternation").
+
+## Nelder-Mead
+
+The starting simplex is \f$x_0\f$ and \f$x_0 + h_j e_j\f$ with \f$h_j\f$ equal to `initial_step` times \f$\max(1, |x_{0,j}|)\f$ (`initial_step` default \f$0.1\f$, coordinate unit vectors \f$e_j\f$), or a caller-supplied `initial_simplex` (`std::vector<std::vector<double>>`) of \f$n + 1\f$ vertices of \f$n\f$ coordinates each (ignoring `x0`; wrong sizes throw `std::invalid_argument`).
+
+Each iteration (Nelder and Mead, 1965; order of Lagarias, Reeds, Wright and Wright, 1998) sorts vertices \f$v_0, \dots, v_n\f$ by value, best first, and reflects \f$v_n\f$ through the centroid \f$c\f$ of the others as \f$v_r = 2c - v_n\f$. If \f$f(v_r) < f(v_0)\f$, it tries expansion \f$c + \chi (v_r - c)\f$ and keeps the lower of the two; else if \f$f(v_r) < f(v_{n-1})\f$, it keeps \f$v_r\f$; else it contracts outside, \f$c + \gamma (v_r - c)\f$, when \f$f(v_r) < f(v_n)\f$ (accepted when not above \f$f(v_r)\f$), or inside, \f$c - \gamma (c - v_n)\f$ (accepted when below \f$f(v_n)\f$). If contraction is refused, every vertex shrinks toward \f$v_0\f$ as \f$v_0 + \sigma (v_j - v_0)\f$.
+
+With `adaptive_coefficients` (default `true`) and \f$n \ge 2\f$, Gao and Han's (2012) coefficients are \f$\chi = 1 + 2/n\f$, \f$\gamma = 3/4 - 1/(2n)\f$, and \f$\sigma = 1 - 1/n\f$, with reflection \f$1\f$ (the classical \f$2, 1/2, 1/2\f$ at \f$n = 2\f$). At \f$n = 1\f$, where Gao and Han's \f$\sigma\f$ would be \f$0\f$, and when `adaptive_coefficients` is `false`, the classical coefficients are used.
+
+McKinnon (1998) gave a strictly convex function with continuous first derivatives on which Nelder-Mead, from his starting simplex, performs inside contractions toward a non-stationary point while values behave as at a minimum. For \f$n > 1\f$, each iteration computes the conditioning \f$|\det E| / \prod_{j=1}^n \|E_j\|_2\f$ of the edge matrix \f$E\f$ with columns \f$E_j = v_j - v_0\f$ (\f$1\f$ for a right-angled simplex, \f$0\f$ for a flat one, independent of size). Below `degenerate_tolerance` (default \f$10^{-6}\f$), the simplex is rebuilt right-angled at \f$v_0\f$ with edges equal to the current diameter, at most `max_restarts` times per run (default \f$3\f$; \f$0\f$ turns it off), costing \f$n\f$ evaluations per rebuild.
+
+The search size is the diameter from the best vertex, \f$\max_{1 \le j \le n} \|v_j - v_0\|_2\f$. A shrink leaving every vertex unchanged in floating point ends the run as `converged_at_resolution`. The rule is asked once per iteration after sorting and the safeguard; `iterations` counts iterations.
+
+## Compass search
+
+A poll evaluates \f$2n\f$ trial points \f$x \pm \delta d_j\f$ over the columns \f$d_j\f$ of an orthonormal basis with step \f$\delta\f$ (Kolda, Lewis and Torczon, 2003). The member `poll_basis` is a \ref laplace::optimizers::compass_poll_basis "compass_poll_basis": `random_orthonormal` (default) or `coordinate`.
+
+With `random_orthonormal`, each poll forms the Householder reflection \f$I - 2 w w^\top / (w^\top w)\f$ of a vector \f$w\f$ drawn uniformly in \f$[-1, 1]^n\f$ by a 64-bit linear congruential generator seeded with `seed` (default \f$1\f$), the same generator as \ref laplace::optimizers::multistart_optimizer "multistart_optimizer", so polls match across platforms and compilers. Over a run the directions reach every direction of the sphere, as convergence theory for a Lipschitz, possibly non-smooth, function needs in mesh adaptive direct search (Audet and Dennis, 2006), though the basis is not uniformly distributed over the orthogonal group. With `coordinate`, the directions are \f$\pm e_j\f$; its theory needs continuously differentiable \f$f\f$, and a fixed basis can stop at a kink whose descent directions lie between the axes.
+
+With `first_improvement` (default `true`), a poll stops at its first trial point with a lower value; otherwise it evaluates all \f$2n\f$ and moves to the lowest. Trial points equal to \f$x\f$ in floating point are skipped. Starting from \f$\delta_0\f$ equal to `initial_step` times \f$\max(1, \max_i |x_{0,i}|)\f$ (`initial_step` default \f$0.1\f$), a successful poll moves \f$x\f$ and sets \f$\delta \leftarrow \min(\alpha_+ \delta,\, M \delta_0)\f$, where \f$\alpha_+\f$ is `expansion` (default \f$2\f$) and \f$M\f$ is `max_step_multiple` (default \f$10^4\f$); a failed poll keeps \f$x\f$ and sets \f$\delta \leftarrow \alpha_- \delta\f$, where \f$\alpha_-\f$ is `contraction` (default \f$0.5\f$).
+
+The search size is the step of the poll that just failed, showing no lower value was found at that distance in any of the \f$2n\f$ directions; after a successful poll it is quiet NaN because \f$x\f$ has moved. A failed poll whose trials all equal \f$x\f$ in floating point ends the run as `converged_at_resolution`. The rule is asked after every poll; `iterations` counts polls.
+
+## Measurements
+
+The battery combines Moré–Garbow–Hillstrom problems and ill-conditioned quadratics with condition number \f$\kappa\f$. On one thread with gcc 14.2 at \f$f^* = 0\f$ (fastest of repeats), the table gives evaluations and time for Nelder-Mead and evaluations for random and coordinate compass (`budget` marks runs that ended on the iteration budget).
+
+| Problem | Nelder-Mead evaluations | Nelder-Mead time (ms) | Compass random evaluations | Compass coordinate evaluations |
+|---|---|---|---|---|
+| Rosenbrock \f$n = 2\f$ | 261 | 0.054 | 10574 | 25328 |
+| Rosenbrock \f$n = 4\f$ | 737 | 0.215 | 48499 | budget |
+| Powell singular | 1444 | 0.408 | budget | budget |
+| Beale | 145 | 0.043 | 1133 | 6531 |
+| helical valley | 407 | 0.122 | 6878 | 11352 |
+| Wood | 872 | 0.336 | 35312 | budget |
+| quadratic \f$n = 4\f$, \f$\kappa = 10^2\f$ | 595 | 0.165 | 1241 | 825 |
+| quadratic \f$n = 4\f$, \f$\kappa = 10^4\f$ | 688 | 0.193 | 32878 | budget |
+| quadratic \f$n = 10\f$, \f$\kappa = 10^2\f$ | 2060 | 1.395 | 8525 | 23744 |
+
+Nelder-Mead converges on every problem at \f$f^* = 0, 1, 10^3, 10^6\f$ (each with a constant added), within \f$7.5 \times 10^{-8}\f$ of the minimizer \f$x^*\f$ at \f$f^* = 0\f$; at \f$f^* = 10^6\f$ the distance grows to the resolution of \f$f\f$, up to \f$8 \times 10^{-6}\f$, and \f$1.5 \times 10^{-3}\f$ on Powell's singular function, where \f$f\f$ grows as \f$\|x - x^*\|^4\f$. Random compass converges on all but Powell's, ending on the budget of \f$10000\f$ polls at distance \f$1.1 \times 10^{-2}\f$ from \f$x^*\f$, and needs \f$2\f$ to \f$70\f$ times the evaluations of Nelder-Mead. Coordinate compass ends on the budget on Rosenbrock with \f$n = 4\f$, Wood, and the quadratic with \f$\kappa = 10^4\f$.
+
+McKinnon's (1998) function is
+\f[
+  f_{\mathrm{M}}(x_1, x_2) =
+  \begin{cases}
+    360 x_1^2 + x_2 + x_2^2, & x_1 \le 0, \\
+    6 x_1^2 + x_2 + x_2^2, & x_1 > 0.
+  \end{cases}
+\f]
+Without the safeguard, Nelder-Mead ends `converged` at \f$(0, 0)\f$ with \f$f_{\mathrm{M}} = 0\f$ against the minimum \f$-1/4\f$ at \f$(0, -1/2)\f$ after \f$219\f$ evaluations; with it, the run reaches \f$(0, -1/2)\f$ within \f$4.9 \times 10^{-9}\f$ in \f$273\f$ evaluations.
+
+On \f$\sum_{i=1}^n |x_i|\f$ at \f$n = 2\f$ and \f$4\f$ and \f$\sum_i |y_i - \mu|\f$ over \f$7\f$ and \f$8\f$ points \f$y_i\f$, both methods converge with the minimizer within twice the final search size (what the test checks).
+
+On a test objective equal to the Laplace sample's negative log-likelihood solved by alternating blocks, with \f$\mu\f$ by the method and the log scale by Newton with the expected curvature, both finish in \f$3\f$ sweeps with \f$\mu\f$ inside the median interval. At sample size \f$10^5\f$ on one thread, Brent takes \f$74\f$ evaluations in \f$37\f$ ms, Nelder-Mead \f$187\f$ in \f$91\f$ ms, and compass \f$208\f$ in \f$101\f$ ms. The tests pass on gcc and CUDA; see `docs/numerics.md`.
+
+## Limits
+
+On the noisy objective \f$\sum_{i=1}^4 p_i^2 + 100 \sin(10^{20} p_1)\f$ for \f$p = (p_1, \dots, p_4)\f$ with \f$n = 4\f$, the measured spread at the verdict is \f$157\f$ for Nelder-Mead and \f$159\f$ for compass search, so both end `stalled`. With the spread check off (`value_spread_tolerance` set to infinity), those runs end `converged` near the start, with \f$|x|\f$ about \f$1\f$ and \f$f\f$ about \f$-96\f$. Across the \f$94\f$ other test runs that reached a verdict, the spread at the verdict is at most \f$1.02 \times 10^{-8}\f$ (\f$1.2 \times 10^{-10}\f$ on the smooth problems and up to \f$1.02 \times 10^{-8}\f$ at the kinks of \f$\sum_{i=1}^n |x_i|\f$ and the median). On least absolute deviations with sample sizes up to \f$10^5\f$, the spread is at most \f$1.4 \times 10^{-8}\f$ and all runs converge. At a kink, the spread is about the search size times the slope, so a kink whose slope times the search size exceeds `value_spread_tolerance` (slope above about \f$100\f$ with the default search size \f$10^{-8}\f$ and default tolerance \f$10^{-6}\f$) is refused as `stalled`; raising `value_spread_tolerance` or loosening the stopping rule avoids that refusal, and no test problem reaches this limit.
+
+On `compass_optimizer`, a rule on the change of the point (\ref laplace::optimizers::parameter_change_stop_rule "parameter_change_stop_rule") sees no change after every failed poll, since \f$x\f$ does not move, and stops the run there as `stopped_on_change`.
+
+## Example
+
+The example minimizes \f$f(x) = |x_1 - 1| + (x_2 + 2)^2\f$ from \f$(0, 0)\f$ with `nelder_mead_optimizer<>` and `compass_optimizer<>` using `compass_poll_basis::coordinate`, returning whether both succeeded, after `Kokkos::initialize`.
+
+```cpp
+#include <laplace/optimizers/compass.hpp>
+#include <laplace/optimizers/minimize.hpp>
+#include <laplace/optimizers/nelder_mead.hpp>
+
+#include <cmath>
+
+struct kink_quadratic_objective {
+  double value(const laplace::optimizers::optimizer_point& x) const {
+    const double d = x(1) + 2.0;
+    return std::abs(x(0) - 1.0) + d * d;
+  }
+};
+
+bool derivative_free_example() {
+  laplace::optimizers::optimizer_vector x0("x0", 2);
+  x0(0) = 0.0;
+  x0(1) = 0.0;
+  kink_quadratic_objective f;
+  const laplace::optimizers::nelder_mead_optimizer<> nm;
+  laplace::optimizers::compass_optimizer<> compass;
+  compass.poll_basis = laplace::optimizers::compass_poll_basis::coordinate;
+  const laplace::optimizers::optimizer_report r_nm =
+      laplace::optimizers::minimize(nm, f, x0);
+  const laplace::optimizers::optimizer_report r_cp =
+      laplace::optimizers::minimize(compass, f, x0);
+  return laplace::optimizers::optimizer_succeeded(r_nm.status) &&
+         laplace::optimizers::optimizer_succeeded(r_cp.status);
+}
+```
+
+## Module types
+
+In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::nelder_mead_optimizer "nelder_mead_optimizer"
+- \ref laplace::optimizers::compass_optimizer "compass_optimizer"
+- \ref laplace::optimizers::compass_poll_basis "compass_poll_basis"
+
+## References
+
+- J. A. Nelder and R. Mead (1965), A simplex method for function minimization, The Computer Journal, 7(4), 308–313. https://doi.org/10.1093/comjnl/7.4.308
+- J. C. Lagarias, J. A. Reeds, M. H. Wright and P. E. Wright (1998), Convergence properties of the Nelder–Mead simplex method in low dimensions, SIAM Journal on Optimization, 9(1), 112–147. https://doi.org/10.1137/S1052623496303470
+- F. Gao and L. Han (2012), Implementing the Nelder–Mead simplex algorithm with adaptive parameters, Computational Optimization and Applications, 51(1), 259–277. https://doi.org/10.1007/s10589-010-9329-3
+- K. I. M. McKinnon (1998), Convergence of the Nelder–Mead simplex method to a nonstationary point, SIAM Journal on Optimization, 9(1), 148–158. https://doi.org/10.1137/S1052623496303482
+- T. G. Kolda, R. M. Lewis and V. Torczon (2003), Optimization by direct search: new perspectives on some classical and modern methods, SIAM Review, 45(3), 385–482. https://doi.org/10.1137/S003614450242889
+- C. Audet and J. E. Dennis (2006), Mesh adaptive direct search algorithms for constrained optimization, SIAM Journal on Optimization, 17(1), 188–217. https://doi.org/10.1137/040603371
+
+*/

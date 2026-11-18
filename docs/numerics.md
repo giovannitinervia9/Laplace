@@ -11973,3 +11973,284 @@ CUDA the regression test objective computes the gradient with a team reduction
 per column, since an array reduction of 1 + p sums exceeded CUDA's per-block
 scratch at p = 201; host backends keep the single pass. The CUDA timings of the
 bench were not taken.
+
+## Nelder-Mead and compass search (2026-11-18)
+
+**What.** The two multidimensional optimizers of wave 2 that use values only
+(note/optimizers.md section 12, decision 2): `nelder_mead_optimizer`
+(`include/laplace/optimizers/nelder_mead.hpp`) and `compass_optimizer`
+(`compass.hpp`). Both report their stationarity measure as `search_size`, in
+the units of x, and stop by default on `search_size_stop_rule` (converged
+when the search size is at most 1e-8). Both work as block sub-optimizers of
+`block_coordinate_optimizer`. Tests in
+`tests/optimizers/test_derivative_free.cpp`, bench in
+`benchmarks/optimizers_derivative_free.cpp`.
+
+**Nelder-Mead.** The starting simplex is x0 and the n points x0 + h_j e_j,
+with h_j = 0.1 max(1, |x0_j|), or a simplex given by the caller. Each iteration
+sorts the vertices and then reflects, expands, contracts outside or inside, or
+shrinks toward the best vertex (Lagarias, Reeds, Wright and Wright 1998), with
+Gao and Han's (2012) coefficients 1, 1 + 2/n, 3/4 - 1/(2n), 1 - 1/n. At n = 2
+these are the classical 1, 2, 1/2, 1/2; at n = 1 the classical ones are used,
+because Gao and Han's shrink factor would be 0. A non-finite value counts as
++infinity. The search size is the diameter of the simplex from the best vertex,
+max_j |x_j - x_0|_2. A shrink that leaves every vertex unchanged means the
+simplex has collapsed to rounding, and the run ends as converged at
+resolution.
+
+**McKinnon's safeguard.** McKinnon (1998) gave a strictly convex C1 function,
+(x <= 0 ? 360 x^2 : 6 x^2) + y + y^2 (tau = 2, theta = 6, phi = 60), on which
+Nelder-Mead from his simplex performs inside contractions toward (0, 0), where
+the gradient is (0, 1), while the minimum is -1/4 at (0, -1/2). The shape of
+the simplex is watched: the conditioning |det E| / prod_j |E_j|, where E holds
+the edges from the best vertex (computed by modified Gram-Schmidt), is 1 for a
+right-angled simplex and 0 for a flat one, whatever its size. Below 1e-6 the
+simplex is rebuilt right-angled at the best vertex, with edges equal to the
+diameter reached, at most 3 times per run. Measured: without the safeguard
+the run ends converged at (0, 0) with f = 0, after 108 iterations and 219
+evaluations; with it the run reaches (0, -1/2) within 4.9e-9, after 142
+iterations and 273 evaluations.
+
+**Compass search.** A poll evaluates x +- delta d_j over the n columns d_j of
+an orthonormal basis, 2n points in all. The default basis is a new random one
+at every poll: the Householder reflection I - 2 w w'/w'w of a vector w drawn
+uniformly in [-1, 1]^n from the 64-bit LCG of multistart, seeded with `seed`
+(default 1), so that gcc and MSVC give the same polls. Its columns reach every
+direction of the sphere over a run, which is the property the convergence
+theory for a Lipschitz f needs (the idea of MADS, Audet and Dennis 2006). The
+coordinate basis is the other option. With first improvement (the default)
+a poll stops at its first lower value. After a success delta is doubled, up to
+1e4 times its start; after a failure it is halved. The start is
+delta = 0.1 max(1, max_i |x0_i|). The search size is the step of the poll that
+just failed, the distance at which no lower value was found in any of the 2n
+directions; it is not a number after a successful poll, since x has moved. A
+failed poll whose trial points all round to x ends the run as converged at
+resolution.
+
+**The battery** (f* = 0; status 0 converged, 4 iteration budget; one thread,
+gcc 14.2, fastest of repeats):
+
+| problem | NM evaluations | NM ms | compass random | compass coordinate |
+|---|---|---|---|---|
+| Rosenbrock n = 2 | 261 | 0.054 | 10574 | 25328 |
+| Rosenbrock n = 4 | 737 | 0.215 | 48499 | budget |
+| Powell singular | 1444 | 0.408 | budget | budget |
+| Beale | 145 | 0.043 | 1133 | 6531 |
+| helical valley | 407 | 0.122 | 6878 | 11352 |
+| Wood | 872 | 0.336 | 35312 | budget |
+| quadratic n = 4, kappa 1e2 | 595 | 0.165 | 1241 | 825 |
+| quadratic n = 4, kappa 1e4 | 688 | 0.193 | 32878 | budget |
+| quadratic n = 10, kappa 1e2 | 2060 | 1.395 | 8525 | 23744 |
+
+Nelder-Mead converges on every problem at f* = 0, 1, 1e3 and 1e6, with
+|x - x*| at most 7.5e-8 at f* = 0. With f* = 1e6 the distance grows to the
+resolution of f, up to 8e-6 on the problems whose minimum has a positive
+definite Hessian, and 1.5e-3 on Powell's, where f grows as |x - x*|^4. The
+random compass converges on all but Powell's singular minimum, where it
+reaches the budget of 10000 polls with |x - x*| = 1.1e-2. It needs 2 to 70
+times the evaluations of Nelder-Mead. The coordinate poll reaches the budget
+on Rosenbrock n = 4, Wood and the kappa 1e4 quadratic (f - f* = 0.21 there),
+because its fixed axes descend narrow valleys in small steps. The tests ask a
+converged run to lie within max(1e3 search size, C (eps max(1, |f*|))^p), with
+p = 1/2 (1/4 for Powell's) and C between 10 and 1e3, and a run that does not
+converge to end with a budget status.
+
+**Non-smooth.** sum |x_i| at n = 2 and 4, and sum |y_i - mu| over 7 and
+8 points (the median, and an interval of minimizers): both methods converge
+with the minimizer within twice the final search size. Nelder-Mead uses 127
+and 471 evaluations on sum |x_i|, compass 290 and 977.
+
+**As a block.** The Laplace (laplace1) of the fit_distrib bench by
+alternation, mu by the method and log sigma by Newton on the expected
+curvature, from the library start plus 1 on each free coordinate: 3 sweeps at
+n = 1000 and 1001 (tests) and 1e5 (bench), mu inside the median
+interval and sigma within 1.6e-6 relative of the mean absolute deviation. At
+n = 1e5 on one thread: Brent 74 reductions in 37 ms, Nelder-Mead 187 in 91 ms,
+compass 208 in 101 ms.
+
+**The spread check.** On sum p_i^2 + 100 sin(1e20 p_1)
+at n = 4 both methods first reached a converged verdict near the start
+(|x| about 1, f about -96): the search size certifies only that no lower value
+was found at that distance, and the noise has such points at every scale. A
+convergence verdict, from the stop rule or from the method's own rounding
+test, now stands only when the values that the final search compared differ by
+at most `value_spread_tolerance` + 64 eps |f| (default 1e-6, in the units of
+f): over the final simplex, max_j f(v_j) - min_j f(v_j); over the final failed
+poll, max |f(x +- delta d_j) - f(x)|. A larger spread ends the run as
+`stalled`. It costs no evaluation, since both sets of values are already at
+hand. Measured at the verdict: 157 (Nelder-Mead) and 159 (compass) on the noisy
+objective, which now ends stalled on both; at most 1.02e-8 on the 94 other runs
+of the tests that reached a verdict (1.2e-10 on the smooth problems, up to
+1.02e-8 at the kinks of sum |x_i| and of the median, where the spread is about
+the search size times the slope); on least absolute deviations,
+sum |y_i - b_0 - b_1 x_i| with n = 1e3, 1e4 and 1e5, at most 1.4e-8, all
+converged. The term 64 eps |f| keeps the check from refusing a minimum whose
+values are flat to rounding when |f| is large (the spread from rounding alone
+is about eps |f|, 2.2e-10 measured at f* = 1e6). The default leaves a factor of
+about 100 above the largest spread of a converged run and 1.6e8 below the
+noisy one; a kink whose slope times the search size exceeds 1e-6 (slope above
+about 100 with the default search size 1e-8) would be refused, which no test
+problem reaches.
+
+**CUDA.** Both methods run on the host; the whole laplace_tests passes on the
+CUDA build, and the 4 derivative-free cases give 205 assertions, none failing,
+on gcc and on CUDA.
+
+## The proximal bundle method and least absolute deviations (2026-11-18)
+
+**What.** `bundle_optimizer` (`include/laplace/optimizers/bundle.hpp`), the
+method of wave 2 for a convex objective that is not differentiable everywhere
+and has no simple proximal operator (note/optimizers.md section 12, decision
+7), from the value and one subgradient per point (`gradient_objective`). The
+case it was written for is least absolute deviations (LAD),
+sum_i |y_i - x_i'beta| / sigma, the negative log-likelihood of the Laplace
+distribution in its location with covariates. Tests in
+`tests/optimizers/test_bundle.cpp`, bench in `benchmarks/optimizers_bundle.cpp`.
+
+**The method.** Each point y_j visited gives a cut, the affine minorant
+f(y_j) + g_j'(z - y_j); the cuts are kept as the subgradient and the
+linearization error alpha_j at the stability centre x, updated on each move of
+the centre by alpha_j += f(x_new) - f(x) - g_j'(x_new - x). The step is
+d = -t p, p = G lambda, with lambda the solution of the dual over the simplex,
+min (t/2)|G lambda|^2 + alpha'lambda; the model predicts the decrease
+v = t|p|^2 + alpha'lambda, and the trial point is a serious step (the centre
+moves) when f falls by at least 0.1 v, a null step otherwise. The proximity t
+follows Kiwiel's rule (1990): the interpolated u_int = 2u(1 - fall/v), u = 1/t,
+after two serious steps in a row or more than three null steps in a row whose
+new cut has a large linearization error, a halving of u after more than three
+serious steps, u kept within [u/10, 10u] per step and above 1e-10 u_0.
+Kiwiel's variation estimate eps_v reads |p| + alpha_p, which mixes the units of
+a gradient and of the objective; here it reads the stationarity measure below.
+The first t is 1/|g_0|, a first step of length 1 in x (optimizers7 multiplied
+the subgradient by a raw t0, and a first step 233 units long on Rosenbrock
+left t unable to recover). A trial point where f is not finite is refused
+(no cut, t / 10). When the bundle exceeds max_bundle_size cuts (default
+n + 2, enough for a vertex in R^n) the cuts with lambda_j = 0 are dropped
+first, then the aggregate cut (p, alpha'lambda), formed at the centre before
+the step, replaces all but the newest; its linearization error is moved with
+the centre when the step was serious (optimizers7 once stored the aggregate at
+the new centre, where it can lie above f).
+
+**The dual.** An active-set method of the kind of Wolfe's minimum-norm-point
+algorithm: the working set holds cuts whose (g_j, 1) are linearly independent,
+the equality-constrained problem on it is two Cholesky solves of
+t G_F'G_F + s^2 11' (s^2 the mean of t|g_j|^2, which puts the two parts on one
+scale), and a cut whose (g_j, 1) depends on the working set enters by
+replacing one of them along a direction on which the dual falls linearly. A
+cut enters when its dual gradient is below the current value by more than
+1e-13 (t max_j Q_jj + max_j alpha_j), the rounding of a score that is a sum of
+nearly cancelling terms; with 1e-13 max_j |score_j| the solve cycled to its cap
+at large t. Measured against FISTA on the dual with the exact projection on
+the simplex (step 1/(t trace G'G), the same solver for both dual solves; 16
+OpenMP threads, best of three):
+
+| dataset (n, p + 1) | active set: it, s | FISTA dual: it, s | FISTA: distance to the vertex |
+|---|---|---|---|
+| d1 (100, 11) | 61, 0.0036 | 62, 0.0282 | 4.8e-9 |
+| d3 (1000, 51) | 211, 0.030 | 222, 0.72 | 2.8e-8 |
+| d4 (10000, 101) | 446, 0.45 | 825, 10.6 | 9.6e-8 |
+| d5 (100000, 11) | 74, 0.014 | 84, 0.049 | 5.1e-8 |
+
+The active set is 4 to 24 times faster; FISTA converges, honestly, near the
+vertex but not on it (within 5e-9 to 1e-7). The exact active set is the
+solver (decided by Giovanni, 2026-11-18), and the FISTA dual, kept for this
+measurement only, is not in the library.
+
+**Stationarity.** The model is a minorant of f, so f(x) - f* is at most the
+cutting-plane gap f(x) - min_z f_hat(z), which by duality is
+min{alpha'lambda : G lambda = 0, lambda in the simplex}, infinite while 0 is
+not in the hull of the cuts' subgradients. The measure is the model's
+predicted decrease at a large proximity Gamma, v(Gamma) =
+Gamma |p_Gamma|^2 + alpha'lambda_Gamma, from a second solve of the dual
+warm-started from the first: it increases with Gamma towards the gap and falls
+short of it by at most |d*|^2/(2 Gamma), d* the step to the model's minimizer.
+Gamma = certificate_ratio max(gamma, t), with gamma the largest of t_0 and the
+t of every serious step (the longest proximity at which the model was
+confirmed); gamma never falls on a null step. Three measures were set aside on
+measurement.
+- (1/2) gamma |p_t|^2 + alpha'lambda_t, from the step's own dual, declared
+  convergence with f - f* 5 to 54 times above it on d3, d4 and d5
+  (f - f* = 9.7e-6 under 1.8e-7 on d3, 2.4e-4 from the vertex): near a vertex
+  f - f* behaves like |p| times the distance, not like a quadratic decrement.
+- The secant ratios s's/s'y between consecutive centres as a third term of
+  gamma, as BFGS's gamma_max: on a polyhedral f they are 0 or infinite, and on
+  the CUDA build one pair with s'y at rounding level set gamma to 1.2e6 on d4,
+  so that Gamma |p|^2 held the measure at 2.2e-6 on the vertex itself
+  (f - f* = 9e-12) for 100000 null steps, the iteration budget.
+- A measure carrying the current t (optimizers7's -v) is driven under any
+  tolerance by null steps that shrink t; on an objective finite only at its
+  start the bundle method ends stalled with a measure of 141.
+
+That CUDA run also showed a null step that cannot be resolved: at the vertex
+the step's predicted decrease v was 9.4e-12, below the resolution of f
+(64 eps |f| = 1.4e-10), every trial point gave f exactly and Kiwiel's rule left
+t unchanged. Such a null step now multiplies t by 10, and ends the run as
+stalled once t is at its cap. The ratio, LAD at the default decrement
+tolerance 1e-6, 16 OpenMP threads (f - f*, with the measure in brackets):
+
+| certificate_ratio | d1 | d3 | d4 | d5 |
+|---|---|---|---|---|
+| 10 | 4.3e-14 (5.1e-14) | 3.3e-12 (7.6e-7) | 6.0e-8 (8.9e-7) | 1.9e-10 (2.2e-10) |
+| 100 | 4.3e-14 (5.1e-14) | 3.3e-12 (7.9e-7) | 3.2e-9 (6.1e-7) | 1.9e-10 (2.2e-10) |
+| 1e3 | 4.3e-14 (5.1e-14) | 3.3e-12 (4.9e-7) | 3.3e-11 (1.1e-7) | 1.9e-10 (2.2e-10) |
+| 1e5 | 4.3e-14 (3.4e-11) | 1.3e-12 (1.3e-12) | 6.0e-8 (5.3e-7) | 1.9e-10 (2.2e-10) |
+
+Every run converged and every measure is above f - f*; the default is 100
+(decided by Giovanni, 2026-11-18, with the certificate itself, the default
+bundle size n + 2, the statuses above and the two repairs of the CUDA run).
+
+**LAD against quantreg.** On the four wave-2 datasets with p < n (G2's frozen
+references, the vertex re-solved from rq's basis), from beta = 0, active set,
+bundle size n + 2 (8 OpenMP threads; f - f*, measure, max |beta - vertex|):
+
+| dataset | decrement 1e-6: trial points, f - f*, measure, distance | decrement max(1e-10, 1e3 eps f*): the same |
+|---|---|---|
+| d1 | 61, 1.4e-14, 2.5e-14, 4.4e-15 | 61, 1.4e-14, 2.5e-14, 4.4e-15 |
+| d3 | 214, 1.0e-12, 1.1e-12, 2.0e-13 | 214, 1.0e-12, 1.1e-12, 2.0e-13 |
+| d4 | 411, 6.0e-8, 7.8e-7, 3.5e-6 | 438, 5.2e-10, 5.2e-10, 2.9e-11 |
+| d5 | 74, 3.1e-10, 3.4e-10, 1.4e-10 | 74, 3.1e-10, 3.4e-10, 1.4e-10 |
+
+Once the bundle holds the p + 1 cuts of the basis the model is exact at the
+vertex, and the method lands on it; at the default rule it may stop just
+before (d4). Over 1 to 16 threads the measure was above f - f* in every run but
+two, both on d5 at f - f* about 1e-9 (1.08 and 1.3 times the measure), within
+the rounding of a sum of 1e5 terms (sqrt(n) eps |f| about 7e-9); the test
+asks f - f* <= 2 measure + 64 eps |f*|. At a decrement of 1e-10, two of eight
+runs on d4 and d5 ended stalled: 64 eps |f| is 1.4e-10 and 1.4e-9 there, so
+the tight runs use max(1e-10, 1e3 eps |f*|) as G1's FISTA test does. Bundle
+sizes (16 threads): 2n + 2 converges as well, at 1.0 to 2.4 times the time of
+n + 2; 10 cuts reach the budget of 20000 trial points on d3 and d4 and need
+19465 on d1.
+
+**The Laplace with covariates by block alternation.** laplace1's -l in
+(beta, u = log sigma), e^-u sum|r| + n u + n log 2, beta by the bundle method
+and u by Newton (block_coordinate_optimizer): 3 sweeps on each dataset,
+beta within 3.6e-11 of the vertex, sigma within 1.2e-6 relative of
+sigma_hat = sum|r|/n (the decrement tolerance bounds it by about
+sqrt(2 tol / n)), -l within 1.7e-8 of rq_fits' laplace1 value.
+
+**Newton with the expected information and BFGS on LAD** (decision 7's
+measurement, for the engine of phase 7; from beta = 0, default settings, BFGS
+with 5000 iterations; status 3 stalled, 4 iteration budget, 6 line search
+failed):
+
+| dataset | Newton, X'X: status, it, f - f*, distance | BFGS: status, it, f - f*, distance |
+|---|---|---|
+| d1 | 3, 111, 0.16, 3.6e-2 | 6, 31, 2.0e-3, 9.0e-4 |
+| d3 | 4, 200, 0.24, 2.1e-2 | 6, 195, 7.1e-5, 1.1e-4 |
+| d4 | 4, 200, 9.2e-2, 2.9e-3 | 6, 207, 3.2e-3, 5.1e-4 |
+| d5 | 3, 56, 1.2e-4, 1.6e-4 | 3, 58, 1.3e-5, 4.5e-5 |
+
+Neither converges on any of the four, and both say so: Newton's step from the
+smooth X'X has no descent at the kinks (stalled or the 200-iteration budget,
+with 1409 to 2303 values in its line searches), BFGS's Wolfe search fails at a
+kink. BFGS gets nearer (f - f* 1e-5 to 3e-3); at n = 1e5 the kinks are dense
+enough for both to come within 1e-4 of the vertex. For LAD the route is the
+bundle method (or LAD's own linear programme); the expected information is a
+route for the scale, not for the location.
+
+**CUDA.** The method runs on the host; the sums over rows are the regression
+objective's kernels. The whole laplace_tests passes on the CUDA build, and the
+5 bundle cases (with the header case) give 72 assertions, none failing, on gcc
+and on CUDA. On the device every LAD fit lands on the vertex at the default
+rule (d4: 452 trial points, 0.42 s, f - f* = 9.1e-12; d5: 71, 0.044 s).
