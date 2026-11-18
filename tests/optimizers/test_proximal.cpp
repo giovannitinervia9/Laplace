@@ -9,7 +9,7 @@
 //   proximal Newton with FISTA inside agree on the point and on the exact
 //   support, and the point satisfies the optimality conditions read through
 //   the prox and coordinate by coordinate (KKT);
-// - MCP, a weakly convex penalty written here (rho = 1/gamma): with rho
+// - MCP (mcp_penalty, rho = 1/gamma): with rho
 //   declared, MFISTA and proximal Newton reach a stationary point, and proximal
 //   Newton damps the coordinates whose curvature is below rho and says so;
 //   with rho wrongly declared 0 no run claims convergence at a point that is not
@@ -29,6 +29,7 @@
 #include <laplace/optimizers/proximal_gradient.hpp>
 #include <laplace/optimizers/proximal_newton.hpp>
 #include <laplace/penalty/independent_product_penalty.hpp>
+#include <laplace/penalty/nonconvex_penalty.hpp>
 
 #include <Kokkos_Core.hpp>
 
@@ -151,44 +152,17 @@ void check_three_routes(const regression_problem& pr, P penalty, std::vector<dou
   }
 }
 
-// MCP with weight lambda and concavity gamma on every coordinate but the
-// intercept, rho = 1/gamma, with its firm-threshold prox (exact for t < gamma)
-struct mcp_objective {
-  using curvature_type = lo::dense_curvature_matrix;
-  objective_type& smooth;
-  double lambda, gamma, declared_rho;
-
-  double value(const lo::optimizer_point& x) { return smooth.value(x); }
-  double value_gradient(const lo::optimizer_point& x, const lo::optimizer_vector& g) { return smooth.value_gradient(x, g); }
-  double value_gradient_curvature(const lo::optimizer_point& x, const lo::optimizer_vector& g, curvature_type& H) {
-    return smooth.value_gradient_curvature(x, g, H);
-  }
-  double pen(double b) const {
-    const double u = std::abs(b);
-    return u <= gamma * lambda ? lambda * u - u * u / (2.0 * gamma) : 0.5 * gamma * lambda * lambda;
-  }
-  double prox1(double v, double t) const {
-    const double u = std::abs(v);
-    if (u <= t * lambda) return 0.0;
-    if (u <= gamma * lambda) return std::copysign((u - t * lambda) / (1.0 - t / gamma), v);
-    return v;
-  }
-  double nonsmooth_value(const lo::optimizer_point& x) {
-    double r = 0.0;
-    for (std::size_t j = 1; j < x.extent(0); ++j) r += pen(x(j));
-    return r;
-  }
-  void nonsmooth_prox(const lo::optimizer_point& v, double t, const lo::optimizer_vector& z) {
-    z(0) = v(0);
-    for (std::size_t j = 1; j < v.extent(0); ++j) z(j) = prox1(v(j), t);
-  }
-  int nonsmooth_block_count() const { return 1; }
-  double weak_convexity_constant(int) const { return declared_rho; }
-  std::pair<int, int> nonsmooth_block_range(int) const { return {1, smooth.columns() - 1}; }
-  bool nonsmooth_block_separable(int) const { return true; }
-  double nonsmooth_coordinate_prox(int, int, double v, double t) const { return prox1(v, t); }
-};
+// MCP (mcp_penalty) with theta = (lambda, gamma) on every coordinate but the
+// intercept, rho = 1/gamma, with its firm-threshold prox (NaN for t rho > 1)
+using mcp_objective = lo::penalized_objective<objective_type, lpen::mcp_penalty>;
 static_assert(lo::coordinate_composite_objective<mcp_objective>);
+
+// the same objective with rho wrongly declared 0
+struct mcp_objective_rho_hidden : mcp_objective {
+  using mcp_objective::mcp_objective;
+  double weak_convexity_constant(int) const { return 0.0; }
+};
+static_assert(lo::coordinate_composite_objective<mcp_objective_rho_hidden>);
 
 // stationarity of MCP: 0 in the Clarke subdifferential, coordinate by coordinate
 double mcp_violation(objective_type& smooth, const lo::optimizer_point& x, double lambda, double gamma) {
@@ -275,7 +249,8 @@ TEST_CASE("proximal methods: MCP, rho declared and wrongly declared") {
   const double lambda = 0.15, gamma = 1.5;
   lo::optimizer_vector x0("x0", pr.p);
 
-  mcp_objective right{smooth, lambda, gamma, 1.0 / gamma};
+  mcp_objective right(smooth, pr.p, lo::attach_penalty(lpen::mcp_penalty{pr.p - 1}, 1, {lambda, gamma}));
+  CHECK(right.weak_convexity_constant(0) == 1.0 / gamma);
   lo::proximal_gradient_optimizer<> mfista;
   mfista.stop_rule.tolerance = 1e-14;
   const auto r1 = lo::minimize(mfista, right, x0);
@@ -291,9 +266,9 @@ TEST_CASE("proximal methods: MCP, rho declared and wrongly declared") {
   // H has no Cholesky factor problem here (X'X is positive definite): proximal Newton must converge
   CHECK(lo::optimizer_succeeded(r2.status));
 
-  // rho declared 0: the steps are no longer bounded by gamma, the firm threshold is
-  // not the prox; a run may fail, but never claims a non-stationary point
-  mcp_objective wrong{smooth, lambda, gamma, 0.0};
+  // rho declared 0: the steps are no longer bounded by gamma, and mcp_penalty's prox
+  // answers NaN beyond t = gamma; a run may fail, but never claims a non-stationary point
+  mcp_objective_rho_hidden wrong(smooth, pr.p, lo::attach_penalty(lpen::mcp_penalty{pr.p - 1}, 1, {lambda, gamma}));
   const auto w1 = lo::minimize(mfista, wrong, x0);
   const auto w2 = lo::minimize(newton, wrong, x0);
   MESSAGE("MCP with rho declared 0: FISTA status ", int(w1.status), " after ", w1.iterations, "; proximal Newton status ",
@@ -364,7 +339,7 @@ TEST_CASE("proximal methods: lasso and elastic net against the frozen glmnet ref
       r2 = fit_against_glmnet(d, ref, smooth, pen, {ref.lambda_laplace, ref.alpha}, fista, e2, s2, o2);
     }
     MESSAGE(ref.dataset, " alpha ", ref.alpha, " fraction ", ref.lambda_fraction, " support ", ref.support.size(),
-            " | proximal Newton status ", int(r1.status), " it ", r1.iterations, " err ", e1, " f-f* ", o1, " supp ", s1,
+            " | proximal Newton status ", int(r1.status), " it ", r1.iterations, " factor ", int(r1.final_factorization), " err ", e1, " f-f* ", o1, " supp ", s1,
             " | FISTA status ", int(r2.status), " it ", r2.iterations, " err ", e2, " f-f* ", o2, " measure ", r2.decrement,
             " supp ", s2);
     CHECK(s1);
@@ -372,15 +347,19 @@ TEST_CASE("proximal methods: lasso and elastic net against the frozen glmnet ref
     // d2 has p = 200 > n = 100: X'X has no Cholesky factor, and the decrement
     // comes from the factor of its block on the free coordinates (the support and
     // the intercept). It exists unless the support has n or more coordinates (the
-    // enet at the smallest lambda, 113): there proximal Newton cannot declare
-    // convergence, since the enet's ridge curvature is in r, not in H
+    // enet at the smallest lambda, 113, whose ridge curvature is in r, not in H):
+    // there the decrement falls back to FISTA's measure (1/2) max(t, gamma_max) |G_t|^2,
+    // flagged by decrement_from_prox_mapping, and the run converges (43 iterations, f - f* 2.6e-12; before the fallback it
+    // could not declare convergence)
     const bool free_singular = ref.support.size() + 1 > std::size_t(d.n);
-    CHECK(lo::optimizer_succeeded(r1.status) == !free_singular);
-    CHECK(lo::optimizer_succeeded(r2.status));
+    CHECK(lo::optimizer_succeeded(r1.status));
+    CHECK((r1.final_factorization == lo::curvature_factorization::positive_definite) == !free_singular);
+    CHECK(r1.decrement_from_prox_mapping == free_singular);
+    CHECK(!r2.decrement_from_prox_mapping);
     // at the decrement tolerance 1e-10: f - f* at most 1.8e-10 and coefficients
     // within 2.4e-6 on d2 (measured), within 2e-7 elsewhere
     CHECK(e1 <= (d.p >= d.n ? 5e-6 : 5e-7));
-    if (!free_singular) CHECK(std::abs(o1) <= 4e-10);
+    CHECK(std::abs(o1) <= 4e-10);
     // FISTA's measure (1/2) max(t, gamma_max) |G_t|^2 against f - f*: at most 1.11
     // times the measure over the 30 fits (measured), checked with a margin
     CHECK(e2 <= 2e-5);

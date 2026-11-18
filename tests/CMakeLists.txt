@@ -116,6 +116,7 @@ set(LAPLACE_TEST_SOURCES
   optimizers/test_bundle.cpp
   optimizers/test_primal_dual.cpp
   optimizers/test_linear_map_fits.cpp
+  optimizers/test_nonconvex_fits.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

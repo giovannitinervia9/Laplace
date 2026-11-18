@@ -154,6 +154,13 @@ struct optimizer_report {
   int damped_coordinates = 0;
   /**
    * \ingroup optimizers
+   * \brief Whether `decrement` is proximal Newton's fallback measure.
+   *
+   * True when proximal Newton falls back to the proximal gradient mapping measure because \f$H\f$ is finite and its restriction to the free coordinates has no Cholesky factor; `false` by default and for every other method.
+   */
+  bool decrement_from_prox_mapping = false;  // proximal Newton's fallback measure (note/optimizers.md section 12, point 16)
+  /**
+   * \ingroup optimizers
    * \brief Wall-clock duration of the run in seconds.
    */
   double elapsed_seconds = 0.0;

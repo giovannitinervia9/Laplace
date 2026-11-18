@@ -12990,6 +12990,102 @@ on the side of the cumulative function that is close to one, where `1 - r` at
 400 bits rounds to one as soon as `r` falls below 2^-400 and its logarithm would
 read as zero.
 
+## SCAD and MCP fits against ncvreg; proximal Newton's fallback measure (2026-11-18)
+
+**What.** The proximal methods on the non-convex penalties `mcp_penalty`
+(gamma = 3) and `scad_penalty` (a = 3.7), against fits of ncvreg 3.16.0 (R
+4.6.0) frozen by `tools/reference/optimizers_wave2_ncvreg.R` on the five
+gaussian datasets of the wave-2 references, at 0.5, 0.1 and 0.01 of ncvreg's
+lambda_max: 30 fits in `tests/data/reference/optimizers/wave2/`
+(`ncvreg_fits.csv`, `ncvreg.csv`, `ncvreg_weights.csv`), tested by
+`tests/optimizers/test_nonconvex_fits.cpp`. With them one change to
+`proximal_newton_optimizer`: a fallback measure when the free block of H has no
+Cholesky factor.
+
+**The conversion.** ncvreg centres y, scales each column to sum(x^2)/n = 1
+(scale s_j) and minimizes RSS/(2n) + sum_j q(s_j |beta_j|; lambda, shape) in the
+original coordinates. Each piece of both q is homogeneous of degree 2 in
+(u, lambda) jointly, so n q(u; lambda, shape) = q(sqrt(n) u; sqrt(n) lambda,
+shape), and n times ncvreg's objective is
+
+    RSS/2 + sum_j q(w_j |beta_j|; sqrt(n) lambda, shape),   w_j = |x_j - mean(x_j)|_2 = sqrt(n) s_j,
+
+the gaussian test objective (sigma = 1) plus `linear_map_penalty<mcp_penalty
+or scad_penalty, diagonal_map>` with weights w and theta = (sqrt(n) lambda,
+shape), the intercept unpenalized. An unnormalizable penalty keeps its class
+through the map, so the value adds no -sum log w_j.
+
+**The references.** ncvreg runs a path of 100 log-spaced lambdas down to 0.01
+lambda_max, the three fractions included, with eps = 1e-14. Its point is then
+solved again exactly: on its support and with the piece of q of each u_j, the
+stationarity is linear, (Xc_S'Xc_S - diag(d_S)) beta_S = Xc_S'yc - (w s k)_S,
+with (k, d) = (lambda, w^2/gamma) on MCP's inner piece, (lambda, 0) on SCAD's
+first, (a lambda/(a - 1), w^2/(a - 1)) on SCAD's second and (0, 0) on the flat
+tails. All 30 polished points keep ncvreg's signs and pieces, satisfy the KKT
+conditions within 2e-9 (in the objective's units) with a strict inequality off
+the support, and have a positive smallest eigenvalue of that matrix: they are
+strict local minima. The objective is convex (smallest eigenvalue of the
+standardized X'X/n above rho = 1/gamma or 1/(a - 1)) on d1 and d4 only.
+
+**The fits.** From x0 = 0: proximal Newton (tolerance 1e-10), MFISTA
+(tolerance max(1e-10, 1e3 eps |f|)) and a multistart of MFISTA from 10 Latin
+hypercube starts (spread 1). Stationarity is measured as the largest violation
+of 0 in the Clarke subdifferential, divided by lambda max_j w_j.
+
+| fits | proximal Newton | MFISTA | multistart |
+|---|---|---|---|
+| 24 (d1, d3, d4, d5; d2 at 0.5) | ncvreg's support; coefficients within 2.3e-6, abs(f - f*) <= 1.5e-10 | ncvreg's support; within 2.8e-6, f - f* <= 2.95 times its measure | ncvreg's point |
+| d2 (p = 200 > n = 100) at 0.1 | MCP +3.29, SCAD -12.18 | MCP -1.35, SCAD -12.70 | MCP -1.35, SCAD -12.70 |
+| d2 at 0.01 | MCP +0.555, SCAD +0.750 | MCP +0.639, SCAD +0.911 | MCP +0.639, SCAD +0.911 |
+
+(f - f(ncvreg) in the objective's units in the last two rows.) On the 24 fits
+every method reaches ncvreg's minimum, and so do all 10 starts of the
+multistart on d2 at 0.5. On d2 below 0.5 there are other local minima (the 10
+starts end at 8 (MCP) and 10 (SCAD) distinct optima at 0.1, at 8 and 6 at
+0.01): every converged run is stationary (at most
+5.6e-6), the multistart reaches ncvreg's value or a lower one at 0.1, and at
+0.01 no route from 0 or from random starts reaches it. Measured without being
+kept in the test: multistarts of 30 starts with spread 0.1 or 0.3 end between
++0.54 and +0.91 there, and a path warm-started along ncvreg's grid ends +0.045
+(MCP) and -0.233 (SCAD); at SCAD 0.1 that path reproduces ncvreg's point
+exactly, at MCP 0.1 it ends +4.80. The test bounds: on the 24 fits coefficients
+within 5e-6 and abs(f - f*) <= 4e-10 for proximal Newton, within 1.5e-5 and
+f - f* <= 4 times the measure + 64 eps |f| for MFISTA and the multistart; on d2
+below 0.5 stationarity <= 1e-5 for every converged run, and at 0.1 the
+multistart's value <= ncvreg's + 4 times its measure + 64 eps |f|.
+
+The damping of proximal Newton never fires on these problems: in ncvreg's
+scaling H_jj is about w_j^2, above the block's rho max_j w_j^2 since rho < 1
+and the column norms are close.
+
+**The fallback measure.** On d2 at 0.01, proximal Newton from 0 ended
+"stalled" after 85 (MCP) and 98 (SCAD) iterations, with a NaN decrement, at
+points stationary within 1e-8: the free coordinates (the unpenalized ones and
+the penalized ones not held at a kink, here many in the flat tails) outnumbered
+the rows, so their block of H = X'X had no Cholesky factor. From random starts
+at 0.1, 9 of 10 runs stalled the same way, at points that interpolate the data
+with coefficients in the flat tails. Now, when that factor does not exist and H
+is finite, the decrement is the measure of `proximal_gradient_optimizer` at x,
+(1/2) max(t, gamma_max) |G_t|^2 with G_t = (x - prox_{t r}(x - t grad s(x)))/t,
+t = 1/L the step of the inner model (L the Gershgorin bound of H, at least
+rho/0.99) and gamma_max the largest s's/s'y over proximal Newton's accepted
+steps; it stays NaN only when H is not finite. The new field
+`decrement_from_prox_mapping` of `optimizer_report` (false by default) says that
+the decrement of the report is this measure; the tests check that it is true
+exactly on the d2 fits at 0.01 here and on the elastic net below, false
+elsewhere. Measured: d2 at 0.01 converges in 59 (MCP) and 71 (SCAD) iterations at
+the same local minima, with stationarity 2.9e-6 and 2.2e-6; the elastic net on
+d2 at 0.01 of lambda_max (support 113 > n), which could not converge before,
+converges in 43 iterations with f - f* = 2.6e-12 and coefficients within
+5.7e-7. The other 29 glmnet fits and the 28 other SCAD and MCP fits end with a
+positive definite factor, so the fallback never stopped them and they are
+unchanged.
+
+**What is open.** No method here finds ncvreg's minimum on d2 at 0.01 from
+random starts; a warm-started path, which is how ncvreg reaches its point, is a
+route of the engine (penalties plan, section 7) and is not tested here. The
+damping is exercised only by the synthetic MCP test of `test_proximal.cpp`.
+
 ## The univariate power exponential: powerexp_distrib (2026-11-18)
 
 `powerexp_distrib(mu, sigma, p)`, the power exponential law, also called the

@@ -36,8 +36,12 @@
 // the stationary points of s + r, kinks included. It is NaN when H restricted
 // to the free coordinates (the unpenalized ones and the penalized ones not held
 // at a kink at the subproblem's solution; all of them without coordinate
-// access) has no Cholesky factor, so that no point with an indefinite or
-// singular curvature on the free coordinates is declared converged by it.
+// access) has no Cholesky factor; then, when H is finite, it falls back to the
+// measure of proximal_gradient_optimizer at x, (1/2) max(t, gamma_max) |G_t|^2
+// (t = 1/L as below, gamma_max the largest secant ratio s's/s'y over the
+// accepted steps), and the report's decrement_from_prox_mapping says that the
+// decrement it gives was this measure (Giovanni, 2026-11-18). NaN only when H
+// is not finite.
 //
 // The step x + s d is accepted on Armijo's condition on the full objective
 // (Lee, Sun and Saunders 2014),
@@ -132,8 +136,15 @@ inline double half_curvature(const optimizer_point& z, const optimizer_point& x,
  * or \f$\frac{1}{2} t \lVert G\rVert^2\f$ when neither exists) is at most `inner_fraction` (default \f$0.01\f$)
  * times \f$\frac{1}{2} d^\top H d\f$, or after `max_inner_sweeps` (default \f$1000\f$) sweeps or iterations.
  *
- * Stationarity is the proximal Newton decrement \f$\delta = \frac{1}{2} d^\top H d\f$ in the objective's units,
- * or quiet NaN when \f$H\f$ restricted to the free coordinates (those not held at a kink) has no Cholesky factor.
+ * Stationarity is the proximal Newton decrement \f$\delta = \frac{1}{2} d^\top H d\f$ in the objective's units.
+ * When \f$H\f$ restricted to the free coordinates (those not held at a kink) has no Cholesky factor and \f$H\f$ is finite,
+ * \f$\delta\f$ falls back to the `proximal_gradient_optimizer` measure at the outer point \f$x\f$,
+ * \f$\frac{1}{2}\max(t, \gamma_{\max})\lVert G_t\rVert^2\f$, where \f$G_t = (x - \operatorname{prox}_{t r}(x - t\nabla s(x)))/t\f$,
+ * \f$t = 1/L\f$ is the step of the inner model (Gershgorin bound, at least \f$\rho / \f$`rho_safety`), and
+ * \f$\gamma_{\max}\f$ is the largest secant ratio \f$\delta_x^\top \delta_x / (\delta_x^\top \delta_g)\f$ (with
+ * \f$\delta_x^\top \delta_g > 0\f$) over accepted steps for consecutive point and gradient differences \f$\delta_x\f$ and
+ * \f$\delta_g\f$. Then `optimizer_report::decrement_from_prox_mapping` is `true`; \f$\delta\f$ is quiet NaN only when \f$H\f$
+ * is not finite.
  * If the inner solve misses its target, `stop_rule` receives \f$\max(\delta, \delta_{\mathrm{in}} / \kappa_{\mathrm{in}})\f$
  * where \f$\delta_{\mathrm{in}}\f$ is the last inner measure and \f$\kappa_{\mathrm{in}}\f$ is `inner_fraction`.
  * The step \f$x + \alpha d\f$ uses Armijo backtracking \f$f(x + \alpha d) - f(x) \le c_1 \alpha (g^\top d + r(x + d) - r(x))\f$
@@ -144,7 +155,8 @@ inline double half_curvature(const optimizer_point& z, const optimizer_point& x,
  * `stalled` (step fell below rounding in \f$x\f$), `line_search_failed`, `iteration_budget` (`max_iterations`, default \f$200\f$),
  * `evaluation_budget` (`max_value_evaluations`, default \f$10^5\f$), and `start_not_admissible`. In `optimizer_report`,
  * `gradient` is \f$\nabla s\f$ at `point`, `final_factorization` is the last factorization of \f$H\f$ or its free restriction,
- * and `damped_coordinates` counts damped coordinate updates. See \ref optimizers_proximal for measured accuracy.
+ * `damped_coordinates` counts damped coordinate updates, and `decrement_from_prox_mapping` marks the fallback measure.
+ * See \ref optimizers_proximal for measured accuracy.
  *
  * \tparam StopRule Stopping rule requiring at most `stop_needs_decrement` and `stop_needs_previous` (`gradient_stop_rule` is rejected at compile time).
  * \see \ref optimizers_proximal, coordinate_composite_objective, proximal_newton_inner_solver, penalized_objective, proximal_gradient_optimizer
@@ -179,7 +191,7 @@ struct proximal_newton_optimizer {
    * \tparam O Composite objective type satisfying `composite_objective`, `curvature_objective`, and `dense_curvature_matrix` curvature.
    * \param objective Composite objective \f$f = s + r\f$.
    * \param x0 Starting point \f$x_0\f$; \f$f(x_0)\f$ must be finite.
-   * \return An `optimizer_report` with `decrement` equal to \f$\frac{1}{2} d^\top H d\f$ (or quiet NaN if the free curvature block lacks a Cholesky factor), `gradient` equal to \f$\nabla s\f$ at `point`, `final_factorization`, and `damped_coordinates`.
+   * \return An `optimizer_report` with `decrement` equal to \f$\frac{1}{2} d^\top H d\f$ (falling back to the `proximal_gradient_optimizer` measure at `point` when \f$H\f$ is finite and the free curvature block lacks a Cholesky factor, and quiet NaN only when \f$H\f$ is not finite), `decrement_from_prox_mapping`, `gradient` equal to \f$\nabla s\f$ at `point`, `final_factorization`, and `damped_coordinates`.
    *
    * Measured accuracy is documented on \ref optimizers_proximal.
    */
@@ -192,7 +204,7 @@ struct proximal_newton_optimizer {
     constexpr double nan = std::numeric_limits<double>::quiet_NaN();
     optimizer_report report;
     optimizer_vector x("x", n), g("g", n), z("z", n), u("u", n), x_trial("x_trial", n), x_previous("x_previous", n),
-        w("w", n), w_old("w_old", n), v("v", n), h("h", n);
+        w("w", n), w_old("w_old", n), v("v", n), h("h", n), g_previous("g_previous", n);
     dense_curvature_matrix H("H", n, n);
     typename curvature_solver_for<dense_curvature_matrix>::type solver(n);
     Kokkos::deep_copy(x, x0);
@@ -219,6 +231,8 @@ struct proximal_newton_optimizer {
     ++report.value_evaluations, ++report.gradient_evaluations, ++report.curvature_evaluations;
     double r_x = objective.nonsmooth_value(x);
     double f = s_x + r_x, f_previous = f, last_step = 0.0;
+    // the largest secant ratio s's / s'y over the accepted steps, for the fallback measure
+    double gamma_max = 0.0;
     auto finish = [&](optimizer_status status) {
       report.status = status;
       report.point = x, report.value = f, report.gradient = g;
@@ -379,6 +393,21 @@ struct proximal_newton_optimizer {
       // the decrement and the predicted decrease
       const double half_dHd = detail::half_curvature(z, x, u);
       report.decrement = factor_ok ? half_dHd : nan;
+      report.decrement_from_prox_mapping = false;
+      // Fallback (Giovanni, 2026-11-18): without a factor of the free block but with
+      // a finite H, the measure of proximal_gradient_optimizer at x (decision 12),
+      // (1/2) max(t, gamma_max) |G_t|^2, G_t = (x - prox_{t r}(x - t g)) / t with the
+      // step t = 1/L above, flagged by decrement_from_prox_mapping. A stationary point whose
+      // free coordinates outnumber the rows (nonzeros in the flat tails of SCAD or MCP
+      // with p > n) stalled at NaN before.
+      if (!factor_ok && report.final_factorization != curvature_factorization::non_finite) {
+        for (int i = 0; i < n; ++i) v(i) = x(i) - t * g(i);
+        objective.nonsmooth_prox(v, t, h);
+        double gg = 0.0;
+        for (int i = 0; i < n; ++i) gg += (x(i) - h(i)) * (x(i) - h(i));
+        report.decrement = 0.5 * std::max(t, gamma_max) * gg / (t * t);
+        report.decrement_from_prox_mapping = true;
+      }
       const double r_z = objective.nonsmooth_value(z);
       double delta_pred = r_z - r_x;
       for (int i = 0; i < n; ++i) delta_pred += g(i) * (z(i) - x(i));
@@ -424,10 +453,19 @@ struct proximal_newton_optimizer {
       Kokkos::deep_copy(x_previous, x);
       Kokkos::deep_copy(x, x_trial);
       f_previous = f;
+      Kokkos::deep_copy(g_previous, g);
       s_x = objective.value_gradient_curvature(x, g, H);
       ++report.value_evaluations, ++report.gradient_evaluations, ++report.curvature_evaluations;
       r_x = objective.nonsmooth_value(x);
       f = s_x + r_x;
+      {
+        double ss = 0.0, sy = 0.0;
+        for (int i = 0; i < n; ++i) {
+          const double si = x(i) - x_previous(i);
+          ss += si * si, sy += si * (g(i) - g_previous(i));
+        }
+        if (sy > 0.0 && std::isfinite(ss / sy)) gamma_max = std::max(gamma_max, ss / sy);
+      }
       report.iterations = k + 1;
       last_step = step;
     }
