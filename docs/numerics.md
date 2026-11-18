@@ -13302,3 +13302,115 @@ representable on both sides and never near the location.
 **Builds.** gcc (Kokkos Serial and OpenMP): 13 cases, 25405 assertions, 0
 failed. CUDA (sm_89, RTX 4070 SUPER, the default build): 13 cases, 25405
 assertions, 0 failed, confirmed by a second build after the bounds were set.
+
+## The multivariate power exponential: mvpowerexp1 and mvpowerexp2 (2026-11-18)
+
+**What.** `mvpowerexp1_distrib<S>` (scale matrix `Sigma = M(theta)`) and
+`mvpowerexp2_distrib<S>` (inverse scale `Q = M(theta)`), the law of Gómez,
+Gómez-Villegas and Marín (1998), proper class only, in
+`include/laplace/distrib/mvpowerexp1.hpp`, `mvpowerexp2.hpp`,
+`mvpowerexp_state.hpp` and the shared `detail/mvpowerexp_common.hpp`. With
+`r = y - mu`, `delta = r' W r` (`W = Sigma^-1` or `Q`) and the shape `beta > 0`,
+
+    l = -log Z(d, beta) -+ 1/2 log det M - 1/2 delta^beta,
+    Z(d, beta) = 2^(1 + d/(2 beta)) pi^(d/2) Gamma(1 + d/(2 beta)) / (d Gamma(d/2)).
+
+The typed parameter list is (mu vector, the matrix, beta scalar), beta last in
+"the rest". Value and derivative blocks to order six in (mu, theta, beta) and
+mixed, the draw, the mean and the covariance.
+
+**The convention (Giovanni, 2026-11-18).** `Sigma` is the SCALE matrix and is
+not rescaled to the covariance, as `mvstudent_t1`'s is not, so that `beta = 1`
+is exactly `mvgaussian1` (and `mvgaussian2` for the second form). The
+covariance is `Sigma 2^(1/beta) Gamma((d+2)/(2 beta)) / (d Gamma(d/(2 beta)))`,
+factor 1 at `beta = 1`.
+
+**How.** The derivative blocks by Faà di Bruno over the set partitions of the
+mu and theta positions with at most two mu per part, with the kernel table
+
+    H(n, c) = d_delta^n d_beta^c (-1/2 delta^beta)
+            = -1/2 delta^(beta - n) sum_(j=0..c) binom(c, j) P_n^(j)(beta) L^(c-j),
+
+`L = log delta` and `P_n` the falling factorial, whose beta-derivatives come
+from `P_(n+1)^(j) = (beta - n) P_n^(j) + j P_n^(j-1)`; the derivatives of
+`log Z` through the reciprocal chain rule
+`d^n/dbeta^n F(1/beta) = (-1)^n sum_k F^(k)(1/beta) (n!/k!) binom(n-1, k-1) beta^(-n-k)`
+with `F(u) = (d/2) u log 2 + lgamma(1 + (d/2) u)` and `polygamma`.
+`tools/reference/mvpowerexp_forms.py` derives the constant by radial
+integration (equal to the published `Z` in symbols, and to the quadrature of
+the definition within 1.2e-60 over `d` in {1, 2, 3, 5} and seven betas) and
+checks every closed form against SymPy's own derivative, the Faà di Bruno
+assembly included at 5.5e-41. References: `tools/reference/distrib_mvpowerexp.py`,
+45252 rows of `mpmath.diff` of the definition at 60 and 75 digits (stops if
+they disagree by more than 1e-30), six structures, betas 0.3, 0.5, 0.7, 1, 2
+and 6, `r` at the location, at 1e-3 of it, at order one and far in the tail,
+and a near-singular log_cholesky point (`log L33 = -7.5`).
+
+**Double-double from three Faà di Bruno positions on (decided by Giovanni).**
+For `n = A + K_theta >= 3` the residual, `W_U r`, `r' W_U r`, the kernel table
+and the partition sum go in double-double, as `mvstudent_t` does; orders one
+and two stay in double. Two losses it removes, both measured: the partition sum
+cancels 951-fold at the worst entry of an order-six mu block of form 1 at
+`delta = 9.42`, `beta = 0.7` (153 ulp1N of the block's scale in double, 9.03
+with double-double); and `exp((beta - n) log delta)` in double carries the
+relative error `eps |(beta - n) log delta|` inherent in `exp(log)`, which
+forming the product exactly removes. `delta^beta` itself is evaluated by `pow`,
+which is exact at `beta = 1`.
+
+The sum over `j` in `H(n, c)` can cancel at moderate `|log delta|`, where terms
+of different powers of `L` have opposite signs. The worst entry of the kernel
+table over `beta` in [0.3, 6], `delta` in [1e-12, 1e8] and `n + c <= 6` is
+3.7e-14 relative to mpmath, at `delta = 1e-3`, `beta = 0.5`, `n = 2`, `c = 4`,
+where the `L^4` term (-569) and the `L^2` term (572) leave about 3 (an earlier
+note in this work placed it at `delta = 1e8`, `beta = 6` and blamed `exp(log)`
+without locating it; that was wrong). It does not reach the blocks: those that
+hold it are within 6.7 ulp of `max(|ref|, 1)` over `A <= 2`, up to six
+derivatives in beta and `delta` from 1e-4 to 9, so no change was made.
+
+**The kink.** `delta^beta = ||r||_W^(2 beta)` is homogeneous of degree
+`2 beta`, so `l` stays continuous in `y` at `y = mu` to every order for a
+positive integer beta and to order `ceil(2 beta) - 1` otherwise (checked against
+SymPy). The multivariate interface has no runtime kinks member, so the mu
+descriptor declares 0, the worst case. At `r = 0` every partition term is
+homogeneous of degree `2 beta - A` whatever the partition, so the kernel
+contributes exactly 0 when `2 beta > A`; the factor-by-factor product there
+would read 0 times infinity.
+
+**The numbers.** Worst ulp1N over every `(A, K)` with `A + K <= 6`, all six
+betas and all points, per structure:
+
+| structure | mvpowerexp1 gcc | CUDA | mvpowerexp2 gcc | CUDA |
+|---|---|---|---|---|
+| diagonal | 58.7 | 58.7 | 106 | 106 |
+| ar1 | 4.65 | 4.65 | 8.08 | 8.08 |
+| compound_symmetry | 6.02 | 6.02 | 5.67 | 5.67 |
+| log_cholesky | 3.96e3 | 3.86e3 | 18.1 | 17.4 |
+| scaled_ar1 | 17.4 | 21.7 | 8.27 | 8.59 |
+| factor_analytic | 3.94 | 8.26 | 11.3 | 11.3 |
+
+The log_cholesky entry of form 1 is the error of `Sigma^-1` itself, proved and
+not inferred: every value above 1e3 is at the near-singular point
+(cond(Sigma) = 3.5e7) in the `K = 0` blocks with `A = 2, 3, 4` at
+`beta = 0.5`; the double `Sigma^-1` there has relative error 1.008e-9
+(4.5e6 ulp), and feeding THAT matrix into an otherwise exact mpmath computation
+of the same blocks costs 750, 1441 and 3694 ulp1N at `A = 2, 3, 4`, against
+1.46e3, 1.54e3 and 3.96e3 measured. Form 2 takes `Q` directly and never
+inverts, and stays within 18.1 at the same point. The diagonal entries are the
+far-tail point (`||r|| = 17`) at `beta = 6` and orders five and six at `beta = 0.7`.
+
+Other checks, the same on gcc and CUDA except where two numbers are given:
+`beta = 1` against `mvgaussian1/2` within 0.884 ulp1N over 18 blocks per
+structure on three structures (0 on several); form 1 at `theta` against form 2
+at `-theta` over the diagonal structure 0 ulp1N; `log Z` against a quadrature
+of the radial form 2.22e-16 (gcc) and 2.95e-16 (CUDA) relative; the mass
+through `logpdf` in one dimension 2.22e-16; the `beta = 1/2` group-lasso form
+0.794 ulp1; second derivatives in beta against central differences at
+`h = 1e-5` 2.66e-9; draws within 0.00137 standard deviations on the mean and
+0.0065 relative on the covariance over `beta` in {0.5, 1, 2}. The test runs
+197221 assertions on both builds, all passing; the bounds are the measurement
+times 1.5 on the default CUDA build and gcc.
+
+**What is open.** The degenerate and improper classes (a positive semidefinite
+structure) are not written. There is no `expected_info_dk`. The radial kink has
+no place in the multivariate interface (no `y_regularity`, no runtime kinks),
+which would need a change of its own across every multivariate law and wrapper.

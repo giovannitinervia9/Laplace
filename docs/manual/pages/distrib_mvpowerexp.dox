@@ -1,0 +1,252 @@
+/**
+\defgroup distrib_mvpowerexp1 mvpowerexp1 (location, scale matrix)
+\brief Multivariate power exponential distribution with location vector \f$\mu\f$, scale matrix \f$\Sigma = M(\theta)\f$ given by a matrix structure, and shape \f$\beta\f$.
+
+\f[
+  f(y; \mu, \Sigma, \beta) = \frac{\det(\Sigma)^{-1/2}}{Z(d, \beta)} \exp\!\left(-\tfrac{1}{2}\,\delta^{\beta}\right),
+  \qquad
+  Z(d, \beta) = \frac{2^{1 + d/(2\beta)}\,\pi^{d/2}\,\Gamma\bigl(1 + d/(2\beta)\bigr)}{d\,\Gamma(d/2)}.
+\f]
+
+Here \f$y \in \mathbb{R}^d\f$ is the observation, \f$\mu \in \mathbb{R}^d\f$ its location, \f$\Sigma\f$ the positive definite scale matrix, \f$\beta > 0\f$ the shape, \f$d\f$ the dimension, \f$r = y - \mu\f$ the residual and \f$\delta = r^\top \Sigma^{-1} r\f$ the squared Mahalanobis distance of the residual. This is the classic form of the multivariate power exponential family of Gómez, Gómez-Villegas and Marín (1998).
+
+The scale matrix is given by a structure: \f$\Sigma = M(\theta)\f$ for a structure `S` with parameters \f$\theta \in \mathbb{R}^q\f$. Writing \f$W = \Sigma^{-1}\f$ for the matrix of the quadratic form, the implemented log-density is
+
+\f[
+  \ell_1 = -\log Z(d, \beta) - \tfrac{1}{2}\log\det\Sigma - \tfrac{1}{2}\,\delta^{\beta}, \qquad \delta = r^\top W r.
+\f]
+
+This is the classic log-density with \f$\Sigma\f$ written as \f$M(\theta)\f$, so the parameters keep the meaning they have in the classic form. The structure `S` is a positive definite matrix structure satisfying `pdmat::pdmat_structure`, and the class provided is the proper one.
+
+\f$\Sigma\f$ is the scale matrix and is not rescaled to the covariance. The covariance is
+
+\f[
+  \operatorname{Var} Y = \Sigma\,\frac{2^{1/\beta}\,\Gamma\bigl((d + 2)/(2\beta)\bigr)}{d\,\Gamma\bigl(d/(2\beta)\bigr)},
+\f]
+
+and the factor multiplying \f$\Sigma\f$ is 1 at \f$\beta = 1\f$. The mean is \f$\mu\f$ for every \f$\beta > 0\f$, because every moment of the law is finite.
+
+At \f$\beta = 1\f$ the constant is \f$Z(d, 1) = (2\pi)^{d/2}\f$ and the kernel is \f$-\delta/2\f$, so the law is the Gaussian of \ref distrib_mvgaussian1 "mvgaussian1". At \f$\beta = 1/2\f$ with \f$\Sigma = \sigma^2 I\f$, where \f$\sigma > 0\f$ is a scalar and \f$I\f$ the identity matrix, the log-density becomes
+
+\f[
+  \ell = -\log Z(d, 1/2) - d\log\sigma - \frac{\lVert r\rVert}{2\sigma},
+\f]
+
+where \f$\lVert r\rVert\f$ is the Euclidean norm of the residual. The kernel is then the group lasso kernel.
+
+The kernel is \f$\lVert r\rVert_\Sigma^{2\beta}\f$, where \f$\lVert r\rVert_\Sigma = \delta^{1/2}\f$ is the Mahalanobis norm of the residual. The exponent of the radial distance is therefore \f$2\beta\f$, because \f$\delta\f$ is the square of that distance.
+
+The multivariate Laplace distribution of the literature is a different law. It is a scale mixture of normal distributions whose density carries a modified Bessel function of the second kind, and it is not the member with \f$\beta = 1/2\f$ of this family.
+
+\anchor mvpowerexp1_rest
+## Matrix parameters, shape and parameter table
+
+The typed parameter list has three entries: the location \f$\mu\f$, a vector of dimension \f$d\f$; the matrix \f$\Sigma = M(\theta)\f$, with the parameters \f$\theta\f$ of its structure; and the shape \f$\beta\f$, a scalar. The rest of the parameters is \f$(\theta_0, \dots, \theta_{q-1}, \beta)\f$, where \f$q\f$ is the number of structure parameters (`structure.n_params()`). So `theta_size()` returns \f$q + 1\f$, and \f$\beta\f$ carries the last index \f$q\f$, which is the value of `param_offset(2)`.
+
+The \f$\theta\f$ table (`theta_table_entries()`, `theta_table_size()`, `fill_theta_table_entry()` and `with_theta_table()`) is the same as the one of \ref mvgaussian1_theta_table "the Gaussian". It stores the \f$\theta\f$-derivatives of \f$W\f$ and of \f$\log\det M\f$ only, and never \f$\beta\f$.
+
+## State
+
+`theta_state(theta, w)` returns \ref laplace::distrib::mvpowerexp_state "mvpowerexp_state\<G\>", with \f$G\f$ the state of the Gaussian with the same matrix, here `mvgaussian1_state`. The state holds `gauss`, which contains the matrix \f$W\f$, a factor \f$L\f$ with \f$\Sigma = LL^\top\f$, \f$\log\det\Sigma\f$ and an optional \f$\theta\f$ table. It also holds the shape `beta`, the dimension `dim` and the array `lz`, which contains \f$\log Z(d, \beta)\f$ and its \f$\beta\f$-derivatives of orders 0 to 6.
+
+`state_size()` is \f$2\,d(d+1)/2\f$ doubles. `scratch_size()` is the larger of \f$2\,d(d+1)/2\f$ plus the scratch of the structure, and \f$17\,d(d+1)/2 + 128\,(d+1)\f$ plus the same scratch of the structure.
+
+\anchor mvpowerexp1_blocks
+## Log-density derivative blocks
+
+`logpdf_dk<K, A>(state, y, mu, idx, out, w)` gives the block of order \f$A\f$ in \f$\mu\f$ and of order \f$K\f$ in \f$(\theta, \beta)\f$, for \f$A + K \le 6\f$. The block is stored as in \ref distrib_multivariate "Multivariate", with a \ref laplace::distrib::sym_tensor "sym_tensor" over \f$d\f$ for \f$A \ge 3\f$. The function `logpdf_dy_dk<J, K>()` returns \f$(-1)^J\f$ times the block with \f$A = J\f$. With \f$A > 0\f$, `logpdf_dy_dk<J, K, A>()` returns the Kronecker product of the \f$y\f$ and \f$\mu\f$ tensors, with the \f$y\f$ factor first. Unlike the Gaussian, the blocks with \f$A \ge 3\f$ are nonzero.
+
+The blocks are built from the derivatives of \f$\delta\f$. Let \f$W_U = \partial_U W\f$ be the derivative of \f$W\f$ along a subset \f$U\f$ of the positions of \f$\theta\f$, and let \f$\mu_i\f$ be the \f$i\f$-th coordinate of \f$\mu\f$. Then
+
+\f[
+  \partial_U \delta = r^\top W_U r, \qquad
+  \partial_{\mu_i}\partial_U \delta = -2\,(W_U r)_i, \qquad
+  \partial_{\mu_i}\partial_{\mu_j}\partial_U \delta = 2\,(W_U)_{ij},
+\f]
+
+and every derivative with three or more positions in \f$\mu\f$ vanishes.
+
+By \ref faa_di_bruno "Faà di Bruno's formula", a block with \f$A\f$ positions in \f$\mu\f$, \f$K_\theta\f$ positions in \f$\theta\f$ and \f$c\f$ positions in \f$\beta\f$ is a sum over the set partitions of its \f$A + K_\theta\f$ positions. In each partition every part holds at most two positions in \f$\mu\f$:
+
+\f[
+  \sum_{\text{partitions}} H(n, c) \prod_{\text{parts}} \partial_{\text{part}}\delta.
+\f]
+
+Here \f$n\f$ is the number of parts, and \f$H(n, c) = \partial_\delta^n\,\partial_\beta^c\bigl(-\tfrac{1}{2}\delta^\beta\bigr)\f$ has the closed form
+
+\f[
+  H(n, c) = -\tfrac{1}{2}\,\delta^{\beta - n} \sum_{j=0}^{c} \binom{c}{j}\,P_n^{(j)}(\beta)\,(\log\delta)^{c-j},
+\f]
+
+where \f$P_n(\beta) = \beta(\beta - 1)\cdots(\beta - n + 1)\f$ is the falling factorial, with \f$P_0 = 1\f$, and \f$P_n^{(j)}\f$ is its \f$j\f$-th derivative in \f$\beta\f$. These derivatives come from the recursion
+
+\f[
+  P_{n+1}^{(j)}(\beta) = (\beta - n)\,P_n^{(j)}(\beta) + j\,P_n^{(j-1)}(\beta),
+\f]
+
+which gives \f$P_n\f$ and all its \f$\beta\f$-derivatives together. The recursion involves no cancellation, since \f$P_n\f$ is a product. The sum over \f$j\f$ can cancel at moderate \f$|\log\delta|\f$, where terms of different powers of \f$\log\delta\f$ have opposite signs: the worst entry of the table is \f$3.7 \times 10^{-14}\f$ relative, at \f$\delta = 10^{-3}\f$, \f$\beta = 1/2\f$, \f$n = 2\f$ and \f$c = 4\f$, and the blocks that hold it are within 6.7 ulp1 of the reference. The forms were checked against the derivatives that SymPy computes (Meurer and others, 2017).
+
+Blocks with \f$A = c = 0\f$ add \f$-\tfrac{1}{2}\partial_T\log\det\Sigma\f$, where \f$T\f$ is the set of the \f$\theta\f$ positions of the block. The pure \f$\beta\f$ blocks, with \f$A = K_\theta = 0\f$ and \f$c \ge 1\f$, return \f$-\log Z^{(c)}(d, \beta) + H(0, c)\f$.
+
+The power \f$\delta^{\beta - n}\f$ is evaluated as \f$\exp\bigl((\beta - n)\log\delta\bigr)\f$, which avoids the spurious overflow and underflow of a ratio \f$\delta^\beta / \delta^n\f$ at either end of the range. The power \f$\delta^\beta\f$ itself is evaluated by `pow`.
+
+From three positions on, that is \f$n = A + K_\theta \ge 3\f$, the residual, the vectors \f$W_U r\f$, the scalars \f$r^\top W_U r\f$, the kernel table and the partition sum are computed in double-double arithmetic. Orders one and two stay in `double`. Two losses make the extra cost worth paying, and both were measured. The partition sum cancels: at the worst entry of an order-six block in \f$\mu\f$ of form 1, at \f$\delta = 9.42\f$ and \f$\beta = 0.7\f$, the sum cancels 951-fold. The error of that block is 153 ulp1N in `double` and 9.03 ulp1N in double-double. In `double`, \f$\exp\bigl((\beta - n)\log\delta\bigr)\f$ carries a relative error of about \f$\varepsilon\,\lvert(\beta - n)\log\delta\rvert\f$, inherent in the exponential of a logarithm, and forming the product \f$(\beta - n)\log\delta\f$ exactly removes it.
+
+\anchor mvpowerexp1_constant
+## Normalizing constant
+
+With \f$u = 1/\beta\f$ and \f$F(u) = \tfrac{d}{2}\,u\log 2 + \log\Gamma\bigl(1 + \tfrac{d}{2}u\bigr)\f$, the normalizing constant is
+
+\f[
+  \log Z(d, \beta) = \log 2 + \tfrac{d}{2}\log\pi - \log d - \log\Gamma(d/2) + F(1/\beta).
+\f]
+
+The part \f$\log 2 + \tfrac{d}{2}\log\pi - \log d - \log\Gamma(d/2)\f$ does not depend on \f$\beta\f$. The derivatives of order \f$n\f$ in \f$\beta\f$ of \f$F(1/\beta)\f$ are
+
+\f[
+  \frac{\mathrm{d}^n}{\mathrm{d}\beta^n} F(1/\beta) = (-1)^n \sum_{k=1}^{n} F^{(k)}(1/\beta)\,\frac{n!}{k!}\binom{n-1}{k-1}\beta^{-n-k},
+\f]
+
+where \f$F^{(k)}\f$ is the \f$k\f$-th derivative of \f$F\f$ in \f$u\f$, given by
+
+\f[
+  F^{(1)}(u) = \tfrac{d}{2}\bigl(\log 2 + \psi(1 + \tfrac{d}{2}u)\bigr), \qquad
+  F^{(k)}(u) = \bigl(\tfrac{d}{2}\bigr)^{k}\,\psi^{(k-1)}\bigl(1 + \tfrac{d}{2}u\bigr) \quad (k \ge 2).
+\f]
+
+Here \f$\psi\f$ is the digamma function and \f$\psi^{(m)}\f$ its derivative of order \f$m\f$, evaluated by \ref laplace::math::polygamma "polygamma()" (see \ref gamma "the gamma functions"). For \f$k \ge 2\f$ the terms of the inner sum share one sign, since \f$\psi^{(k-1)}\f$ has one sign.
+
+The constant is checked against a one-dimensional quadrature of the radial form of the definition. The relative difference in \f$\log Z\f$ is \f$2.22 \times 10^{-16}\f$ on gcc/OpenMP and \f$2.95 \times 10^{-16}\f$ on CUDA, and the integral of the density over the line in one dimension, computed through `logpdf`, differs from one by \f$2.22 \times 10^{-16}\f$.
+
+\anchor mvpowerexp1_kink
+## The radial kink
+
+The kink of the density is radial, at \f$y = \mu\f$, where \f$\delta = 0\f$. Because \f$\delta^\beta = \lVert r\rVert_\Sigma^{2\beta}\f$ is homogeneous of degree \f$2\beta\f$ in \f$r\f$, a partial derivative of order \f$k\f$ is homogeneous of degree \f$2\beta - k\f$ times a function of the direction. It is continuous at \f$r = 0\f$ while \f$2\beta - k > 0\f$, and it depends on the direction at \f$k = 2\beta\f$, where it is discontinuous.
+
+The log-density is therefore continuous in \f$y\f$ at \f$y = \mu\f$ to every order when \f$\beta\f$ is a positive integer, where \f$\delta^\beta\f$ is a polynomial in \f$r\f$. Otherwise it is continuous up to order \f$\lceil 2\beta\rceil - 1\f$. The location \f$\mu\f$ is declared with regularity 0, the worst case over \f$\beta > 0\f$.
+
+At \f$\delta = 0\f$ every factor that carries \f$r\f$ vanishes, and every partition term of a block is homogeneous of degree \f$2\beta - A\f$ in \f$\lVert r\rVert\f$. For \f$2\beta > A\f$ the kernel therefore contributes nothing, and the block reduces to the term in \f$\log\det\Sigma\f$. The value of the density at the kink is \f$-\log Z(d, \beta) - \tfrac{1}{2}\log\det\Sigma\f$, and the pure \f$\beta\f$ blocks there are \f$-\log Z^{(c)}(d, \beta)\f$. For \f$2\beta \le A\f$ the derivative does not exist at the kink. In particular the gradient in \f$\mu\f$ at \f$y = \mu\f$ is zero for \f$\beta > 1/2\f$ and is not finite for \f$\beta \le 1/2\f$.
+
+\anchor mvpowerexp1_draws
+## Draws, mean and covariance
+
+`rng(state, mu, seed, unit, y)` writes \f$y = \mu + Lv\f$, where \f$\Sigma = LL^\top\f$ and \f$v = s\,z/\lVert z\rVert\f$. The vector \f$z\f$ holds standard normal values drawn at indices \f$0\f$ to \f$d - 1\f$ of \ref laplace::distrib::counter_uniform_source "counter_uniform_source" with the given seed and unit. The scalar \f$s = (2t)^{1/(2\beta)}\f$ uses a standard gamma value \f$t\f$ of shape \f$d/(2\beta)\f$, drawn at index \f$d\f$. Under the law, \f$\lVert v\rVert^{2\beta}/2\f$ is that gamma value, and the direction of \f$v\f$ is uniform on the sphere.
+
+`mean()` writes \f$\mu\f$. `covariance()` writes \f$\Sigma\f$ times the factor of the covariance above, and the factor is computed through its logarithm, so that the two gamma functions do not overflow separately. `start_value()` runs on the host. It sets \f$\beta = 1\f$, where the law is the Gaussian, and it sets the matrix parameters by the Gaussian starting rule.
+
+\anchor mvpowerexp1_accuracy
+## Accuracy
+
+The references are 45252 values of the blocks, computed with mpmath (The mpmath development team, 2023) from the definition at 60 and 75 digits. The run stops if the two precisions differ by more than \f$10^{-30}\f$. They cover six matrix structures, the shapes \f$\beta \in \{0.3, 0.5, 0.7, 1, 2, 6\}\f$, every block with \f$A + K \le 6\f$, and the points with \f$r\f$ at the location, with \f$\lVert r\rVert\f$ about \f$10^{-3}\f$, with \f$r\f$ of order one, and far in the tail. A near-singular `log_cholesky` point is included.
+
+The error of a block is normwise. It is measured in units of \f$\mathrm{ulp}(\max(S, 1))\f$, where \f$S\f$ is the largest reference magnitude over the entries and tuples of the block at that point, and this measure is the ulp1N of the tests. See \ref accuracy "How accuracy is measured" for the other error scales. The worst errors per structure are these, on gcc/OpenMP and on CUDA (RTX 4070 SUPER):
+
+| Structure | Form 1, gcc | Form 1, CUDA | Form 2, gcc | Form 2, CUDA |
+|---|---|---|---|---|
+| `diagonal_pdmat` | 58.7 | 58.7 | 106 | 106 |
+| `ar1_pdmat` | 4.65 | 4.65 | 8.08 | 8.08 |
+| `compound_symmetry_pdmat` | 6.02 | 6.02 | 5.67 | 5.67 |
+| `unstructured_pdmat<log_cholesky_bijector>` | \f$3.96 \times 10^{3}\f$ | \f$3.86 \times 10^{3}\f$ | 18.1 | 17.4 |
+| `unit_diagonal_scaled_pdmat<ar1_pdmat>` | 17.4 | 21.7 | 8.27 | 8.59 |
+| `factor_analytic_pdmat` | 3.94 | 8.26 | 11.3 | 11.3 |
+
+Form 1 has its largest error over `log_cholesky`. The other five structures have worst errors of at most 58.7 ulp1N on both backends. That error occurs only at the near-singular point, where the condition number of \f$\Sigma\f$ is \f$3.5 \times 10^{7}\f$ (\f$\log L_{33} = -7.5\f$). It occurs in the blocks with \f$K = 0\f$ and \f$A = 2, 3, 4\f$ at \f$\beta = 1/2\f$. The error is the error of \f$\Sigma^{-1}\f$ itself, which the blocks inherit. The computed \f$\Sigma^{-1}\f$ there has relative error \f$1.008 \times 10^{-9}\f$. Feeding that matrix into an otherwise exact mpmath computation of the same blocks gives 750, 1441 and 3694 ulp1N at \f$A = 2, 3, 4\f$, against \f$1.46 \times 10^{3}\f$, \f$1.54 \times 10^{3}\f$ and \f$3.96 \times 10^{3}\f$ ulp1N measured for the code.
+
+Form 2 takes \f$Q\f$ directly and never inverts it. At the same point it stays within 18.1 ulp1N on gcc and 17.4 ulp1N on CUDA.
+
+Other checks agree on gcc and CUDA. At \f$\beta = 1\f$ the blocks agree with `mvgaussian1` and `mvgaussian2` within 0.884 ulp1N, over 18 blocks per structure on three structures. Form 1 at \f$\theta\f$ agrees with form 2 at \f$-\theta\f$ over the diagonal structure to 0 ulp1N, since there \f$Q = \Sigma^{-1}\f$ exactly. The group-lasso form at \f$\beta = 1/2\f$ agrees within 0.794 ulp1. The second derivatives in \f$\beta\f$ agree with central differences at \f$h = 10^{-5}\f$ to \f$2.66 \times 10^{-9}\f$. Draws over \f$\beta \in \{0.5, 1, 2\}\f$ match the mean within 0.00137 standard deviations and the covariance within 0.0065 of its largest entry. The table of order 3 gives the same blocks as the direct evaluation, to the bit.
+
+The test bounds are these measured values times 1.5, rounded up. See `docs/numerics.md` for the measurements behind these figures.
+
+## Example
+
+Evaluating `logpdf()` and the gradient in \f$\mu\f$ on the device, with one shared state:
+
+\code{.cpp}
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/mvpowerexp1.hpp>
+#include <laplace/pdmat/ar1.hpp>
+
+// y and mu hold one unit per row, LayoutRight so that &y(i, 0) is a contiguous
+// row on every backend (the default layout is LayoutLeft on CUDA)
+void eval_mvpowerexp1(const Kokkos::View<const double**, Kokkos::LayoutRight>& y,
+                      const Kokkos::View<const double**, Kokkos::LayoutRight>& mu,
+                      const Kokkos::View<const double*>& theta_beta, Kokkos::View<double*>& log_lik,
+                      Kokkos::View<double**>& grad_mu) {
+  constexpr int d = 3;
+  const int n = static_cast<int>(y.extent(0));
+  const laplace::distrib::mvpowerexp1_distrib<laplace::pdmat::ar1_pdmat> dist(laplace::pdmat::ar1_pdmat(d));
+  using state_t = laplace::distrib::mvpowerexp1_distrib<laplace::pdmat::ar1_pdmat>::state_type;
+  Kokkos::View<double*> state_buf("state_buf", dist.state_size() + dist.scratch_size());
+  Kokkos::View<state_t> state_view("state");
+  Kokkos::parallel_for(
+      "mvpe_state", 1, KOKKOS_LAMBDA(int) { state_view() = dist.theta_state(theta_beta.data(), state_buf.data()); });
+  Kokkos::View<double**, Kokkos::LayoutRight> work("work", n, dist.scratch_size());
+  Kokkos::parallel_for(
+      "mvpe_eval", n, KOKKOS_LAMBDA(int i) {
+        const auto st = state_view();
+        double g[d];
+        log_lik(i) = dist.logpdf(st, &y(i, 0), &mu(i, 0));
+        if (dist.template logpdf_dk<0, 1>(st, &y(i, 0), &mu(i, 0), nullptr, g, &work(i, 0)))
+          for (int k = 0; k < d; ++k) grad_mu(i, k) = g[k];
+      });
+}
+\endcode
+
+## Module types
+
+- \ref laplace::distrib::mvpowerexp1_distrib "mvpowerexp1_distrib\<S\>": the multivariate power exponential with location \f$\mu\f$, scale matrix \f$\Sigma = M(\theta)\f$ and shape \f$\beta\f$.
+- \ref laplace::distrib::mvpowerexp_state "mvpowerexp_state\<G\>": the precomputed state at fixed \f$(\theta, \beta)\f$, shared with the second parametrization.
+
+## References
+
+- E. Gómez, M. A. Gómez-Villegas, J. M. Marín (1998), A multivariate generalization of the power exponential family of distributions, Communications in Statistics - Theory and Methods, 27(3), 589-600. https://doi.org/10.1080/03610929808832115
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/
+
+/**
+\defgroup distrib_mvpowerexp2 mvpowerexp2 (location, inverse scale matrix)
+\brief Multivariate power exponential distribution with location vector \f$\mu\f$, inverse scale matrix \f$Q = M(\theta)\f$ given by a matrix structure, and shape \f$\beta\f$.
+
+\f[
+  f(y; \mu, Q, \beta) = \frac{\det(Q)^{1/2}}{Z(d, \beta)} \exp\!\left(-\tfrac{1}{2}\,\delta^{\beta}\right),
+  \qquad \delta = r^\top Q r,
+\f]
+
+where \f$Z(d, \beta)\f$ is the constant of \ref distrib_mvpowerexp1 "the first parametrization", the same for both. Here \f$y\f$, \f$\mu\f$, \f$d\f$, \f$\beta\f$ and \f$r = y - \mu\f$ are as on that page. The matrix \f$Q \in \mathbb{R}^{d \times d}\f$ is the positive definite inverse scale matrix, \f$Q = M(\theta)\f$ for a structure with parameters \f$\theta\f$.
+
+The density is the one of the first page with \f$\Sigma = Q^{-1}\f$. Then \f$\det(\Sigma)^{-1/2} = \det(Q)^{1/2}\f$ and \f$r^\top \Sigma^{-1} r = r^\top Q r\f$. The implemented log-density is
+
+\f[
+  \ell_2 = -\log Z(d, \beta) + \tfrac{1}{2}\log\det Q - \tfrac{1}{2}\,\delta^{\beta}.
+\f]
+
+The sign of the log-determinant term is the only change from \f$\ell_1\f$ of the first page, because here the determinant is taken of \f$Q\f$, the inverse of the scale matrix. The structure is a positive definite matrix structure satisfying `pdmat::pdmat_structure`, and the class provided is the proper one.
+
+The matrix \f$Q^{-1}\f$ is the scale matrix. The covariance is \f$Q^{-1}\f$ times the same factor as on the first page,
+
+\f[
+  \operatorname{Var} Y = Q^{-1}\,\frac{2^{1/\beta}\,\Gamma\bigl((d + 2)/(2\beta)\bigr)}{d\,\Gamma\bigl(d/(2\beta)\bigr)},
+\f]
+
+which is 1 at \f$\beta = 1\f$. The mean is \f$\mu\f$ for every \f$\beta > 0\f$.
+
+At \f$\beta = 1\f$ the law is the Gaussian of \ref distrib_mvgaussian2 "mvgaussian2". At \f$\beta = 1/2\f$ with \f$Q = \sigma^{-2} I\f$, where \f$\sigma > 0\f$ is a scalar, the log-density is \f$-\log Z(d, 1/2) - d\log\sigma - \lVert r\rVert/(2\sigma)\f$, the same as on the first page. The kernel is \f$\lVert r\rVert_Q^{2\beta}\f$, where \f$\lVert r\rVert_Q = \delta^{1/2}\f$, so the exponent of the radial distance is \f$2\beta\f$.
+
+The multivariate Laplace distribution of the literature is a different law, a scale mixture of normal distributions whose density carries a modified Bessel function of the second kind. It is not the member with \f$\beta = 1/2\f$ of this family.
+
+The constant is the one of the first page, \ref mvpowerexp1_constant "the normalizing constant". The derivative blocks, the typed parameter list, the \f$\theta\f$ table and the radial kink are also those of the first page: see \ref mvpowerexp1_rest "the parameters", \ref mvpowerexp1_blocks "the derivative blocks" and \ref mvpowerexp1_kink "the radial kink". The blocks use \f$W = Q\f$ itself, so the derivatives in \f$\theta\f$ are those of \f$Q\f$ and no matrix is inverted. The term added by blocks with \f$A = c = 0\f$ is \f$+\tfrac{1}{2}\partial_T\log\det Q\f$.
+
+`theta_state(theta, w)` returns `mvpowerexp_state<mvgaussian2_state>`, which holds the Gaussian state of \f$Q\f$, with a factor \f$L\f$ such that \f$Q = LL^\top\f$. Its `rng()` writes \f$y = \mu + L^{-\top}v\f$, with the draw \f$v\f$ of the first page. Since \f$\Sigma = Q^{-1} = L^{-\top}L^{-1}\f$, the draws have scale matrix \f$\Sigma\f$. `mean()` writes \f$\mu\f$, and `covariance()` writes \f$Q^{-1}\f$ times the factor above. `start_value()` runs on the host, sets \f$\beta = 1\f$, and sets the parameters of \f$Q\f$ by the Gaussian starting rule for the inverse scale.
+
+Form 2 takes \f$Q\f$ directly and never inverts it, so it does not carry the error of the computed \f$\Sigma^{-1}\f$ that form 1 inherits at the near-singular point of the `log_cholesky` structure. At that point form 2 stays within 18.1 ulp1N on gcc/OpenMP and 17.4 ulp1N on CUDA, while form 1 reaches \f$3.96 \times 10^{3}\f$ and \f$3.86 \times 10^{3}\f$ ulp1N. The accuracy table and the other checks are those of \ref mvpowerexp1_accuracy "the accuracy section of the first page".
+
+## Module types
+
+- \ref laplace::distrib::mvpowerexp2_distrib "mvpowerexp2_distrib\<S\>": the multivariate power exponential with location \f$\mu\f$, inverse scale matrix \f$Q = M(\theta)\f$ and shape \f$\beta\f$.
+
+## References
+
+- E. Gómez, M. A. Gómez-Villegas, J. M. Marín (1998), A multivariate generalization of the power exponential family of distributions, Communications in Statistics - Theory and Methods, 27(3), 589-600. https://doi.org/10.1080/03610929808832115
+*/

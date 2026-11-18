@@ -273,6 +273,13 @@ parent here, in tree order; the module pages define their groups without
 \ingroup distrib_mvstudent_t */
 /** \addtogroup distrib_mvstudent_t2
 \ingroup distrib_mvstudent_t */
+/** \defgroup distrib_mvpowerexp Multivariate power exponential
+\ingroup distrib_multivariate
+\brief The multivariate power exponential distribution in two parametrizations. */
+/** \addtogroup distrib_mvpowerexp1
+\ingroup distrib_mvpowerexp */
+/** \addtogroup distrib_mvpowerexp2
+\ingroup distrib_mvpowerexp */
 /** \addtogroup distrib_dirichlet
 \ingroup distrib_multivariate */
 /** \addtogroup distrib_multinomial
