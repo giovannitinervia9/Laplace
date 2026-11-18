@@ -35,6 +35,7 @@ set(LAPLACE_TEST_SOURCES
   math/test_exprel.cpp
   math/test_log1prel.cpp
   math/test_stirling.cpp
+  math/test_dawson.cpp
   math/test_psi_remainder.cpp
   distrib/test_pilot.cpp
   distrib/test_generic.cpp

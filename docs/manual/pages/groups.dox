@@ -67,6 +67,9 @@ parent here, in tree order; the module pages define their groups without
 /** \addtogroup owen
 \ingroup special_cdf */
 
+/** \addtogroup dawson
+\ingroup special */
+
 /** \defgroup bijector Bijectors
 \brief Bijections between intervals, with their inverses, derivatives and log-Jacobians. */
 /** \addtogroup bijector_scalar

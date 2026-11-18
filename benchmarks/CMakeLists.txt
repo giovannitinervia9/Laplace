@@ -65,6 +65,10 @@ target_link_libraries(bijector_scalar PRIVATE Laplace::laplace)
 add_executable(math_stirling math_stirling.cpp)
 target_link_libraries(math_stirling PRIVATE Laplace::laplace)
 
+laplace_kokkos_sources(math_dawson.cpp)
+add_executable(math_dawson math_dawson.cpp)
+target_link_libraries(math_dawson PRIVATE Laplace::laplace)
+
 add_executable(distrib_generic distrib_generic.cpp)
 target_link_libraries(distrib_generic PRIVATE Laplace::laplace)
 

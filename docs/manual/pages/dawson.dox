@@ -1,0 +1,124 @@
+/**
+\defgroup dawson Dawson's integral
+\brief Dawson's integral \f$F(x)\f$ and its derivatives \f$F^{(k)}(x)\f$ for \f$k = 1, \dots, 6\f$.
+
+This module computes Dawson's integral \f$F(x)\f$ and its first six derivatives for every real argument. Include `<laplace/math/dawson.hpp>` and call the functions in namespace `laplace::math`: \ref laplace::math::dawson "dawson()" returns \f$F(x)\f$, and \ref laplace::math::dawson_d1 "dawson_d1()" through \ref laplace::math::dawson_d6 "dawson_d6()" return the derivatives. Every function is marked `LAPLACE_HD`, so it runs on the host and inside Kokkos kernels on the device. The measured error of the value is at most 10.35 ulp on either build, and that of the derivatives at most 89.5 ulp1 below \f$|x| = 8\f$ and 8.27 ulp above it.
+
+## Definitions
+
+For a real argument \f$x \in \mathbb{R}\f$, Dawson's integral is
+\f[
+F(x) = e^{-x^2} \int_0^x e^{s^2} \, \mathrm{d}s,
+\f]
+where \f$s\f$ is the integration variable (DLMF §7.2). The derivatives are \f$F^{(k)}(x) = \mathrm{d}^k F(x) / \mathrm{d}x^k\f$ for the order \f$k \in \{1, \dots, 6\}\f$. The function is odd and bounded. It has a single maximum, \f$F = 0.5410442246351816\f$ at \f$x = 0.9241388730045917\f$. It behaves like \f$x\f$ near the origin and like \f$1/(2x)\f$ as \f$x\f$ grows, and it satisfies
+\f[
+F'(x) = 1 - 2 x F(x)
+\f]
+for every real \f$x\f$.
+
+## Domain and special values
+
+The domain is the whole real line. At the origin \f$F(0) = 0\f$, and the derivatives of orders 1 to 6 are \f$1, 0, -4, 0, 32, 0\f$, returned exactly. A NaN argument gives NaN, and every function returns 0 at both infinities. Because \f$F\f$ is odd, \f$F^{(k)}\f$ is odd for even \f$k\f$ and even for odd \f$k\f$. The tests check this symmetry bit for bit at arguments between \f$2^{-40}\f$ and \f$10^5\f$.
+
+## Method
+
+Two routes compute the value and every derivative. The route changes at \f$|x| = 8\f$, and the same threshold serves every order.
+
+Below the threshold the function uses a scaled series. Write \f$A_K(x) = e^{x^2} F^{(K)}(x)\f$ for the order \f$K\f$. The identity \f$A_{K+1} = A_K' - 2 x A_K\f$ turns the power series of
+\f[
+A_0(x) = \int_0^x e^{s^2} \, \mathrm{d}s = \sum_{m \ge 0} \frac{x^{2m+1}}{m!\,(2m+1)}
+\f]
+into
+\f[
+F^{(K)}(x) = e^{-x^2} \sum_{m \ge 0} b_K(m) \frac{x^n}{m!},
+\f]
+where \f$m\f$ is the summation index, \f$n = 2m + 1\f$ for even \f$K\f$ and \f$n = 2m\f$ for odd \f$K\f$. The coefficients are
+\f[
+b_0(m) = \frac{1}{2m+1}, \quad b_1(m) = -\frac{1}{2m-1}, \quad b_2(m) = \frac{4}{(2m-1)(2m+1)},
+\f]
+\f[
+b_3(m) = -\frac{12}{(2m-3)(2m-1)}, \quad b_4(m) = \frac{96}{(2m-3)(2m-1)(2m+1)},
+\f]
+\f[
+b_5(m) = -\frac{480}{(2m-5)(2m-3)(2m-1)}, \quad b_6(m) = \frac{5760}{(2m-5)(2m-3)(2m-1)(2m+1)}.
+\f]
+One expression covers every \f$m \ge 0\f$, and no denominator vanishes, because \f$2m - j\f$ is odd for every odd \f$j\f$. Each \f$b_K\f$ keeps one sign from the first \f$m\f$ at which all its factors are positive on, so the tail of every series has a single sign and its terms do not cancel. Each term follows from the previous one by a single fraction. The number of terms grows like \f$x^2 + 5|x|\f$, which is about 104 at \f$|x| = 8\f$. The series is summed at the rounded value of \f$x^2\f$ and multiplied by \f$e^{-x^2}\f$ at that same rounded value, so the rounding of \f$x^2\f$ cancels to first order. The forms were derived with SymPy and checked against SymPy's own derivatives (Meurer and others, 2017).
+
+From \f$|x| = 8\f$ on, the asymptotic series differentiated term by term is used:
+\f[
+F^{(K)}(x) \sim (-1)^K \sum_{m \ge 0} \frac{(2m-1)!!}{2^{m+1}} \, (2m+1)_K \, x^{-(2m+1+K)},
+\f]
+where \f$(2m+1)_K = (2m+1)(2m+2)\cdots(2m+K)\f$ is the rising factorial and \f$(2m-1)!!\f$ is the product of the odd numbers up to \f$2m-1\f$. Every term carries the sign \f$(-1)^K\f$, so the terms do not cancel. The sum stops at its smallest term, which is where an asymptotic series is most accurate. At \f$|x| = 8\f$ that takes about 25 terms.
+
+The threshold is 8 for every order. The asymptotic series needs a larger argument at a higher order, because its terms carry the rising factorial, and order 6 is the order that sets the threshold.
+
+## Accuracy
+
+The derivative of order \f$k\f$ has \f$\lceil k/2 \rceil\f$ simple zeros on the positive axis, each with its mirror image, and the relative error is unbounded at a zero. The derivatives are therefore measured in ulps of 1 (ulp1) below \f$|x| = 8\f$, where the zeros lie, and in ulps of the value (ulp) above it, past every zero. The two measures are defined on \ref accuracy "How accuracy is measured". The value \f$F\f$ has no zero away from the origin, so its relative error is bounded everywhere.
+
+Reference values come from mpmath, and \ref accuracy "How accuracy is measured" says how they are made. The table gives the measured maxima over 2176 reference arguments per order, with the test bound of each.
+
+| order | ulp1, \f$\lvert x \rvert < 8\f$ | test bound | ulp, \f$\lvert x \rvert \ge 8\f$ | test bound |
+|---|---|---|---|---|
+| \f$F\f$ | 1.24 | 1.9 | 6.50 | 10.0 |
+| \f$k = 1\f$ | 1.07 | 1.7 | 5.37 | 8.1 |
+| \f$k = 2\f$ | 2.54 | 3.8 | 6.14 | 9.3 |
+| \f$k = 3\f$ | 4.63 | 7.0 | 6.01 | 9.1 |
+| \f$k = 4\f$ | 8.00 | 12.0 | 5.78 | 8.7 |
+| \f$k = 5\f$ | 13.4 | 19.5 | 8.27 | 12.5 |
+| \f$k = 6\f$ | 89.5 | 134 | 7.95 | 12.0 |
+
+Every figure of the table is the same on gcc/OpenMP and on CUDA. The one figure that differs between the two builds is the relative error of the value over the whole line, 9.68 ulp on gcc/OpenMP and 10.35 ulp on CUDA, against a test bound of 16.0. The 89.5 ulp1 of order 6 is reached where \f$F^{(6)}\f$ crosses 1, in a region where that derivative is a few hundred in size, so the error is below one ulp of the derivative's own size there.
+
+The tests also check the seven values at the origin exactly, the parity of every order, the agreement of the two routes at \f$|x| = 8\f$ within \f$10^{-13}\f$ in absolute value, and \f$F'(x) = 1 - 2 x F(x)\f$ within \f$10^{-14}\f$ scaled by the larger of 1 and \f$|F'(x)|\f$. The test bounds include a margin of about half again over the measured maxima. The measurement history and the routes that were not chosen are in `docs/numerics.md`.
+
+## Speed
+
+The times are nanoseconds per call on one thread of the gcc/OpenMP build, with OpenMP on 8 threads, and on an RTX 4070 SUPER. Each entry is the range over arguments drawn from its region.
+
+| region | one thread | OpenMP (8 threads) | CUDA (RTX 4070 SUPER) |
+|---|---|---|---|
+| \f$\lvert x \rvert < 5/2\f$, series | 48 to 55 ns | 7.5 to 9.0 ns | 2.9 to 8.6 ns |
+| \f$5/2 \le \lvert x \rvert < 8\f$, series | 128 to 155 ns | 21 to 29 ns | 11 to 39 ns |
+| \f$\lvert x \rvert \ge 8\f$, asymptotic | 24 to 26 ns | 3.4 to 4.2 ns | 1.2 to 7.7 ns |
+
+The cost of the series is set by its number of terms, so it is highest just below the threshold. Above the threshold the asymptotic series is short, and the call is at its cheapest.
+
+## Example
+
+The following example evaluates \f$F(x)\f$ and \f$F''(x)\f$ inside a `Kokkos::parallel_for` kernel:
+
+\code{.cpp}
+#include <laplace/math/dawson.hpp>
+#include <Kokkos_Core.hpp>
+
+void eval_dawson(const Kokkos::View<const double*>& x,
+                 Kokkos::View<double*>& f,
+                 Kokkos::View<double*>& f2,
+                 int n) {
+  Kokkos::parallel_for("eval_dawson", n, KOKKOS_LAMBDA(const int i) {
+    const double x_val = x(i);
+    f(i)  = laplace::math::dawson(x_val);
+    f2(i) = laplace::math::dawson_d2(x_val);
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+- \ref laplace::math::dawson "dawson()": Dawson's integral \f$F(x)\f$
+- \ref laplace::math::dawson_d1 "dawson_d1()": first derivative \f$F'(x)\f$
+- \ref laplace::math::dawson_d2 "dawson_d2()": second derivative \f$F''(x)\f$
+- \ref laplace::math::dawson_d3 "dawson_d3()": third derivative \f$F^{(3)}(x)\f$
+- \ref laplace::math::dawson_d4 "dawson_d4()": fourth derivative \f$F^{(4)}(x)\f$
+- \ref laplace::math::dawson_d5 "dawson_d5()": fifth derivative \f$F^{(5)}(x)\f$
+- \ref laplace::math::dawson_d6 "dawson_d6()": sixth derivative \f$F^{(6)}(x)\f$
+
+## References
+
+- NIST Digital Library of Mathematical Functions, §7.2 Definitions (Error Functions), https://dlmf.nist.gov/7.2
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

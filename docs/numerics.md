@@ -12617,3 +12617,206 @@ error of the differences.
 Open. The properized versions (a Gaussian tail beyond the last knot, proper,
 for REML) are distribs, written by the distributions work; their Z needs
 Dawson's function F(x) = e^{-x^2} int_0^x e^{s^2} ds, not in Laplace yet.
+
+## Dawson's integral and its derivatives to order 6 (2026-11-18)
+
+**What.** `include/laplace/math/dawson.hpp`: Dawson's integral
+F(x) = e^(-x^2) int_0^x e^(s^2) ds (`dawson`) and its derivatives F^(k)(x),
+k = 1..6 (`dawson_d1` ... `dawson_d6`), for every real x. F is odd and
+bounded, with a single maximum F = 0.5410442246351816 at
+x = 0.9241388730045917; F(x) ~ x near the origin, F(x) ~ 1/(2x) as x -> inf,
+and F'(x) = 1 - 2 x F(x) exactly. Needed by the normalizing constants of the
+properized MCP and SCAD penalties,
+
+  Z_MCP  = 2 [ sqrt(2 gamma) F(lambda sqrt(gamma/2)) + e^(-gamma lambda^2/2) sqrt(pi V/2) ],
+  Z_SCAD = 2 [ (1 - e^(-lambda^2))/lambda + e^(-lambda^2) sqrt(2 c) F(lambda sqrt(c/2))
+               + e^(-(a+1) lambda^2/2) sqrt(pi V/2) ],
+
+with lambda > 0 the penalty strength, gamma > 0 the MCP curvature, a > 1 the
+SCAD shape, c = a - 1 and V the tail scale: the arguments are positive and
+grow with lambda, so the right half line and the large-argument behaviour are
+what the use exercises, while the negative side is covered for correctness.
+Nothing in `math/` gives F: there is no erfi, `erfcx` is the scaled complement
+of the real error function rather than of the imaginary one, and the
+incomplete gamma routines do not take the negative argument that
+F(x) = (sqrt(pi)/2) e^(-x^2) erfi(x) would need through them.
+
+**How.** Six candidates, in two groups. For the value alone:
+
+- Rybicki's equally spaced sum, F(x) = (1/sqrt(pi)) sum_(n odd) e^(-(x - n h)^2)/n
+  in the limit h -> 0, whose error falls like e^(-(pi/(2h))^2). The terms are
+  paired around the even multiple of h nearest to x and both exponentials of a
+  term follow a geometric recurrence, so the whole sum costs three exp calls.
+  At h = 0.22 with 20 terms it reaches 4.2 ulp on [5/2, 8) and 4.2 ulp above 8,
+  but 1.5 ulp1 and 3.0e13 ulp below 5/2, where the sum cannot resolve a small
+  x, and it costs 138-142 ns on one gcc thread. Discarded: slower than both
+  chosen routes and no route to the derivatives;
+- the continued fraction of the asymptotic series,
+  F = 1/(2 D) with D = x - (1/2)/(x - 1/(x - (3/2)/(x - ...))). At 16 levels it
+  is the most accurate candidate above 8, 1.26 ulp at 22 ns on one thread,
+  against 6.5 ulp at 25 ns for the chosen series, and 32 or 64 levels change
+  neither figure. Below 8 it is useless (3.1e14 ulp on [5/2, 8)) and it gives
+  the value only. Discarded for the second reason;
+- published rational approximations (Cody, Paciorek and Thacher) were not
+  measured: their coefficients are not available here, and a rational is a
+  route for the value alone, since each derivative order would need its own
+  fit. What a polynomial route can give was measured instead with mpmath's
+  Chebyshev fits (`tools/reference/dawson.py --cheb`): on [0, 5/2] a fit of
+  F(x)/x in x^2 reaches 3.6e-19 at degree 21, but its coefficients are those
+  of the Taylor series of F to sixteen digits (1, -2/3, 4/15, -8/105, ...), so
+  evaluating it cancels exactly as the Taylor series does; on [5/2, 7] a fit
+  of F in x needs degree 31 for 2.9e-17 and degree 35 for 1.2e-19, while the
+  same fit in 1/x^2 reaches only 8.0e-13 at degree 23, the branch point at
+  1/x^2 = 0 sitting too close to the interval.
+
+For the value and every derivative order:
+
+- the alternating Taylor series F(x) = sum_n (-2)^n x^(2n+1)/(2n+1)!!,
+  differentiated term by term. Its largest term exceeds the sum by a factor
+  that grows like e^(x^2): 266 ulp and 33 ulp1 for the value below 5/2 and
+  2.7e27 ulp on [5/2, 8); at order 6, 2.5e5 ulp1 below 5/2. Discarded above
+  |x| = 2;
+- the recurrence F^(1) = 1 - 2 x F, F^(k+1) = -2 (x F^(k) + k F^(k-1)) over an
+  accurate value. It is the cheapest route to the derivatives and the one that
+  fails: at large x the two terms of a step agree to about log2(x) bits, since
+  x F^(k) ~ (-1)^k k!/(2 x^k) and k F^(k-1) ~ (-1)^(k-1) k!/(2 x^k), so order 1
+  loses 2 log2(x) bits and each further order another log2(x). Measured, with
+  the chosen value as its seed: order 1 reaches 4.85 ulp1 below 5/2, 7.57 ulp1
+  and 969 ulp on [5/2, 8), and 3.53 ulp1 with 2.6e16 ulp above 8; order 6
+  reaches 419 ulp1 below 5/2, 5.0e6 ulp1 on [5/2, 8) and 2.2e41 ulp1 above 8.
+  Discarded;
+- **the scaled series** (chosen below |x| = 8). With A_K(x) = e^(x^2) F^(K)(x),
+  the identity A_(K+1) = A_K' - 2 x A_K turns the series of
+  A_0(x) = int_0^x e^(s^2) ds = sum_m x^(2m+1)/(m! (2m+1)) into
+
+    F^(K)(x) = e^(-x^2) sum_(m >= 0) b_K(m) x^n / m!,
+
+  with n = 2m + 1 for K even and n = 2m for K odd, and
+
+    b_0(m) =    1/(2m+1)                      b_1(m) =   -1/(2m-1)
+    b_2(m) =    4/((2m-1)(2m+1))               b_3(m) =  -12/((2m-3)(2m-1))
+    b_4(m) =   96/((2m-3)(2m-1)(2m+1))         b_5(m) = -480/((2m-5)(2m-3)(2m-1))
+    b_6(m) = 5760/((2m-5)(2m-3)(2m-1)(2m+1)).
+
+  One formula covers every m >= 0, with no exceptional leading coefficient,
+  and no denominator vanishes, because 2m - j is odd for odd j. Each b_K keeps
+  one sign from the first m at which all its factors are positive on, so the
+  tail of every series has one sign and nothing cancels inside it; the leading
+  coefficients that break the sign are at most four, and the points at which
+  they cancel the tail are the zeros of F^(K) themselves. Every denominator of
+  b_K is a window of consecutive odd numbers, so the ratio of two neighbouring
+  terms is a single fraction, w (2m - 1 - 2 floor((K+1)/2)) / (m (2m + 1)) for
+  K even and the same with 2m - 1 in place of 2m + 1 for K odd, with w = x^2:
+  one division per term. The series is summed at the rounded w = fl(x^2) and
+  multiplied by e^(-w) at the same w. The sum behaves like e^w, so the error
+  that rounding x^2 causes in the two factors cancels to first order; an
+  fma-corrected e^(-x^2) against a series summed at fl(x^2) would instead
+  leave it in, about x^2 2^-53 relative, 18 ulp at x = 6. The cap is 320
+  terms, against the x^2 + 5 |x| the series needs, 104 at |x| = 8;
+- **the differentiated asymptotic series** (chosen from |x| = 8),
+
+    F^(K)(x) ~ (-1)^K sum_m ((2m-1)!!/2^(m+1)) (2m+1)_K x^(-(2m+1+K)),
+
+  with (2m+1)_K the rising factorial. Every term carries the sign (-1)^K, so
+  nothing cancels here either. The ratio of neighbouring terms is
+  w (2m + K - 1)(2m + K)/(4m) with w = 1/x^2, again one division per term, and
+  the sum is stopped at its smallest term, where an asymptotic series is most
+  accurate. At |x| = 8 that is about 25 terms.
+
+Both series were derived and checked against SymPy's own derivatives in
+`tools/reference/dawson_forms.py`: the defining identity, the two recurrences
+on b_K, nine coefficients of every order against the series of
+e^(x^2) F^(K)(x), nine terms of every order of the asymptotic series against
+the term-by-term derivative, the seven values F^(k)(0) and the maximum of F.
+
+**The threshold.** The asymptotic series needs a larger argument at a higher
+order, by the rising factorial that multiplies its terms, so the |x| at which
+it becomes the better route was swept over 5, 6, 6.5, 7 and 8. The smallest
+value at which each order is as accurate as the series is 6 for the value and
+for order 1, 6.5 for orders 2 and 3, 7 for orders 4 and 5, and 8 for order 6,
+whose worst point at a threshold of 7 is x = 7.0014 with 2988 ulp. One
+threshold for every order, 8, was chosen: it costs the value about 20 per cent
+on a mixed argument (58 against 48 ns on one gcc thread) and nothing in
+accuracy, and it keeps one constant instead of seven.
+
+**Measurement.** References `dawson.csv` and `dawson_d1.csv` ...
+`dawson_d6.csv` (`tools/reference/dawson.py`): the value from mpmath's erfi,
+the derivatives from the defining recurrence, everything at 600 and at 700
+bits and kept only where the two agree to 2^-100 relative, which absorbs the
+cancellation of the recurrence (about 190 bits at order 6 at x = 1e8). Two
+routes check the value at every point, Kummer's function
+F(x) = x e^(-x^2) M(1/2, 3/2, x^2) and, below |x| = 12, the quadrature of the
+definition itself: the largest relative difference over the grid is 7.0e-211.
+2176 rows per order, none dropped: x log-uniform in [2^-45, 1e8], uniform in
+[0, 12], around each candidate threshold, at the maximum of F and near the
+first zeros of the derivatives, and the mirror image of a third of the grid.
+
+The derivative of order k has ceil(k/2) simple zeros on the positive axis,
+each with its mirror image (0.9241388730045917; 1.501975268; 0.595679356 and
+1.955608092; 1.066311887 and 2.340530538; 0.474246676, 1.466192267 and
+2.680438697; 0.878711253, 1.819221958 and 2.987984368, counted at 400 bits over
+(0, 60]), and the grid holds all twelve, so the relative error is unbounded
+there and the absolute error in ulps of 1 (ulp1) is the measure that carries
+meaning below the threshold; above it, past every zero,
+the relative error does. Maxima of the chosen routes:
+
+| region | measure | k = 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|---|
+| \|x\| < 8, series | ulp1 | 1.24 | 1.07 | 2.54 | 4.63 | 8.00 | 13.4 | 89.5 |
+| \|x\| >= 8, asymptotic | ulp | 6.50 | 5.37 | 6.14 | 6.01 | 5.78 | 8.27 | 7.95 |
+
+gcc/OpenMP and CUDA agree on every figure of the table and on every worst
+argument. The value, which has no zero away from the origin, is within 9.68
+ulp on gcc and 10.35 ulp on CUDA everywhere, its worst argument being
+-5.2231447303876841 on gcc and -5.1502338383858 on CUDA. Split by region on
+the grid before the zeros were added to it, the ulp1 of the series was 1.24,
+1.07, 2.54, 4.63, 8.00, 12.9 and 89.5 below |x| = 5/2 and 0.61, 0.28, 0.36,
+0.37, 0.86, 3.67 and 14.9 on [5/2, 8), which is where the cost of the route
+changes rather than its accuracy. In the series region the relative error of each
+derivative is read at one of its zeros, where it means nothing: 4.9e14 at
+order 1 (x = 0.92413887300459174), 1.1e9 at order 2 (1.501975268), 4.7e9 at
+order 3 (-0.595679356), 1.7e9 at order 4 (2.340530538), 1.2e11 at order 5
+(1.466192267) and 4.2e9 at order 6 (2.987984368). The 89.5 ulp1 of order 6
+is of the same kind: it is reached where F^(6) crosses 1 while its scale in
+that region is a few hundred, so the error is below one ulp of the function's
+own size. In the asymptotic region the worst arguments are
+8.1294951781346469, 8.3084666620398711, -10.440565655072483,
+9.0253180852636845, -8.9288483521814008, 9.3274832764819831 and
+11.636480101888953 for the value and the orders 1 to 6, all close to the
+threshold, where that series is the least converged.
+
+ns per call (`benchmarks/math_dawson.cpp`, 2^18 arguments drawn from each
+region; one gcc thread, OpenMP on 8 threads, and the RTX 4070 SUPER):
+
+| route | region | one thread | OpenMP | CUDA |
+|---|---|---|---|---|
+| series | \|x\| < 5/2 | 48-55 | 7.5-9.0 | 2.9-8.6 |
+| series | 5/2 <= \|x\| < 8 | 128-155 | 21-29 | 11-39 |
+| asymptotic | \|x\| >= 8 | 24-26 | 3.4-4.2 | 1.2-7.7 |
+
+**What this says.** The value is within 9.7 ulp everywhere and the derivatives
+within 13 ulp1 to order 5, which is the accuracy of the elementary functions
+they are built on; order 6 is within 90 ulp1, and within one ulp of its own
+scale. The cost is set by the number of terms of the series, x^2 + 5 |x|, so
+it grows from 50 ns near the origin to 155 ns just below the threshold and
+drops to 25 ns above it. Nothing in either route cancels, which is what the
+two single-signed tails buy: the recurrence that every textbook gives for the
+derivatives loses 3 to 41 orders of magnitude of relative accuracy over the
+same grid.
+
+**Open.** The cost on [5/2, 8) is the weak point: 155 ns is three times the
+cost of the same series near the origin and six times that of the asymptotic
+series. Two ways down, neither taken: a threshold per order, 6 for the value
+and for order 1 rising to 8 for order 6, which would serve the value at 25 ns
+from |x| = 6 up and cost six more constants; or a polynomial of degree about
+31 per order on that interval, which would need seven tables of 32
+coefficients and a decision about where its relative accuracy near the zeros
+is good enough. The 89.5 ulp1 of order 6 could be brought to a few ulp1 by
+summing the scaled series in double-double, at about ten times its cost.
+
+**Chosen.** This version. Tested in `tests/math/test_dawson.cpp` on both
+builds: the absolute error below the threshold and the relative error above it
+against the bounds of the table with a margin of about half again, the value's
+relative error everywhere, the seven values F^(k)(0) exactly, the parity of
+every order bit for bit, the two routes meeting at |x| = 8 within 1e-13 in
+absolute value, and F'(x) = 1 - 2 x F(x) within 1e-14.
