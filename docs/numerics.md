@@ -11572,3 +11572,89 @@ thing that changed. A braced list over the pack, `for (const fixed_coord c :
 {C...})`, is also out of device code, its `std::initializer_list` having static
 storage; the one in a `LAPLACE_HD` member is now a fold over
 `std::index_sequence`.
+
+## Frozen R references for wave 2 of the optimizers (2026-11-18)
+
+**What.** Lasso, elastic-net and least-absolute-deviation fits produced in R
+once, so that the proximal and bundle optimizers of wave 2 can be compared with
+glmnet and quantreg without R at test time (note/optimizers.md section 12,
+decisions 7 and 8). Versions: R 4.6.0, glmnet 5.0, quantreg 6.1. The script is
+`tools/reference/optimizers_wave2.R`, run from the repository root with
+`Rscript --vanilla`; it writes `tests/data/reference/optimizers/wave2/` (about
+18 MB; the layout is in the README there).
+
+**The data.** Five linear regressions with a dense design and fixed seeds:
+n = 100 with p = 10 (independent columns) and p = 200 (AR(1) correlation
+0.9^|j - k|, p > n), n = 1000 with p = 50 (AR(1), 0.5), n = 1e4 with p = 100
+(equicorrelated, 0.5) and n = 1e5 with p = 10 (AR(1), 0.8). The true
+coefficients are sparse (max(3, p/10) nonzero, from 2 down to 0.5 with
+alternating signs) and the intercept is 0.5. Each dataset carries two
+responses on the same X, one with N(0, 1) errors for the penalized fits and
+one with Laplace(0, 1) errors for LAD. The two smallest are stored as hex CSV,
+the others as raw little-endian binary64, column-major.
+
+**The objective in Laplace's units.** glmnet, family "gaussian", with an
+unpenalized intercept b0 and `standardize = FALSE`, documents its objective as
+
+  F_g(b0, beta) = RSS / (2 n) + lambda_g (alpha |beta|_1 + (1 - alpha) |beta|_2^2 / 2).
+
+The optimizers work with sums, not means, so the reference objective is
+F_L = n F_g:
+
+  F_L = RSS / 2 + a |beta|_1 + c |beta|_2^2 / 2,   a = n lambda_g alpha,   c = n lambda_g (1 - alpha).
+
+RSS / 2 is the gaussian negative log-likelihood with sigma = 1 less
+n log(2 pi) / 2. The penalty is, on each coefficient, `enet_distrib`'s with
+lambda = n lambda_g and the same alpha (its rates are a = lambda alpha and
+c = lambda (1 - alpha)) less its log-normalizer A; at alpha = 1 it is
+`laplace2_distrib`'s with rate lambda = n lambda_g (or `laplace1_distrib`'s
+with sigma = 1 / (n lambda_g)) less -log(lambda / 2). Both constants are in
+`glmnet_fits.csv`, so that a Laplace objective with the penalty's normalizing
+constant included can be compared as well.
+
+**glmnet's ridge term.** glmnet divides y by its standard deviation s_y
+(divisor n) before fitting and divides lambda by s_y with it; the lasso term is
+unchanged by this, but the ridge term comes out divided by s_y: what it
+minimizes is RSS / (2 n) + lambda alpha |beta|_1 + lambda (1 - alpha) |beta|^2 / (2 s_y).
+Measured on a test problem with s_y = 3.4996, the ridge weight implied by the
+KKT conditions at glmnet's point was 0.285745 times lambda (1 - alpha), which
+is 1/s_y to seven digits. The script therefore calls glmnet with
+lambda' = k lambda_g and alpha' = alpha / k, k = alpha + s_y (1 - alpha), which
+makes its objective F_g at (lambda_g, alpha) exactly; k = 1 for the lasso.
+Before this correction the elastic-net fits violated the KKT conditions of F_L
+by up to 1.4e4 (in F_L's units, at n = 1e5); after it, by at most 7.5e-3,
+3.3e-5 relative to a.
+
+**Polishing.** glmnet stops on a relative change (`thresh = 1e-14` here, with
+`maxit = 1e8`), and its coefficients still carry errors of up to 8.3e-5 (the
+p > n dataset at the smallest lambda). Each fit is therefore polished: with
+glmnet's support S and signs s, the KKT system on S, (Xc_S' Xc_S + c I) beta_S
+= Xc_S' yc - a s_S with Xc and yc centred and b0 = mean(y) - mean(X)' beta, is
+solved directly with one step of iterative refinement. The polished point is
+accepted only when its signs agree with s and every coordinate off S satisfies
+|Xc_j' r| < a strictly; then it is the minimizer of F_L up to rounding. All 30
+fits (5 datasets, alpha = 1 and 0.5, lambda = 0.5, 0.1 and 0.01 times glmnet's
+lambda_max) were accepted, with the same support as glmnet's, KKT violations
+of 1e-15 to 2e-9 (in F_L's units, against a from 0.70 to 6.6e4) and supports
+from 1 to 113 coefficients. The smallest slack off the support, min (a -
+|X_j' r|), is 1.0e-3 (p = 200, alpha = 0.5, the smallest lambda): a test that
+reads the support from a computed point must resolve the subgradient below
+that.
+
+**LAD.** quantreg's `rq.fit(cbind(1, X), y, tau = 0.5, method = "br")` solves
+the LAD problem, min sum |y_i - b0 - x_i' beta|, as a linear program by the
+simplex method of Barrodale and Roberts, so its solution is a vertex at which
+p + 1 residuals are zero. The script takes those p + 1 observations as the
+basis B, re-solves the square system X1_B coef = y_B, and certifies optimality
+through the dual on the basis, u_B = -(X1_B')^(-1) X1_N' sign(r_N): the point
+is optimal when max |u_B| <= 1, and unique when the maximum is below 1. It
+was 0.89, 0.991, 0.993 and 0.94 on the four datasets with p < n, so all four
+solutions are unique; the re-solved vertex differs from rq's coefficients by
+at most 5.6e-15. The dataset with p > n has no LAD reference. `rq_fits.csv`
+also gives sigma_hat = sum |r| / n and the `laplace1_distrib` negative
+log-likelihood at (beta, sigma_hat), n + n log(2 sigma_hat), the reference for
+the Laplace regression with sigma fitted by block alternation.
+
+**What is open.** The SCAD and MCP references from ncvreg (installed, 3.16.0)
+are added to the same script when the penalties land them (note/penalties.md,
+step 5).
