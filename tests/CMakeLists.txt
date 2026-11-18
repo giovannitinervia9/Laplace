@@ -74,6 +74,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_transformed.cpp
   distrib/test_fixed.cpp
   distrib/test_mcp_scad.cpp
+  distrib/test_powerexp.cpp
   distrib/test_mvgaussian.cpp
   distrib/test_mvgaussian_rank_deficient.cpp
   penalty/test_distrib_penalty.cpp

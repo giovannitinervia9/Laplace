@@ -12989,3 +12989,316 @@ integral. The reference script now factors and subdivides, and it uses `log1p`
 on the side of the cumulative function that is close to one, where `1 - r` at
 400 bits rounds to one as soon as `r` falls below 2^-400 and its logarithm would
 read as zero.
+
+## The univariate power exponential: powerexp_distrib (2026-11-18)
+
+`powerexp_distrib(mu, sigma, p)`, the power exponential law, also called the
+generalized normal of the first kind: `mu` real, `sigma > 0` the STANDARD
+DEVIATION and `p > 0` the shape. With
+
+    c(p) = sqrt(Gamma(1/p) / Gamma(3/p)),   s = sigma c(p),   z = (y - mu)/s,
+    f(y) = p / (2 s Gamma(1/p)) exp(-|z|^p),
+
+so that `Var Y = s^2 Gamma(3/p)/Gamma(1/p) = sigma^2` for every `p`: `sigma`
+carries the whole spread and `p` only the shape of the tails, the convention of
+`pseudohuber_distrib`. Decided with Giovanni before the work started, together
+with the two conventions below.
+
+**The three limits, with the constants.** `c(2) = sqrt(2)`, and the law is
+exactly the Gaussian of standard deviation `sigma`; `c(1) = 1/sqrt(2)`, and it
+is exactly the Laplace of scale `sigma/sqrt(2)`, whose variance
+`2 (sigma/sqrt 2)^2` is `sigma^2`. As `p` grows, `Gamma(1/p) ~ p` and
+`Gamma(3/p) ~ p/3`, so `c(p) -> sqrt(3)` and NOT to one: the limit law is the
+uniform on `[mu - sigma sqrt(3), mu + sigma sqrt(3)]`, whose variance is
+`sigma^2`. Measured: `c(1e7) = 1.732050907546` against
+`sqrt(3) = 1.732050807569`.
+
+**The form the derivatives are assembled in.** The log-density is written as one
+function of `zeta = (y - mu)/sigma` and `p` plus two functions of one parameter:
+
+    l = Lambda(zeta, p) + g(p) - log sigma,
+    Lambda = -|zeta|^p exp(A(p)),   A(p) = -p lambda(p),   lambda(p) = log c(p),
+    g(p) = log p - log 2 - (3/2) lgamma(1/p) + (1/2) lgamma(3/p).
+
+`lambda` and `g` are EVALUATED in two equivalent forms, obtained with
+`lgamma(v) = lgamma(1 + v) - log v`:
+
+    lambda(p) = (1/2) (lgamma(1 + 1/p) - lgamma(1 + 3/p) + log 3),
+    g(p)      = -log 2 - lgamma(1 + 1/p) - lambda(p),
+
+in which the logarithms that cancel (`log(1/p) - log(3/p) = -log 3` inside
+`lambda`, and `log p` against the `-log(1/p)` inside `lgamma(1/p)` in `g`) are
+cancelled by hand and never formed. The reason and the measurement are below,
+under "Where the loss comes from". The same identity, with
+`psi(1 + v) = psi(v) + 1/v`, gives the derivative of `lambda` used by the
+expected information, `kappa = (3 psi(1 + 3/p) - psi(1 + 1/p)) / (2 p^2)`, in
+which the poles `3/(3a)` and `1/a` of `3 psi(3a) - psi(a)` have cancelled.
+
+`Lambda` FACTORIZES over the three parameters,
+`Lambda = -|y - mu|^p sigma^-p exp(A(p))`, so it is differentiated in all three
+at once rather than through a table of `(zeta, p)` derivatives carried to
+`(mu, sigma)`. With `fall(p, a) = p (p-1) ... (p-a+1)`,
+`rise(p, b) = p (p+1) ... (p+b-1)`, `r = y - mu`, `L = log|zeta|` and `Y_k` the
+complete Bell polynomial of the derivatives of
+`V(p) = (p - a) log|r| - (p + b) log sigma + A(p)` (whose first derivative is
+`L + A'(p)` and whose higher ones are `A^(m)(p)`),
+
+    d^a/dmu^a d^b/dsigma^b d^c/dp^c Lambda
+      = -(-1)^(a+b) sgn(r)^a |zeta|^(p-a) exp(A(p)) sigma^(-a-b)
+        sum_(i+j+k=c) c!/(i! j! k!) [d^i fall(p, a)/dp^i] [d^j rise(p, b)/dp^j] Y_k,
+
+where `|zeta|^(p-a) exp(A(p)) sigma^(-a-b) = exp(V)` is computed as
+`exp(p (L - lambda(p)) - a L) sigma^(-a-b)`. The derivatives of `lambda` and of
+`g` need those of `lgamma(1 + 1/p)` and `lgamma(1 + 3/p)`, one Faa di Bruno
+composition each through `v = 1 + a/p` with the polygamma functions of `v`
+outside (orders 0 to 5 at order six).
+
+**Why not the usual location-scale route, and the first of two bugs it caused.**
+`detail_location_scale::mixed_shape_dk` carries a table of mixed `(zeta, p)`
+derivatives to `(mu, sigma, p)` by multiplying each derivative in `zeta` by a
+polynomial in `zeta`. At the location a derivative in `zeta` is infinite and the
+polynomial carries a factor `zeta = 0`, so the product is a NaN: the test that
+asks for no NaN at `y = mu` caught 84 of them, in the `(mu, sigma)` mixed
+components at `p = 0.5`, 0.95 and 1.05. The factorized form has no such product,
+and its magnitude `|zeta|^(p-a)` depends on the number of derivatives in `mu`
+alone, which is what makes the limits at the location elementary. The second bug
+was in the assembly itself: a `sym_tensor<3, K>` holds the components of total
+order exactly `K`, and `pos3(a, b, c)` with `a + b + c < K` is a position in the
+smaller tensor, so a loop over `a + b + c <= K` writes several values into one
+slot. At `p = 2`, `K = 4` the `(mu, mu)` entry of order two landed in the slot of
+the four `mu` derivatives, which `fall(2, 4) = 0` then never rewrote: the test
+read `-0.591716` where the fourth derivative of a parabola is zero. The
+assembly now walks the pairs `(a, b)` with `a + b <= K` and takes
+`c = K - a - b`, so every component is written once.
+
+**Regularity, the one delicate point.** Since
+`d^j/dz^j |z|^p = p (p-1) ... (p-j+1) |z|^(p-j) sgn(z)^j`, the derivative of
+order `j` at `z = 0` is finite and zero while `j < p` and infinite once `j > p`,
+so the regularity of `l` in `y` (and in `mu`) depends on `p`, a runtime value,
+while `y_regularity` is `static constexpr`. Settled with Giovanni:
+`y_regularity = 0`, the worst case over `p`, and the true order at runtime in the
+`continuous_order` field of `y_kinks()` and `param_kinks(0, y)`. The order
+returned is `ceil(p) - 1`, with `infinitely_smooth` at `p == 2.0` exactly and no
+test for any other even integer, an exact equality on a runtime double being
+fragile while `p` moves under an optimizer. `ceil(p) - 1` is `floor(p)` away from
+the integers and `p - 1` at an integer: `floor(p)` everywhere, as the assignment
+first put it, would claim one order more than exists at an odd integer, `C^1` at
+`p = 1` where the law is the Laplace and the first derivative jumps. The same
+formula was reached independently, from the homogeneity of `||r||^(2 beta)`, by
+the session writing the multivariate law, where it reads `ceil(2 beta) - 1`
+outside the integers. Being conservative at `p = 4, 6, ...` costs panel
+granularity in the quadratures and nothing else. One consumer reads the static
+field: `independent_product_penalty.hpp` sets `beta_regularity = D::y_regularity`
+and takes `penalty_kink_geometry::per_coordinate` unless the law is
+`infinitely_smooth`, so a power exponential used as a penalty always takes the
+kink geometry, at `p >= 2` as well.
+
+**The limits at the location.** A component with no derivative in `mu` is zero,
+`Lambda` vanishing identically in `(sigma, p)` at `r = 0`; an odd number of them
+is zero by the convention `sgn(0) = 0` of `laplace1.hpp`, the mean of the two
+one-sided derivatives, whose magnitudes are equal; an even number `a` is zero
+while `a < p`, `-(-1)^b fall(p, a) rise(p, b) exp(A) sigma^(-a-b)` at `a = p`
+with no derivative in `p`, and infinite otherwise, with the sign of the term
+carrying the highest power of `L`. Where `p` is an integer below `a`,
+`fall(p, a) = 0` and the component is exactly zero, correctly: `|zeta|^p` is then
+a polynomial of degree below `a`. One consequence is worth stating because it
+surprises: `d^2 l / dzeta^2` at the location is 0 above `p = 2`,
+`-2 exp(A)/sigma^2` at `p = 2` and infinite below it, so its derivative in `p` is
+infinite at `p = 2`, where `l` itself is a polynomial in `y`. The test checks
+those infinities with exact comparisons, on the device as well as on the host, so
+that a guard that failed to fire could not pass as "large".
+
+**Numerics.** `|z|^p` is formed as `exp(p (L - lambda(p)))` and never as
+`exp(p L + A(p))`: for large `p` the two terms of the second form are huge and
+nearly opposite, while in the first the difference is of order one. Each order
+`a` carries its own exponential, `exp(p (L - lambda) - a L)`, rather than
+`|zeta|^(-a)` times a common one, because the common one underflows near the
+location while `|zeta|^(p-a)` with `a > p` is the large number that belongs
+there. Where the sum over `(i, j, k)` is exactly zero, which happens when `p` is
+an integer below `a`, the component is zero and the exponential is not
+multiplied in, which would be zero times infinity.
+
+**The cumulative functions.** Closed, through the regularized incomplete gamma:
+with `t = |z|^p`, which is a `Gamma(1/p, 1)` variable under the law,
+`F(y) = 1/2 + sgn(z) P(1/p, t)/2`, so the far side of the distribution is half an
+upper regularized function and no tail is formed as a difference of numbers near
+one half; the near side is `-log 2 + log1p(P(1/p, t))`. The quantile inverts the
+same relation (`gamma_q_inv` below the median, `gamma_p_inv` above it). The
+derivative TENSORS of `log F` and `log(1 - F)` in the parameters are NOT
+supplied: they would need the derivatives of `P(1/p, t)` in its shape mixed with
+those in `t`, and `incomplete_gamma_deriv.hpp` carries the shape derivatives to
+order five, one short of the six that three parameters need. The generic
+quadrature route answers for them.
+
+**The expected information.** Closed in all six entries. With `a = 1/p` and
+`q = |z|^p`, which is `Gamma(a, 1)` under the law, the scores in the natural
+parametrization `(mu, s, p)` are `(p/s)|z|^(p-1) sgn(z)`, `(p q - 1)/s` and
+`a^2 psi(1 + a) - a q log q`, and the moments of `q` and of `q log q` give
+
+    I_mu mu = p^2 Gamma(2 - 1/p) / (s^2 Gamma(1/p)),
+    I_s s = p / s^2,   I_s p = -(1 + psi(1 + a)) / (p s),
+    I_p p = -a^4 psi(1 + a)^2 + a^3 (1 + a) (psi'(2 + a) + psi(2 + a)^2),
+
+with `I_mu s = I_mu p = 0` by symmetry. The Jacobian of `s = sigma c(p)` carries
+them to `(mu, sigma, p)` through `kappa = lambda'(p)`:
+`I_sigma sigma = p / sigma^2`,
+`I_sigma p = (p kappa - (1 + psi(1 + a))/p) / sigma`,
+`I_p p = I^nat_p p - 2 kappa (1 + psi(1 + a))/p + p kappa^2`, and `I_mu mu`
+unchanged, evaluated as `p Gamma(2 - a)/(s^2 Gamma(1 + a))` since
+`Gamma(a) = Gamma(1 + a)/a`. `I_mu mu` is the integral of `|z|^(2p-2)` against
+the density and is finite only for `p > 1/2`; at `p <= 1/2` the member returns
+`+infinity` rather than a finite number, while the `(sigma, p)` block stays
+finite for every `p > 0`. `I_sigma p` is exactly zero at `p = 2`: the standard
+deviation and the shape are orthogonal at the Gaussian. The derivatives of `I` in
+the parameters are left to the generic route.
+
+**What was checked symbolically** (`tools/reference/powerexp_forms.py`, SymPy and
+mpmath, nothing of the library's own code):
+
+| what | checks | worst relative |
+| --- | --- | --- |
+| `l` against the logarithm of the density, and `A`, `g` against their definitions | 16 | 0 |
+| `d^m/dp^m lgamma(1 + a/p)`, m = 0..6, by Faa di Bruno through v = 1 + a/p, a = 1, 3; p = 1/3, 1, 5/2, 40 | 56 | 0 |
+| `A^(m)` and `g^(m)`, m = 0..6, in the shifted forms, against SymPy's derivatives of the original definitions through `lgamma(1/p)` and `lgamma(3/p)`; same four `p` | 56 | 0 |
+| the `(zeta, p)` table `d^c/dp^c d^j/dzeta^j Lambda`, every `c + j <= 6`; p = 1/2, 3/2, 2, 9/2; zeta = 3/7, 2, -5/3 | 336 | 0 |
+| `d^i/dp^i fall(p, j)` from the integer coefficients; j = 0..6; p = 1/2, 2, 17/4 | 147 | 0 |
+| the factorized tensor, all 84 components with `K <= 6`, both sides of the location; p = 1/2, 3/2, 2, 9/2; two `(mu, sigma)` pairs | 16 point sets | 1.6e-166 |
+| the reductions at `p = 2` and `p = 1` | 6 | 0 |
+| the closed `I` against the quadrature of the score products | p = 0.8, 1, 1.5, 2, 3, 6 | 1.3e-6 at p = 0.8, 9.5e-11 at p = 1, <= 2.9e-19 above |
+
+The figure at `p = 0.8` is the quadrature's, not the closed form's: `I_mu mu` is
+the integral of `|z|^(2p-2) = |z|^(-0.4)`, whose endpoint singularity the
+quadrature resolves to about six digits there and to eleven at `p = 1`.
+
+**The reference values** (`tools/reference/distrib_powerexp.py`): 180 points,
+15120 rows, 0 dropped. The derivatives are SymPy's own symbolic derivatives of
+the definition through `lgamma(1/p)` and `lgamma(3/p)`, evaluated through mpmath
+(`sp.lambdify`) at 50 and at 80 digits; a row is kept when the two agree to
+1e-30 of the largest component of its order, and all 15120 did. The route shares
+no step with the library's, which goes through Faa di Bruno, the Bell polynomials
+and the shifted forms. `|z|^p` is not differentiable symbolically through an
+absolute value, so each point is built with the sign of `y - mu` fixed; the
+points have `mu` dyadic, `sigma` a power of two and `zeta = (y - mu)/sigma` a
+double of 20 significant bits, so that the library and the reference see the
+same `zeta` in double arithmetic. The location itself, where several derivatives
+are infinite, is not in the file: the test checks those limits directly. `p`
+runs over 0.4, 0.75, 0.95, 1, 1.05, 1.5, 2, 2.5, 3, 4, 7.5 and 30, and `zeta`
+over 0.03, 0.3, 1, -1, 2.5, -7 and 30, with `(mu, sigma) = (0.5, 1)`,
+`(-2, 2^-10)` and `(1, 2^10)`.
+
+**Worst scaled error against those references**, in ulp of the largest component
+of the order at that point, the row of order 0 in ulp of the value. gcc and CUDA
+(the default build, not `nofmad`) agree to the digit in every entry but one,
+order 5 at `p >= 2.5`, where CUDA reads 483 against gcc's 2.27e3 below; the
+bounds are gcc's figures times about one and a half:
+
+| order | p < 2.5: worst (bound) | p >= 2.5: worst (bound) |
+| --- | --- | --- |
+| 0 | 49.5 (75) | 32.9 (50) |
+| 1 | 39.7 (60) | 31.2 (50) |
+| 2 | 60.9 (95) | 32.1 (50) |
+| 3 | 440 (660) | 266 (400) |
+| 4 | 102 (155) | 32.8 (50) |
+| 5 | 678 (1050) | 2.27e3 (3450) |
+| 6 | 273 (410) | 80.6 (125) |
+
+By `p`, over every order: 0.4: 188; 0.75: 440; 0.95: 107; 1: 78.5; 1.05: 678;
+1.5: 27; 2: 88.8; 2.5: 266; 3: 80.6; 4: 2.27e3; 7.5: 29.7; 30: 35.9.
+
+**Where the loss comes from, measured.** At the points of large error the
+pure-`p` component of the derivative is the sum of the derivatives in `p` of
+`Lambda` and of `g`, which are of opposite sign and nearly equal, both carrying
+the derivatives of `lambda(p) = log c(p)`, the factor the standard-deviation
+parametrization introduces. Over a grid of 15 values of `p` (0.3 to 30) and 8 of
+`zeta` (0.01 to 30), the factor `(|Lambda^(K)| + |g^(K)|)/|Lambda^(K) + g^(K)|`
+by which that sum loses significance has medians 1.1, 1.8, 2.9, 4.0, 8.0 and 8.7
+at orders 1 to 6, 90th percentiles between 13 and 17, and maxima of 66 (order 1),
+420 (order 2, p = 0.4), 486 (order 3), 677 (order 4, p = 0.8), 234 (order 5,
+p = 4) and 256 (order 6); no point of the grid loses more than 1000. It is
+caused by the rescaling: the same derivatives of the law in its natural scale,
+at fixed `s` rather than fixed `sigma`, lose a factor 1 at those points (1.7 at
+the order-5 one). The natural route does not escape it, though: the conversion
+back to fixed `sigma` adds `lambda'(p) (p |z|^p - 1)` and its derivatives, and the
+cancellation moves there.
+
+Inside the shape part there was a second, avoidable loss, which the shifted
+forms above remove. The derivatives of `lgamma(v)` at small `v` are dominated by
+the pole of `-log v`, and those pole terms cancel exactly between `lgamma(1/p)`
+and `lgamma(3/p)` in `lambda`, and between `lgamma(1/p)` and `log p` in `g`, but
+only after both have been computed and rounded. Emulating the pure-`p` component
+in double with every other quantity as the header computes it and the shape
+derivatives taken exact gave 408 ulp at order 2, `p = 0.4` and 314 at order 5,
+`p = 4`, against 1.08e3 and 2.92e3 measured on the first version, which went
+through `lgamma(a/p)`. The two routes compared over the reference grid (12 `p`
+times 6 `|zeta|`), both emulated with the same correctly rounded lgamma and
+polygamma values so that only the formula differs, error of the pure-`p`
+component in ulp of its exact value:
+
+| order | median: through lgamma(a/p), through lgamma(1 + a/p) | p90 | max | shifted better / worse |
+| --- | --- | --- | --- | --- |
+| 1 | 2.84, 2.03 | 23.7, 10.6 | 393, 393 | 30 / 17 |
+| 2 | 4.68, 2.97 | 11.7, 9.77 | 152, 152 | 35 / 21 |
+| 3 | 5.67, 4.54 | 24, 26.9 | 212, 408 | 26 / 28 |
+| 4 | 6.8, 5.09 | 28.8, 22.4 | 214, 136 | 33 / 25 |
+| 5 | 16.5, 7.74 | 106, 78.5 | 5.7e3, 1.85e3 | 49 / 16 |
+| 6 | 25.1, 10 | 126, 65.8 | 287, 213 | 47 / 18 |
+
+Order 3 is a draw and every other order improves, the high ones most. Measured on
+the library itself, the shifted forms took order 2 at `p = 0.4` from 1.08e3 to
+60.9 ulp, orders 0 to 2 and 4 at `p >= 2.5` from 81-87 to 31-33, and order 5 at
+`p = 4` from 2.92e3 to 2.27e3, while three maxima rose by a factor 1.5 to 2.3
+(order 3 at `p = 0.75`, 188 to 440; order 3 at `p >= 2.5`, 130 to 266; order 6,
+185 to 273), within the spread the table shows for order 3.
+
+**What is left, and why a better polygamma would not remove it.** The worst row,
+order 5 at `p = 4` (2.27e3 ulp on gcc, 483 on CUDA, where fused multiply-add
+happens to round the cancelling terms more favourably), emulated with correctly rounded lgamma and polygamma values
+through the shifted route, loses 1.85e3 ulp, against 2.27e3 in the library: the
+polygamma's own few ulp account for a factor 1.2 only. Every shape quantity of
+that emulation is right to under one ulp except `A^(5)`, at 3.3 ulp, and the
+final cancellation (234 there) amplifies those. The 3.3 ulp come from a
+structural cancellation inside `A^(m) = -(p lambda^(m) + m lambda^(m-1))`: for
+large `p`, `lambda = (1/2) log 3 + gamma/p + O(p^-2)` with `gamma` Euler's
+constant, so `A = -p lambda = -(p/2) log 3 - gamma + O(1/p)` and the leading term
+of `lambda` contributes `gamma (-1)^m m!/p^m` and its opposite to the two
+products, which cancel exactly. **Open, for Giovanni:** removing that would take
+the series of `A` in `1/p`, `A = -(p/2) log 3 - gamma - (1/2) sum_(k>=2) (-1)^k
+zeta(k) (1 - 3^k) / (k p^(k-1))`, convergent for `p > 3` only and slowly near
+it (ratio 3/4 at `p = 4`), so a branch and a derivation to order six for one
+row, whose floor with every shape derivative exact is 314 ulp.
+
+**The other checks** (`tests/distrib/test_powerexp.cpp`), worst measured
+difference, identical on gcc and CUDA except where the table says:
+
+| what | worst |
+| --- | --- |
+| the value against the definition (`lgamma` and `pow` of the standard library) | 2.83e-15 relative |
+| `p = 2` against `gaussian1_distrib`, every order, the `(mu, sigma)` block | 4.12e-16 relative |
+| `p = 1` against `laplace1_distrib` of scale `sigma/sqrt 2`, every order | 1.76e-15 relative |
+| the mass and the variance `sigma^2` by `panels_quad` with a cut at the location | within 1e-12 and 1e-10, the test's tolerances |
+| the closed `I` against the reference file | 2.18e-15 relative, at p = 0.6, pair (p, p) |
+| the closed `I` against the variance of the score and against the generic score-form route | 7.4e-16 relative |
+| the closed `log F` and `log(1 - F)` against the generic quadrature route | 9.93e-16 relative |
+| the quantile against its own cumulative function | 1.79e-14 relative |
+| every order inside a Kokkos kernel, host against device, at the exact points y = -3 + i/4, as a fraction of the sum of the absolute values of the components | 0 on gcc; on CUDA 2.4e-16 (order 1) to 7.5e-15 (order 5) |
+| the value, a mixed derivative, the cumulative functions, the information and the quantile inside a kernel, host against device | 0 on gcc; 6.4e-15 relative on CUDA |
+
+Every derivative order is also checked against a five-point difference of the
+order below, in the parameters, in `y` and mixed (`check_derivs` and the
+three-parameter `check_y_derivs3`), at `p` from 0.45 to 5 and away from the
+location.
+
+**A test defect found on CUDA.** The first kernel test sampled
+`y = -3 + 0.2 i`, which rounds: at `i = 17` it lands a few ulp from the location
+on the host, and fused multiply-add puts it a different number of ulp away on the
+device. There the derivatives grow like `|zeta|^(p-a)`, so a factor 2 in `zeta`
+became a factor `2^(a-p)` in the component, and the host-device comparison read
+0.32 at order 2 for `p = 1.6` (`2^0.4 = 1.32`), 20.1 at order 6 (`2^4.4 = 21`)
+and 41.2 at order 6 for `p = 0.6` (`2^5.4 = 42`), while gcc, where host and
+"device" run the same code, read 0. The kernel bounds of that version had never
+been measured on the device. The points are now `y = -3 + i/4`, exactly
+representable on both sides and never near the location.
+
+**Builds.** gcc (Kokkos Serial and OpenMP): 13 cases, 25405 assertions, 0
+failed. CUDA (sm_89, RTX 4070 SUPER, the default build): 13 cases, 25405
+assertions, 0 failed, confirmed by a second build after the bounds were set.

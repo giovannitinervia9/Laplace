@@ -1,0 +1,170 @@
+/**
+\defgroup distrib_powerexp Power exponential
+\brief Continuous real-line distribution with location \f$\mu\f$, standard deviation \f$\sigma > 0\f$, and shape \f$p > 0\f$, which is Gaussian at \f$p = 2\f$ and Laplace at \f$p = 1\f$.
+
+Defined in `<laplace/distrib/powerexp.hpp>` as \ref laplace::distrib::powerexp_distrib "powerexp_distrib", this module evaluates the log-density, its parameter derivatives to order \f$6\f$, the mixed observation-parameter derivatives, the cumulative functions \f$F\f$ and \f$1 - F\f$ with their logarithms, the quantile, and the expected Fisher information in closed form. Every evaluator is marked `LAPLACE_HD`, so it runs on host CPUs and inside Kokkos device kernels (see \ref distrib_core "distrib_core"). The parameter derivatives of \f$\log F\f$ and of \f$\log(1 - F)\f$, the derivatives of the expected information, and the random draws come from \ref distrib_generic "the generic routes". Against high-precision reference values, the log-density and its derivatives of orders \f$0\f$ to \f$6\f$ stay within \f$2.27 \times 10^3\f$ ulp of the largest component of their order in the worst measured case, which is the entry of the table in the section "Accuracy" below.
+
+## The classic form and the implemented one
+
+The classic exponential power density, also called the generalized normal distribution of the first kind (Nadarajah, 2005), has a location \f$m \in \mathbb{R}\f$, a scale \f$b > 0\f$, and an exponent \f$p > 0\f$. With \f$\Gamma\f$ the gamma function, it reads
+\f[
+g(y) = \frac{p}{2 b\,\Gamma(1/p)} \exp\!\left(-\left|\frac{y - m}{b}\right|^{p}\right), \qquad y \in \mathbb{R}.
+\f]
+Its variance is \f$b^2 \Gamma(3/p) / \Gamma(1/p)\f$, so the scale and the exponent both move the spread. Laplace carries the law by its standard deviation instead. Define
+\f[
+c(p) = \sqrt{\frac{\Gamma(1/p)}{\Gamma(3/p)}}, \qquad s = \sigma\, c(p), \qquad z = \frac{y - \mu}{s}.
+\f]
+The substitution \f$m = \mu\f$ and \f$b = s\f$ gives the implemented density
+\f[
+f(y; \mu, \sigma, p) = \frac{p}{2 s\, \Gamma(1/p)} \exp\bigl(-|z|^{p}\bigr), \qquad y \in \mathbb{R}.
+\f]
+For every \f$p > 0\f$ the variance is \f$\sigma^2\f$, so \f$\sigma\f$ carries the whole spread and \f$p\f$ governs only the tails. The location \f$\mu\f$ is the mean, the median, and the mode.
+
+Three cases fix the constants.
+
+- At \f$p = 2\f$, \f$c(2) = \sqrt{2}\f$, and the law is the Gaussian of mean \f$\mu\f$ and standard deviation \f$\sigma\f$ (\ref distrib_gaussian1 "gaussian1_distrib").
+- At \f$p = 1\f$, \f$c(1) = 1/\sqrt{2}\f$, and the law is the Laplace distribution of location \f$\mu\f$ and scale \f$\sigma/\sqrt{2}\f$ (\ref distrib_laplace1 "laplace1_distrib"). Its variance \f$2(\sigma/\sqrt{2})^2\f$ is \f$\sigma^2\f$.
+- As \f$p\f$ grows, \f$\Gamma(1/p) \sim p\f$ and \f$\Gamma(3/p) \sim p/3\f$, so \f$c(p) \to \sqrt{3}\f$. The constant does not tend to one. The limit law is the uniform distribution on \f$[\mu - \sqrt{3}\,\sigma, \mu + \sqrt{3}\,\sigma]\f$, whose variance is \f$\sigma^2\f$.
+
+Below \f$p = 1\f$ the density has a cusp at \f$\mu\f$ and is not log-concave. The law is defined there as well. The tests check the Gaussian and Laplace cases to \f$10^{-13}\f$ relative, and \f$c(10^7)\f$ against \f$\sqrt{3}\f$ to \f$10^{-6}\f$ relative.
+
+## Parameters, domain, and regularity
+
+Struct `powerexp_distrib` sets `kind = distrib_kind::continuous` and `n_params = 3`. The parameter \f$\mu\f$ has the open domain \f$(-\infty, \infty)\f$, and \f$\sigma\f$ and \f$p\f$ have \f$(0, \infty)\f$. All three set `circular = false` and `moves_support = false`. The support is the whole real line. In `params`, \f$\mu\f$ has `regularity = 0` and `cdf_regularity = 1`, while \f$\sigma\f$ and \f$p\f$ have `regularity = cdf_regularity = infinitely_smooth`. Member `center()` returns \f$\mu\f$ and `scale()` returns \f$\sigma\f$. Parameter derivatives pack into `sym_tensor<3, K>` in lexicographic multi-index order (\ref distrib_core "distrib_core").
+
+The regularity in the observation depends on the shape. For \f$j \ge 1\f$, the \f$j\f$-th derivative of \f$|z|^p\f$ is \f$p(p-1)\cdots(p-j+1)\,|z|^{p-j}\operatorname{sgn}(z)^j\f$, where \f$\operatorname{sgn}\f$ is the sign function. At \f$z = 0\f$ this derivative is finite and zero while \f$j < p\f$, and infinite once \f$j > p\f$. The static field `y_regularity` is therefore \f$0\f$, the worst case over \f$p\f$. The true order is a run-time value. It is the `continuous_order` field of `y_kinks()` and of `param_kinks(0, y)`, given by `kink_order()`, which is \f$\lceil p \rceil - 1\f$. Away from the integers this equals \f$\lfloor p \rfloor\f$, and at an integer \f$p\f$ it equals \f$p - 1\f$. At \f$p = 2\f$ exactly the order is `infinitely_smooth`, because the log-density is then a polynomial in \f$y\f$. The code does not test other even integers. At \f$p = 4\f$, for example, the reported order is \f$3\f$, although the log-density is smooth there. The order is capped at \f$10^6\f$. The tests check the values \f$0, 0, 1\f$, `infinitely_smooth`, \f$2, 2, 3\f$ at \f$p = 0.5, 1, 1.5, 2, 2.5, 3, 4\f$.
+
+## Formulas and how the derivatives are assembled
+
+The log-density is a function of \f$\zeta = (y - \mu)/\sigma\f$ and \f$p\f$, plus two functions of \f$p\f$ alone:
+\f[
+\ell(\mu, \sigma, p; y) = \Lambda(\zeta, p) + g(p) - \log\sigma,
+\f]
+where
+\f[
+\Lambda(\zeta, p) = -|\zeta|^{p} e^{A(p)}, \qquad A(p) = -p\log c(p) = -\frac{p}{2}\bigl(\log\Gamma(1/p) - \log\Gamma(3/p)\bigr),
+\f]
+\f[
+g(p) = \log p - \log 2 - \frac{3}{2}\log\Gamma(1/p) + \frac{1}{2}\log\Gamma(3/p).
+\f]
+Since \f$|\zeta|^p e^{A(p)} = |z|^p\f$, the term \f$\Lambda\f$ is the exponent of the density, and \f$g\f$ collects the normalizing constant.
+
+The two functions of \f$p\f$ are evaluated through \f$\log\Gamma(1 + 1/p)\f$ and \f$\log\Gamma(1 + 3/p)\f$ rather than through \f$\log\Gamma(1/p)\f$ and \f$\log\Gamma(3/p)\f$. With \f$\lambda(p) = \log c(p)\f$, so that \f$A = -p\lambda\f$, the identity \f$\log\Gamma(v) = \log\Gamma(1 + v) - \log v\f$ gives
+\f[
+\lambda(p) = \frac{1}{2}\Bigl(\log\Gamma(1 + 1/p) - \log\Gamma(1 + 3/p) + \log 3\Bigr), \qquad g(p) = -\log 2 - \log\Gamma(1 + 1/p) - \lambda(p).
+\f]
+In these forms the logarithms that cancel are never computed: \f$\log(1/p) - \log(3/p) = -\log 3\f$ inside \f$\lambda\f$, and \f$\log p\f$ against the \f$-\log(1/p)\f$ inside \f$\log\Gamma(1/p)\f$ in \f$g\f$. At small \f$v\f$ the derivatives of \f$\log\Gamma(v)\f$ are dominated by those of \f$-\log v\f$, so the forms through \f$\log\Gamma(1/p)\f$ and \f$\log\Gamma(3/p)\f$ would form and then cancel the largest terms of every derivative.
+
+The exponent factorizes over the three parameters, because \f$\Lambda = -|y - \mu|^p\,\sigma^{-p}\,e^{A(p)}\f$. The derivatives are therefore taken in the three factors at once. Write \f$r = y - \mu\f$, \f$L = \log|\zeta|\f$, \f$\mathrm{fall}(p, a) = p(p-1)\cdots(p-a+1)\f$ for the falling factorial, \f$\mathrm{rise}(p, b) = p(p+1)\cdots(p+b-1)\f$ for the rising factorial, and \f$Y_k\f$ for the complete Bell polynomial of order \f$k\f$. The Bell polynomial takes the derivatives of
+\f[
+V(p) = (p - a)\log|r| - (p + b)\log\sigma + A(p),
+\f]
+whose first derivative is \f$L + A'(p)\f$ and whose derivatives of order \f$m \ge 2\f$ are \f$A^{(m)}(p)\f$. The function \f$\exp V = |\zeta|^{p-a}\sigma^{-a-b}e^{A(p)}\f$ is then differentiated by Leibniz's rule, with \f$\partial^k_p \exp V = Y_k \exp V\f$. For \f$a\f$ derivatives in \f$\mu\f$, \f$b\f$ in \f$\sigma\f$, and \f$c\f$ in \f$p\f$,
+\f[
+\frac{\partial^{a}}{\partial\mu^{a}} \frac{\partial^{b}}{\partial\sigma^{b}} \frac{\partial^{c}}{\partial p^{c}} \Lambda
+= -(-1)^{a+b}\operatorname{sgn}(r)^{a} \sum_{i+j+k=c} \frac{c!}{i!\,j!\,k!}\, \frac{\partial^{i}\mathrm{fall}(p, a)}{\partial p^{i}}\, \frac{\partial^{j}\mathrm{rise}(p, b)}{\partial p^{j}}\, Y_k \, \exp V.
+\f]
+The sum runs over the non-negative integers \f$i\f$, \f$j\f$, and \f$k\f$ with \f$i + j + k = c\f$. The sign convention is \f$\operatorname{sgn}(0) = 0\f$, the mean of the two one-sided derivatives, so every odd order in \f$\mu\f$ is zero at \f$\mu = y\f$.
+
+The derivatives of \f$A\f$ and of \f$g\f$ in \f$p\f$ come from those of \f$\log\Gamma(1 + a/p)\f$ for \f$a = 1\f$ and \f$a = 3\f$. Each one is a single Faà di Bruno composition (\ref faa_di_bruno "Faà di Bruno's formula") through \f$v = 1 + a/p\f$. The derivatives of \f$v\f$ are \f$a(-1)^k k!/p^{k+1}\f$ in order \f$k\f$, and the polygamma functions of \f$v\f$ (\ref laplace::math::own::polygamma "polygamma()") appear outside, at orders zero to five for an order-six tensor. Then \f$\lambda^{(m)}\f$ is half the difference of the two, \f$A^{(m)} = -(p\lambda^{(m)} + m\lambda^{(m-1)})\f$ by Leibniz's rule against the factor \f$p\f$, and \f$g^{(m)} = -\partial^m_p\log\Gamma(1 + 1/p) - \lambda^{(m)}\f$ for \f$m \ge 1\f$. The pure-\f$p\f$ components receive the derivatives of \f$g\f$, and the pure-\f$\sigma\f$ component of order \f$K\f$ receives \f$(-1)^K (K-1)!\,\sigma^{-K}\f$ from the term \f$-\log\sigma\f$.
+
+## Limits at the location
+
+At \f$\mu = y\f$ the logarithm \f$L\f$ is infinite, so the components are taken from their limits. A component with no derivative in \f$\mu\f$ is zero, because \f$\Lambda\f$ vanishes identically in \f$(\sigma, p)\f$ there. An odd number of derivatives in \f$\mu\f$ gives zero by the convention above. An even number \f$a\f$ of derivatives in \f$\mu\f$ gives zero while \f$a < p\f$. It gives the finite value \f$-(-1)^b\,\mathrm{fall}(p, a)\,\mathrm{rise}(p, b)\,e^{A(p)}\sigma^{-a-b}\f$ when \f$a = p\f$ and there is no derivative in \f$p\f$. Otherwise it is infinite, with the sign that the limit fixes. Where \f$p\f$ is an integer below \f$a\f$, \f$\mathrm{fall}(p, a)\f$ is zero and so is the component. This is correct, because \f$|\zeta|^p\f$ is then a polynomial of degree below \f$a\f$.
+
+One consequence is worth stating. The second derivative of the log-density in \f$\mu\f$ at the location is zero above \f$p = 2\f$, equals \f$-1/\sigma^2\f$ at \f$p = 2\f$, and is infinite below it. Its derivative in \f$p\f$ is therefore infinite at \f$p = 2\f$, although the log-density is a polynomial in \f$y\f$ there. The tests check the exact infinities on the host and inside a Kokkos kernel. They check the absence of NaN at the location for several values of \f$p\f$ on the host.
+
+## Numerics
+
+The power \f$|\zeta|^p\f$ is formed as \f$\exp\bigl(p(L - \log c(p))\bigr)\f$ and not as \f$\exp(pL + A(p))\f$. For large \f$p\f$ the two terms of the second form are huge and nearly opposite. In the first form the bracket \f$L - \log c(p)\f$ is of order one. Each order \f$a\f$ carries its own exponential, \f$\exp\bigl(p(L - \log c) - aL\bigr)\f$, instead of \f$|\zeta|^{-a}\f$ times a common factor. The common factor would underflow near the location, while \f$|\zeta|^{p-a}\f$ with \f$a > p\f$ is large there. Where the sum over \f$(i, j, k)\f$ is exactly zero, which happens when \f$p\f$ is an integer below \f$a\f$, the component is set to zero and no exponential is multiplied in. Where \f$|z|^p\f$ overflows, the log-density is \f$-\infty\f$, the density having underflowed.
+
+## Cumulative functions and the quantile
+
+Let \f$t = |z|^p\f$. Under the law, \f$t\f$ is a gamma variable with shape \f$1/p\f$ and unit scale. Let \f$P(a, x)\f$ and \f$Q(a, x) = 1 - P(a, x)\f$ be the regularized lower and upper incomplete gamma functions (\ref incomplete_gamma "incomplete_gamma"). Then
+\f[
+F(y) = \frac{1}{2} + \frac{\operatorname{sgn}(z)}{2}\, P(1/p, t).
+\f]
+Below the location the distribution function is therefore \f$Q(1/p, t)/2\f$, and the far side is half an upper regularized function. No tail is formed as a difference of numbers close to one half. The logarithm on the near side is \f$-\log 2 + \log(1 + P(1/p, t))\f$.
+
+The quantile inverts the same relation. For \f$u < 1/2\f$ it solves \f$Q(1/p, t) = 2u\f$, and for \f$u \ge 1/2\f$ it solves \f$P(1/p, t) = 2u - 1\f$. The quantile is then \f$\mu - s\, t^{1/p}\f$ below the location and \f$\mu + s\, t^{1/p}\f$ above it, with \f$s = \sigma c(p)\f$.
+
+The derivative tensors of \f$\log F\f$ and of \f$\log(1 - F)\f$ in the parameters are not supplied here. They would need the derivatives of \f$P(1/p, t)\f$ in its shape, mixed with those in \f$t\f$. The shape derivatives of the incomplete gamma function are carried to order five, and a parameter tensor of order six needs one more. The generic quadrature route answers for them (\ref distrib_generic "the generic routes").
+
+## Expected information
+
+The expected information is closed in all six entries. Let \f$a = 1/p\f$, let \f$\psi\f$ be the digamma function, and let \f$\psi'\f$ be its derivative. Let \f$s = \sigma c(p)\f$ be the natural scale. The scores in the parametrization \f$(\mu, s, p)\f$ are \f$(p/s)|z|^{p-1}\operatorname{sgn}(z)\f$, \f$(pq - 1)/s\f$, and \f$a^2\psi(1 + a) - a q\log q\f$, where \f$q = |z|^p\f$. The moments of \f$q\f$ and of \f$q\log q\f$ give
+\f[
+I_{\mu\mu} = \frac{p^2\,\Gamma(2 - 1/p)}{s^2\,\Gamma(1/p)}, \qquad I_{ss} = \frac{p}{s^2}, \qquad I_{sp} = -\frac{1 + \psi(1 + a)}{p\, s},
+\f]
+\f[
+I_{pp} = -a^4\psi(1 + a)^2 + a^3(1 + a)\bigl(\psi'(2 + a) + \psi(2 + a)^2\bigr).
+\f]
+The off-diagonal entries \f$I_{\mu s}\f$ and \f$I_{\mu p}\f$ are zero by symmetry. The change to \f$(\mu, \sigma, p)\f$ uses \f$\kappa(p) = \lambda'(p) = \bigl(3\psi(3/p) - \psi(1/p)\bigr)/(2p^2)\f$, evaluated as \f$\bigl(3\psi(1 + 3/p) - \psi(1 + 1/p)\bigr)/(2p^2)\f$: by \f$\psi(1 + v) = \psi(v) + 1/v\f$ the two forms are equal, and in the second the poles \f$3/(3a)\f$ and \f$1/a\f$ have cancelled. Then
+\f[
+I_{\sigma\sigma} = \frac{p}{\sigma^2}, \qquad I_{\sigma p} = \frac{1}{\sigma}\Bigl(p\kappa - \frac{1 + \psi(1 + a)}{p}\Bigr), \qquad I_{pp} = I^{\mathrm{nat}}_{pp} - \frac{2\kappa\,(1 + \psi(1 + a))}{p} + p\kappa^2,
+\f]
+where \f$I^{\mathrm{nat}}_{pp}\f$ is the expression above. The entry \f$I_{\mu\mu}\f$ is unchanged by the change of variables, and is evaluated as \f$p\,\Gamma(2 - a)/(s^2\,\Gamma(1 + a))\f$, since \f$\Gamma(a) = \Gamma(1 + a)/a\f$.
+
+Two facts follow. The entry \f$I_{\mu\mu}\f$ is the integral of \f$|z|^{2p-2}\f$ against the density, so it is finite only for \f$p > 1/2\f$. At \f$p \le 1/2\f$ the member returns \f$+\infty\f$. The \f$(\sigma, p)\f$ block is finite for every \f$p > 0\f$. Also, \f$I_{\sigma p}\f$ is exactly zero at \f$p = 2\f$, so the standard deviation and the shape are orthogonal at the Gaussian. The derivatives of the expected information in the parameters come from \ref distrib_generic "the generic route".
+
+`start_value()` sets \f$\mu\f$ to the sample mean, \f$\sigma\f$ to the sample standard deviation, and \f$p = 2\f$, the Gaussian, each moved strictly inside its open domain (\ref distrib_start "Starting values").
+
+## Accuracy
+
+The reference values are SymPy's derivatives of the definition, evaluated through mpmath at 50 and at 80 digits (Meurer and others, 2017; The mpmath development team, 2023). They are taken at 180 points, which give 15120 rows. The test compares the log-density and its derivatives with them in ulp, as defined in \ref accuracy "How accuracy is measured". The table gives the worst scaled error of each order, in ulp of the largest component of the order at that point. The row of order \f$0\f$ is in ulp of the value. The table has two regions of \f$p\f$, \f$p < 2.5\f$ and \f$p \ge 2.5\f$. The values are those of the gcc build. The CUDA build (RTX 4070 SUPER) gives the same values to the digit in every entry but one, order five at \f$p \ge 2.5\f$, where it measures \f$483\f$ ulp. Each bound in parentheses is the bound the test uses.
+
+| Order | \f$p < 2.5\f$: worst (bound) | \f$p \ge 2.5\f$: worst (bound) |
+| --- | --- | --- |
+| \f$0\f$ (`logpdf`) | \f$49.5\f$ (\f$75\f$) | \f$32.9\f$ (\f$50\f$) |
+| \f$1\f$ | \f$39.7\f$ (\f$60\f$) | \f$31.2\f$ (\f$50\f$) |
+| \f$2\f$ | \f$60.9\f$ (\f$95\f$) | \f$32.1\f$ (\f$50\f$) |
+| \f$3\f$ | \f$440\f$ (\f$660\f$) | \f$266\f$ (\f$400\f$) |
+| \f$4\f$ | \f$102\f$ (\f$155\f$) | \f$32.8\f$ (\f$50\f$) |
+| \f$5\f$ | \f$678\f$ (\f$1050\f$) | \f$2.27 \times 10^3\f$ (\f$3450\f$) |
+| \f$6\f$ | \f$273\f$ (\f$410\f$) | \f$80.6\f$ (\f$125\f$) |
+
+The loss has one cause in both regions, and it falls on the components with derivatives in \f$p\f$ only. Such a component is the sum of the derivatives in \f$p\f$ of \f$\Lambda\f$ and of \f$g\f$, which are of opposite sign and nearly equal, because both contain the derivatives of \f$\lambda(p) = \log c(p)\f$. The factor by which that sum loses significance, \f$(|\Lambda^{(K)}| + |g^{(K)}|)/|\Lambda^{(K)} + g^{(K)}|\f$, has medians between \f$1.1\f$ and \f$8.7\f$ over orders \f$1\f$ to \f$6\f$ on a grid of \f$15\f$ values of \f$p\f$ and \f$8\f$ of \f$\zeta\f$, and reaches \f$677\f$ at most. The same derivatives of the law at fixed natural scale \f$s\f$ lose a factor of about one at those points, so the loss comes with the parametrization by the standard deviation. At the worst row, order five at \f$p = 4\f$, a second cancellation adds to it, inside \f$A^{(m)} = -(p\lambda^{(m)} + m\lambda^{(m-1)})\f$: for large \f$p\f$, \f$\lambda = \tfrac{1}{2}\log 3 + \gamma/p + O(p^{-2})\f$, with \f$\gamma\f$ Euler's constant, and the term \f$\gamma/p\f$ contributes equal and opposite amounts to the two products. The full measurements are in `docs/numerics.md`.
+
+## Other checks
+
+The tests compare the closed forms and the derivatives with the references below. The bounds are those of the tests, and the measured values are the worst found in `docs/numerics.md`.
+
+| What is compared | Worst measured | Test bound |
+| --- | --- | --- |
+| log-density against the definition, with the standard library's `lgamma` and `pow` | \f$2.83 \times 10^{-15}\f$ relative | \f$10^{-14}\f$ |
+| \f$p = 2\f$ against `gaussian1_distrib`, all orders, the \f$(\mu, \sigma)\f$ block | \f$4.12 \times 10^{-16}\f$ relative | \f$10^{-13}\f$ |
+| \f$p = 1\f$ against `laplace1_distrib` of scale \f$\sigma/\sqrt{2}\f$, all orders | \f$1.76 \times 10^{-15}\f$ relative | \f$10^{-13}\f$ |
+| expected information against the reference file | \f$2.18 \times 10^{-15}\f$ relative | \f$10^{-13}\f$ |
+| expected information against the variance of the score, and against the generic score-form route | \f$7.4 \times 10^{-16}\f$ relative | \f$2 \times 10^{-8}\f$ |
+| \f$\log F\f$ and \f$\log(1 - F)\f$ against the generic quadrature route | \f$9.93 \times 10^{-16}\f$ relative | \f$10^{-11}\f$ |
+| quantile against its own distribution function | \f$1.79 \times 10^{-14}\f$ relative | \f$10^{-11}\f$ |
+| host against device inside Kokkos kernels, every order, CUDA build | \f$2.4 \times 10^{-16}\f$ (order one) to \f$7.5 \times 10^{-15}\f$ (order five) | \f$4 \times 10^{-16}\f$ to \f$1.15 \times 10^{-14}\f$, one per kernel |
+
+The mass of the density is checked to \f$10^{-12}\f$ relative, and its variance to \f$\sigma^2\f$ within \f$10^{-10}\f$ relative, by quadrature with a cut at the location. Every derivative order is checked against five-point differences of the order below, in the parameters, in \f$y\f$, and mixed. The shapes run from \f$0.45\f$ to \f$5\f$, away from the location. The expected information is zero in the entries that vanish by symmetry, and the infinite \f$I_{\mu\mu}\f$ at \f$p \le 1/2\f$ is tested exactly. The tests run on the gcc build and on the CUDA build. For the kernel comparison, the bound applies to the difference between host and device, as a fraction of the sum of the absolute values of the components.
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/powerexp.hpp>
+
+void eval_powerexp(Kokkos::View<const double*> y, Kokkos::View<double*> out,
+                   double mu, double sigma, double p) {
+  const laplace::distrib::powerexp_distrib d{mu, sigma, p};
+  Kokkos::parallel_for("powerexp_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
+    // the first component of the order-two tensor is the second derivative in mu
+    out(i) = d.logpdf(y(i)) + d.logpdf_dk<2>(y(i))[0];
+  });
+}
+```
+
+## Members
+
+Struct \ref laplace::distrib::powerexp_distrib "powerexp_distrib" implements \ref distrib_core "distrib_core" for `n_params = 3`. Its members are `mu`, `sigma`, `p`, `kind`, `n_params`, `y_regularity`, `params`, `log_scale_ratio()`, `natural_scale()`, `logpdf()`, `logpdf_d1()` to `logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `quantile()`, `expected_info()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, `kink_order()`, and `start_value()`.
+
+## References
+
+- S. Nadarajah (2005), A generalized normal distribution, Journal of Applied Statistics, 32(7), 685-694. https://doi.org/10.1080/02664760500079464
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

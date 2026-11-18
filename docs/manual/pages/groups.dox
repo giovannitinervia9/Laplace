@@ -191,6 +191,8 @@ parent here, in tree order; the module pages define their groups without
 \ingroup distrib_real */
 /** \addtogroup distrib_scad
 \ingroup distrib_real */
+/** \addtogroup distrib_powerexp
+\ingroup distrib_real */
 
 /** \defgroup distrib_positive Continuous on the positive half-line
 \ingroup distrib
