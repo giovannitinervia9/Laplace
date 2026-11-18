@@ -30,7 +30,7 @@ The concept requires `normalization`, `kind`, `n_params`, `params`, `state_type`
 
 ## Typed parameters
 
-Each parameter \f$j\f$ has a \ref laplace::distrib::distrib_mv_param_info "distrib_mv_param_info" descriptor `params[j]` carrying `name`, `kind`, `lower`, `upper`, and `regularity`. Here `lower` and `upper` give the open natural domain of each coordinate for `scalar` parameters only (unused otherwise), and `regularity` is the log-density differentiability order (\ref laplace::distrib::infinitely_smooth "infinitely_smooth" for every parameter declared so far).
+Each parameter \f$j\f$ has a \ref laplace::distrib::distrib_mv_param_info "distrib_mv_param_info" descriptor `params[j]` carrying `name`, `kind`, `lower`, `upper`, and `regularity`. Here `lower` and `upper` give the open natural domain of each coordinate of `scalar` and `vector` parameters, read per coordinate through `mv_coord_lower()` and `mv_coord_upper()` (see "Coordinate bounds" below), and `regularity` is the log-density differentiability order (\ref laplace::distrib::infinitely_smooth "infinitely_smooth" for every parameter declared so far).
 
 The \ref laplace::distrib::distrib_mv_param_kind "distrib_mv_param_kind" `kind` places each parameter into one of two groups:
 
@@ -77,6 +77,18 @@ A distribution may split \f$y\f$ and each dense parameter into \f$G\f$ blocks, e
 
 With \f$d = 1000\f$ coordinates in \f$1000\f$ singleton blocks, a second-order tensor drops from \f$500{,}500\f$ doubles to \f$1000\f$, and a third-order tensor from \f$1.67 \times 10^8\f$ doubles to \f$1000\f$.
 
+## Coordinate atoms
+
+A law may put mass on the hyperplane \f$y_i = c\f$ of one coordinate \f$i\f$ of \f$y\f$, as a product of one-dimensional laws with atoms does (see \ref distrib_independent_product "Independent product"). Here \f$c\f$ is the position of an atom. On each coordinate the reference measure is then Lebesgue measure plus counting measure on that coordinate's atoms, and the product of these measures over the coordinates is the one with respect to which `logpdf` is a density. A coordinate that sits on an atom thus contributes a log mass, and any other coordinate a log density.
+
+A law declares its atoms with `n_coord_atoms(i)`, the number of atoms on coordinate \f$i\f$, and `coord_atom_point(i, a)`, the position of atom \f$a\f$. A law that declares neither has no coordinate atoms. The helpers \ref laplace::distrib::mv_n_coord_atoms "mv_n_coord_atoms()" and \ref laplace::distrib::mv_coord_atom_point "mv_coord_atom_point()" read them: the first returns 0 and the second quiet NaN when the law declares none. Derivatives in a coordinate of \f$y\f$ that sits on one of its atoms have no meaning.
+
+## Coordinate bounds
+
+The descriptor of each parameter gives one open domain, `lower` and `upper` in `distrib_mv_param_info`. A law whose coordinates of one parameter have different domains declares `coord_lower(j, i)` and `coord_upper(j, i)` for them. Here \f$j\f$ indexes `params` and \f$i\f$ is the coordinate of that parameter, \f$0 \le i <\f$ `param_size(j)`.
+
+The helper \ref laplace::distrib::mv_coord_lower "mv_coord_lower()" returns the lower bound of coordinate \f$i\f$ of parameter \f$j\f$: the value of the law's `coord_lower(j, i)` when it declares one, and `params[j].lower` otherwise. The helper \ref laplace::distrib::mv_coord_upper "mv_coord_upper()" does the same for the upper bound.
+
 ## Normalization classes
 
 The static constant `normalization`, of type `distrib_normalization`, states what the matrix parameter allows:
@@ -101,6 +113,10 @@ On the host, \ref laplace::distrib::summarize_mv_sample "summarize_mv_sample(y, 
 - \ref laplace::distrib::y_slot "y_slot" — slot constant for the observation \f$y\f$ in block queries (\f$-2\f$)
 - \ref laplace::distrib::distrib_normalization "distrib_normalization" — normalization class of the matrix parameter (`proper`, `degenerate`, `improper`)
 - \ref laplace::distrib::constant_null_space_psdmat "constant_null_space_psdmat" — concept of a positive semidefinite structure with a constant, supplied null space
+- \ref laplace::distrib::mv_n_coord_atoms "mv_n_coord_atoms()" — number of atoms on a coordinate of \f$y\f$
+- \ref laplace::distrib::mv_coord_atom_point "mv_coord_atom_point()" — position of a coordinate atom
+- \ref laplace::distrib::mv_coord_lower "mv_coord_lower()" — lower bound of a coordinate of a parameter
+- \ref laplace::distrib::mv_coord_upper "mv_coord_upper()" — upper bound of a coordinate of a parameter
 - \ref laplace::distrib::mv_slot_size "mv_slot_size()" — coordinate count of `y_slot` or a dense parameter
 - \ref laplace::distrib::mv_n_blocks "mv_n_blocks()" — number of coordinate blocks \f$G\f$
 - \ref laplace::distrib::mv_block_start "mv_block_start()" — starting coordinate of a block in a slot

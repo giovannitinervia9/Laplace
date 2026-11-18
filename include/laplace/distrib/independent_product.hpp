@@ -96,6 +96,16 @@ constexpr void check_component() {
                 "independent_product_distrib: a component's state must be trivially copyable");
 }
 
+// whether a component declares coordinate atoms; a named concept, since nvcc
+// rejects the same requires-expression written inline in a member's constraint
+template <class M>
+concept has_coord_atoms = requires(const M m) { m.n_coord_atoms(0); };
+
+template <class M, class... R>
+constexpr distrib_kind first_kind() {
+  return M::kind;
+}
+
 template <class... M>
 constexpr distrib_normalization product_normalization() {
   bool improper = false, degenerate = false;
@@ -179,22 +189,24 @@ concept has_mv_prox_y = requires(const M m, const typename M::state_type& s, con
  * indexed parameter \f$j\f$ of `M_k`, the \f$H_k\f$ sets side by side. Each
  * copy is one block. Satisfies `multivariate_distrib`.
  *
+ * The components are all continuous or all discrete. A continuous product takes its coordinate atoms, and the reference measure they define, from the copy that owns each coordinate (see \ref distrib_multivariate "Multivariate").
+ *
  * \tparam M Multivariate distributions whose only dense parameter is the location.
  */
 template <class... M>
 struct independent_product_distrib {
   static_assert(sizeof...(M) >= 1, "independent_product_distrib: at least one component");
   static_assert((true && ... && (detail_product::check_component<M>(), true)));
-  static_assert(((M::kind == distrib_kind::continuous) && ...),
-                "independent_product_distrib: the components must be continuous");
+  static_assert((... && (M::kind == detail_product::first_kind<M...>())),
+                "independent_product_distrib: the components must all be continuous or all discrete");
 
   /// The components.
   detail_product::component_list<M...> components;
 
   /// Normalization: improper if a component is, degenerate if a component is, proper otherwise.
   static constexpr distrib_normalization normalization = detail_product::product_normalization<M...>();
-  /// Kind of the law (`continuous`: every component is).
-  static constexpr distrib_kind kind = distrib_kind::continuous;
+  /// Kind of the law, that of every component (a product of continuous and discrete factors is not supported).
+  static constexpr distrib_kind kind = detail_product::first_kind<M...>();
   /// Number of typed parameters: \f$\mu\f$, then the indexed parameters of each component.
   static constexpr int n_params = 1 + ((M::n_params - 1) + ... + 0);
   /// Parameter descriptors: \f$\mu\f$ (vector), then those of each `M_k` after its location.
@@ -216,8 +228,7 @@ struct independent_product_distrib {
     each([&](const auto& c, auto) { n += c.copies * c.distribution.dim(); });
     return n;
   }
-  /// \return The number of \f$y\f$ coordinates of the derivatives in \f$y\f$, `dim()`. ponytail: a
-  /// component whose unit is constrained (y_coord_size() < dim(), the Dirichlet) is not supported yet.
+  /// \return The number of \f$y\f$ coordinates of the derivatives in \f$y\f$, `dim()`. A component whose unit is constrained (y_coord_size() below its dim(), as the Dirichlet) is not supported.
   LAPLACE_HD int y_coord_size() const { return dim(); }
   /// \return The number of blocks, \f$\sum_k G_k\f$.
   LAPLACE_HD int n_blocks() const {
@@ -270,6 +281,44 @@ struct independent_product_distrib {
     each([&](const auto& c, auto) { n += c.n_sets * c.distribution.theta_size(); });
     return n;
   }
+  /**
+   * \brief Lower bound of coordinate `i` of parameter `j`: that of the copy or the set that owns it.
+   * \param j Parameter index. \param i Coordinate of the parameter.
+   * \return The component's own bound, read through mv_coord_lower().
+   */
+  double coord_lower(int j, int i) const { return coord_bound(j, i, false); }
+  /**
+   * \brief Upper bound of coordinate `i` of parameter `j`: that of the copy or the set that owns it.
+   * \param j Parameter index. \param i Coordinate of the parameter.
+   * \return The component's own bound, read through mv_coord_upper().
+   */
+  double coord_upper(int j, int i) const { return coord_bound(j, i, true); }
+
+  /**
+   * \brief Number of atoms on coordinate `i` of \f$y\f$, those of the copy that owns it; present when a component has atoms.
+   * \param i Coordinate of \f$y\f$.
+   * \return mv_n_coord_atoms() of the owning copy at its own coordinate.
+   */
+  LAPLACE_HD int n_coord_atoms(int i) const
+    requires(... || detail_product::has_coord_atoms<M>)
+  {
+    int n = 0;
+    locate_coord(i, [&](const auto& c, int li) { n = mv_n_coord_atoms(c.distribution, li); });
+    return n;
+  }
+  /**
+   * \brief Value of atom `a` of coordinate `i` of \f$y\f$; present when a component has atoms.
+   * \param i Coordinate of \f$y\f$. \param a Atom index.
+   * \return mv_coord_atom_point() of the owning copy at its own coordinate.
+   */
+  LAPLACE_HD double coord_atom_point(int i, int a) const
+    requires(... || detail_product::has_coord_atoms<M>)
+  {
+    double v = 0.0;
+    locate_coord(i, [&](const auto& c, int li) { v = mv_coord_atom_point(c.distribution, li, a); });
+    return v;
+  }
+
   /// \return Doubles of the state: for each set, its state struct, its gathered \f$\theta\f$ and the state of `M_k`.
   LAPLACE_HD int state_size() const {
     int n = 0;
@@ -334,17 +383,23 @@ struct independent_product_distrib {
    * \param x Location \f$\mu\f$, length `dim()`.
    * \return \f$\log p(y \mid \mu, \theta)\f$.
    */
-  LAPLACE_HD double logpdf(const state_type& st, const double* y, const double* x) const {
-    double s = 0.0;
-    int off = 0;
-    const double* r = st.regions;
-    each([&](const auto& c, auto) {
-      const int dk = c.distribution.dim();
-      for (int g = 0; g < c.copies; ++g, off += dk)
-        s += c.distribution.logpdf(set_state(c, r, c.set(g)), y + off, x + off);
-      r += c.n_sets * region_size(c);
-    });
-    return s;
+  LAPLACE_HD double logpdf(const state_type& st, const double* y, const double* x) const
+    requires(kind == distrib_kind::continuous)
+  {
+    return log_value(st, y, x);
+  }
+
+  /**
+   * \brief The log mass of a discrete product, the sum over the copies.
+   * \param st State from `theta_state()`.
+   * \param y Observation, length `dim()`.
+   * \param x Location \f$\mu\f$, length `dim()`.
+   * \return \f$\log P(Y = y \mid \mu, \theta)\f$.
+   */
+  LAPLACE_HD double logpmf(const state_type& st, const double* y, const double* x) const
+    requires(kind == distrib_kind::discrete)
+  {
+    return log_value(st, y, x);
   }
 
   /**
@@ -395,7 +450,50 @@ struct independent_product_distrib {
    */
   template <int J, int K, int... A>
   LAPLACE_HD bool logpdf_dy_dk_blocks(const state_type& st, const double* y, const double* x, const int* idx,
-                                      double* out, double* w) const {
+                                      double* out, double* w) const
+    requires(kind == distrib_kind::continuous)
+  {
+    return blocks_impl<J, K, A...>(st, y, x, idx, out, w);
+  }
+
+  /**
+   * \brief Derivatives `K` in \f$\theta\f$ and `A` in \f$\mu\f$ of the log mass of a discrete product, block by block.
+   *
+   * The layout of `logpdf_dy_dk_blocks()` with \f$J = 0\f$, the components' `logpmf_dk<K, A...>` in place of their
+   * `logpdf_dy_dk`.
+   *
+   * \tparam K Order in \f$\theta\f$. \tparam A Order in \f$\mu\f$ (omitted means 0).
+   * \param st State. \param y Observation. \param x Location. \param idx Sorted tuple over \f$\theta\f$ (unused when `K == 0`).
+   * \param out Output of `mv_block_tensor_size<A...>(*this)` doubles. \param w Scratch of `scratch_size()` doubles.
+   * \return As `logpdf_dy_dk_blocks()`.
+   */
+  template <int K, int... A>
+  LAPLACE_HD bool logpmf_dk_blocks(const state_type& st, const double* y, const double* x, const int* idx,
+                                   double* out, double* w) const
+    requires(kind == distrib_kind::discrete)
+  {
+    return blocks_impl<0, K, A...>(st, y, x, idx, out, w);
+  }
+
+  /**
+   * \brief Derivatives `K` in \f$\theta\f$ and `A` in \f$\mu\f$ of the log mass of a discrete product, dense layout.
+   * \tparam K Order in \f$\theta\f$. \tparam A Order in \f$\mu\f$ (omitted means 0).
+   * \param st State. \param y Observation. \param x Location. \param idx Sorted tuple over \f$\theta\f$ (unused when `K == 0`).
+   * \param out Output, the packed tensor of order `A` over `dim()`. \param w Scratch as for `logpdf_dy_dk()`.
+   * \return As `logpdf_dy_dk_blocks()`.
+   */
+  template <int K, int... A>
+  LAPLACE_HD bool logpmf_dk(const state_type& st, const double* y, const double* x, const int* idx, double* out,
+                            double* w) const
+    requires(kind == distrib_kind::discrete)
+  {
+    return dense_impl<0, K, A...>(st, y, x, idx, out, w);
+  }
+
+ private:
+  template <int J, int K, int... A>
+  LAPLACE_HD bool blocks_impl(const state_type& st, const double* y, const double* x, const int* idx, double* out,
+                              double* w) const {
     constexpr int a = detail_mv::dense_order<A...>();
     int kset = -1, hset = -1;
     int local[K > 0 ? K : 1];
@@ -411,8 +509,7 @@ struct independent_product_distrib {
       for (int g = 0; g < c.copies; ++g, off += dk, out += n) {
         const int h = c.set(g);
         double* o = scalar ? &one : out;
-        if ((K > 0 && (int(kc) != kset || h != hset)) ||
-            !c.distribution.template logpdf_dy_dk<J, K, A...>(set_state(c, r, h), y + off, x + off, local, o, w))
+        if ((K > 0 && (int(kc) != kset || h != hset)) || !component_dk<J, K, A...>(c, set_state(c, r, h), y + off, x + off, local, o, w))
           for (int i = 0; i < (scalar ? 1 : n); ++i) o[i] = 0.0;
         sum += one;
       }
@@ -422,6 +519,7 @@ struct independent_product_distrib {
     return true;
   }
 
+ public:
   /**
    * \brief Derivatives `K` in \f$\theta\f$ and `A` in \f$\mu\f$, block by block: `logpdf_dy_dk_blocks<0, K, A...>`.
    * \tparam K Order in \f$\theta\f$.
@@ -432,8 +530,10 @@ struct independent_product_distrib {
    */
   template <int K, int... A>
   LAPLACE_HD bool logpdf_dk_blocks(const state_type& st, const double* y, const double* x, const int* idx,
-                                   double* out, double* w) const {
-    return logpdf_dy_dk_blocks<0, K, A...>(st, y, x, idx, out, w);
+                                   double* out, double* w) const
+    requires(kind == distrib_kind::continuous)
+  {
+    return blocks_impl<0, K, A...>(st, y, x, idx, out, w);
   }
 
   /**
@@ -452,9 +552,33 @@ struct independent_product_distrib {
    */
   template <int J, int K, int... A>
   LAPLACE_HD bool logpdf_dy_dk(const state_type& st, const double* y, const double* x, const int* idx, double* out,
-                               double* w) const {
+                               double* w) const
+    requires(kind == distrib_kind::continuous)
+  {
+    return dense_impl<J, K, A...>(st, y, x, idx, out, w);
+  }
+
+  /**
+   * \brief Derivatives `K` in \f$\theta\f$ and `A` in \f$\mu\f$, dense layout: `logpdf_dy_dk<0, K, A...>`.
+   * \tparam K Order in \f$\theta\f$. \tparam A Order in \f$\mu\f$ (omitted means 0).
+   * \param st State. \param y Observation. \param x Location. \param idx Sorted tuple over \f$\theta\f$ (unused when `K == 0`).
+   * \param out Output, the packed tensor of order `A` over `dim()`. \param w Scratch as for `logpdf_dy_dk()`.
+   * \return As `logpdf_dy_dk_blocks()`.
+   */
+  template <int K, int... A>
+  LAPLACE_HD bool logpdf_dk(const state_type& st, const double* y, const double* x, const int* idx, double* out,
+                            double* w) const
+    requires(kind == distrib_kind::continuous)
+  {
+    return dense_impl<0, K, A...>(st, y, x, idx, out, w);
+  }
+
+ private:
+  template <int J, int K, int... A>
+  LAPLACE_HD bool dense_impl(const state_type& st, const double* y, const double* x, const int* idx, double* out,
+                             double* w) const {
     constexpr int a = detail_mv::dense_order<A...>();
-    if constexpr (J == 0 && a == 0) return logpdf_dy_dk_blocks<J, K, A...>(st, y, x, idx, out, w);  // the scalar
+    if constexpr (J == 0 && a == 0) return blocks_impl<J, K, A...>(st, y, x, idx, out, w);  // the scalar
     const int d = dim();
     const int na = sym_tensor_size(d, a), nt = sym_tensor_size(d, J) * na;
     // the components' scratch first, the blocks after it
@@ -464,7 +588,7 @@ struct independent_product_distrib {
         need = m > need ? m : need;
       });
     double* buf = w + need;
-    if (!logpdf_dy_dk_blocks<J, K, A...>(st, y, x, idx, buf, w)) return false;
+    if (!blocks_impl<J, K, A...>(st, y, x, idx, buf, w)) return false;
     for (int i = 0; i < nt; ++i) out[i] = 0.0;
     int ty[J > 0 ? J : 1], ta[a > 0 ? a : 1], gy[J > 0 ? J : 1], ga[a > 0 ? a : 1];
     const double* b = buf;
@@ -487,19 +611,72 @@ struct independent_product_distrib {
     return true;
   }
 
-  /**
-   * \brief Derivatives `K` in \f$\theta\f$ and `A` in \f$\mu\f$, dense layout: `logpdf_dy_dk<0, K, A...>`.
-   * \tparam K Order in \f$\theta\f$. \tparam A Order in \f$\mu\f$ (omitted means 0).
-   * \param st State. \param y Observation. \param x Location. \param idx Sorted tuple over \f$\theta\f$ (unused when `K == 0`).
-   * \param out Output, the packed tensor of order `A` over `dim()`. \param w Scratch as for `logpdf_dy_dk()`.
-   * \return As `logpdf_dy_dk_blocks()`.
-   */
-  template <int K, int... A>
-  LAPLACE_HD bool logpdf_dk(const state_type& st, const double* y, const double* x, const int* idx, double* out,
-                            double* w) const {
-    return logpdf_dy_dk<0, K, A...>(st, y, x, idx, out, w);
+  // a component's derivative block: logpdf_dy_dk of a continuous one, logpmf_dk of a discrete one
+  template <int J, int K, int... A, class C, class S>
+  LAPLACE_HD static bool component_dk(const C& c, const S& s, const double* y, const double* x, const int* idx,
+                                      double* o, double* w) {
+    if constexpr (kind == distrib_kind::continuous)
+      return c.distribution.template logpdf_dy_dk<J, K, A...>(s, y, x, idx, o, w);
+    else
+      return c.distribution.template logpmf_dk<K, A...>(s, y, x, idx, o, w);
+  }
+  // the sum over the copies of their logpdf or logpmf
+  LAPLACE_HD double log_value(const state_type& st, const double* y, const double* x) const {
+    double s = 0.0;
+    int off = 0;
+    const double* r = st.regions;
+    each([&](const auto& c, auto) {
+      const int dk = c.distribution.dim();
+      for (int g = 0; g < c.copies; ++g, off += dk) {
+        if constexpr (kind == distrib_kind::continuous)
+          s += c.distribution.logpdf(set_state(c, r, c.set(g)), y + off, x + off);
+        else
+          s += c.distribution.logpmf(set_state(c, r, c.set(g)), y + off, x + off);
+      }
+      r += c.n_sets * region_size(c);
+    });
+    return s;
+  }
+  // f(component, its own coordinate) for the copy that owns coordinate i of y (and of mu)
+  template <class F>
+  LAPLACE_HD void locate_coord(int i, F&& f) const {
+    bool done = false;
+    each([&](const auto& c, auto) {
+      const int n = c.copies * c.distribution.dim();
+      if (done) return;
+      if (i < n) {
+        f(c, i % c.distribution.dim());
+        done = true;
+      } else {
+        i -= n;
+      }
+    });
+  }
+  // the bound of coordinate i of parameter j, read from the copy (mu) or the set (theta) that owns it
+  double coord_bound(int j, int i, bool upper) const {  // host, as mv_coord_lower()
+    double v = 0.0;
+    if (j == 0) {
+      locate_coord(i, [&](const auto& c, int li) {
+        v = upper ? mv_coord_upper(c.distribution, 0, li) : mv_coord_lower(c.distribution, 0, li);
+      });
+      return v;
+    }
+    bool done = false;
+    each([&](const auto& c, auto) {
+      using Mk = std::remove_cvref_t<decltype(c.distribution)>;
+      if (done) return;
+      if (j >= Mk::n_params) {
+        j -= Mk::n_params - 1;
+        return;
+      }
+      const int li = i % c.distribution.param_size(j);  // the H_k sets of parameter j side by side
+      v = upper ? mv_coord_upper(c.distribution, j, li) : mv_coord_lower(c.distribution, j, li);
+      done = true;
+    });
+    return v;
   }
 
+ public:
   /**
    * \brief Visit the components in order: `f(component, std::integral_constant<int, k>)`.
    * \tparam F Callable type.

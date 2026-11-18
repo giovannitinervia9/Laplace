@@ -100,9 +100,9 @@ struct distrib_mv_param_info {
   const char* name;
   /// Storage and differentiation kind (`scalar`, `vector`, `simplex_vector`, or `matrix`).
   distrib_mv_param_kind kind;
-  /// Lower bound of the open natural domain of each coordinate (used for `scalar` parameters only).
+  /// Lower bound of the open natural domain of each coordinate (`scalar` and `vector` parameters; per coordinate through mv_coord_lower()).
   double lower;
-  /// Upper bound of the open natural domain of each coordinate (used for `scalar` parameters only).
+  /// Upper bound of the open natural domain of each coordinate (`scalar` and `vector` parameters; per coordinate through mv_coord_upper()).
   double upper;
   /// Differentiability order of the log-density in this parameter (`infinitely_smooth` or a non-negative integer).
   int regularity;
@@ -183,6 +183,86 @@ concept multivariate_distrib =
              { d.template logpmf_dk<0, 1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
              { d.template logpmf_dk<1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
            });
+
+// Coordinate atoms (Giovanni, 2026-11-17). A law may put mass on the
+// hyperplanes y_i = c of single coordinates, as a product of one-dimensional
+// factors with atoms does: its logpdf is then the log density with respect to
+// the product over the coordinates i of (Lebesgue measure + counting measure on
+// coordinate i's atoms), which gives a factor's log mass on an atom coordinate
+// and its log density elsewhere. Such a law declares n_coord_atoms(i) and
+// coord_atom_point(i, a); a law that declares nothing has none. Derivatives in
+// a coordinate of y that sits on one of its atoms have no meaning. The index i
+// runs over the dim() stored values of y (0 <= i < dim()), not over the
+// y_coord_size() coordinates of the derivatives in y, which are fewer for a
+// constrained unit such as the Dirichlet's.
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Number of atoms on coordinate \f$i\f$ of \f$y\f$ (0 when the law declares none).
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \param i Coordinate of \f$y\f$, \f$0 \le i <\f$ `d.dim()`.
+ * \return `d.n_coord_atoms(i)` when `D` declares it, 0 otherwise.
+ * \see mv_coord_atom_point(), distrib_multivariate
+ */
+template <class D>
+LAPLACE_HD int mv_n_coord_atoms(const D& d, int i) {
+  if constexpr (requires { d.n_coord_atoms(i); }) return d.n_coord_atoms(i);
+  else return (void)d, (void)i, 0;
+}
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Value \f$c\f$ of atom \f$a\f$ of coordinate \f$i\f$: the law puts mass on the hyperplane \f$y_i = c\f$.
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \param i Coordinate of \f$y\f$.
+ * \param a Atom index, \f$0 \le a <\f$ `mv_n_coord_atoms(d, i)`.
+ * \return `d.coord_atom_point(i, a)`, or quiet NaN when the law declares no atom.
+ * \see mv_n_coord_atoms(), distrib_multivariate
+ */
+template <class D>
+LAPLACE_HD double mv_coord_atom_point(const D& d, int i, int a) {
+  if constexpr (requires { d.coord_atom_point(i, a); }) return d.coord_atom_point(i, a);
+  else return (void)d, (void)i, (void)a, Kokkos::Experimental::quiet_NaN_v<double>;
+}
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Lower bound of the natural domain of coordinate \f$i\f$ of parameter \f$j\f$.
+ *
+ * A law whose coordinates of one parameter have different domains (a product
+ * of laws with a positive mean and laws with a real one) declares
+ * `coord_lower(j, i)`; otherwise every coordinate has `D::params[j].lower`.
+ *
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \param j Parameter index in `D::params`.
+ * \param i Coordinate of the parameter, \f$0 \le i <\f$ `d.param_size(j)`.
+ * \return The lower bound of the open domain of that coordinate.
+ * \see mv_coord_upper(), distrib_mv_param_info, distrib_multivariate
+ */
+template <class D>
+inline double mv_coord_lower(const D& d, int j, int i) {  // host: reads D::params at a runtime index
+  if constexpr (requires { d.coord_lower(j, i); }) return d.coord_lower(j, i);
+  else return (void)d, (void)i, D::params[j].lower;
+}
+
+/**
+ * \ingroup distrib_multivariate
+ * \brief Upper bound of the natural domain of coordinate \f$i\f$ of parameter \f$j\f$.
+ * \tparam D Multivariate distribution type.
+ * \param d Multivariate distribution.
+ * \param j Parameter index in `D::params`.
+ * \param i Coordinate of the parameter, \f$0 \le i <\f$ `d.param_size(j)`.
+ * \return `d.coord_upper(j, i)` when `D` declares it, `D::params[j].upper` otherwise.
+ * \see mv_coord_lower(), distrib_mv_param_info, distrib_multivariate
+ */
+template <class D>
+inline double mv_coord_upper(const D& d, int j, int i) {  // host: reads D::params at a runtime index
+  if constexpr (requires { d.coord_upper(j, i); }) return d.coord_upper(j, i);
+  else return (void)d, (void)i, D::params[j].upper;
+}
 
 // Blocks (note/multivariate_typed_params.md section 4). A distrib may split y
 // and each dense parameter into G blocks, block g owning the contiguous range
