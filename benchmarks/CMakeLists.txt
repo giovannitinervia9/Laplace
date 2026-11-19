@@ -69,6 +69,10 @@ laplace_kokkos_sources(math_dawson.cpp)
 add_executable(math_dawson math_dawson.cpp)
 target_link_libraries(math_dawson PRIVATE Laplace::laplace)
 
+laplace_kokkos_sources(math_gaussian_laplace.cpp)
+add_executable(math_gaussian_laplace math_gaussian_laplace.cpp)
+target_link_libraries(math_gaussian_laplace PRIVATE Laplace::laplace)
+
 add_executable(distrib_generic distrib_generic.cpp)
 target_link_libraries(distrib_generic PRIVATE Laplace::laplace)
 

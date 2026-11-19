@@ -37,6 +37,7 @@ set(LAPLACE_TEST_SOURCES
   math/test_stirling.cpp
   math/test_dawson.cpp
   math/test_mvnormal.cpp
+  math/test_gaussian_laplace.cpp
   math/test_psi_remainder.cpp
   distrib/test_pilot.cpp
   distrib/test_generic.cpp

@@ -1,0 +1,108 @@
+/**
+\defgroup gaussian_laplace Gaussian-lasso integral
+\brief Log integral of a multivariate Gaussian density against an exponential absolute-value weight, and the mean and covariance of the resulting law.
+
+This module computes the logarithm of the integral of a multivariate normal density multiplied by \f$\exp(-\sum_i \lambda_i |\beta_i|)\f$, together with the mean and covariance of the normalized law proportional to that integrand. Include `<laplace/math/gaussian_laplace.hpp>` and call the functions in namespace `laplace::math`. Every function is marked `LAPLACE_HD`, so it runs on the host and inside Kokkos kernels on the device; none allocates memory, and each takes a caller-supplied workspace sized by \ref laplace::math::gaussian_laplace_scratch "gaussian_laplace_scratch()". Across 195 one-factor test cases on gcc/OpenMP and CUDA, \f$\log I\f$ is within \f$1.1 \times 10^{-13}\f$ for dimension at most three and within \f$5.8 \times 10^{-6}\f$ for dimensions four and five.
+
+## Definitions
+
+Let \f$k \ge 1\f$ be the dimension, \f$m \in \mathbb{R}^k\f$ the mean vector, \f$\Sigma \in \mathbb{R}^{k \times k}\f$ a positive-definite covariance matrix passed packed lower-triangular as in \ref laplace::math::log_mvn_rect "log_mvn_rect()", and \f$\lambda \in \mathbb{R}_{\ge 0}^k\f$ a vector of non-negative finite rates. The integral is
+\f[
+I(m, \Sigma, \lambda) = \int_{\mathbb{R}^k} N(\beta; m, \Sigma) \exp\!\left(-\sum_{i=1}^k \lambda_i |\beta_i|\right) \mathrm{d}\beta,
+\f]
+where \f$N(\beta; m, \Sigma)\f$ denotes the multivariate Gaussian density and \f$\beta \in \mathbb{R}^k\f$ is the integration variable. The integrand omits the normalizing factors \f$\lambda_i / 2\f$ of a Laplace density. \ref laplace::math::gaussian_laplace_log_integral "gaussian_laplace_log_integral()" returns \f$\log I(m, \Sigma, \lambda)\f$.
+
+The normalized law has density \f$N(\beta; m, \Sigma) \exp(-\sum_{i=1}^k \lambda_i |\beta_i|) / I(m, \Sigma, \lambda)\f$. \ref laplace::math::gaussian_laplace_mean "gaussian_laplace_mean()" computes the \f$k\f$-element mean of this law, and \ref laplace::math::gaussian_laplace_cov "gaussian_laplace_cov()" computes its covariance packed lower-triangular; both functions return \f$\log I(m, \Sigma, \lambda)\f$ as their value.
+
+## Domain and special values
+
+The dimension must satisfy \f$1 \le k \le\f$ `mvn_max_dim` (19). Every function returns quiet NaN when \f$k\f$ is out of range, when any entry of \f$m\f$ is NaN, when any rate \f$\lambda_i\f$ is negative, NaN, or infinite, or when the underlying orthant probabilities return NaN. Under those conditions, \ref laplace::math::gaussian_laplace_mean "gaussian_laplace_mean()" and \ref laplace::math::gaussian_laplace_cov "gaussian_laplace_cov()" also fill their output arrays with quiet NaN. When every \f$\lambda_i = 0\f$, the integral equals \f$1\f$, so \f$\log I = 0\f$ and the law is \f$N(m, \Sigma)\f$.
+
+## Method
+
+Space is partitioned into the \f$2^k\f$ orthants indexed by sign vectors \f$s \in \{-1, 1\}^k\f$ with \f$s_i \beta_i > 0\f$ for each coordinate \f$i\f$. Putting \f$\ell = \lambda \circ s\f$ for the componentwise product gives \f$|\beta_i| = s_i \beta_i\f$, so on orthant \f$s\f$ the integrand equals \f$\exp(c_s) N(\beta; \mu_s, \Sigma)\f$, where
+\f[
+\mu_s = m - \Sigma \ell, \qquad c_s = \frac{1}{2}\ell^\top \Sigma \ell - \ell^\top m = -\frac{1}{2}\ell^\top (m + \mu_s).
+\f]
+Summing over the orthants yields
+\f[
+\log I = \log \sum_{s \in \{-1, 1\}^k} \exp(c_s + \log P_s), \qquad P_s = \Pr(s \circ \beta > 0), \quad \beta \sim N(\mu_s, \Sigma).
+\f]
+Each \f$P_s\f$ is a rectangle probability with one limit at zero and the other infinite in every coordinate, computed on the log scale by \ref laplace::math::log_mvn_rect "log_mvn_rect()" (see \ref mvnormal "Multivariate normal probabilities"). Deep in the tail, where \f$\lambda_i \sqrt{\Sigma_{ii}}\f$ is large, \f$c_s\f$ and \f$\log P_s\f$ are both large with opposite signs. Only their sum \f$c_s + \log P_s\f$ is formed, inside a log-sum-exp over the orthants, so no cancellation occurs. For \f$k \ge 4\f$, \ref laplace::math::gaussian_laplace_log_integral "gaussian_laplace_log_integral()" passes `tensor_max_dim = 3` to \ref laplace::math::log_mvn_rect "log_mvn_rect()" to select its lattice rule rather than the tensor rule, which costs about 20 times less there.
+
+The moments are the mixture over orthants of the truncated normal means and covariances from \ref laplace::math::log_mvn_trunc_cumulants "log_mvn_trunc_cumulants()" at orders 1 and 2, shifted by \f$\mu_s\f$, with weights \f$\exp(c_s + \log P_s - \log I)\f$. They are accumulated one orthant at a time as convex combinations centred on the running mean. Let \f$f\f$ denote the weight of the new orthant relative to all orthants processed so far, \f$g = 1 - f\f$, \f$d\f$ the new orthant's mean minus the running mean, and \f$C_s\f$ its covariance. The running covariance \f$C\f$ and running mean \f$\bar{\beta}\f$ update as
+\f[
+C \leftarrow g C + f C_s + f g \, d d^\top, \qquad \bar{\beta} \leftarrow \bar{\beta} + f d,
+\f]
+with both \f$f\f$ and \f$g\f$ computed as exponentials of differences of logarithms. The covariance is therefore never formed as a second moment minus the square of the mean, which would cancel when the law is narrow compared with its location.
+
+## Accuracy
+
+See \ref accuracy "How accuracy is measured" for the reference file layout and backend comparison. Reference values come from mpmath across 195 cases for \f$k = 1\f$ to \f$5\f$, with one-factor correlations up to loadings of \f$0.99\f$, \f$\lambda_i \sqrt{\Sigma_{ii}}\f$ from \f$0.5\f$ to \f$20\f$, and \f$m\f$ at the kink, random, or far from the kink on half the coordinates. Because the coordinates of a one-factor model are independent given the factor and each one-dimensional integral has a closed form, \f$I\f$ and the moments reduce to one-dimensional integrals, evaluated at two precisions that agree on every case.
+
+Errors are measured as absolute error for \f$\log I\f$, in units of the law's standard deviations for the mean, and in units of products of the law's standard deviations for the covariance. The table gives the largest errors measured across all cases on gcc/OpenMP and CUDA together with the test bounds in `tests/math/test_gaussian_laplace.cpp`:
+
+| \f$k\f$ | \f$\log I\f$ max | \f$\log I\f$ bound | Mean max | Mean bound | Covariance max | Covariance bound |
+|---|---|---|---|---|---|---|
+| 1 | \f$3.6 \times 10^{-14}\f$ | \f$5.5 \times 10^{-14}\f$ | \f$1.4 \times 10^{-14}\f$ | \f$2.1 \times 10^{-14}\f$ | \f$5.0 \times 10^{-14}\f$ | \f$7.5 \times 10^{-14}\f$ |
+| 2 | \f$6.5 \times 10^{-14}\f$ | \f$9.7 \times 10^{-14}\f$ | \f$2.1 \times 10^{-13}\f$ | \f$3.2 \times 10^{-13}\f$ | \f$1.4 \times 10^{-13}\f$ | \f$2.1 \times 10^{-13}\f$ |
+| 3 | \f$1.1 \times 10^{-13}\f$ | \f$1.7 \times 10^{-13}\f$ | \f$1.4 \times 10^{-12}\f$ | \f$2.1 \times 10^{-12}\f$ | \f$4.5 \times 10^{-12}\f$ | \f$6.8 \times 10^{-12}\f$ |
+| 4 | \f$3.3 \times 10^{-6}\f$ | \f$5.0 \times 10^{-6}\f$ | \f$9.5 \times 10^{-5}\f$ | \f$1.4 \times 10^{-4}\f$ | \f$1.8 \times 10^{-3}\f$ | \f$2.7 \times 10^{-3}\f$ |
+| 5 | \f$5.8 \times 10^{-6}\f$ | \f$8.7 \times 10^{-6}\f$ | \f$7.9 \times 10^{-5}\f$ | \f$1.2 \times 10^{-4}\f$ | \f$1.2 \times 10^{-3}\f$ | \f$1.8 \times 10^{-3}\f$ |
+
+The \f$\log I\f$ returned by the moment functions has the same maxima, except at \f$k = 2\f$, where its maximum error is \f$5.5 \times 10^{-14}\f$ against a test bound of \f$8.3 \times 10^{-14}\f$. From \f$k = 3\f$ onward, gcc/OpenMP and CUDA agree to the digits shown; at \f$k = 1\f$, \f$\log I\f$ is \f$9.3 \times 10^{-15}\f$ on gcc/OpenMP and \f$3.6 \times 10^{-14}\f$ on CUDA. The jump at \f$k = 4\f$ comes from switching to the lattice rule for the orthant probabilities. The test evaluates the moments on a lattice of 16381 points (`mvn_default_lattice`), whereas the default for \ref laplace::math::gaussian_laplace_mean "gaussian_laplace_mean()" and \ref laplace::math::gaussian_laplace_cov "gaussian_laplace_cov()" is 65521 points (`mvn_trunc_default_lattice`). Full measurement records are in `docs/numerics.md`.
+
+## Speed
+
+Evaluating the integral or its moments requires \f$2^k\f$ orthant probabilities. The table reports seconds per evaluation measured on one thread with gcc `-O3`, for a one-factor covariance of correlation \f$0.9\f$, \f$\lambda_i \sqrt{\Sigma_{ii}} = 10\f$, and \f$m\f$ at the kink:
+
+| \f$k\f$ | Orthants | \f$\log I\f$ | Mean | Covariance |
+|---|---|---|---|---|
+| 1 | 2 | \f$2 \times 10^{-7}\f$ | \f$7 \times 10^{-7}\f$ | \f$1.6 \times 10^{-6}\f$ |
+| 2 | 4 | \f$1.9 \times 10^{-4}\f$ | \f$1.4 \times 10^{-4}\f$ | \f$3.5 \times 10^{-4}\f$ |
+| 3 | 8 | 0.061 | 0.030 | 0.070 |
+| 4 | 16 | 0.33 | 1.1 | 2.5 |
+| 5 | 32 | 0.61 | 2.8 | 6.3 |
+| 6 | 64 | 1.5 | 7.0 | 16 |
+| 7 | 128 | 4.0 | 18 | 38 |
+| 8 | 256 | 9.1 | 38 | 82 |
+
+## Example
+
+The following host example evaluates \f$\log I\f$, the mean, and the packed lower-triangular covariance for \f$k = 2\f$:
+
+\code{.cpp}
+#include <laplace/math/gaussian_laplace.hpp>
+#include <vector>
+
+double eval_gaussian_laplace() {
+  const int k = 2;
+  const double m[2] = {0.3, -0.5};
+  const double S[3] = {1.0, -0.72, 2.25};
+  const double lam[2] = {0.9, 0.4};
+  std::vector<double> w(laplace::math::gaussian_laplace_scratch(k, 2));
+
+  const double log_I = laplace::math::gaussian_laplace_log_integral(k, m, S, lam, w.data());
+  // log_I = -1.028904
+
+  double mean[2];
+  laplace::math::gaussian_laplace_mean(k, m, S, lam, mean, w.data());
+  // mean = {0.126078, -0.255542}
+
+  double cov[3];
+  laplace::math::gaussian_laplace_cov(k, m, S, lam, cov, w.data());
+  // cov = {0.483908, -0.240177, 1.306612}
+
+  return log_I;
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+- \ref laplace::math::gaussian_laplace_scratch "gaussian_laplace_scratch()" — Workspace size in doubles
+- \ref laplace::math::gaussian_laplace_log_integral "gaussian_laplace_log_integral()" — Log of the Gaussian-lasso integral
+- \ref laplace::math::gaussian_laplace_mean "gaussian_laplace_mean()" — Mean of the Gaussian-lasso law
+- \ref laplace::math::gaussian_laplace_cov "gaussian_laplace_cov()" — Covariance of the Gaussian-lasso law
+*/

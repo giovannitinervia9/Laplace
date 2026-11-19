@@ -14053,3 +14053,79 @@ cost depends on the route of its inner bivariate: an equicorrelated orthant
 lattice, while the orthant work measured 0.32 s for deep one-factor orthants
 at r = 0.9, where every inner bivariate takes the tail route (about 40 us,
 9409 nodes).
+
+## The Gaussian-lasso integral and its law: math/gaussian_laplace.hpp (2026-11-19)
+
+**What.** `gaussian_laplace_log_integral(k, m, Sigma, lam)`,
+log I = log int N(beta; m, Sigma) exp(-sum_i lam_i |beta_i|) dbeta, and the mean
+(`gaussian_laplace_mean`) and covariance (`gaussian_laplace_cov`, packed lower)
+of the law proportional to the integrand; lam_i >= 0 finite, Sigma packed lower.
+
+**How.** On the orthant of signs s, with ell = lam o s, the integrand is
+exp(c_s) N(beta; mu_s, Sigma), mu_s = m - Sigma ell, c_s = -ell' (m + mu_s)/2, so
+log I = log sum_s exp(c_s + log P_s) with P_s the orthant probability of
+N(mu_s, Sigma), from `log_mvn_rect` (math/mvnormal.hpp). Deep in the tail c_s
+and log P_s are both large (about t^2/2 at t = lam sd) and of opposite sign;
+only their sum is formed, in a log-sum-exp over the orthants. The moments are
+the mixture of the per-orthant truncated means and covariances
+(`log_mvn_trunc_cumulants`, orders 1 and 2), with weights
+exp(c_s + log P_s - log I), accumulated orthant by orthant as convex
+combinations centred on the running mean:
+Cov <- g Cov + f C_s + f g d d', mean <- mean + f d, with f the new orthant's
+weight, g = 1 - f the weight of those before (both exponentials of
+differences of logs) and d its mean minus the running mean. The value asks
+log_mvn_rect for the lattice from four coordinates on (`tensor_max_dim = 3`),
+as the moments already do: at k = 4 the tensor tanh-sinh rule costs 0.32 s
+per orthant and the lattice about 20 ms.
+
+**References.** mpmath, `tools/reference/gaussian_laplace.py`, 195 rows,
+k = 1..5, one-factor Sigma (loadings to 0.99, standard deviations 0.5 to 2),
+t = lam sd from 0.5 to 20 (rates jittered by 0.7-1.3), the mode at the kink,
+random within 1.5 sd, or off the kink by lam sd^2 + 4 sd on half the
+coordinates. Given the factor z the coordinates are independent and each
+one-dimensional integral is closed, J = exp(lam^2 tau^2/2)(exp(-lam mu)
+Phi(mu/tau - lam tau) + exp(lam mu) Phi(-mu/tau - lam tau)), with the
+conditional moments of its two truncated-normal pieces closed too; I and the
+moments are then 1-D integrals over z by tanh-sinh, cut around the mode of
+the log-concave integrand, at 40 digits and at 50 digits on cuts 1.3 times
+wider; all 195 rows agree (1e-28 for log I, 1e-24 for the moments). The
+formulas were checked against a 2-D quadrature in double (k = 2) and the
+closed form (k = 1), to one ulp.
+
+**Accuracy** (`tests/math/test_gaussian_laplace.cpp`; log I absolute, the
+mean in units of the law's standard deviations, the covariance in units of
+their products; the moments on the lattice N = 16381 in the test, the default
+is 65521; max over the rows, gcc and CUDA):
+
+| k | log I | log I (moment functions) | mean | covariance |
+|---|---|---|---|---|
+| 1 | 3.6e-14 | 3.6e-14 | 1.4e-14 | 5.0e-14 |
+| 2 | 6.5e-14 | 5.5e-14 | 2.1e-13 | 1.4e-13 |
+| 3 | 1.1e-13 | 1.1e-13 | 1.4e-12 | 4.5e-12 |
+| 4 | 3.3e-6 | 3.3e-6 | 9.5e-5 | 1.8e-3 |
+| 5 | 5.8e-6 | 5.8e-6 | 7.9e-5 | 1.2e-3 |
+
+gcc and CUDA agree to the digit from k = 3 on; at k = 1-2 CUDA's log I differs
+in the last digits (3.6e-14 against 9.3e-15 at k = 1). Bounds: these with a
+margin of about half again.
+
+**Speed** (gcc -O3, one thread, one-factor r = 0.9, t = 10, mode at the kink;
+`benchmarks/math_gaussian_laplace.cpp`; seconds per evaluation):
+
+| k | orthants | log I | mean | covariance |
+|---|---|---|---|---|
+| 1 | 2 | 2e-7 | 7e-7 | 1.6e-6 |
+| 2 | 4 | 1.9e-4 | 1.4e-4 | 3.5e-4 |
+| 3 | 8 | 0.061 | 0.030 | 0.070 |
+| 4 | 16 | 0.33 | 1.1 | 2.5 |
+| 5 | 32 | 0.61 | 2.8 | 6.3 |
+| 6 | 64 | 1.5 | 7.0 | 16 |
+| 7 | 128 | 4.0 | 18 | 38 |
+| 8 | 256 | 9.1 | 38 | 82 |
+
+(k = 4 with the tensor rule: 5.1 s for log I.) The orthants are independent,
+so the sum divides over threads.
+
+**Open.** Pruning the orthants whose saddle-point bound is 40 below the
+largest removes some only at correlation 0.99 (202 of 256 at k = 8): not
+implemented.
