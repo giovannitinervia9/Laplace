@@ -27,8 +27,9 @@ using S = lp::unstructured_pdmat<laplace::bijector::log_cholesky_bijector>;
 using D1 = ld::mvgaussian1_distrib<S>;
 using D2 = ld::mvgaussian2_distrib<S>;
 using imp_t = ld::mvgaussian2_distrib<lp::weighted_sum_psdmat>;
+using deg_t = ld::mvgaussian1_distrib<lp::weighted_sum_psdmat>;
 
-static_assert(ld::mv_has_cdf<D1> && ld::mv_has_cdf<D2> && ld::mv_has_cdf<imp_t>);
+static_assert(ld::mv_has_cdf<D1> && ld::mv_has_cdf<D2> && ld::mv_has_cdf<imp_t> && ld::mv_has_cdf<deg_t>);
 
 constexpr double I = std::numeric_limits<double>::infinity();
 
@@ -242,6 +243,28 @@ TEST_CASE("mvgaussian cdf: values against log_mvn_rect, and y against the locati
       e = std::fmax(e, std::fabs(a[i * 3 + j] + m2[ld::detail_mv::block_position(3, 2, t)]));
     }
   CHECK(e == 0.0);
+}
+
+lp::weighted_sum_psdmat first_differences_3() {
+  return lp::weighted_sum_psdmat(std::vector<lp::weighted_sum_psdmat::host_matrix>{[] {
+    lp::weighted_sum_psdmat::host_matrix m("S", 3, 3);
+    const double D[2][3] = {{-1, 1, 0}, {0, -1, 1}};
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) m(i, j) = D[0][i] * D[0][j] + D[1][i] * D[1][j];
+    return m;
+  }()});
+}
+
+TEST_CASE("mvgaussian cdf: a singular covariance has none") {
+  const deg_t g(first_differences_3());
+  const double y[3] = {0, 0, 0}, mu[3] = {0, 0, 0};
+  const int idx[1] = {0};
+  double out[6];
+  ld::mvgaussian_rank_deficient_state st{};
+  CHECK(std::isnan(g.log_cdf(st, y, mu, nullptr)));
+  CHECK(std::isnan(g.log_rect_prob(st, y, y, mu, nullptr)));
+  CHECK(g.log_ccdf_dk<1, 2>(st, y, mu, idx, out, nullptr));
+  for (double v : out) CHECK(std::isnan(v));
 }
 
 TEST_CASE("mvgaussian cdf: a singular precision has none") {

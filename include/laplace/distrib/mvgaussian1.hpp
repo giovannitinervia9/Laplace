@@ -803,6 +803,61 @@ struct mvgaussian1_distrib<S> {
    */
   void covariance(const double* theta, double* out, double* w) const { structure.matrix(theta, out, w); }
   ///@}
+
+  /// \name Distribution function of the degenerate class: every value and component is quiet NaN
+  ///@{
+  /// \brief 0: the members below use no workspace.
+  int cdf_value_scratch_size() const { return 0; }
+  /// \brief 0: the members below use no workspace.
+  int cdf_scratch_size(int K, int A = 0) const { return (void)K, (void)A, 0; }
+  /// \brief Quiet NaN: a degenerate law is evaluated here only on its support, and its distribution function is not provided.
+  double log_cdf(const mvgaussian_rank_deficient_state&, const double*, const double*, double*) const { return nan_(); }
+  /// \brief Quiet NaN.
+  double log_ccdf(const mvgaussian_rank_deficient_state&, const double*, const double*, double*) const { return nan_(); }
+  /// \brief Quiet NaN.
+  double log_rect_prob(const mvgaussian_rank_deficient_state&, const double*, const double*, const double*, double*) const {
+    return nan_();
+  }
+  /// \brief Quiet NaN.
+  double cdf(const mvgaussian_rank_deficient_state&, const double*, const double*, double*) const { return nan_(); }
+  /// \brief Quiet NaN.
+  double ccdf(const mvgaussian_rank_deficient_state&, const double*, const double*, double*) const { return nan_(); }
+  /// \brief Every component quiet NaN (layout of `logpdf_dk`); returns true.
+  template <int K, int... A>
+  bool log_cdf_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const int*, double* out, double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  /// \brief Every component quiet NaN; returns true.
+  template <int K, int... A>
+  bool log_ccdf_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const int*, double* out, double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  /// \brief Every component quiet NaN; returns true.
+  template <int K, int... A>
+  bool log_rect_prob_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const double*, const int*,
+                        double* out, double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  /// \brief Every component quiet NaN (layout of `logpdf_dy_dk`); returns true.
+  template <int J, int K, int... A>
+  bool log_cdf_dy_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const int*, double* out,
+                     double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, J) * sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  /// \brief Every component quiet NaN; returns true.
+  template <int J, int K, int... A>
+  bool log_ccdf_dy_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const int*, double* out,
+                      double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, J) * sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  ///@}
+
+ private:
+  static double nan_() { return math::detail::quiet_nan(); }
+  static bool fill_nan_(int n, double* out) {
+    for (int q = 0; q < n; ++q) out[q] = nan_();
+    return true;
+  }
 };
 
 }  // namespace laplace::distrib
