@@ -6,9 +6,11 @@
 // fit (fastest of repeated fits), and the time of one pass (one reduction) of
 // order 0 (value), 1 (value and gradient) and 2 (with the observed second
 // derivatives). The backend is that of the build (Serial/OpenMP: threads from
-// OMP_NUM_THREADS; CUDA).
+// OMP_NUM_THREADS; CUDA). Six laws added after the first bench (powerexp at
+// p = 1.5, student_t1, weibull, beta, negbin2, mcp) on the R data of
+// fit_distrib_laws.csv at n = 1e3 and 1e5 only.
 //
-// Usage: optimizers_fit_distrib [distrib ...]   (default: all 16)
+// Usage: optimizers_fit_distrib [distrib ...]   (default: all 22)
 
 #include <laplace/optimizers/bfgs.hpp>
 #include <laplace/optimizers/minimize.hpp>
@@ -89,7 +91,7 @@ void bench_data(const char* name, const std::string& data, const Kokkos::View<co
     std::printf("%-12s %-10s %-16s pass us: order 0 %.1f, order 1 %.1f, order 2 %.1f\n", name, data.c_str(), "", p0 * 1e6,
                 p1 * 1e6, p2 * 1e6);
   }
-  time_fit(name, data, "Newton expected", lo::newton_optimizer<>{}, expected, u0);
+  time_fit(name, data, "Newton expected", fb::fisher_scoring_optimizer(), expected, u0);
   time_fit(name, data, "BFGS", lo::bfgs_optimizer<>{}, expected, u0);
 }
 
@@ -107,6 +109,16 @@ void bench_distrib(const char* name) {
     if (r.distrib == name && r.n == 1000) truth[j++] = r.true_value;
   const auto y = fb::simulate(fb::aggregate_builder<D>{}(truth), 1000000L, 20261115u);
   bench_data<D>(name, "1e6 sim", y, fb::library_start(D{}, fb::to_host_vector(y)));
+}
+
+// a law added after the first bench (fit_distrib_laws.csv): the R data at n = 1e3 and 1e5 only
+template <class D>
+void bench_law(const char* name) {
+  const std::string base = LAPLACE_REFERENCE_DIR "/optimizers/fit_distrib/" + std::string(name);
+  for (long n : {1000L, 100000L}) {
+    const auto yh = n == 1000 ? fb::read_hex_csv(base + "_n1000.csv") : fb::read_f64(base + "_n100000.f64");
+    bench_data<D>(name, n == 1000 ? "1e3" : "1e5", fb::to_device(yh), fb::library_start(D{}, yh));
+  }
 }
 
 }  // namespace
@@ -135,5 +147,11 @@ int main(int argc, char** argv) {
   if (on("lognormal1")) bench_distrib<ld::lognormal1_distrib>("lognormal1");
   if (on("lognormal2")) bench_distrib<ld::lognormal2_distrib>("lognormal2");
   if (on("poisson")) bench_distrib<ld::poisson_distrib>("poisson");
+  if (on("powerexp_p1.5")) bench_law<ld::powerexp_distrib>("powerexp_p1.5");
+  if (on("student_t1")) bench_law<ld::student_t1_distrib>("student_t1");
+  if (on("weibull")) bench_law<ld::weibull_distrib>("weibull");
+  if (on("beta")) bench_law<ld::beta_distrib>("beta");
+  if (on("negbin2")) bench_law<ld::negbin2_distrib>("negbin2");
+  if (on("mcp")) bench_law<ld::mcp_distrib>("mcp");
   return 0;
 }

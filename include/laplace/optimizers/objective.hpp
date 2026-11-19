@@ -75,11 +75,18 @@ inline double max_abs(const optimizer_point& v) {
  * \ingroup optimizers
  * \brief Concept for an objective providing function values \f$f(x)\f$.
  *
- * Requires `double value(x)` returning \f$f(x)\f$ for an unconstrained point \f$x \in \mathbb{R}^n\f$.
- * A non-finite return value marks \f$x\f$ as a refused trial point rather than an error.
+ * Requires `double value(x)` returning \f$f(x)\f$ for an unconstrained point
+ * \f$x \in \mathbb{R}^n\f$ passed as a read-only optimizer_point. There is no
+ * base class; any type exposing the required signature models the concept.
+ *
+ * A non-finite return value means the objective cannot be evaluated at \f$x\f$:
+ * optimizers treat \f$x\f$ as a refused trial point rather than an error, and a
+ * non-finite value at the starting point ends the run with
+ * `optimizer_status::start_not_admissible`. Required by brent_optimizer,
+ * block_coordinate_optimizer, nelder_mead_optimizer, and compass_optimizer.
  *
  * \tparam O Objective type.
- * \see \ref optimizers, gradient_objective, curvature_objective
+ * \see \ref optimizers, gradient_objective, curvature_objective, composite_objective
  */
 // C0: double value(x).
 template <class O>
@@ -91,7 +98,13 @@ concept value_objective = requires(O& objective, const optimizer_point& x) {
  * \ingroup optimizers
  * \brief Concept for an objective providing values and gradients.
  *
- * Refines value_objective with `double value_gradient(x, g)`, which returns \f$f(x)\f$ and writes the gradient (or subgradient) \f$\nabla f(x)\f$ into `g` in one evaluation.
+ * Refines value_objective with `double value_gradient(x, g)`, returning
+ * \f$f(x)\f$ and writing the gradient \f$\nabla f(x)\f$ (or a subgradient
+ * where \f$f\f$ is not differentiable) into the \f$n\f$-entry optimizer_vector
+ * `g` in one pass. Derivatives are computed only when asked: a line search
+ * calls `value()` alone at its trial points. A non-finite value or gradient at
+ * the starting point gives `optimizer_status::start_not_admissible`. Required
+ * by bfgs_optimizer, lbfgs_optimizer, and bundle_optimizer.
  *
  * \tparam O Objective type.
  * \see \ref optimizers, value_objective, curvature_objective, composite_objective
@@ -108,8 +121,50 @@ concept gradient_objective =
  * \ingroup optimizers
  * \brief Concept for an objective providing values, gradients, and curvature matrices.
  *
- * Refines gradient_objective with member type `curvature_type` and `double value_gradient_curvature(x, g, H)`, which returns \f$f(x)\f$ and writes \f$g\f$ and the symmetric curvature matrix \f$H(x)\f$ in one evaluation.
- * Whether \f$H\f$ is the observed Hessian or an expected information matrix is the objective's choice.
+ * Refines gradient_objective with a member type `curvature_type` and
+ * `double value_gradient_curvature(x, g, H)`, returning \f$f(x)\f$ and writing
+ * the \f$n\f$-entry gradient `g` and the symmetric \f$n \times n\f$ curvature
+ * matrix `H` in one pass. Whether \f$H(x)\f$ is the observed Hessian or an
+ * expected information matrix is the objective's choice.
+ *
+ * Required by newton_optimizer, and with `curvature_type` equal to
+ * dense_curvature_matrix by trust_region_optimizer and
+ * proximal_newton_optimizer.
+ *
+ * ### Example
+ *
+ * Two-variable quadratic \f$f(x) = \frac{1}{2}(x_1^2 + 10 x_2^2)\f$ with
+ * gradient \f$g = (x_1, 10 x_2)\f$ and curvature
+ * \f$H = \mathrm{diag}(1, 10)\f$:
+ *
+ * \code
+ * #include <laplace/optimizers/objective.hpp>
+ *
+ * struct quadratic_curvature_objective {
+ *   using curvature_type = laplace::optimizers::dense_curvature_matrix;
+ *
+ *   double value(const laplace::optimizers::optimizer_point& x) const {
+ *     return 0.5 * (x(0) * x(0) + 10.0 * x(1) * x(1));
+ *   }
+ *
+ *   double value_gradient(const laplace::optimizers::optimizer_point& x,
+ *                         const laplace::optimizers::optimizer_vector& g) const {
+ *     g(0) = x(0);
+ *     g(1) = 10.0 * x(1);
+ *     return value(x);
+ *   }
+ *
+ *   double value_gradient_curvature(const laplace::optimizers::optimizer_point& x,
+ *                                   const laplace::optimizers::optimizer_vector& g,
+ *                                   laplace::optimizers::dense_curvature_matrix& H) const {
+ *     H(0, 0) = 1.0;
+ *     H(1, 0) = 0.0;
+ *     H(0, 1) = 0.0;
+ *     H(1, 1) = 10.0;
+ *     return value_gradient(x, g);
+ *   }
+ * };
+ * \endcode
  *
  * \tparam O Objective type.
  * \see \ref optimizers, gradient_objective, dense_curvature_matrix, curvature_solver_for
@@ -127,12 +182,24 @@ concept curvature_objective =
  * \ingroup optimizers
  * \brief Concept for a separable composite objective \f$f = f_{\mathrm{s}} + r\f$.
  *
- * Refines gradient_objective where `value()` and `value_gradient()` evaluate the smooth part \f$f_{\mathrm{s}}\f$ alone and \f$r(x) = \sum_b r_b(x_b)\f$ is block-separable.
- * Requires `nonsmooth_value(x)` returning \f$r(x)\f$, `nonsmooth_prox(v, t, z)` writing \f$z = \operatorname{prox}_{t r}(v) = \arg\min_z \{r(z) + \|z - v\|^2 / (2t)\}\f$, `nonsmooth_block_count()`, and `weak_convexity_constant(b)` returning \f$\rho_b \ge 0\f$ such that \f$r_b + \rho_b \|x_b\|^2 / 2\f$ is convex; the proximal map is exact only when \f$t \rho_b < 1\f$.
- * Only the concept is provided here.
+ * Refines gradient_objective where `value()` and `value_gradient()` evaluate
+ * the smooth part \f$f_{\mathrm{s}}\f$ alone, and
+ * \f$r(x) = \sum_b r_b(x_b)\f$ is separable over blocks \f$b\f$. Required by
+ * proximal_gradient_optimizer and, together with curvature_objective, by
+ * proximal_newton_optimizer; see \ref optimizers_proximal "Proximal methods"
+ * for those methods and for penalized_objective.
+ *
+ * ### Required members
+ *
+ * | Member | Meaning |
+ * |---|---|
+ * | `double nonsmooth_value(x)` | Returns \f$r(x)\f$ |
+ * | `void nonsmooth_prox(v, t, z)` | Writes, block by block, \f$z = \operatorname{prox}_{t r}(v) = \arg\min_z \{ r(z) + \lVert z - v \rVert^2 / (2t) \}\f$ for \f$t > 0\f$ |
+ * | `int nonsmooth_block_count()` | Returns the number of blocks |
+ * | `double weak_convexity_constant(b)` | Returns \f$\rho_b \ge 0\f$ such that \f$r_b + \rho_b \lVert x_b \rVert^2 / 2\f$ is convex (\f$0\f$ when \f$r_b\f$ is convex); exact prox requires \f$t \rho_b < 1\f$ |
  *
  * \tparam O Objective type.
- * \see \ref optimizers, gradient_objective
+ * \see \ref optimizers, \ref optimizers_proximal, gradient_objective
  */
 // Composite: f = s + r with s smooth (value, value_gradient as above, of s
 // alone) and r(x) = sum_b r_b(x_b), separable by blocks:

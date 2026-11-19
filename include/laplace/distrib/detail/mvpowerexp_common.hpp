@@ -98,6 +98,7 @@
 #include <cstdint>
 #include <limits>
 #include <type_traits>
+#include <vector>
 
 namespace laplace::distrib {
 
@@ -531,6 +532,76 @@ LAPLACE_HD void rng_whitened(const S& s, const mvpowerexp_state<St>& st, std::ui
       x[i] = v;
     }
   }
+}
+
+// ------------------------------------------------------------ starting value (host)
+// Mardia's multivariate kurtosis of the law, d^2 Gamma(d/(2 beta)) Gamma((d+4)/(2 beta))
+// / Gamma((d+2)/(2 beta))^2: d(d+2) at beta = 1, decreasing in beta.
+inline double mardia_kurtosis_of_shape(int d, double beta) {
+  const double a = 0.5 / beta;
+  return double(d) * d * std::exp(std::lgamma(d * a) + std::lgamma((d + 4.0) * a) - 2.0 * std::lgamma((d + 2.0) * a));
+}
+
+// beta solving mardia_kurtosis_of_shape(d, beta) = b2, by bisection on log beta over
+// [1/4, 10] (p = 2 beta in [1/2, 20], the univariate law's range), clamped to the ends
+inline double shape_from_mardia_kurtosis(int d, double b2) {
+  if (!(b2 < mardia_kurtosis_of_shape(d, 0.25))) return 0.25;
+  if (!(b2 > mardia_kurtosis_of_shape(d, 10.0))) return 10.0;
+  double lo = std::log(0.25), hi = std::log(10.0);
+  for (int it = 0; it < 60; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    (mardia_kurtosis_of_shape(d, std::exp(mid)) > b2 ? lo : hi) = mid;
+  }
+  return std::exp(0.5 * (lo + hi));
+}
+
+// Mardia's sample kurtosis b2 = (1/n) sum_i ((y_i - m)' S^-1 (y_i - m))^2, with m and S the
+// summary's mean and covariance (divisor n), through the Cholesky factor of S; NaN when S
+// is not positive definite
+inline double sample_mardia_kurtosis(const double* y, int n, const distrib_mv_sample_summary& sm) {
+  const int d = sm.dim;
+  std::vector<double> L(std::size_t(d) * d, 0.0), z(d);
+  for (int i = 0; i < d; ++i)
+    for (int j = 0; j <= i; ++j) {
+      double t = sm.covariance[pdmat::packed_index(i, j)];
+      for (int k = 0; k < j; ++k) t -= L[i * d + k] * L[j * d + k];
+      if (i == j) {
+        if (!(t > 0.0)) return std::numeric_limits<double>::quiet_NaN();
+        L[i * d + i] = std::sqrt(t);
+      } else {
+        L[i * d + j] = t / L[j * d + j];
+      }
+    }
+  double b2 = 0.0;
+  for (int u = 0; u < n; ++u) {
+    double q = 0.0;
+    for (int i = 0; i < d; ++i) {  // z = L^-1 (y_u - m)
+      double t = y[std::size_t(u) * d + i] - sm.mean[i];
+      for (int k = 0; k < i; ++k) t -= L[i * d + k] * z[k];
+      z[i] = t / L[i * d + i];
+      q += z[i] * z[i];
+    }
+    b2 += q * q;
+  }
+  return b2 / n;
+}
+
+// theta from the sample: beta from Mardia's kurtosis, the matrix from the covariance
+// divided by covariance_factor(d, beta) (so that Var Y matches it), the Gaussian rule
+// otherwise; beta = 1 when the kurtosis is not available (n < d + 2 or S singular)
+template <bool Prec, class S>
+void start_from_sample(const S& s, const double* y, int n, double* theta) {
+  const int d = s.dim;
+  distrib_mv_sample_summary sm = summarize_mv_sample(y, n, d);
+  double beta = 1.0;
+  if (n >= d + 2) {
+    const double b2 = sample_mardia_kurtosis(y, n, sm);
+    if (std::isfinite(b2)) beta = shape_from_mardia_kurtosis(d, b2);
+  }
+  const double f = covariance_factor(d, beta);
+  for (double& c : sm.covariance) c /= f;
+  mg::start_value<Prec>(s, sm, theta);
+  theta[s.n_params()] = beta;
 }
 
 }  // namespace detail_mvpowerexp

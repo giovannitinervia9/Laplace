@@ -7,7 +7,10 @@
 #include "fit_distrib_bench.hpp"
 
 #include <laplace/distrib/bernoulli.hpp>
+#include <laplace/distrib/beta.hpp>
+#include <laplace/distrib/betabinom.hpp>
 #include <laplace/distrib/cauchy.hpp>
+#include <laplace/distrib/enet.hpp>
 #include <laplace/distrib/chisq.hpp>
 #include <laplace/distrib/exponential.hpp>
 #include <laplace/distrib/gamma1.hpp>
@@ -23,9 +26,22 @@
 #include <laplace/distrib/laplace1.hpp>
 #include <laplace/distrib/laplace2.hpp>
 #include <laplace/distrib/logistic.hpp>
+#include <laplace/distrib/mcp.hpp>
+#include <laplace/distrib/negbin1.hpp>
+#include <laplace/distrib/negbin2.hpp>
+#include <laplace/distrib/pig.hpp>
 #include <laplace/distrib/lognormal1.hpp>
 #include <laplace/distrib/lognormal2.hpp>
 #include <laplace/distrib/poisson.hpp>
+#include <laplace/distrib/powerexp.hpp>
+#include <laplace/distrib/pseudohuber.hpp>
+#include <laplace/distrib/scad.hpp>
+#include <laplace/distrib/skewnormal.hpp>
+#include <laplace/distrib/skewt.hpp>
+#include <laplace/distrib/student_t1.hpp>
+#include <laplace/distrib/student_t2.hpp>
+#include <laplace/distrib/vonmises.hpp>
+#include <laplace/distrib/weibull.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -142,10 +158,65 @@ std::vector<double> theta_of_distrib(const D& d) {
   return t;
 }
 
-// the library start (generic_start.hpp) as theta
+// the library start (generic_start.hpp) as theta, through the sample route: the distrib's
+// start_value(y) where it has one (vonmises, powerexp), its start_value(summary) otherwise
 template <class D>
 std::vector<double> library_start(const D& prototype, const std::vector<double>& y) {
-  return theta_of_distrib(laplace::distrib::distrib_start_value(prototype, laplace::distrib::summarize_sample(y)));
+  return theta_of_distrib(laplace::distrib::distrib_start_value(prototype, y));
+}
+
+// D with its parameters from theta and its other fields (betabinom's size) from a
+// prototype; the parameters are D's leading double fields (theta_of_distrib)
+template <class D>
+struct prototype_builder {
+  D prototype;
+  LAPLACE_HD D operator()(const double* theta) const {
+    D d = prototype;
+    double* p = reinterpret_cast<double*>(&d);
+    for (int j = 0; j < D::n_params; ++j) p[j] = theta[j];
+    return d;
+  }
+};
+
+// one row of fit_distrib_laws.csv (tools/reference/optimizers_fit_distrib_laws.R)
+struct laws_reference_row {
+  std::string name, reference, param;
+  long n = 0;
+  double true_value = 0, mle = 0, loglik_mle = 0, statmodels7 = 0, loglik_statmodels7 = 0, score = 0;
+  bool has_statmodels7 = false, statmodels7_converged = false;
+};
+
+inline std::vector<laws_reference_row> read_laws_reference_rows(const std::string& path) {
+  std::ifstream in(path);
+  std::vector<laws_reference_row> rows;
+  std::string line;
+  bool header = true;
+  while (std::getline(in, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    if (header) { header = false; continue; }
+    std::vector<std::string> f;
+    std::stringstream ss(line);
+    std::string c;
+    while (std::getline(ss, c, ',')) {
+      c.erase(std::remove(c.begin(), c.end(), '"'), c.end());
+      f.push_back(c);
+    }
+    laws_reference_row r;
+    r.name = f[0];
+    r.reference = f[1];
+    r.n = std::atol(f[2].c_str());
+    r.param = f[4];
+    r.true_value = std::strtod(f[5].c_str(), nullptr);
+    r.mle = std::strtod(f[6].c_str(), nullptr);
+    r.loglik_mle = std::strtod(f[7].c_str(), nullptr);
+    r.has_statmodels7 = f[8] != "NA";
+    r.statmodels7 = r.has_statmodels7 ? std::strtod(f[8].c_str(), nullptr) : 0.0;
+    r.loglik_statmodels7 = r.has_statmodels7 ? std::strtod(f[9].c_str(), nullptr) : 0.0;
+    r.statmodels7_converged = f[10] == "TRUE";
+    r.score = std::strtod(f[11].c_str(), nullptr);
+    rows.push_back(r);
+  }
+  return rows;
 }
 
 }  // namespace fit_distrib_bench

@@ -24,7 +24,7 @@ If `initial_lipschitz` (default \f$0\f$) is positive, \f$L\f$ starts there; othe
 \f[
 s(x^+) \le s(x) + \nabla s(x)^\top (x^+ - x) + \frac{L}{2}\lVert x^+ - x\rVert^2
 \f]
-fails by more than `rounding_slack` \f$\cdot\,\varepsilon \max(1, |s(x)|)\f$ (default `rounding_slack` \f$8\f$, \f$\varepsilon = 2^{-52}\f$), or when \f$s(x^+)\f$ is non-finite. Because \f$L\f$ never decreases, after finitely many doublings the steps follow the fixed-step theory.
+fails by more than `rounding_slack` \f$\cdot\,\varepsilon \max(1, |s(x)|)\f$ (default `rounding_slack` \f$8\f$, \f$\varepsilon = 2^{-52}\f$), or when \f$s(x^+)\f$ is non-finite. When the excess is within \f$\sqrt{\varepsilon}\max(1, |s(x)|)\f$, the step is accepted if \f$(x^+ - x)^\top(\nabla s(x^+) - \nabla s(x)) \le \frac{L}{2}\lVert x^+ - x\rVert^2\f$, as in the proximal gradient method (Becker, Candès and Grant, 2011): the rounding of \f$s\f$, a sum over the rows, exceeds the slack near the solution (\f$\pm 2\cdot 10^{-12}\f$ against \f$1.5\cdot 10^{-12}\f$ on a regression with \f$1000\f$ rows summed on one thread), and without this test a false failure doubled \f$L\f$ again and again until the run stalled. Because \f$L\f$ never decreases, after finitely many doublings the steps follow the fixed-step theory.
 
 The dual step \f$\sigma\f$ starts at `initial_dual_ratio` \f$\cdot\, L / B\f$ (default \f$50\f$). After each iteration it is balanced between the two parts of the stationarity measure below: divided by \f$1 + a_k\f$ when the primal part exceeds `balance_threshold` (default \f$1.5\f$) times the dual part, and multiplied by \f$1 + a_k\f$ in the opposite case. At each adjustment, \f$a_k\f$ (starting at `balance_rate`, default \f$0.5\f$) is multiplied by `balance_decay` (default \f$0.95\f$) so the steps settle, and \f$\tau\f$ updates by the formula above.
 
@@ -144,5 +144,7 @@ In namespace `laplace::optimizers`:
 [3] R. J. Tibshirani (2014), Adaptive piecewise polynomial estimation via trend filtering, The Annals of Statistics, 42(1), 285–323. https://doi.org/10.1214/13-aos1189
 
 [4] T. B. Arnold and R. J. Tibshirani (2016), Efficient implementations of the generalized lasso dual path algorithm, Journal of Computational and Graphical Statistics, 25(1), 1–27. https://doi.org/10.1080/10618600.2015.1008638
+
+[5] S. R. Becker, E. J. Candès and M. C. Grant (2011), Templates for convex cone problems with applications to sparse signal recovery, Mathematical Programming Computation, 3(3), 165–218. https://doi.org/10.1007/s12532-011-0029-5
 
 */

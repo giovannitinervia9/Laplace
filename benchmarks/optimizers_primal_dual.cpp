@@ -9,7 +9,11 @@
 // Prints status, iterations, evaluations of s, time, the declared measure and
 // f - f_FISTA where FISTA runs.
 //
-//   optimizers_primal_dual [n ...]     (default 1000 10000 100000)
+//   optimizers_primal_dual [n ...]     (default 1000)
+//
+// The regression rows at n = 1e4 and 1e5 run to the 1e5-iteration budget on
+// trend filtering and take minutes on one thread (4.7 ms per iteration at
+// n = 1e5), so they run only when asked: optimizers_primal_dual 1000 10000 100000.
 
 #include <laplace/distrib/independent_product.hpp>
 #include <laplace/distrib/laplace2.hpp>
@@ -120,7 +124,7 @@ int main(int argc, char** argv) {
     std::vector<int> sizes;
     for (int i = 1; i < argc; ++i)
       if (argv[i][0] != '-') sizes.push_back(std::atoi(argv[i]));
-    if (sizes.empty()) sizes = {1000, 10000, 100000};
+    if (sizes.empty()) sizes = {1000};
     for (int n : sizes) regression_cases(n);
   }
   Kokkos::finalize();

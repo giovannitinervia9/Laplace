@@ -113,7 +113,15 @@ where \f$I^{\mathrm{nat}}_{pp}\f$ is the expression above. The entry \f$I_{\mu\m
 
 Two facts follow. The entry \f$I_{\mu\mu}\f$ is the integral of \f$|z|^{2p-2}\f$ against the density, so it is finite only for \f$p > 1/2\f$. At \f$p \le 1/2\f$ the member returns \f$+\infty\f$. The \f$(\sigma, p)\f$ block is finite for every \f$p > 0\f$. Also, \f$I_{\sigma p}\f$ is exactly zero at \f$p = 2\f$, so the standard deviation and the shape are orthogonal at the Gaussian. The derivatives of the expected information in the parameters come from \ref distrib_generic "the generic route".
 
-`start_value()` sets \f$\mu\f$ to the sample mean, \f$\sigma\f$ to the sample standard deviation, and \f$p = 2\f$, the Gaussian, each moved strictly inside its open domain (\ref distrib_start "Starting values").
+Two `start_value()` overloads run on the host (\ref distrib_start "Starting values"), and every returned parameter is moved strictly inside its open domain by \ref laplace::distrib::start_inside "start_inside()". Given a \ref laplace::distrib::distrib_sample_summary "distrib_sample_summary", `start_value(summary)` sets \f$\mu\f$ to the sample mean, \f$\sigma\f$ to the sample standard deviation, and \f$p = 2\f$, the Gaussian.
+
+Given a sample vector `y`, `start_value(y)` is the overload selected by \ref laplace::distrib::distrib_start_value(const D&, const std::vector<double>&) "distrib_start_value(prototype, y)", because that route prefers a member over the sample. It sets \f$\mu\f$ to the sample mean and \f$\sigma\f$ to the sample standard deviation with divisor \f$n\f$. The shape \f$p\f$ solves \f$K(p) = b_2\f$. The kurtosis of the law, returned by the static host member `kurtosis_of_shape(p)`, is
+\f[
+K(p) = \frac{\Gamma(5/p)\,\Gamma(1/p)}{\Gamma(3/p)^2},
+\f]
+and \f$b_2 = m_4 / m_2^2\f$ is the sample kurtosis from the central moments \f$m_2\f$ and \f$m_4\f$ with divisor \f$n\f$. The function \f$K(p)\f$ decreases in \f$p\f$, with \f$K(1) = 6\f$ for the Laplace case, \f$K(2) = 3\f$ for the Gaussian, and \f$K(p) \to 9/5\f$ as \f$p \to \infty\f$. The equation is solved by bisection on \f$\log p\f$ over \f$[1/2, 20]\f$ with \f$60\f$ halvings, and \f$p\f$ is clamped to the nearer endpoint outside \f$[K(20), K(1/2)] = [1.824, 25.2]\f$. A sample with fewer than four observations, or with no spread, takes \f$p = 2\f$.
+
+In `tests/distrib/test_shape_starts.cpp` on \f$n = 10^5\f$ draws at \f$\mu = 1\f$ and \f$\sigma = 2\f$, the relative error of the starting \f$p\f$ is \f$0.0389\f$ at \f$p = 0.8\f$, \f$0.0116\f$ at \f$p = 1.5\f$, and \f$0.0056\f$ at \f$p = 2\f$. It is \f$6.4 \times 10^{-5}\f$ at \f$p = 3\f$ and \f$0.0094\f$ at \f$p = 6\f$, within the test bound of \f$0.06\f$.
 
 ## Accuracy
 
@@ -166,7 +174,7 @@ void eval_powerexp(Kokkos::View<const double*> y, Kokkos::View<double*> out,
 
 ## Members
 
-Struct \ref laplace::distrib::powerexp_distrib "powerexp_distrib" implements \ref distrib_core "distrib_core" for `n_params = 3`. Its members are `mu`, `sigma`, `p`, `kind`, `n_params`, `y_regularity`, `params`, `log_scale_ratio()`, `natural_scale()`, `logpdf()`, `logpdf_d1()` to `logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `quantile()`, `expected_info()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, `kink_order()`, and `start_value()`.
+Struct \ref laplace::distrib::powerexp_distrib "powerexp_distrib" implements \ref distrib_core "distrib_core" for `n_params = 3`. Its members are `mu`, `sigma`, `p`, `kind`, `n_params`, `y_regularity`, `params`, `log_scale_ratio()`, `natural_scale()`, `logpdf()`, `logpdf_d1()` to `logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `quantile()`, `expected_info()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, `kink_order()`, `kurtosis_of_shape()`, and `start_value()`.
 
 ## References
 

@@ -13,7 +13,9 @@
 //   w  = y + sigma D (2 x+ - x),  u' = prox_{g/sigma}(w / sigma),  y+ = w - sigma u'
 // (the dual step by Moreau's identity, y+ in dg(u')). L is estimated from a
 // secant at the start and doubled whenever the descent lemma fails along the
-// iterates; it never decreases. sigma is balanced between the two parts of
+// iterates; it never decreases. Where the lemma's excess is within sqrt(eps) |s|,
+// the step is decided on gradients instead (Becker, Candes and Grant, 2011, as in
+// proximal_gradient.hpp), so that the rounding of s cannot double L. sigma is balanced between the two parts of
 // the stationarity measure, by factors 1 + a_k with a_k decaying, so the steps
 // settle.
 //
@@ -256,7 +258,7 @@ inline constexpr unsigned primal_dual_provides = stop_needs_primal_dual | stop_n
  * | `balance_threshold` | \f$1.5\f$ | Ratio threshold between primal and dual parts of \f$V\f$ triggering rebalancing |
  * | `balance_rate` | \f$0.5\f$ | Initial adjustment factor \f$a_0\f$ for \f$\sigma\f$ |
  * | `balance_decay` | \f$0.95\f$ | Factor multiplying \f$a_k\f$ after each rebalancing of \f$\sigma\f$ |
- * | `rounding_slack` | \f$8\f$ | Multiple of \f$\varepsilon \max(1, |s(x)|)\f$ allowed in the descent lemma check |
+ * | `rounding_slack` | \f$8\f$ | Multiple of \f$\varepsilon \max(1, |s(x)|)\f$ allowed in the descent lemma check; an excess within \f$\sqrt{\varepsilon}\max(1, |s(x)|)\f$ is decided on gradients |
  * | `max_backtracks` | \f$100\f$ | Maximum doublings of \f$L\f$ within one iteration |
  * | `trace` | empty | Optional `optimizer_trace` callback invoked once per iteration |
  *
@@ -418,9 +420,18 @@ struct primal_dual_optimizer {
           const double d = x_new(i) - x(i);
           slope += g(i) * d, step2 += d * d;
         }
-        if (std::isfinite(s_new) &&
-            s_new - s_x - slope - 0.5 * L * step2 <= rounding_slack * eps * std::max(1.0, std::abs(s_x)))
-          break;
+        const double excess = s_new - s_x - slope - 0.5 * L * step2;
+        if (std::isfinite(s_new) && excess <= rounding_slack * eps * std::max(1.0, std::abs(s_x))) break;
+        // An excess within sqrt(eps) |s| may be the rounding of s itself (the sum
+        // over n rows rounds by more than rounding_slack eps |s|, and a false
+        // failure doubles L for good): decide on gradients, as proximal_gradient
+        // does, (x+ - x)'(grad s(x+) - grad s(x)) <= (L/2) |x+ - x|^2, which for a
+        // convex s implies the test above; g_new is already at hand
+        if (std::isfinite(s_new) && excess <= std::sqrt(eps) * std::max(1.0, std::abs(s_x))) {
+          double curvature = 0.0;
+          for (int i = 0; i < n; ++i) curvature += (x_new(i) - x(i)) * (g_new(i) - g(i));
+          if (curvature <= 0.5 * L * step2) break;
+        }
         L *= 2.0;
         tau = primal_step();
       }

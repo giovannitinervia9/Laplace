@@ -28,6 +28,7 @@
 #include <laplace/distrib/binomial.hpp>
 #include <laplace/distrib/generic_expectation.hpp>
 #include <laplace/distrib/generic_info.hpp>
+#include <laplace/optimizers/newton.hpp>
 #include <laplace/optimizers/objective.hpp>
 
 #include <Kokkos_Core.hpp>
@@ -118,6 +119,21 @@ void loglik_sums(const Kokkos::View<const double*, typename ExecSpace::memory_sp
 }
 
 enum class fit_curvature { observed, expected };
+
+// Fisher scoring as the bench runs it: Newton on the expected curvature with every step
+// capped at 1 in the free coordinates (Giovanni, 2026-11-19; newton_optimizer's own default
+// stays infinite). Measured over the 36 data sets of the bench at n = 1e3 and 1e5, from the
+// library start and the +1 start (144 runs, the diagnostic "Fisher scoring max_step" of
+// test_fit_distrib_diagnostics.cpp): converged 131 / 133 / 134 with max_step infinite / 2 / 1, iterations
+// 1442 / 1446 / 1153, value evaluations 6089 / 6414 / 4102, no run changed to a worse status.
+// Without the cap the full step on a small expected curvature in a shape's free coordinate
+// sends pseudohuber's nu to 1.5e-4 and then 1e28 from the +1 start.
+constexpr double fisher_max_step = 1.0;
+inline laplace::optimizers::newton_optimizer<> fisher_scoring_optimizer() {
+  laplace::optimizers::newton_optimizer<> newton;
+  newton.max_step = fisher_max_step;
+  return newton;
+}
 
 template <class D, class Builder = aggregate_builder<D>, class ExecSpace = Kokkos::DefaultExecutionSpace>
 struct fit_distrib_objective {

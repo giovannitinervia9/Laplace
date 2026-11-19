@@ -132,7 +132,18 @@ At \f$\delta = 0\f$ every factor that carries \f$r\f$ vanishes, and every partit
 
 `rng(state, mu, seed, unit, y)` writes \f$y = \mu + Lv\f$, where \f$\Sigma = LL^\top\f$ and \f$v = s\,z/\lVert z\rVert\f$. The vector \f$z\f$ holds standard normal values drawn at indices \f$0\f$ to \f$d - 1\f$ of \ref laplace::distrib::counter_uniform_source "counter_uniform_source" with the given seed and unit. The scalar \f$s = (2t)^{1/(2\beta)}\f$ uses a standard gamma value \f$t\f$ of shape \f$d/(2\beta)\f$, drawn at index \f$d\f$. Under the law, \f$\lVert v\rVert^{2\beta}/2\f$ is that gamma value, and the direction of \f$v\f$ is uniform on the sphere.
 
-`mean()` writes \f$\mu\f$. `covariance()` writes \f$\Sigma\f$ times the factor of the covariance above, and the factor is computed through its logarithm, so that the two gamma functions do not overflow separately. `start_value()` runs on the host. It sets \f$\beta = 1\f$, where the law is the Gaussian, and it sets the matrix parameters by the Gaussian starting rule.
+`mean()` writes \f$\mu\f$. `covariance()` writes \f$\Sigma\f$ times the factor of the covariance above, and the factor is computed through its logarithm, so that the two gamma functions do not overflow separately. `start_value(summary, theta)` runs on the host, sets \f$\beta = 1\f$ where the law is the Gaussian, and sets the matrix parameters by the Gaussian starting rule.
+
+`start_value(y, n, theta)` also runs on the host, where `y` holds the \f$n\f$ units \f$y_0, \dots, y_{n-1}\f$ stacked with unit \f$i\f$ starting at `y[i * d]`. It sets \f$\beta\f$ by equating Mardia's multivariate kurtosis of the law to Mardia's sample kurtosis (Mardia, 1970):
+
+\f[
+  \frac{d^2\,\Gamma\bigl(d/(2\beta)\bigr)\,\Gamma\bigl((d + 4)/(2\beta)\bigr)}{\Gamma\bigl((d + 2)/(2\beta)\bigr)^2} = b_2, \qquad
+  b_2 = \frac{1}{n}\sum_{i=0}^{n-1}\bigl((y_i - \bar{y})^\top \hat{\Sigma}^{-1} (y_i - \bar{y})\bigr)^2.
+\f]
+
+Here \f$\bar{y}\f$ is the sample mean and \f$\hat{\Sigma}\f$ is the sample covariance with divisor \f$n\f$, and \f$b_2\f$ is evaluated through the Cholesky factor of \f$\hat{\Sigma}\f$. At \f$\beta = 1\f$ the left-hand side equals \f$d(d + 2)\f$, the Gaussian value, and at \f$d = 1\f$ it reduces to the univariate kurtosis at shape \f$2\beta\f$ (\ref distrib_powerexp "powerexp"). The equation is solved by bisection on \f$\log\beta\f$ over \f$[1/4, 10]\f$, matching the univariate range \f$p = 2\beta \in [1/2, 20]\f$, and clamped to the nearer endpoint outside it. With fewer than \f$d + 2\f$ units, or when \f$\hat{\Sigma}\f$ is not positive definite, \f$\beta\f$ is set to \f$1\f$. The matrix parameters come from \f$\hat{\Sigma}\f$ divided by the covariance factor above at that \f$\beta\f$, using the Gaussian starting rule. When the structure is unrestricted, the covariance of the start therefore equals \f$\hat{\Sigma}\f$.
+
+Measured on \f$n = 4 \times 10^4\f$ draws, the relative error of the starting \f$\beta\f$ is \f$0.0022\f$ to \f$0.0062\f$ for \f$d = 3\f$ with `unstructured_pdmat<log_cholesky_bijector>` on both forms at \f$\beta \in \{0.4, 1, 2.5\}\f$. It is \f$0.0032\f$ to \f$0.0055\f$ for \f$d = 2\f$ with `ar1_pdmat`. For `unstructured_pdmat<log_cholesky_bijector>`, the covariance of the start equals \f$\hat{\Sigma}\f$ to \f$4.9 \times 10^{-16}\f$ relative; `ar1_pdmat` cannot represent every \f$\hat{\Sigma}\f$, so there it does not. The test bound on the relative error of \f$\beta\f$ is \f$0.0095\f$.
 
 \anchor mvpowerexp1_accuracy
 ## Accuracy
@@ -203,6 +214,7 @@ void eval_mvpowerexp1(const Kokkos::View<const double**, Kokkos::LayoutRight>& y
 - E. Gómez, M. A. Gómez-Villegas, J. M. Marín (1998), A multivariate generalization of the power exponential family of distributions, Communications in Statistics - Theory and Methods, 27(3), 589-600. https://doi.org/10.1080/03610929808832115
 - A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
 - The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- K. V. Mardia (1970), Measures of multivariate skewness and kurtosis with applications, Biometrika, 57(3), 519-530.
 */
 
 /**
@@ -238,7 +250,7 @@ The multivariate Laplace distribution of the literature is a different law, a sc
 
 The constant is the one of the first page, \ref mvpowerexp1_constant "the normalizing constant". The derivative blocks, the typed parameter list, the \f$\theta\f$ table and the radial kink are also those of the first page: see \ref mvpowerexp1_rest "the parameters", \ref mvpowerexp1_blocks "the derivative blocks" and \ref mvpowerexp1_kink "the radial kink". The blocks use \f$W = Q\f$ itself, so the derivatives in \f$\theta\f$ are those of \f$Q\f$ and no matrix is inverted. The term added by blocks with \f$A = c = 0\f$ is \f$+\tfrac{1}{2}\partial_T\log\det Q\f$.
 
-`theta_state(theta, w)` returns `mvpowerexp_state<mvgaussian2_state>`, which holds the Gaussian state of \f$Q\f$, with a factor \f$L\f$ such that \f$Q = LL^\top\f$. Its `rng()` writes \f$y = \mu + L^{-\top}v\f$, with the draw \f$v\f$ of the first page. Since \f$\Sigma = Q^{-1} = L^{-\top}L^{-1}\f$, the draws have scale matrix \f$\Sigma\f$. `mean()` writes \f$\mu\f$, and `covariance()` writes \f$Q^{-1}\f$ times the factor above. `start_value()` runs on the host, sets \f$\beta = 1\f$, and sets the parameters of \f$Q\f$ by the Gaussian starting rule for the inverse scale.
+`theta_state(theta, w)` returns `mvpowerexp_state<mvgaussian2_state>`, which holds the Gaussian state of \f$Q\f$, with a factor \f$L\f$ such that \f$Q = LL^\top\f$. Its `rng()` writes \f$y = \mu + L^{-\top}v\f$, with the draw \f$v\f$ of the first page. Since \f$\Sigma = Q^{-1} = L^{-\top}L^{-1}\f$, the draws have scale matrix \f$\Sigma\f$. `mean()` writes \f$\mu\f$, and `covariance()` writes \f$Q^{-1}\f$ times the factor above. `start_value(summary, theta)` runs on the host, sets \f$\beta = 1\f$, and sets the parameters of \f$Q\f$ by the Gaussian starting rule for the inverse scale. `start_value(y, n, theta)` also runs on the host on stacked units `y`: it solves for \f$\beta\f$ from Mardia's kurtosis as on \ref mvpowerexp1_draws "the first page", and sets the parameters of \f$Q\f$ from the sample covariance divided by the covariance factor above at that \f$\beta\f$, by the Gaussian starting rule for the inverse scale.
 
 Form 2 takes \f$Q\f$ directly and never inverts it, so it does not carry the error of the computed \f$\Sigma^{-1}\f$ that form 1 inherits at the near-singular point of the `log_cholesky` structure. At that point form 2 stays within 18.1 ulp1N on gcc/OpenMP and 17.4 ulp1N on CUDA, while form 1 reaches \f$3.96 \times 10^{3}\f$ and \f$3.86 \times 10^{3}\f$ ulp1N. The accuracy table and the other checks are those of \ref mvpowerexp1_accuracy "the accuracy section of the first page".
 

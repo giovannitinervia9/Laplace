@@ -13,6 +13,8 @@
 // - statuses: an unbounded objective never converges, a small budget ends as
 //   iteration_budget, a non-finite start is refused; gradient_stop_rule is
 //   rejected at compile time;
+// - the descent-lemma test at the rounding of s: the same fused regression
+//   converges with its sum taken sequentially and on the default space;
 // - the 18 genlasso fits frozen in tests/data/reference/optimizers/wave2
 //   (fused lasso, trend filtering of order 2, elastic net on first
 //   differences): coefficients and objective against the polished reference.
@@ -408,6 +410,39 @@ void laplace_scale_cases() {
   }
 }
 
+// The descent-lemma test near the solution: the bench's fused regression at
+// n = 1000, its objective summed sequentially (Kokkos::Serial) and on the
+// default space. Without the gradient fallback the sequential sum's rounding
+// (about +-2e-12 against the slack 1.5e-12) failed the test at iteration 4723,
+// doubled L 21 times and stalled the run at V = 6e-5 until the 1e5 budget, while
+// the default space converged in 6372 iterations.
+template <class ExecSpace>
+lo::optimizer_report rounding_fit(const regression_problem& pr) {
+  regression_test::regression_test_objective<ExecSpace> smooth(pr.x, pr.y, pr.n, pr.p, regression_loss::gaussian);
+  const difference_penalty<lasso_penalty, 1> pen(make_product<ld::laplace2_distrib>(pr.p - 2),
+                                                 lpen::difference_map<1>(pr.p - 1));
+  lo::linear_map_penalized_objective<regression_test::regression_test_objective<ExecSpace>, lasso_penalty,
+                                     lpen::difference_map<1>>
+      split(smooth, pr.p, lo::attach_penalty(pen, 1, {0.1 * pr.n}));
+  lo::optimizer_vector x0("x0", pr.p);
+  return lo::minimize(lo::primal_dual_optimizer<>{}, split, x0);
+}
+
+void rounding_case() {
+  const regression_problem pr = make_regression_problem(1000, 41, 10, 1.0, 21u, false, 0.5);
+  const auto a = rounding_fit<Kokkos::Serial>(pr);
+  const auto b = rounding_fit<Kokkos::DefaultExecutionSpace>(pr);
+  std::printf("primal_dual rounding fused n 1000: serial status %d it %d V %.2e | %s status %d it %d V %.2e\n",
+              int(a.status), a.iterations, a.decrement, Kokkos::DefaultExecutionSpace::name(), int(b.status), b.iterations,
+              b.decrement);
+  CHECK(a.status == lo::optimizer_status::converged);
+  CHECK(b.status == lo::optimizer_status::converged);
+  CHECK(a.iterations >= 6000);
+  CHECK(a.iterations <= 6800);
+  CHECK(b.iterations >= 6000);
+  CHECK(b.iterations <= 6800);
+}
+
 void status_cases() {
   const int n = 30;
   {  // unbounded below: s = c'x with sum c != 0 is free along the constants
@@ -518,6 +553,13 @@ void genlasso_cases() {
     if (small) {
       CHECK(rep.status == lo::optimizer_status::converged);
       CHECK(err <= 1e-6 * scale);  // measured 3.7e-8
+    } else if (ref.lambda_fraction == 0.01 && !trend) {
+      // fused and fused_enet at 0.01 converge since the descent-lemma test is
+      // decided on gradients near the rounding of s (were the budget before):
+      // measured 2472 and 3359 iterations, coef err 6.9e-13 and 2.2e-12 (gcc),
+      // 2473, 3360, 6.6e-13, 2.2e-12 (CUDA)
+      CHECK(rep.status == lo::optimizer_status::converged);
+      CHECK(err <= 1e-10 * scale);
     } else {
       CHECK((rep.status == lo::optimizer_status::converged || rep.status == lo::optimizer_status::iteration_budget));
       if (rep.status == lo::optimizer_status::converged) CHECK(err <= 1e-6 * scale);
@@ -534,6 +576,7 @@ TEST_CASE("primal_dual: trend filtering and enet on differences, optimality cond
 }
 TEST_CASE("primal_dual: Laplace log-scale likelihood") { primal_dual_test::laplace_scale_cases(); }
 TEST_CASE("primal_dual: statuses") { primal_dual_test::status_cases(); }
+TEST_CASE("primal_dual: the same status with a sequential and a parallel sum") { primal_dual_test::rounding_case(); }
 TEST_CASE("primal_dual: genlasso references (fused, trend filtering, enet on differences)") {
   primal_dual_test::genlasso_cases();
 }

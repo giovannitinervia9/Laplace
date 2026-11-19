@@ -28,7 +28,7 @@ namespace laplace::optimizers {
 
 /**
  * \ingroup optimizers
- * \brief Capability bit indicating that a stopping rule reads `stop_rule_input::gradient`.
+ * \brief Capability bit (\f$1\f$) indicating that a stopping rule reads `stop_rule_input::gradient`.
  *
  * \see \ref optimizers, stop_rule, stop_rule_for
  */
@@ -37,35 +37,35 @@ namespace laplace::optimizers {
 inline constexpr unsigned stop_needs_gradient = 1u;   // grad f at the point
 /**
  * \ingroup optimizers
- * \brief Capability bit indicating that a stopping rule reads `stop_rule_input::decrement`.
+ * \brief Capability bit (\f$2\f$) indicating that a stopping rule reads `stop_rule_input::decrement`.
  *
  * \see \ref optimizers, stop_rule, stop_rule_for
  */
 inline constexpr unsigned stop_needs_decrement = 2u;  // the stationarity measure in f's units
 /**
  * \ingroup optimizers
- * \brief Capability bit indicating that a stopping rule reads `previous_value` and `previous_point`.
+ * \brief Capability bit (\f$4\f$) indicating that a stopping rule reads `previous_value` and `previous_point`.
  *
  * \see \ref optimizers, stop_rule, stop_rule_for
  */
 inline constexpr unsigned stop_needs_previous = 4u;   // the previous point and value
 /**
  * \ingroup optimizers
- * \brief Capability bit indicating that a stopping rule reads `stop_rule_input::prox_mapping`.
+ * \brief Capability bit (\f$8\f$) indicating that a stopping rule reads `stop_rule_input::prox_mapping`.
  *
  * \see \ref optimizers, \ref optimizers_proximal, stop_rule, stop_rule_for, prox_mapping_stop_rule
  */
 inline constexpr unsigned stop_needs_prox_mapping = 8u;  // (1/2) gamma |G_t|^2 of a composite objective
 /**
  * \ingroup optimizers
- * \brief Capability bit indicating that a stopping rule reads `stop_rule_input::search_size`.
+ * \brief Capability bit (\f$16\f$) indicating that a stopping rule reads `stop_rule_input::search_size`.
  *
  * \see \ref optimizers, stop_rule, stop_rule_for, search_size_stop_rule
  */
 inline constexpr unsigned stop_needs_search_size = 16u;  // the size of a derivative-free search, in x's units
 /**
  * \ingroup optimizers
- * \brief Capability bit indicating that a stopping rule reads `stop_rule_input::primal_dual`.
+ * \brief Capability bit (\f$32\f$) indicating that a stopping rule reads `stop_rule_input::primal_dual`.
  *
  * \see \ref optimizers, \ref optimizers_primal_dual, stop_rule, stop_rule_for, primal_dual_stop_rule
  */
@@ -75,9 +75,12 @@ inline constexpr unsigned stop_needs_primal_dual = 32u;  // e_d + gamma |r_p|^2 
  * \ingroup optimizers
  * \brief Verdict returned by a stopping rule, ordered from weakest to strongest.
  *
- * Values in increasing strength: `none` (continue), `stopped_on_change` (a change rule held),
- * `converged_at_resolution` (stationarity reached objective floating-point resolution), and
- * `converged` (a stationarity rule held at its tolerance).
+ * Values in increasing strength: `none` (continue the run),
+ * `stopped_on_change` (a change rule on the point or objective value held;
+ * never treated as convergence), `converged_at_resolution` (the stationarity
+ * measure fell below the objective's floating-point resolution, about
+ * \f$\varepsilon |f|\f$ with \f$\varepsilon = 2^{-52}\f$), and `converged`
+ * (a stationarity rule held at its tolerance).
  *
  * \see \ref optimizers, stop_rule, any_of(), all_of()
  */
@@ -88,9 +91,33 @@ enum class stop_verdict { none, stopped_on_change, converged_at_resolution, conv
  * \ingroup optimizers
  * \brief Iteration quantities passed to `stop_rule::verdict()`.
  *
- * The fields `previous_value` and `previous_point` are populated only when `has_previous` is `true`.
- * When the calling method does not supply gradients or a predicted decrease, `gradient` is empty and `decrement` is quiet NaN.
- * The predicted decrease `decrement` is \f$\frac{1}{2} g^\top H^{-1} g\f$ with curvature, or \f$\frac{1}{2} g^\top B g\f$ for a method whose next direction is \f$d = -B g\f$ with inverse-curvature model \f$B\f$.
+ * The objective `value` \f$f(x)\f$ and `iteration` are always populated.
+ * `previous_value` and `previous_point` are meaningful only when
+ * `has_previous` is `true`. When a method does not provide a quantity,
+ * `gradient` is empty and scalar measures (`decrement`, `prox_mapping`,
+ * `search_size`, `primal_dual`) are quiet NaN.
+ *
+ * `decrement` is the decrease predicted by the next step in the objective's
+ * units: \f$\frac{1}{2} g^\top H^{-1} g\f$ with curvature, or
+ * \f$\frac{1}{2} g^\top B g\f$ for a method whose next direction is
+ * \f$d = -B g\f$ with inverse-curvature model \f$B\f$; see
+ * \ref optimizers "the optimizers page" for the per-method mapping.
+ *
+ * ### Fields
+ *
+ * | Field | Type | Default | Meaning |
+ * |---|---|---|---|
+ * | `iteration` | `int` | \f$0\f$ | Current iteration index |
+ * | `value` | `double` | quiet NaN | Current objective value \f$f(x)\f$ |
+ * | `point` | `Kokkos::View<const double*, Kokkos::HostSpace>` | empty | Current point \f$x\f$ |
+ * | `gradient` | `Kokkos::View<const double*, Kokkos::HostSpace>` | empty | Gradient \f$\nabla f(x)\f$, or empty when not provided |
+ * | `decrement` | `double` | quiet NaN | Predicted decrease in the objective's units, or quiet NaN |
+ * | `prox_mapping` | `double` | quiet NaN | Proximal gradient mapping measure in the objective's units, or quiet NaN |
+ * | `search_size` | `double` | quiet NaN | Derivative-free search region size in the units of \f$x\f$, or quiet NaN |
+ * | `primal_dual` | `double` | quiet NaN | Primal-dual stationarity measure in the objective's units, or quiet NaN |
+ * | `has_previous` | `bool` | `false` | Whether `previous_value` and `previous_point` are populated |
+ * | `previous_value` | `double` | quiet NaN | Objective value from the preceding iteration |
+ * | `previous_point` | `Kokkos::View<const double*, Kokkos::HostSpace>` | empty | Point from the preceding iteration |
  *
  * \see \ref optimizers, stop_rule, optimizer_report
  */
@@ -106,32 +133,32 @@ enum class stop_verdict { none, stopped_on_change, converged_at_resolution, conv
 struct stop_rule_input {
   /**
    * \ingroup optimizers
-   * \brief Current iteration index.
+   * \brief Current iteration index (default \f$0\f$).
    */
   int iteration = 0;
   /**
    * \ingroup optimizers
-   * \brief Current objective value \f$f(x)\f$.
+   * \brief Current objective value \f$f(x)\f$ (default quiet NaN).
    */
   double value = std::numeric_limits<double>::quiet_NaN();
   /**
    * \ingroup optimizers
-   * \brief Current point \f$x\f$.
+   * \brief Current point \f$x\f$ (default empty).
    */
   Kokkos::View<const double*, Kokkos::HostSpace> point;
   /**
    * \ingroup optimizers
-   * \brief Current gradient \f$\nabla f(x)\f$, or empty when not provided.
+   * \brief Current gradient \f$\nabla f(x)\f$, or empty when not provided (default empty).
    */
   Kokkos::View<const double*, Kokkos::HostSpace> gradient;
   /**
    * \ingroup optimizers
-   * \brief Predicted decrease in the objective's units, or quiet NaN when not provided.
+   * \brief Predicted decrease in the objective's units, or quiet NaN when not provided (default quiet NaN).
    */
   double decrement = std::numeric_limits<double>::quiet_NaN();
   /**
    * \ingroup optimizers
-   * \brief Proximal gradient mapping measure \f$\frac{1}{2} \gamma \lVert G_t\rVert^2\f$ in the objective's units, or quiet NaN when not provided.
+   * \brief Proximal gradient mapping measure \f$\frac{1}{2} \gamma \lVert G_t\rVert^2\f$ in the objective's units, or quiet NaN when not provided (default quiet NaN).
    *
    * Here \f$G_t(x) = (x - \operatorname{prox}_{t r}(x - t \nabla s(x))) / t\f$ is the proximal gradient mapping and \f$\gamma\f$ is a scale chosen by the method (`proximal_gradient_optimizer` uses \f$\gamma = \max(t, \gamma_{\max})\f$).
    */
@@ -141,14 +168,14 @@ struct stop_rule_input {
   double prox_mapping = std::numeric_limits<double>::quiet_NaN();
   /**
    * \ingroup optimizers
-   * \brief Size of the region still searched by a derivative-free method, in the units of \f$x\f$, or quiet NaN when not provided.
+   * \brief Size of the region still searched by a derivative-free method, in the units of \f$x\f$, or quiet NaN when not provided (default quiet NaN).
    */
   // The half-width of Brent's bracket, the diameter of a simplex, the step of
   // a poll; in the units of x, not of f. NaN when the method does not provide it.
   double search_size = std::numeric_limits<double>::quiet_NaN();
   /**
    * \ingroup optimizers
-   * \brief Primal-dual stationarity measure \f$V = e_d + \max(\gamma_{\max}, \tau) \lVert r_p\rVert^2\f$ in the objective's units, or quiet NaN when not provided.
+   * \brief Primal-dual stationarity measure \f$V = e_d + \max(\gamma_{\max}, \tau) \lVert r_p\rVert^2\f$ in the objective's units, or quiet NaN when not provided (default quiet NaN).
    *
    * Here \f$r_p = \nabla s(x) + D^\top y\f$, \f$e_d = g(Dx) - g(u') - y^\top(Dx - u')\f$, and \f$\gamma_{\max}\f$ is the largest secant ratio of \f$\nabla s\f$; see \ref optimizers_primal_dual "Primal-dual method".
    */
@@ -159,17 +186,17 @@ struct stop_rule_input {
   double primal_dual = std::numeric_limits<double>::quiet_NaN();
   /**
    * \ingroup optimizers
-   * \brief Whether `previous_value` and `previous_point` hold data from the preceding iteration.
+   * \brief Whether `previous_value` and `previous_point` hold data from the preceding iteration (default `false`).
    */
   bool has_previous = false;
   /**
    * \ingroup optimizers
-   * \brief Objective value at the previous iteration (valid when `has_previous` is `true`).
+   * \brief Objective value at the previous iteration, valid when `has_previous` is `true` (default quiet NaN).
    */
   double previous_value = std::numeric_limits<double>::quiet_NaN();
   /**
    * \ingroup optimizers
-   * \brief Point from the previous iteration (valid when `has_previous` is `true`).
+   * \brief Point from the previous iteration, valid when `has_previous` is `true` (default empty).
    */
   Kokkos::View<const double*, Kokkos::HostSpace> previous_point;
 };
@@ -178,7 +205,10 @@ struct stop_rule_input {
  * \ingroup optimizers
  * \brief Concept for a stopping rule.
  *
- * Requires a static `unsigned` bitmask `needs` and `stop_verdict verdict(const stop_rule_input&) const`.
+ * A stopping rule is a small object chosen by the user that carries its own
+ * tolerances: there is no separate tolerance beside a rule. Requires a static
+ * `unsigned` bitmask `needs` of `stop_needs_*` flags and
+ * `stop_verdict verdict(const stop_rule_input&) const`.
  *
  * \tparam R Stopping rule type.
  * \see \ref optimizers, stop_rule_for, stop_rule_input, stop_verdict
@@ -193,8 +223,12 @@ concept stop_rule = requires(const R& rule, const stop_rule_input& input) {
  * \ingroup optimizers
  * \brief Concept checking that stopping rule `R` requires no quantities outside `provided`.
  *
+ * Holds when `(R::needs & ~provided) == 0u`. Passing a stopping rule that asks
+ * for a quantity an optimizer does not provide (such as `gradient_stop_rule`
+ * with a derivative-free method) fails to compile.
+ *
  * \tparam R Stopping rule type.
- * \tparam provided Bitmask of `stop_needs_*` quantities provided by the caller.
+ * \tparam provided Bitmask of `stop_needs_*` quantities provided by the optimizer.
  * \see \ref optimizers, stop_rule
  */
 // A rule that an optimizer providing the quantities `provided` can ask.
@@ -205,11 +239,40 @@ concept stop_rule_for = stop_rule<R> && ((R::needs & ~provided) == 0u);
  * \ingroup optimizers
  * \brief Stationarity rule testing the predicted decrease `decrement`.
  *
- * Returns `stop_verdict::converged` when `decrement` is at most `tolerance`,
- * `stop_verdict::converged_at_resolution` when `decrement` is at most \f$m \varepsilon |f|\f$ (where \f$m\f$ is `resolution_multiple` and \f$\varepsilon\f$ is double-precision machine epsilon),
- * and `stop_verdict::none` otherwise (including when `decrement` is NaN).
+ * Tests the objective-unit stationarity measure \f$\delta\f$ passed in
+ * `stop_rule_input::decrement` (independent of dimension \f$n\f$). Default
+ * rule for `newton_optimizer`, `trust_region_optimizer`, `bfgs_optimizer`,
+ * `lbfgs_optimizer`, `proximal_newton_optimizer`, and `bundle_optimizer`.
  *
- * \see \ref optimizers, gradient_stop_rule, stop_verdict
+ * Let \f$f\f$ be `in.value`, \f$\tau\f$ be `tolerance`, \f$m\f$ be
+ * `resolution_multiple`, and \f$\varepsilon = 2^{-52}\f$ be double-precision
+ * machine epsilon. `verdict()` returns:
+ * - `stop_verdict::converged` when \f$\delta \le \tau\f$;
+ * - `stop_verdict::converged_at_resolution` when \f$\delta > \tau\f$ and
+ *   \f$\delta \le m\,\varepsilon\,|f|\f$, meaning the predicted decrease is
+ *   below the smallest decrease the objective can resolve;
+ * - `stop_verdict::none` otherwise (including when \f$\delta\f$ is NaN, which
+ *   compares false).
+ *
+ * For example, `decrement_stop_rule{1e-14}` with \f$\delta = 10^{-12}\f$ at
+ * \f$f = 10^6\f$, where \f$\varepsilon |f| \approx 2.2 \times 10^{-10}\f$,
+ * returns `stop_verdict::converged_at_resolution`.
+ *
+ * ### Settings
+ *
+ * | Member | Default | Effect |
+ * |---|---|---|
+ * | `tolerance` | \f$10^{-6}\f$ | Convergence threshold \f$\tau\f$ on \f$\delta\f$ in the objective's units |
+ * | `resolution_multiple` | \f$1\f$ | Multiplier \f$m\f$ on \f$\varepsilon \lvert f\rvert \f$ for `converged_at_resolution` |
+ *
+ * ### Example
+ *
+ * \code
+ * laplace::optimizers::newton_optimizer<> opt;
+ * opt.stop_rule.tolerance = 1e-10;
+ * \endcode
+ *
+ * \see \ref optimizers, prox_mapping_stop_rule, primal_dual_stop_rule, gradient_stop_rule, stop_verdict
  */
 // Converged when the decrement is at most `tolerance` (in the objective's
 // units, independent of n); converged at resolution when it is at most
@@ -222,19 +285,19 @@ struct decrement_stop_rule {
   static constexpr unsigned needs = stop_needs_decrement;
   /**
    * \ingroup optimizers
-   * \brief Convergence threshold in the objective's units.
+   * \brief Convergence threshold \f$\tau\f$ in the objective's units (default \f$10^{-6}\f$).
    */
   double tolerance = 1e-6;
   /**
    * \ingroup optimizers
-   * \brief Multiplier on \f$\varepsilon |f|\f$ for the resolution check.
+   * \brief Multiplier \f$m\f$ on \f$\varepsilon |f|\f$ for the resolution check (default \f$1\f$).
    */
   double resolution_multiple = 1.0;
   /**
    * \ingroup optimizers
    * \brief Evaluates the stopping rule on `in`.
    *
-   * \param in Current iteration quantities.
+   * \param in Current iteration quantities (`value` and `decrement`).
    * \return `stop_verdict::converged`, `stop_verdict::converged_at_resolution`, or `stop_verdict::none`.
    */
   stop_verdict verdict(const stop_rule_input& in) const {
@@ -249,8 +312,22 @@ struct decrement_stop_rule {
  * \ingroup optimizers
  * \brief Stationarity rule testing the proximal gradient mapping of a composite objective.
  *
- * Returns `stop_verdict::converged` when `prox_mapping` (\f$\frac{1}{2} \gamma \lVert G_t\rVert^2\f$, in the objective's units) is at most `tolerance`,
- * `stop_verdict::converged_at_resolution` when it is at most \f$m \varepsilon |f|\f$ (where \f$m\f$ is `resolution_multiple` and \f$\varepsilon\f$ is double-precision machine epsilon), and `stop_verdict::none` otherwise (including when `prox_mapping` is NaN).
+ * Tests `in.prox_mapping` (in the objective's units, independent of dimension
+ * \f$n\f$) with the same rules as `decrement_stop_rule`. Default rule for
+ * `proximal_gradient_optimizer` (\ref optimizers_proximal).
+ *
+ * Let \f$p\f$ be `in.prox_mapping`, \f$f\f$ be `in.value`, \f$\tau\f$ be
+ * `tolerance`, \f$m\f$ be `resolution_multiple`, and \f$\varepsilon = 2^{-52}\f$.
+ * `verdict()` returns `stop_verdict::converged` when \f$p \le \tau\f$, else
+ * `stop_verdict::converged_at_resolution` when \f$p \le m\,\varepsilon\,|f|\f$,
+ * and `stop_verdict::none` otherwise (including when \f$p\f$ is NaN).
+ *
+ * ### Settings
+ *
+ * | Member | Default | Effect |
+ * |---|---|---|
+ * | `tolerance` | \f$10^{-6}\f$ | Convergence threshold \f$\tau\f$ on `prox_mapping` in the objective's units |
+ * | `resolution_multiple` | \f$1\f$ | Multiplier \f$m\f$ on \f$\varepsilon \lvert f\rvert \f$ for `converged_at_resolution` |
  *
  * \see \ref optimizers, \ref optimizers_proximal, decrement_stop_rule, stop_rule_input::prox_mapping, stop_verdict
  */
@@ -265,19 +342,19 @@ struct prox_mapping_stop_rule {
   static constexpr unsigned needs = stop_needs_prox_mapping;
   /**
    * \ingroup optimizers
-   * \brief Convergence threshold in the objective's units.
+   * \brief Convergence threshold \f$\tau\f$ in the objective's units (default \f$10^{-6}\f$).
    */
   double tolerance = 1e-6;
   /**
    * \ingroup optimizers
-   * \brief Multiplier on \f$\varepsilon |f|\f$ for the resolution check.
+   * \brief Multiplier \f$m\f$ on \f$\varepsilon |f|\f$ for the resolution check (default \f$1\f$).
    */
   double resolution_multiple = 1.0;
   /**
    * \ingroup optimizers
    * \brief Evaluates the stopping rule on `in`.
    *
-   * \param in Current iteration quantities.
+   * \param in Current iteration quantities (`value` and `prox_mapping`).
    * \return `stop_verdict::converged`, `stop_verdict::converged_at_resolution`, or `stop_verdict::none`.
    */
   stop_verdict verdict(const stop_rule_input& in) const {
@@ -292,11 +369,27 @@ struct prox_mapping_stop_rule {
  * \ingroup optimizers
  * \brief Stationarity rule of the derivative-free methods, testing the size of the region still searched.
  *
- * Returns `stop_verdict::converged` when `search_size` is at most \f$\tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} \max_i |x_i|\f$
- * (where \f$\tau_{\mathrm{abs}}\f$ is `absolute_tolerance` and \f$\tau_{\mathrm{rel}}\f$ is `relative_tolerance`),
- * and `stop_verdict::none` otherwise (including NaN).
+ * Default rule for `brent_optimizer`, `nelder_mead_optimizer`, and
+ * `compass_optimizer` (\ref optimizers_block_coordinate,
+ * \ref optimizers_derivative_free). Because derivative-free methods have no
+ * stationarity measure in the objective's units, `search_size` is measured in
+ * the units of \f$x\f$, and this rule has no resolution check (`converged` or
+ * `none` only).
  *
- * \see \ref optimizers, decrement_stop_rule, stop_verdict
+ * `verdict()` returns `stop_verdict::converged` when `search_size` is at most
+ * \f$\tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} \max_i |x_i|\f$, where
+ * \f$x\f$ is `in.point`, \f$\tau_{\mathrm{abs}}\f$ is `absolute_tolerance`,
+ * and \f$\tau_{\mathrm{rel}}\f$ is `relative_tolerance`, and
+ * `stop_verdict::none` otherwise (including when `search_size` is NaN).
+ *
+ * ### Settings
+ *
+ * | Member | Default | Effect |
+ * |---|---|---|
+ * | `absolute_tolerance` | \f$10^{-8}\f$ | Absolute threshold \f$\tau_{\mathrm{abs}}\f$ in the units of \f$x\f$ |
+ * | `relative_tolerance` | \f$0\f$ | Relative threshold \f$\tau_{\mathrm{rel}}\f$ multiplying \f$\max_i \lvert x_i\rvert \f$ |
+ *
+ * \see \ref optimizers, \ref optimizers_block_coordinate, \ref optimizers_derivative_free, decrement_stop_rule, stop_verdict
  */
 // Converged when the search size (Brent's bracket half-width, a simplex's
 // diameter, a poll step) is at most absolute_tolerance + relative_tolerance
@@ -310,19 +403,19 @@ struct search_size_stop_rule {
   static constexpr unsigned needs = stop_needs_search_size;
   /**
    * \ingroup optimizers
-   * \brief Absolute tolerance on the search size.
+   * \brief Absolute tolerance \f$\tau_{\mathrm{abs}}\f$ on `search_size` in the units of \f$x\f$ (default \f$10^{-8}\f$).
    */
   double absolute_tolerance = 1e-8;
   /**
    * \ingroup optimizers
-   * \brief Relative tolerance multiplying \f$\max_i |x_i|\f$.
+   * \brief Relative tolerance \f$\tau_{\mathrm{rel}}\f$ multiplying \f$\max_i |x_i|\f$ (default \f$0\f$).
    */
   double relative_tolerance = 0.0;
   /**
    * \ingroup optimizers
    * \brief Evaluates the stopping rule on `in`.
    *
-   * \param in Current iteration quantities.
+   * \param in Current iteration quantities (`point` and `search_size`).
    * \return `stop_verdict::converged` or `stop_verdict::none`.
    */
   stop_verdict verdict(const stop_rule_input& in) const {
@@ -337,8 +430,22 @@ struct search_size_stop_rule {
  * \ingroup optimizers
  * \brief Stationarity rule testing the primal-dual measure of a smooth plus linear-map composite objective.
  *
- * Returns `stop_verdict::converged` when `primal_dual` (\f$e_d + \max(\gamma_{\max}, \tau) \lVert r_p\rVert^2\f$, in the objective's units) is at most `tolerance`,
- * `stop_verdict::converged_at_resolution` when it is at most \f$m \varepsilon |f|\f$ (where \f$m\f$ is `resolution_multiple` and \f$\varepsilon\f$ is double-precision machine epsilon), and `stop_verdict::none` otherwise (including when `primal_dual` is NaN).
+ * Tests `in.primal_dual` (in the objective's units, independent of dimension
+ * \f$n\f$) with the same rules as `decrement_stop_rule`. Default rule for
+ * `primal_dual_optimizer` (\ref optimizers_primal_dual).
+ *
+ * Let \f$v\f$ be `in.primal_dual`, \f$f\f$ be `in.value`, \f$\tau\f$ be
+ * `tolerance`, \f$m\f$ be `resolution_multiple`, and \f$\varepsilon = 2^{-52}\f$.
+ * `verdict()` returns `stop_verdict::converged` when \f$v \le \tau\f$, else
+ * `stop_verdict::converged_at_resolution` when \f$v \le m\,\varepsilon\,|f|\f$,
+ * and `stop_verdict::none` otherwise (including when \f$v\f$ is NaN).
+ *
+ * ### Settings
+ *
+ * | Member | Default | Effect |
+ * |---|---|---|
+ * | `tolerance` | \f$10^{-6}\f$ | Convergence threshold \f$\tau\f$ on `primal_dual` in the objective's units |
+ * | `resolution_multiple` | \f$1\f$ | Multiplier \f$m\f$ on \f$\varepsilon \lvert f\rvert \f$ for `converged_at_resolution` |
  *
  * \see \ref optimizers, \ref optimizers_primal_dual, decrement_stop_rule, stop_rule_input::primal_dual, stop_verdict
  */
@@ -352,19 +459,19 @@ struct primal_dual_stop_rule {
   static constexpr unsigned needs = stop_needs_primal_dual;
   /**
    * \ingroup optimizers
-   * \brief Convergence threshold in the objective's units.
+   * \brief Convergence threshold \f$\tau\f$ in the objective's units (default \f$10^{-6}\f$).
    */
   double tolerance = 1e-6;
   /**
    * \ingroup optimizers
-   * \brief Multiplier on \f$\varepsilon |f|\f$ for the resolution check.
+   * \brief Multiplier \f$m\f$ on \f$\varepsilon |f|\f$ for the resolution check (default \f$1\f$).
    */
   double resolution_multiple = 1.0;
   /**
    * \ingroup optimizers
    * \brief Evaluates the stopping rule on `in`.
    *
-   * \param in Current iteration quantities.
+   * \param in Current iteration quantities (`value` and `primal_dual`).
    * \return `stop_verdict::converged`, `stop_verdict::converged_at_resolution`, or `stop_verdict::none`.
    */
   stop_verdict verdict(const stop_rule_input& in) const {
@@ -379,9 +486,25 @@ struct primal_dual_stop_rule {
  * \ingroup optimizers
  * \brief Stationarity rule testing the scaled supremum norm of the gradient.
  *
- * Returns `stop_verdict::converged` when \f$\sigma \max_i |g_i| \le \tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} |f|\f$
- * (where \f$\sigma\f$ is `scale`, \f$\tau_{\mathrm{abs}}\f$ is `absolute_tolerance`, and \f$\tau_{\mathrm{rel}}\f$ is `relative_tolerance`),
- * or `stop_verdict::none` if the gradient is empty, contains NaN, or exceeds the threshold.
+ * Returns `stop_verdict::converged` when
+ * \f$\sigma \max_i |g_i| \le \tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} |f|\f$,
+ * where \f$g\f$ is `in.gradient`, \f$f\f$ is `in.value`, \f$\sigma\f$ is
+ * `scale`, \f$\tau_{\mathrm{abs}}\f$ is `absolute_tolerance`, and
+ * \f$\tau_{\mathrm{rel}}\f$ is `relative_tolerance`. Returns
+ * `stop_verdict::none` when the gradient is empty, contains any NaN entry, or
+ * exceeds the threshold.
+ *
+ * `scale` lets the caller adjust the gradient's scale without modifying the
+ * objective; for example, \f$\sigma = 1 / N\f$ reads a gradient summed over
+ * \f$N\f$ observations as a gradient per observation.
+ *
+ * ### Settings
+ *
+ * | Member | Default | Effect |
+ * |---|---|---|
+ * | `absolute_tolerance` | \f$10^{-6}\f$ | Absolute gradient threshold \f$\tau_{\mathrm{abs}}\f$ |
+ * | `relative_tolerance` | \f$0\f$ | Relative threshold \f$\tau_{\mathrm{rel}}\f$ multiplying \f$\lvert f\rvert \f$ |
+ * | `scale` | \f$1\f$ | Multiplier \f$\sigma\f$ on \f$\max_i \lvert g_i\rvert \f$ (e.g., \f$1/N\f$ per observation) |
  *
  * \see \ref optimizers, decrement_stop_rule, stop_verdict
  */
@@ -395,24 +518,24 @@ struct gradient_stop_rule {
   static constexpr unsigned needs = stop_needs_gradient;
   /**
    * \ingroup optimizers
-   * \brief Absolute gradient tolerance.
+   * \brief Absolute gradient tolerance \f$\tau_{\mathrm{abs}}\f$ (default \f$10^{-6}\f$).
    */
   double absolute_tolerance = 1e-6;
   /**
    * \ingroup optimizers
-   * \brief Relative tolerance multiplying \f$|f|\f$.
+   * \brief Relative tolerance \f$\tau_{\mathrm{rel}}\f$ multiplying \f$|f|\f$ (default \f$0\f$).
    */
   double relative_tolerance = 0.0;
   /**
    * \ingroup optimizers
-   * \brief User-chosen multiplier on \f$\max_i |g_i|\f$ (for example \f$1 / n\f$ for a per-observation score).
+   * \brief User-chosen multiplier \f$\sigma\f$ on \f$\max_i |g_i|\f$ (default \f$1\f$; for example \f$1/N\f$ for a per-observation score).
    */
   double scale = 1.0;
   /**
    * \ingroup optimizers
    * \brief Evaluates the stopping rule on `in`.
    *
-   * \param in Current iteration quantities.
+   * \param in Current iteration quantities (`value` and `gradient`).
    * \return `stop_verdict::converged` or `stop_verdict::none`.
    */
   stop_verdict verdict(const stop_rule_input& in) const {
@@ -432,11 +555,30 @@ struct gradient_stop_rule {
  * \ingroup optimizers
  * \brief Change rule testing successive objective values.
  *
- * Returns `stop_verdict::stopped_on_change` (never `converged`) when `in.has_previous` is `true` and
- * \f$|f - f_{\mathrm{prev}}| \le \tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} |f_{\mathrm{prev}}|\f$
- * (where \f$\tau_{\mathrm{abs}}\f$ is `absolute_tolerance` and \f$\tau_{\mathrm{rel}}\f$ is `relative_tolerance`).
+ * Returns `stop_verdict::stopped_on_change` when `in.has_previous` is `true`
+ * and
+ * \f$|f - f_{\mathrm{prev}}| \le \tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} |f_{\mathrm{prev}}|\f$,
+ * where \f$f\f$ is `in.value`, \f$f_{\mathrm{prev}}\f$ is `in.previous_value`,
+ * \f$\tau_{\mathrm{abs}}\f$ is `absolute_tolerance`, and
+ * \f$\tau_{\mathrm{rel}}\f$ is `relative_tolerance`. Returns
+ * `stop_verdict::none` otherwise (including when `in.has_previous` is `false`
+ * or the difference is NaN).
  *
- * \see \ref optimizers, parameter_change_stop_rule, stop_verdict
+ * Never declares convergence: a small change in objective value can occur
+ * far from a minimum (for example on a slow method or a flat stretch), so the
+ * run ends with `optimizer_status::stopped_on_change`, which
+ * `optimizer_succeeded()` counts as false while `optimizer_report::decrement`
+ * lets the caller judge. Combining this rule with a stationarity rule via
+ * `all_of()` also yields `stopped_on_change` when both hold.
+ *
+ * ### Settings
+ *
+ * | Member | Default | Effect |
+ * |---|---|---|
+ * | `absolute_tolerance` | \f$10^{-12}\f$ | Absolute objective change threshold \f$\tau_{\mathrm{abs}}\f$ |
+ * | `relative_tolerance` | \f$0\f$ | Relative threshold \f$\tau_{\mathrm{rel}}\f$ multiplying \f$\lvert f_{\mathrm{prev}}\rvert \f$ |
+ *
+ * \see \ref optimizers, parameter_change_stop_rule, all_of(), stop_verdict, optimizer_succeeded()
  */
 // Stopped on change when |f - f_previous| <= absolute_tolerance + relative_tolerance |f_previous|.
 struct objective_change_stop_rule {
@@ -447,19 +589,19 @@ struct objective_change_stop_rule {
   static constexpr unsigned needs = stop_needs_previous;
   /**
    * \ingroup optimizers
-   * \brief Absolute objective change tolerance.
+   * \brief Absolute objective change tolerance \f$\tau_{\mathrm{abs}}\f$ (default \f$10^{-12}\f$).
    */
   double absolute_tolerance = 1e-12;
   /**
    * \ingroup optimizers
-   * \brief Relative tolerance multiplying \f$|f_{\mathrm{prev}}|\f$.
+   * \brief Relative tolerance \f$\tau_{\mathrm{rel}}\f$ multiplying \f$|f_{\mathrm{prev}}|\f$ (default \f$0\f$).
    */
   double relative_tolerance = 0.0;
   /**
    * \ingroup optimizers
    * \brief Evaluates the stopping rule on `in`.
    *
-   * \param in Current iteration quantities.
+   * \param in Current and previous iteration quantities.
    * \return `stop_verdict::stopped_on_change` or `stop_verdict::none`.
    */
   stop_verdict verdict(const stop_rule_input& in) const {
@@ -474,11 +616,28 @@ struct objective_change_stop_rule {
  * \ingroup optimizers
  * \brief Change rule testing successive points in supremum norm.
  *
- * Returns `stop_verdict::stopped_on_change` (never `converged`) when `in.has_previous` is `true`, no coordinate difference is NaN, and
- * \f$\max_i |x_i - x_{\mathrm{prev}, i}| \le \tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} \max_i |x_{\mathrm{prev}, i}|\f$
- * (where \f$\tau_{\mathrm{abs}}\f$ is `absolute_tolerance` and \f$\tau_{\mathrm{rel}}\f$ is `relative_tolerance`).
+ * Returns `stop_verdict::stopped_on_change` when `in.has_previous` is `true`,
+ * no coordinate difference is NaN, and
+ * \f$\max_i |x_i - x_{\mathrm{prev}, i}| \le \tau_{\mathrm{abs}} + \tau_{\mathrm{rel}} \max_i |x_{\mathrm{prev}, i}|\f$,
+ * where \f$x\f$ is `in.point`, \f$x_{\mathrm{prev}}\f$ is `in.previous_point`,
+ * \f$\tau_{\mathrm{abs}}\f$ is `absolute_tolerance`, and
+ * \f$\tau_{\mathrm{rel}}\f$ is `relative_tolerance`. Returns
+ * `stop_verdict::none` otherwise.
  *
- * \see \ref optimizers, objective_change_stop_rule, stop_verdict
+ * Never declares convergence: a small step can occur far from a minimum, so
+ * the run ends with `optimizer_status::stopped_on_change`, which
+ * `optimizer_succeeded()` counts as false while `optimizer_report::decrement`
+ * lets the caller judge. Combining this rule with a stationarity rule via
+ * `all_of()` also yields `stopped_on_change` when both hold.
+ *
+ * ### Settings
+ *
+ * | Member | Default | Effect |
+ * |---|---|---|
+ * | `absolute_tolerance` | \f$10^{-10}\f$ | Absolute parameter change threshold \f$\tau_{\mathrm{abs}}\f$ |
+ * | `relative_tolerance` | \f$0\f$ | Relative threshold \f$\tau_{\mathrm{rel}}\f$ multiplying \f$\max_i \lvert x_{\mathrm{prev}, i}\rvert \f$ |
+ *
+ * \see \ref optimizers, objective_change_stop_rule, all_of(), stop_verdict, optimizer_succeeded()
  */
 // Stopped on change when max_i |x_i - x_previous,i| <= absolute_tolerance +
 // relative_tolerance max_i |x_previous,i|.
@@ -490,19 +649,19 @@ struct parameter_change_stop_rule {
   static constexpr unsigned needs = stop_needs_previous;
   /**
    * \ingroup optimizers
-   * \brief Absolute parameter change tolerance.
+   * \brief Absolute parameter change tolerance \f$\tau_{\mathrm{abs}}\f$ (default \f$10^{-10}\f$).
    */
   double absolute_tolerance = 1e-10;
   /**
    * \ingroup optimizers
-   * \brief Relative tolerance multiplying \f$\max_i |x_{\mathrm{prev}, i}|\f$.
+   * \brief Relative tolerance \f$\tau_{\mathrm{rel}}\f$ multiplying \f$\max_i |x_{\mathrm{prev}, i}|\f$ (default \f$0\f$).
    */
   double relative_tolerance = 0.0;
   /**
    * \ingroup optimizers
    * \brief Evaluates the stopping rule on `in`.
    *
-   * \param in Current iteration quantities.
+   * \param in Current and previous iteration quantities.
    * \return `stop_verdict::stopped_on_change` or `stop_verdict::none`.
    */
   stop_verdict verdict(const stop_rule_input& in) const {
@@ -525,10 +684,34 @@ struct parameter_change_stop_rule {
  * \ingroup optimizers
  * \brief Disjunctive combinator returning the strongest `stop_verdict` among its component rules.
  *
- * With zero component rules, always returns `stop_verdict::none`.
+ * Evaluates every rule in `rules` on `in` and returns the strongest verdict
+ * under the ordering `none < stopped_on_change < converged_at_resolution < converged`,
+ * so any rule that stops stops the run. With zero component rules (`any_of()`),
+ * always returns `stop_verdict::none`.
+ *
+ * Its `needs` bitmask is the bitwise union `(0u | ... | R::needs)` of all
+ * component rules' `needs`, so `stop_rule_for` rejects the combination if any
+ * component asks for a quantity the optimizer does not provide.
+ *
+ * ### Example
+ *
+ * A BFGS run that stops when the decrement is at most \f$10^{-10}\f$ or on a
+ * small change of the point, with `objective` and `x0` defined elsewhere:
+ *
+ * \code
+ * #include <laplace/optimizers/bfgs.hpp>
+ *
+ * using namespace laplace::optimizers;
+ * auto rule = any_of(decrement_stop_rule{.tolerance = 1e-10},
+ *                    parameter_change_stop_rule{.absolute_tolerance = 1e-12});
+ * bfgs_optimizer<decltype(rule)> opt;
+ * opt.stop_rule = rule;
+ * const optimizer_report report = minimize(opt, objective, x0);
+ * // report.status is converged, converged_at_resolution or stopped_on_change, or a failure
+ * \endcode
  *
  * \tparam R Component stopping rule types satisfying `stop_rule`.
- * \see \ref optimizers, any_of(), all_of_stop_rule
+ * \see \ref optimizers, any_of(), all_of_stop_rule, stop_verdict
  */
 // The strongest verdict of its rules (any one stopping stops the run).
 template <stop_rule... R>
@@ -559,10 +742,19 @@ struct any_of_stop_rule {
  * \ingroup optimizers
  * \brief Conjunctive combinator returning the weakest `stop_verdict` among its component rules.
  *
- * Requires at least one component rule; combining a convergence rule with a change rule yields `stop_verdict::stopped_on_change` when both hold.
+ * Evaluates every rule in `rules` on `in` and returns the weakest verdict
+ * under the ordering `none < stopped_on_change < converged_at_resolution < converged`,
+ * so the run stops only when all component rules stop. Requires at least one
+ * component rule (enforced by `static_assert`). Combining a convergence rule
+ * with a change rule yields `stop_verdict::stopped_on_change` when both hold,
+ * since `stopped_on_change` is weaker than `converged_at_resolution` and
+ * `converged`.
+ *
+ * Its `needs` bitmask is the bitwise union `(0u | ... | R::needs)` of all
+ * component rules' `needs`.
  *
  * \tparam R Component stopping rule types satisfying `stop_rule`.
- * \see \ref optimizers, all_of(), any_of_stop_rule
+ * \see \ref optimizers, all_of(), any_of_stop_rule, stop_verdict
  */
 // The weakest verdict of its rules (the run stops only when all of them stop
 // it; a convergence combined with a change rule stops on change).

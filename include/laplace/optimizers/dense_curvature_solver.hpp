@@ -32,8 +32,79 @@ namespace laplace::optimizers {
  * \ingroup optimizers
  * \brief Cholesky-based solver and condition estimator for dense symmetric curvature matrices.
  *
- * Reads the lower triangle of a `dense_curvature_matrix` \f$H\f$ without modifying \f$H\f$, computes the Cholesky factor of \f$H\f$ or \f$H + \lambda I\f$ via \ref dense, solves \f$(H + \lambda I) d = -g\f$, and estimates \f$\kappa_1(H + \lambda I)\f$.
- * Programs using this class must link `Laplace::dense`.
+ * `dense_curvature_solver` operates on host views of type
+ * `dense_curvature_matrix` for a fixed dimension \f$n\f$. Constructing
+ * `dense_curvature_solver(n)` allocates three buffers: the shifted matrix
+ * (\f$n \times n\f$), its Cholesky factor (\f$n \times n\f$), and a
+ * right-hand-side vector (\f$n\f$ entries). All operations are host functions,
+ * and a program using this class must link `Laplace::dense`. Used by
+ * newton_optimizer, trust_region_optimizer, and proximal_newton_optimizer
+ * (\ref optimizers_second_order, \ref optimizers_proximal).
+ *
+ * ### Factorization and solves
+ *
+ * Calling `factorize(H)` is equivalent to `factorize_shifted(H, 0.0)`.
+ * `factorize_shifted(H, lambda)` copies the lower triangle of
+ * \f$H + \lambda I\f$ without modifying `H`, computes the Cholesky
+ * decomposition \f$H + \lambda I = L L^\top\f$ via \ref dense, and stores and
+ * returns a `curvature_factorization` outcome (`positive_definite`,
+ * `non_finite` if an input entry is non-finite, or `not_positive_definite`
+ * otherwise). Passing a matrix whose dimensions are not \f$n \times n\f$
+ * throws `std::invalid_argument`. `last_factorization()` returns the most
+ * recent outcome (`not_evaluated` before the first call).
+ *
+ * After a `positive_definite` factorization, `newton_direction(g, d)` solves
+ * \f$(H + \lambda I) d = -g\f$ using two triangular solves with the stored
+ * factor and returns `true`; when the last factorization was not
+ * `positive_definite` or the solve fails, it returns `false` and leaves `d`
+ * untouched.
+ *
+ * ### Condition estimate
+ *
+ * `condition_estimate()` estimates \f$\kappa_1(A) = \lVert A \rVert_1 \lVert A^{-1} \rVert_1\f$
+ * for the last factorized matrix \f$A = H + \lambda I\f$, or returns
+ * \f$+\infty\f$ when `last_factorization()` is not `positive_definite`.
+ * \f$\lVert A \rVert_1\f$ is computed exactly from the lower triangle, while
+ * \f$\lVert A^{-1} \rVert_1\f$ uses Higham's estimate (Higham, 1988, Algorithm
+ * 4.1) refining Hager's method (Hager, 1984): an iteration on sign vectors
+ * with at most five solves, followed by one solve with
+ * \f$x_i = (-1)^i (1 + i / (n - 1))\f$, keeping the largest norm found. Every
+ * norm computed is \f$\lVert A^{-1} x \rVert_1\f$ for some \f$x\f$ with
+ * \f$\lVert x \rVert_1 = 1\f$, so the estimate never exceeds \f$\kappa_1(A)\f$
+ * beyond rounding; each solve costs \f$O(n^2)\f$.
+ *
+ * ### Measured accuracy and cost
+ *
+ * Measured with gcc on one thread (see `docs/numerics.md`), the ratio of the
+ * condition estimate to the exact \f$\kappa_1\f$ lies in \f$[0.609, 1.0001]\f$
+ * for \f$n\f$ from \f$5\f$ to \f$300\f$ and \f$\kappa\f$ from \f$10^2\f$ to
+ * \f$10^{13}\f$, where the excess over \f$1\f$ comes from rounding of the
+ * solves at \f$\kappa = 10^{13}\f$. At \f$n = 1000\f$, the estimate takes
+ * \f$1.21\f$ ms, against \f$16.0\f$ ms for the Cholesky factorization and
+ * \f$82.4\f$ ms for the inverse by \f$n\f$ solves.
+ *
+ * The test (`tests/optimizers/test_optimizers.cpp`, case `"dense curvature solver"`,
+ * \f$n = 3\f$) checks \f$H d = -g\f$ and \f$(H + \lambda I) d = -g\f$ with a
+ * relative tolerance of \f$10^{-14}\f$, a condition estimate between \f$1\f$
+ * and \f$10\f$ on its positive-definite matrix, `not_positive_definite` with
+ * `newton_direction()` returning `false` and an infinite estimate on an
+ * indefinite matrix, `positive_definite` after a shift \f$\lambda = 2\f$ with
+ * `H` unchanged, and `non_finite` on an infinite entry.
+ *
+ * ### Example
+ *
+ * Here `H` is a `dense_curvature_matrix`, `g` and `d` are `optimizer_vector`
+ * objects of size `n`, and `lambda > 0` is a shift chosen by the caller:
+ *
+ * \code
+ * laplace::optimizers::dense_curvature_solver solver(n);
+ * if (solver.factorize(H) == laplace::optimizers::curvature_factorization::positive_definite) {
+ *   solver.newton_direction(g, d);            // d = -H^{-1} g
+ *   const double kappa = solver.condition_estimate();
+ * } else {
+ *   solver.factorize_shifted(H, lambda);      // try H + lambda I
+ * }
+ * \endcode
  *
  * \see \ref optimizers, \ref dense, curvature_solver_for, curvature_factorization
  */
@@ -153,6 +224,9 @@ class dense_curvature_solver {
 /**
  * \ingroup optimizers
  * \brief Trait mapping a curvature matrix type `H` to its curvature solver type.
+ *
+ * Exposes `using type = ...` for each supported curvature matrix type. Its one
+ * specialization maps `dense_curvature_matrix` to `dense_curvature_solver`.
  *
  * \tparam H Curvature matrix type.
  * \see \ref optimizers, dense_curvature_solver, dense_curvature_matrix

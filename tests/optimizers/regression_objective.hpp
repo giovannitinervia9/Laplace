@@ -12,8 +12,9 @@
 // -l up to a constant in beta, summed and not divided by n (the objective's
 // units of decision 5). X is dense, n x p, column-major in the execution
 // space's memory; on a host backend each value and gradient is one
-// parallel_reduce over the rows accumulating 1 + p sums, on a device backend a
-// scalar reduction and a team reduction per column (functors with external
+// parallel_reduce over the rows accumulating 1 + p sums, on a device backend one
+// pass over X by chunks of rows and a small kernel that adds the chunks'
+// partial sums, into buffers allocated at construction (functors with external
 // linkage, CLAUDE.md trap); X'X is formed once at construction.
 
 #include <laplace/optimizers/objective.hpp>
@@ -62,46 +63,80 @@ struct regression_sums_functor {
   }
 };
 
-// The device route: the value and the weights w_i (d s / d eta_i) in one scalar
-// reduction, then each gradient entry sum_i w_i X(i, j) by a team per column. An
-// array reduction of 1 + p sums asks CUDA for per-block scratch that grows with p,
-// and at p = 201 it exceeded the limit ("requested too much L0 scratch memory").
-template <class MemSpace>
-struct regression_value_weights_functor {
-  regression_sums_functor<MemSpace> f;
-  Kokkos::View<double*, MemSpace> w;
-  KOKKOS_INLINE_FUNCTION void operator()(int i, double& s) const {
-    double eta = 0.0;
-    for (int j = 0; j < f.p; ++j) eta += f.X(i, j) * f.beta(j);
-    const double r = f.y(i) - eta;
-    if (f.loss == regression_loss::gaussian) {
-      s += 0.5 * r * r * f.inv_sigma * f.inv_sigma;
-      w(i) = -r * f.inv_sigma * f.inv_sigma;
-    } else {
-      s += Kokkos::fabs(r) * f.inv_sigma;
-      w(i) = r > 0.0 ? -f.inv_sigma : (r < 0.0 ? f.inv_sigma : 0.0);
-    }
-  }
-};
+// The device route: one pass over X. A team takes a chunk of
+// regression_chunk_rows rows: its threads and vector lanes compute the residuals,
+// the value and the weights w_i (d s / d eta_i, kept in team scratch), then each
+// thread takes columns and its vector lanes sum w_i X(i, j) over the chunk; the
+// team writes its 1 + p partial sums to row `team` of a preallocated buffer. A
+// second, small kernel adds the partials of the teams column by column, in a
+// fixed order, so that the result does not depend on scheduling. An array
+// reduction of 1 + p sums is not used: it asks CUDA for per-block scratch that
+// grows with p, and at p = 201 it exceeded the limit ("requested too much L0
+// scratch memory"). The buffers are allocated once, at construction.
+inline constexpr int regression_chunk_rows = 256;
 
 template <class ExecSpace>
-struct regression_gradient_functor {
+struct regression_chunk_functor {
   using memory_space = typename ExecSpace::memory_space;
   using member = typename Kokkos::TeamPolicy<ExecSpace>::member_type;
-  Kokkos::View<const double**, Kokkos::LayoutLeft, memory_space> X;
-  Kokkos::View<const double*, memory_space> w;
-  Kokkos::View<double*, memory_space> g;
+  using scratch_view = Kokkos::View<double*, typename ExecSpace::scratch_memory_space, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
+  regression_sums_functor<memory_space> f;
+  Kokkos::View<double**, Kokkos::LayoutLeft, memory_space> partial;  // teams x (1 + p)
   KOKKOS_INLINE_FUNCTION void operator()(const member& team) const {
-    const int j = team.league_rank();
-    double s = 0.0;
+    const int n = static_cast<int>(f.y.extent(0));
+    const int i0 = team.league_rank() * regression_chunk_rows;
+    const int rows = n - i0 < regression_chunk_rows ? n - i0 : regression_chunk_rows;
+    scratch_view w(team.team_scratch(0), regression_chunk_rows);
+    double value = 0.0;
     Kokkos::parallel_reduce(
-        Kokkos::TeamThreadRange(team, static_cast<int>(w.extent(0))), [&](int i, double& a) { a += w(i) * X(i, j); }, s);
-    Kokkos::single(Kokkos::PerTeam(team), [&]() { g(j) = s; });
+        Kokkos::TeamVectorRange(team, rows),
+        [&](int k, double& s) {
+          const int i = i0 + k;
+          double eta = 0.0;
+          for (int j = 0; j < f.p; ++j) eta += f.X(i, j) * f.beta(j);
+          const double r = f.y(i) - eta;
+          if (f.loss == regression_loss::gaussian) {
+            s += 0.5 * r * r * f.inv_sigma * f.inv_sigma;
+            w(k) = -r * f.inv_sigma * f.inv_sigma;
+          } else {
+            s += Kokkos::fabs(r) * f.inv_sigma;
+            w(k) = r > 0.0 ? -f.inv_sigma : (r < 0.0 ? f.inv_sigma : 0.0);
+          }
+        },
+        value);
+    Kokkos::single(Kokkos::PerTeam(team), [&]() { partial(team.league_rank(), 0) = value; });
+    if (f.value_count == 1) return;
+    team.team_barrier();
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, f.p), [&](int j) {
+      double s = 0.0;
+      Kokkos::parallel_reduce(
+          Kokkos::ThreadVectorRange(team, rows), [&](int k, double& a) { a += w(k) * f.X(i0 + k, j); }, s);
+      Kokkos::single(Kokkos::PerThread(team), [&]() { partial(team.league_rank(), 1 + j) = s; });
+    });
   }
 };
 
+template <class MemSpace>
+struct regression_combine_functor {
+  Kokkos::View<const double**, Kokkos::LayoutLeft, MemSpace> partial;
+  Kokkos::View<double*, MemSpace> out;
+  KOKKOS_INLINE_FUNCTION void operator()(int k) const {
+    double s = 0.0;
+    for (int t = 0; t < static_cast<int>(partial.extent(0)); ++t) s += partial(t, k);
+    out(k) = s;
+  }
+};
+
+template <class MemSpace>
+struct regression_device_buffers {
+  Kokkos::View<double**, Kokkos::LayoutLeft, MemSpace> partial;
+  Kokkos::View<double*, MemSpace> out;
+  typename Kokkos::View<double*, MemSpace>::host_mirror_type out_host;
+};
+
 template <class ExecSpace>
-void regression_sums(const regression_sums_functor<typename ExecSpace::memory_space>& f, double* out) {
+void regression_sums(const regression_sums_functor<typename ExecSpace::memory_space>& f,
+                     const regression_device_buffers<typename ExecSpace::memory_space>& buffers, double* out) {
   using memory_space = typename ExecSpace::memory_space;
   const int n = static_cast<int>(f.y.extent(0));
   if constexpr (Kokkos::SpaceAccessibility<Kokkos::HostSpace, memory_space>::accessible) {
@@ -109,18 +144,17 @@ void regression_sums(const regression_sums_functor<typename ExecSpace::memory_sp
     Kokkos::parallel_reduce("regression_test_sums", Kokkos::RangePolicy<ExecSpace>(0, n), f, r);
     Kokkos::fence();
   } else {
-    Kokkos::View<double*, memory_space> w("regression_test_w", n), g("regression_test_g", f.p);
-    double value = 0.0;
-    Kokkos::parallel_reduce("regression_test_value", Kokkos::RangePolicy<ExecSpace>(0, n),
-                            regression_value_weights_functor<memory_space>{f, w}, value);
-    out[0] = value;
-    if (f.value_count > 1) {
-      Kokkos::parallel_for("regression_test_gradient", Kokkos::TeamPolicy<ExecSpace>(f.p, Kokkos::AUTO),
-                           regression_gradient_functor<ExecSpace>{f.X, w, g});
-      auto gh = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g);
-      for (int j = 0; j < f.p; ++j) out[1 + j] = gh(j);
-    }
-    Kokkos::fence();
+    using functor = regression_chunk_functor<ExecSpace>;
+    const int teams = static_cast<int>(buffers.partial.extent(0));
+    const auto bytes = functor::scratch_view::shmem_size(regression_chunk_rows);
+    Kokkos::parallel_for("regression_test_chunks",
+                         Kokkos::TeamPolicy<ExecSpace>(teams, Kokkos::AUTO, 32).set_scratch_size(0, Kokkos::PerTeam(bytes)),
+                         functor{f, buffers.partial});
+    Kokkos::parallel_for("regression_test_combine", Kokkos::RangePolicy<ExecSpace>(0, f.value_count),
+                         regression_combine_functor<memory_space>{buffers.partial, buffers.out});
+    const auto n_out = std::make_pair(0, f.value_count);
+    Kokkos::deep_copy(Kokkos::subview(buffers.out_host, n_out), Kokkos::subview(buffers.out, n_out));
+    for (int k = 0; k < f.value_count; ++k) out[k] = buffers.out_host(k);
   }
 }
 
@@ -151,6 +185,12 @@ class regression_test_objective {
                             regression_loss loss, double sigma = 1.0)
       : n_(n), p_(p), loss_(loss), inv_sigma_(1.0 / sigma), X_("X", n, p), y_("y", n), beta_("beta", p),
         beta_host_("beta_host", p), XtX_("XtX", p, p), sums_(static_cast<std::size_t>(p) + 1) {
+    if constexpr (!Kokkos::SpaceAccessibility<Kokkos::HostSpace, memory_space>::accessible) {
+      buffers_.partial = decltype(buffers_.partial)("regression_test_partial",
+                                                    (n + regression_chunk_rows - 1) / regression_chunk_rows, p + 1);
+      buffers_.out = decltype(buffers_.out)("regression_test_out", p + 1);
+      buffers_.out_host = Kokkos::create_mirror_view(buffers_.out);
+    }
     auto Xh = Kokkos::create_mirror_view(X_);
     auto yh = Kokkos::create_mirror_view(y_);
     for (int j = 0; j < p; ++j)
@@ -190,7 +230,7 @@ class regression_test_objective {
     for (int j = 0; j < p_; ++j) beta_host_(j) = beta(j);
     Kokkos::deep_copy(beta_, beta_host_);
     regression_sums_functor<memory_space> f{gradient ? p_ + 1 : 1, X_, y_, beta_, loss_, inv_sigma_, p_};
-    regression_sums<ExecSpace>(f, sums_.data());
+    regression_sums<ExecSpace>(f, buffers_, sums_.data());
     return sums_[0];
   }
 
@@ -202,6 +242,7 @@ class regression_test_objective {
   Kokkos::View<double*, Kokkos::HostSpace> beta_host_;
   curvature_type XtX_;
   std::vector<double> sums_;
+  regression_device_buffers<memory_space> buffers_;  // device route only
 };
 
 // A test problem: X with a column of ones first, then p - 1 standard normal

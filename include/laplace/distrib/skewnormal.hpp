@@ -705,17 +705,13 @@ struct skewnormal_distrib {
    * \see distrib_start_value(), distrib_sample_summary, start_inside(), distrib_start
    */
   // Starting value (generic_start.hpp): by construction the parameters are the mean, the standard deviation
-  // and the skewness, so the sample's own are the exact moment estimates. The summary carries no skewness
-  // field (distrib_sample_summary of core.hpp): when it gets one, named skewness, it is used; until then
-  // gamma is estimated from the mean and the median, gamma ~ 6 (mean - median)/sd (Pearson, exact to first
-  // order in the skewness). Kept strictly inside (-g, g).
-  template <class Summary>
-  skewnormal_distrib start_value(const Summary& s) const {
+  // and the skewness, so the sample's own are the exact moment estimates. Kept strictly inside (-g, g).
+  // The member takes the summary type itself, not a template parameter: a template would also accept the
+  // sample vector, and distrib_start_value(prototype, y), which prefers a start_value(y), would then pick it
+  // and fail to compile.
+  skewnormal_distrib start_value(const distrib_sample_summary& s) const {
     const double sd = Kokkos::sqrt(s.variance);
-    double sk;
-    if constexpr (requires { s.skewness; }) sk = s.skewness;
-    else sk = sd > 0.0 ? 6.0 * (s.mean - s.median) / sd : 0.0;
-    return {start_inside(s.mean, params[0]), start_inside(sd, params[1]), start_inside(sk, params[2])};
+    return {start_inside(s.mean, params[0]), start_inside(sd, params[1]), start_inside(s.skewness, params[2])};
   }
 };
 

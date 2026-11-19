@@ -298,6 +298,24 @@ struct mvpowerexp2_distrib {
     theta[structure.n_params()] = 1.0;
   }
   /**
+   * \brief Compute starting parameters `theta` on the host from the sample itself.
+   *
+   * \f$\beta\f$ solves \f$d^2\,\Gamma(\tfrac{d}{2\beta})\,\Gamma(\tfrac{d+4}{2\beta}) / \Gamma(\tfrac{d+2}{2\beta})^2 = b_2\f$,
+   * the law's multivariate kurtosis equated to Mardia's sample kurtosis
+   * \f$b_2 = n^{-1} \sum_i ((y_i - \bar y)^\top S^{-1} (y_i - \bar y))^2\f$ (\f$S\f$ the covariance with
+   * divisor \f$n\f$), by bisection on \f$\log\beta\f$ over \f$[1/4, 10]\f$ and clamped to the
+   * nearer end outside it; the matrix parameters come from \f$S\f$ divided by the covariance factor
+   * at that \f$\beta\f$, so that the covariance of the start equals \f$S\f$. With fewer than
+   * \f$d + 2\f$ units or a singular \f$S\f$, \f$\beta = 1\f$ and the summary rule above.
+   *
+   * \param y Pointer to `n * dim()` values on the host, unit `i` at `y[i * dim() ...]`.
+   * \param n Number of units.
+   * \param theta Output parameter vector of length `theta_size()`.
+   */
+  void start_value(const double* y, int n, double* theta) const {
+    detail_mvpowerexp::start_from_sample<true>(structure, y, n, theta);
+  }
+  /**
    * \brief Write the distribution mean \f$\mathbb{E}[Y] = \mu\f$ into `out`.
    *
    * Every moment of the law is finite, so the mean exists for every \f$\beta > 0\f$.

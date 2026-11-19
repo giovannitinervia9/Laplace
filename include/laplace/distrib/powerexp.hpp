@@ -159,6 +159,9 @@
 
 #include <Kokkos_Core.hpp>
 
+#include <cmath>
+#include <vector>
+
 namespace laplace::distrib {
 
 namespace detail_powerexp {
@@ -797,6 +800,63 @@ struct powerexp_distrib {
   powerexp_distrib start_value(const distrib_sample_summary& s) const {
     return {start_inside(s.mean, params[0]), start_inside(Kokkos::sqrt(s.variance), params[1]),
             start_inside(2.0, params[2])};
+  }
+
+  /**
+   * \ingroup distrib_powerexp
+   * \brief Kurtosis \f$K(p) =\Gamma(5/p)\,\Gamma(1/p) / \Gamma(3/p)^2\f$ of the law (host).
+   *
+   * Decreasing in \f$p\f$: 6 at \f$p = 1\f$, 3 at \f$p = 2\f$, \f$9/5\f$ as \f$p \to \infty\f$.
+   * \param p Shape, positive.
+   * \return The kurtosis.
+   */
+  static double kurtosis_of_shape(double p) {
+    return std::exp(std::lgamma(5.0 / p) + std::lgamma(1.0 / p) - 2.0 * std::lgamma(3.0 / p));
+  }
+
+  /**
+   * \ingroup distrib_powerexp
+   * \brief Starting value from the sample (host): the mean, the standard deviation and \f$p\f$ from the kurtosis.
+   *
+   * With \f$m_2, m_4\f$ the central moments of the sample (divisor \f$n\f$), \f$p\f$ solves
+   * \f$K(p) = m_4 / m_2^2\f$ by bisection on \f$\log p\f$ over \f$[1/2, 20]\f$, and is clamped
+   * to the nearer end when the sample kurtosis lies outside \f$[K(20), K(1/2)] = [1.824, 25.2]\f$.
+   * A sample with no spread, or with fewer than four observations, takes \f$p = 2\f$.
+   * \param y Sample vector on the host.
+   * \return A \c powerexp_distrib with parameters strictly inside their open domains.
+   * \see kurtosis_of_shape(), distrib_start_value(), distrib_start
+   */
+  powerexp_distrib start_value(const std::vector<double>& y) const {
+    double n = 0.0, mean = 0.0;
+    for (double v : y)
+      if (std::isfinite(v)) n += 1.0, mean += v;
+    mean = n > 0.0 ? mean / n : 0.0;
+    double m2 = 0.0, m4 = 0.0;
+    for (double v : y)
+      if (std::isfinite(v)) {
+        const double d2 = (v - mean) * (v - mean);
+        m2 += d2, m4 += d2 * d2;
+      }
+    double shape = 2.0;
+    if (n >= 4.0 && m2 > 0.0) {
+      m2 /= n, m4 /= n;
+      const double b2 = m4 / (m2 * m2);
+      double lo = std::log(0.5), hi = std::log(20.0);
+      if (b2 >= kurtosis_of_shape(0.5)) {
+        shape = 0.5;
+      } else if (b2 <= kurtosis_of_shape(20.0)) {
+        shape = 20.0;
+      } else {
+        for (int it = 0; it < 60; ++it) {  // K decreasing in p; 60 halvings of [log 0.5, log 20]
+          const double mid = 0.5 * (lo + hi);
+          (kurtosis_of_shape(std::exp(mid)) > b2 ? lo : hi) = mid;
+        }
+        shape = std::exp(0.5 * (lo + hi));
+      }
+    } else {
+      m2 = n > 0.0 ? m2 / n : 0.0;
+    }
+    return {start_inside(mean, params[0]), start_inside(std::sqrt(m2), params[1]), start_inside(shape, params[2])};
   }
 };
 

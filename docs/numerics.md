@@ -13556,3 +13556,281 @@ times 1.5 on the default CUDA build and gcc.
 structure) are not written. There is no `expected_info_dk`. The radial kink has
 no place in the multivariate interface (no `y_regularity`, no runtime kinks),
 which would need a change of its own across every multivariate law and wrapper.
+
+## The optimizer benches on the GPU: where CUDA pays (2026-11-19)
+
+**What.** The nine optimizer benches (`benchmarks/optimizers_*.cpp`) timed on the
+gcc build (gcc 14.2, Kokkos OpenMP, 1 and 16 threads) and on the CUDA build
+(CUDA 13.1 with MSVC 14.44 for the host code, Kokkos with relocatable device
+code, RTX 4070 SUPER, whose FP64 rate is 1/64 of FP32), with both build slots
+held for the whole run. Three benches are host code only (`foundations`,
+`quasi_newton`, `second_order`): on the CUDA build they measure MSVC against gcc,
+not the GPU. Six evaluate the objective in Kokkos kernels:
+
+| bench | objective | kernels per call | host part | sizes |
+|---|---|---|---|---|
+| fit_distrib | -l of one distrib, 1 to 3 parameters | one parallel_reduce | Newton or BFGS step | n = 1e3, 1e5, 1e6 |
+| block_coordinate, derivative_free (Laplace rows) | the same for laplace1 and laplace2 | one parallel_reduce | Brent, Nelder-Mead or compass on mu, Newton on the scale | n = 1e3, 1e5, 1e6 |
+| proximal | gaussian regression, p = 51 | one pass over X by chunks of rows, then a small kernel adding the chunks (first measured: a reduce writing weights and a team reduce per column) | FISTA, or proximal Newton's coordinate descent on the model | n = 1e3, 1e4, 1e5 |
+| primal_dual | gaussian regression, p = 41 | the same | Condat-Vu step with a difference map | n = 1e3 (default), 1e4, 1e5 |
+| bundle | least absolute deviations, p = 11 to 101 | the same | dual QP on the bundle | n = 100 to 1e5 |
+
+The split between the time spent inside the objective's calls (kernels,
+launches and copies to the host) and the time of the host loop was measured with
+a timer around each call of the objective, in a separate program outside the
+repository that runs the same problems twice and keeps the second run. On CUDA
+every call returns its result to the host, so it ends with the device idle and
+the timer includes the whole device work.
+
+**The fit_distrib objective (a few parameters, one reduction per call).** Time
+per call measured by the timer, laplace1:
+
+| n | gcc 1 thread | gcc 16 threads | CUDA |
+|---|---|---|---|
+| 1e3 | 8.6 us | 77 us | 26 us |
+| 1e5 | 0.63 ms | 157 to 171 us | 48 to 52 us |
+| 1e6 | 6.5 ms | 1.03 to 1.06 ms | 258 to 275 us |
+
+(1 thread: time per fit over the number of passes of the bench.) ms per fit,
+fastest of repeats, 1 thread / 16 threads / CUDA:
+
+| problem | n = 1e3 | n = 1e5 | n = 1e6 |
+|---|---|---|---|
+| laplace1, Brent on mu + Newton on sigma | 0.84 / 5.1 / 2.0 | 38.8 / 7.8 / 2.5 | 363 / 43.5 / 11.5 |
+| laplace1, Newton on the expected curvature | 0.12 / 0.67 / 0.28 | 10.2 / 1.9 / 0.63 | 97 / 10.9 / 2.8 |
+| laplace2, Brent + Newton | 0.64 / 4.6 / 1.5 | 37.7 / 7.6 / 1.8 | 447 / 53 / 8.2 |
+| laplace1, Nelder-Mead on mu + Newton | 1.6 / 10.5 / 4.0 | 92 / 23.2 / 6.9 | |
+
+Over the 28 rows of the fit_distrib bench with a pass time (14 distribs, Newton
+on the observed curvature and BFGS), the GPU against the faster of 1 and 16
+threads: at n = 1e3 faster in 11 of 28, geometric mean 0.86 (range 0.44 to
+2.1); at n = 1e5 faster in 26 of 28, geometric mean 3.1 (0.71 to 9.4); at
+n = 1e6 faster in all 28, geometric mean 5.1 (2.5 to 11.6). With Newton on the
+observed curvature at n = 1e6 the gain against 16 threads is 8.9 to 11.6 times
+for cauchy, logistic, lognormal2 and gumbel and 3.5 to 4.1 times for gamma1,
+gamma2 and chisq, whose rows call lgamma and digamma, as the FP64 rate of this
+card suggests. From the bench's own pass times, the objective takes 70 to 100
+per cent of the time from n = 1e5 (the lowest on fits that stop at iteration 0
+after one pass) and 65 to 100 per cent at n = 1e3. BFGS rows can differ in
+their counts between backends (finding b below), so their ratios mix speed and
+work.
+
+**The regression objective of the tests (p columns).** As first measured, its
+device path allocated two Views on the device in every call and computed the
+gradient with one team per column, p teams in all (11 to 101 blocks on a card
+that runs thousands): the GPU was never faster, 0.59 to 0.64 ms per call at
+n = 1e5 and p = 51 against 0.57 to 0.61 ms on 16 threads, where reading X once
+(41 MB) at the card's bandwidth takes about 0.1 ms. The path now makes one pass
+over X: a team takes 256 rows, computes their residuals, the value and the
+weights in team scratch, then sums the weights times each column over its rows,
+and writes its 1 + p partial sums to a buffer allocated at construction; a
+second small kernel adds the teams' partial sums in a fixed order. The host
+path is unchanged. Time per call after the change (timer around each call,
+second of two runs):
+
+| bench | n, p | gcc 16 threads | CUDA |
+|---|---|---|---|
+| proximal | 1e3, 51 | 92 to 102 us | 57 to 71 us |
+| proximal | 1e4, 51 | 117 to 129 us | 59 to 66 us |
+| proximal | 1e5, 51 | 539 to 585 us | 94 to 98 us |
+| primal_dual | 1e3 / 1e4 / 1e5, 41 | 93 / 120 / 460 us | 60 / 64 / 98 us |
+| bundle | 100, 11 / 1e3, 51 / 1e4, 101 / 1e5, 11 | 91 / 97 / 194 / 225 us | 44 / 72 / 95 / 63 us |
+
+On 1 thread a call costs about 35 us at n = 1e3, 0.32 ms at 1e4 and 4.6 ms at
+1e5 (proximal, p = 51). ms per run, 1 thread / 16 threads / CUDA:
+
+| problem | n = 1e3 | n = 1e4 | n = 1e5 |
+|---|---|---|---|
+| lasso, FISTA | 1.46 / 3.5 / 2.6 | 10.1 / 4.0 / 1.9 | 139 / 15.8 / 3.0 |
+| equicorrelated lasso, FISTA | | | 3975 / 309 / 58 |
+| lasso, proximal Newton (CD) | | | 42 / 4.9 / 1.0 |
+| equicorrelated lasso, proximal Newton (CD) | | | 61 / 11.1 / 10.7 |
+| fused lasso, primal-dual (26606 iterations) | | | 12.3 s on 16 threads / 2.8 s |
+| LAD, bundle | 26.5 / 37.9 / 30.6 (p = 51) | 715 / 479 / 393 (p = 101) | 115 / 17.6 / 11.5 (p = 11) |
+
+So with one pass over X the GPU is faster than the best CPU from n = 1e4 at
+p = 41 to 51 (about 2 times) and 4 to 5 times at n = 1e5; at n = 1e3 a single
+thread is fastest, since the GPU's floor is about 45 to 60 us per call (two
+kernels and a copy back). Where the host part dominates the GPU gains little:
+proximal Newton's coordinate descent on the equicorrelated lasso (0.7 to 1.2 ms
+per iteration with gcc, 1.5 to 2.7 ms with MSVC; the objective takes 5 to 12
+per cent of the run on CUDA) and the bundle's dual QP with p = 51 and 101
+(about 0.1 and 0.9 ms per iteration on both builds; the objective takes 9 to 50
+per cent of the run).
+
+**Host code: MSVC against gcc.** On the host-only benches the CUDA build is
+slower by a geometric mean of 2.3 times (second_order, 95 rows; multistart rows
+of quasi_newton 3.7 to 3.9 times); iterations, evaluations and results are
+identical except on the noisy objective sum(p^2) + 100 sin(1e20 p_1), whose
+value differs between the two platforms' sin, as it should. The same factor
+shows in the host part of the kernel benches (denoising rows of primal_dual, pure
+host code: 1.8 to 2.7 times).
+
+**Where the GPU pays.** For an objective with one reduction per call over
+rows of light work, from n of about 1e5 (3 times the best CPU time, 5 times at
+1e6); at n = 1e3 a single CPU thread is usually fastest, since the GPU's floor
+of about 15 to 26 us per call (launch, reduction and copy back) and the 16
+threads' floor of about 38 to 77 us are both larger than the work (one pass of
+order 0 at n = 1e3: 7.5 to 127 us on 1 thread, 38 to 62 on 16, 15 to 79 on
+CUDA). The crossover lies between n = 1e3 and 1e5; n = 1e4 was not run. For a
+regression with p of about 50 read in one pass, from n = 1e4 (2 times) and 4 to
+5 times at n = 1e5, unless the host loop dominates.
+
+**The primal-dual status that changed with the thread count, and its repair.**
+First measured, the fused lasso at n = 1e3 ended with its budget on 1 thread
+(1e5 iterations, V = 2.1e-4) and converged in 6372 iterations on 16 threads and
+on CUDA; at n = 1e4 the same; at n = 1e5 it converged only on CUDA (26606
+iterations); trend filtering of order 2 at n = 1e3 converged in 39385 iterations
+except on 1 thread. Traced per iteration, the 1- and 16-thread runs agree to
+1e-14 relative up to iteration 4722 (same V, |r_p|^2, sigma, and L = 3.51e4 after
+one doubling at iteration 61). At iteration 4723, on 1 thread, the
+descent-lemma test s(x+) - s(x) - grad s(x)'(x+ - x) - (L/2)|x+ - x|^2 <= 8 eps
+max(1, |s(x)|) failed on rounding: its first two terms are 8.3e-8 each and
+cancel, the computed excess swings by about +-2e-12 between iterations (the
+sequential sum of 1000 rows, about 13 eps |s|), above the slack 1.49e-12 plus
+(L/2)|x+ - x|^2 = 7.8e-13, while on 16 threads it swings by about +-3e-13. L
+only doubles, and each doubling halves tau and makes the quadratic term smaller,
+so the next false failure is likelier: 21 more doublings, L = 1.2e12, tau =
+1.3e-14, V held at 6.1e-5 until the budget (trend filtering: from iteration
+22164, L = 3.7e10, V = 7.2e-4). The repair is the fallback the proximal gradient
+method already has (Becker, Candes and Grant, 2011): an excess within sqrt(eps)
+max(1, |s(x)|) is decided on gradients, (x+ - x)'(grad s(x+) - grad s(x)) <=
+(L/2)|x+ - x|^2, with grad s(x+) already computed, so it costs no evaluation.
+After it, 1 and 16 threads give the same status and iterations: fused lasso
+6372, 15764 and 26606 iterations at n = 1e3, 1e4 and 1e5, trend filtering 39385
+at n = 1e3 (CUDA the same), trend filtering at n = 1e4 still at the budget with
+V = 8.4e-2 on both; L doubles once in every run. Other effects, measured on gcc:
+denoising with the fused lasso at p = 1000 now converges in 4114 iterations
+(was the budget with V = 1.0e-3); of the genlasso fits of the tests, fused
+lasso and elastic net on differences at fraction 0.01 on f2 (n = 1000, p = 200)
+now converge within the tests' 1e4 iterations (2472 and 3359; were the budget
+with V = 1.6e-4 and 1.9e-6), fused at 0.01 on f1 takes 1909 iterations instead
+of 1919, and every other row is unchanged. A test runs the fused case at
+n = 1e3 with its sum taken on Kokkos::Serial and on the default space and asks
+both to converge within 6000 to 6800 iterations (6372 and 6372 on gcc).
+
+**BFGS at iteration 0.** BFGS from a start already at the optimum spends 8 to 39
+evaluations confirming convergence, a number that varies with the backend
+(gaussian1 at n = 1e3: 23 on 1 thread, 11 on CUDA); its times are those
+evaluations.
+
+**Cost of the run.** The primal_dual bench runs n = 1000 by default (the
+larger sizes on the command line): 5.8 s on 1 thread, 8.5 s on 16 threads and
+11.8 s on CUDA, against 17 minutes on 1 thread with n = 1e4 and 1e5, whose
+trend-filtering rows run to the 1e5-iteration budget (4.7 ms per iteration at
+n = 1e5 on 1 thread). Every other bench takes seconds.
+
+## Starting values and the fit_distrib bench on the laws added after it (2026-11-19)
+
+**What.** The fit_distrib bench of the optimizers (section "fit_distrib data and
+estimates") covered the sixteen continuous and three discrete laws that existed when
+it was written. Seventeen cases of the laws added since are now fitted against frozen
+references: student_t1, student_t2, skewnormal, skewt, pseudohuber, weibull,
+vonmises, beta, betabinom (size 10), negbin1, negbin2, pig, enet, powerexp at
+p = 1.5 and p = 3, mcp and scad, each at n = 1e3 and 1e5. Every law already had its
+own start_value; the shapes of powerexp (p = 2) and mvpowerexp (beta = 1) were
+constants and now come from the kurtosis.
+
+**Starting shapes from the kurtosis.** `powerexp_distrib::start_value(y)` solves
+K(p) = b_2, with K(p) = Gamma(5/p) Gamma(1/p) / Gamma(3/p)^2 the kurtosis of the law
+(6 at p = 1, 3 at p = 2, 9/5 as p goes to infinity, decreasing) and b_2 = m_4 / m_2^2
+the sample's, by bisection on log p over [1/2, 20] (clamped outside
+[K(20), K(1/2)] = [1.824, 25.2]); mu and sigma are the sample mean and standard
+deviation. `mvpowerexp1/2_distrib::start_value(y, n, theta)` solves Mardia's
+multivariate kurtosis of the law, d^2 Gamma(d/(2 beta)) Gamma((d+4)/(2 beta)) /
+Gamma((d+2)/(2 beta))^2 (d(d+2) at beta = 1, the univariate K(2 beta) at d = 1),
+equated to the sample's (Mardia, 1970), by bisection on log beta over [1/4, 10], and
+takes the matrix from S divided by the covariance factor at that beta. Measured
+(tests/distrib/test_shape_starts.cpp):
+
+| law | draws | true shape | relative error of the start |
+|---|---|---|---|
+| powerexp | 1e5 | p = 0.8, 1.5, 2, 3, 6 | 0.0389, 0.0116, 0.0056, 6.4e-5, 0.0094 |
+| mvpowerexp1/2, d = 3, log-Cholesky | 4e4 | beta = 0.4, 1, 2.5 | 0.0022, 0.0023, 0.0062 |
+| mvpowerexp1, d = 2, ar1 | 4e4 | beta = 0.4, 1, 2.5 | 0.0036, 0.0032, 0.0055 |
+
+With the log-Cholesky structure the covariance of the start equals S to 4.9e-16
+relative; ar1 cannot represent every S. Bounds 0.06 and 0.0095. A latent defect was
+found on the way: `skewnormal_distrib::start_value` was a template over any summary
+type, so `distrib_start_value(prototype, y)`, which prefers a member over the
+sample, picked it with the vector and did not compile; it now takes
+`distrib_sample_summary`, whose `skewness` it reads.
+
+**References.** `tools/reference/optimizers_fit_distrib_laws.R` simulates the data
+in R and writes `fit_distrib_laws.csv` beside the first bench's files (which it does
+not touch). The log-density is independent of Laplace's code: distributions7's
+`distrib_pdf` for the laws statmodels7 has, gamlss.dist's `dPE` for the power
+exponential (its (mu, sigma, nu) is Laplace's (mu, sigma, p)), and for mcp and scad
+the definition of the header with the normalizing constant by `integrate()`. The MLE
+is optim's BFGS in free coordinates followed by cycles of one-dimensional Brent
+searches until a cycle gains less than 1e-11, from the true values and from
+statmodels7's estimate, keeping the better; Brent needs no derivative, so it reaches
+a maximum at a kink. Laplace's log-likelihood at R's MLE equals R's to at most
+1.2e-13 relative on all 34 data sets (bound 1.8e-13): the parametrizations agree.
+statmodels7's `fit_distrib()` agrees with R's maximum to 1e-8 on every law it has
+except enet, where it reports convergence at alpha = 2.2e-308 (n = 1e3, 10.1 below
+the maximum) and at alpha = 1 - 5e-9 (n = 1e5, 2056 below); the test then requires
+the fit to reach above statmodels7's value and compares estimates with R's only.
+
+**Fits.** Every run of the thirteen smooth laws (Newton with the observed and the
+expected curvature, BFGS, from the library and the +1 start) converges within the
+decrement bound of R's MLE and of statmodels7's. enet, mcp and scad have their MLE of
+mu on an observation (the nearest one 1.4e-10 to 2.4e-9 from R's estimate), the kink
+of l in mu: from the library start every smooth method reaches the maximum (within
+4.2e-5 at n = 1e3, enet BFGS, and 1.75e-6 at n = 1e5, scad Newton expected with an
+uncapped step, 1.11e-6 with the cap below) but its stopping rule cannot certify a kink,
+and most end stalled or with a failed line search. They are asserted on the value
+(6.3e-5 and 2.7e-6, the uncapped measurement times 1.5). The certified fit is the
+alternation of the Laplace (Brent on mu, Newton on the rest with its step capped at 1):
+on all six data sets from the library start it stops converged at the resolution of
+Brent's search, within 6.0e-7 of R's log-likelihood (2.2e-7 at n = 1e3). Its mu is
+checked through the value only: l has a kink at every observation, and a neighbouring
+one can lie within the value bound (scad at n = 1e5 from the +1 start: mu 3.3e-5 from
+R's, -l 7.8e-7 above it).
+
+**The +1 start, and why some methods diverge from it.** The maximum is interior in
+every case; the failures are the method's.
+- pseudohuber: the expected curvature in log nu at the start is 2.33 against a
+  gradient of 30.6 (the observed one is -1.74, indefinite). Uncapped Fisher scoring
+  takes the full step, accepted because -l falls (2591 to 2244): nu goes to 1.5e-4,
+  then 1e28, then 1.3e-159, where l is flat in log nu, and it stalls 19.4 above the
+  minimum of -l at n = 1e3. Newton with the observed curvature takes the
+  eigen-modified direction, capped at 1, and BFGS a scaled gradient step: both
+  converge.
+- enet: Fisher scoring takes logit alpha to about 8 in its first step (alpha near 1,
+  the Laplace end) and stays there with any cap; the trust region and the capped
+  alternation reach the maximum.
+- mcp and scad: two basins. The profile log-likelihood at n = 1e3 (maximized over
+  the other three parameters, in R) has its maximum at gamma = 3.5 (-2106.99) for mcp
+  and at a = 4 (-1985.93) for scad, a valley near gamma = 30 (-2185.33) and a = 10
+  (-2038.45), and beyond it a supremum at gamma or a going to infinity, where the tail
+  variance goes to 0 and the law becomes the Laplace of rate lambda (-2166.82 and
+  -2027.60). From the +1 start (gamma = 8.2) the first Fisher step takes mcp from
+  gamma 7 to 71 and the tail variance from 1.9 to 1.3e-4, across the valley; no
+  method tried reaches the maximum (Fisher with any cap, trust region, BFGS,
+  alternation), and every such fit is flagged on the boundary (infinite free
+  standard error). For scad the capped Fisher scoring and the capped alternation
+  reach the maximum. A reparametrization of the shape moves the boundary to a finite
+  point but cannot remove the second basin, which is in the likelihood.
+
+**Fisher scoring with a capped step.** Over the 36 data sets of the bench at both n,
+from both starts (144 runs, the diagnostic "Fisher scoring max_step" of
+`tests/optimizers/test_fit_distrib_diagnostics.cpp`), with `max_step` the largest component of a
+step in the free coordinates:
+
+| max_step | converged | iterations | value evaluations | gradient evaluations | largest -l above the minimum, converged runs |
+|---|---|---|---|---|---|
+| infinite | 131 | 1442 | 6089 | 1586 | 1.75e-6 |
+| 2 | 133 | 1446 | 6414 | 1590 | 1.75e-6 |
+| 1 | 134 | 1153 | 4102 | 1297 | 1.11e-6 |
+
+No run changes to a worse status. With 2, pseudohuber's two +1 runs converge; with 1,
+also scad's (n = 1e5 converged, n = 1e3 stalled at the kink within 3.2e-7); enet's +1
+runs stay far (882 to 1e5 above) and mcp's unchanged. At equal status, 9 runs take one
+more iteration with 1 (scad from the library start at n = 1e3: 8 more, 42 to 50) and
+18 take fewer. The bench's Fisher scoring now caps its step at 1
+(`fisher_max_step` in `fit_distrib_bench.hpp`); `newton_optimizer`'s own default stays
+infinite.
+
+**Reference.** Mardia, K. V. (1970). Measures of multivariate skewness and kurtosis
+with applications. Biometrika 57(3), 519-530.

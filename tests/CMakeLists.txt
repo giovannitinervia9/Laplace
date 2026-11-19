@@ -86,6 +86,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_mvstudent_t.cpp
   distrib/test_mvstudent_t_improper.cpp
   distrib/test_mvpowerexp.cpp
+  distrib/test_shape_starts.cpp
   distrib/test_simplex.cpp
   math/test_chain_pair.cpp
   pdmat/test_pilot.cpp
@@ -108,6 +109,8 @@ set(LAPLACE_TEST_SOURCES
   optimizers/test_quasi_newton.cpp
   optimizers/test_multistart.cpp
   optimizers/test_fit_distrib.cpp
+  optimizers/test_fit_distrib_laws.cpp
+  optimizers/test_fit_distrib_diagnostics.cpp
   optimizers/test_all_headers.cpp
   optimizers/test_second_order.cpp
   optimizers/test_block_coordinate.cpp
