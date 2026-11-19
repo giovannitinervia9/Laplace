@@ -46,6 +46,8 @@ Away from the atoms (\f$y \notin \{c_0, \dots, c_{N-1}\}\f$), the log-value \f$\
 \f]
 a sum of terms each depending on only one block of parameters. Consequently, **every mixed component** with at least one parent index and at least one free-coordinate index **is identically zero**, and the order-\f$K\f$ derivative tensor (`logpdf_dk<K>` or `logpmf_dk<K>`, \f$1 \le K \le 6\f$) is block diagonal at every non-atom \f$y\f$. At an adjusted atom \f$y = c_j\f$, \f$\ell(c_j) = \log \pi_j(u)\f$ depends only on \f$u\f$, so every component with a parent index vanishes identically there as well. When \f$R(\theta) \ne 1\f$ (a discrete parent with adjusted atoms), the parameter derivatives of \f$\log R(\theta)\f$ are computed from the parent's log-mass derivatives at the adjusted points via the ratio and Bell relation of \ref distrib_generic "the generic routes" and subtracted from the parent block.
 
+For a continuous parent, `logpdf_dy_dk<J, K>(y)` holds the \f$J\f$-th derivative in \f$y\f$ of the log-density as a symmetric tensor of order \f$K\f$ over the parameters. The member exists only for a continuous parent (`requires(D::kind == distrib_kind::continuous)`), because a discrete parent has no derivatives in \f$y\f$, and its total order is \f$J + K \le 6\f$. For \f$J = 0\f$, it forwards to the routes above, with \f$K = 0\f$ giving `logpdf(y)` itself. For \f$J \ge 1\f$, the decomposition above writes the log-density away from the atoms as the cell's log mass plus the parent's log-density, less the log renormalization. Because neither the cell's mass nor the renormalization depends on \f$y\f$, every component carrying a free coordinate is identically zero. Components whose indices are all parent parameters equal the parent's `logpdf_dy_dk<J, K>(y)` unchanged. At an atom, a derivative in \f$y\f$ has no meaning because the derivative of a point mass is not a quantity (\ref distrib_atoms "the atom descriptors"). The member therefore returns quiet `NaN` in every component there, so a caller reads a signal instead of the parent's density derivative, which would be a plausible wrong number.
+
 The derivatives in the free coordinates \f$u\f$ require no new numerical code. With \f$S(u) = \log\bigl(1 + \sum_{b=0}^{N-1} e^{u_b}\bigr)\f$, we have \f$\log \pi_c = u_c - S\f$ for an atom \f$c < N\f$ and \f$\log \pi_N = -S\f$, so every derivative of order \f$K \ge 2\f$ equals \f$-\partial^K S\f$ for every cell, while order \f$1\f$ alone carries the Kronecker delta \f$\delta_{c, a} - \pi_a\f$. Since \f$\partial S / \partial u_a = \pi_a\f$,
 \f[
 \frac{\partial^K S}{\partial u_{a_1} \cdots \partial u_{a_K}} = \frac{\partial^{K-1} \pi_{a_1}}{\partial u_{a_2} \cdots \partial u_{a_K}},
@@ -68,7 +70,7 @@ The starting value `start_value(const std::vector<double>& y)` is always declare
 
 ## Accuracy, checks, and worked example
 
-`tests/distrib/test_atom_mixture.cpp` runs \f$13\f$ test cases and \f$2998\f$ assertions on the `gcc` build with no external reference file, checking every quantity against an internal mathematical twin.
+`tests/distrib/test_atom_mixture.cpp` runs \f$17\f$ test cases and \f$4081\f$ assertions, passing on `gcc` and on CUDA with no external reference file, checking every quantity against an internal mathematical twin.
 
 As a worked example from that test suite, consider `poisson_distrib{3.5}` with \f$0\f$ `inflated` and \f$5\f$ `adjusted` at cell probabilities \f$\pi = (0.20, 0.05, 0.75)\f$ (`atom_alr = {-1.3217558400, -2.7080502011}`). The Poisson parent puts \f$0.030197\f$ at \f$0\f$ and \f$0.132168\f$ at \f$5\f$, so \f$R = 1 - 0.132168 = 0.867832\f$ because only the adjusted atom is removed from the parent. At \f$y = 0\f$ (inflated), the law reads \f$0.226097\f$, keeping the Poisson's renormalized share \f$0.75 \times 0.030197 / 0.867832\f$ on top of its own cell mass \f$0.20\f$; at \f$y = 5\f$ (adjusted), it reads \f$0.05\f$, replacing the Poisson's mass \f$0.132168\f$ with a smaller value.
 
@@ -87,6 +89,7 @@ As a worked example from that test suite, consider `poisson_distrib{3.5}` with \
 | `quantile(p)` inverts `cdf(q)` (exact \f$0\f$ inside jump) | Zero-adjusted `gamma2` and zero-one-adjusted `gaussian1` | \f$10^{-9}\f$ |
 | `start_value(y)` recovers frequencies and parent mean | Zero-adjusted `gamma2`; empty cell starts in \f$(0, 0.02)\f$ | \f$10^{-12}\f$ |
 | Block-diagonal tensor structure | Zero-one-adjusted `gaussian1`, mixed and atom-parent entries | Exact (\f$0.0\f$) |
+| `logpdf_dy_dk<J, K>()` (\f$J + K \le 6\f$) | Zero-one-adjusted `gaussian1` with atoms at \f$0\f$ and \f$1\f$, four points on host (\f$1019\f$ assertions) and device kernel (\f$16\f$ assertions) | Exact (\f$0.0\f$, bit-for-bit parent copy, and quiet `NaN` at atoms) |
 
 ## Kokkos usage
 
