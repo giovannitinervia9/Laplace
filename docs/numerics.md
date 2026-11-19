@@ -13834,3 +13834,178 @@ infinite.
 
 **Reference.** Mardia, K. V. (1970). Measures of multivariate skewness and kurtosis
 with applications. Biometrika 57(3), 519-530.
+
+## The multivariate normal rectangle probability, its derivatives and the truncated law: math/mvnormal.hpp, and the cdf members of mvgaussian1 and mvgaussian2 (2026-11-19)
+
+**What.** `log_mvn_rect(k, a, b, Sigma)`, log Pr(a < X <= b) for X ~ N(0, Sigma),
+every limit possibly infinite, on the log scale and with a small RELATIVE
+error deep in the tail; its derivatives in the shift of the rectangle of every
+order (`log_mvn_rect_derivs`); the cumulants of the truncated law T = X | a <
+X <= b to order six (`log_mvn_trunc_cumulants`), with `mvn_trunc_mean` and
+`mvn_trunc_cov`; the derivatives of log P through those cumulants
+(`log_mvn_rect_log_derivs`). On top, the optional members of mvgaussian1 and
+mvgaussian2: log_cdf, log_ccdf, log_rect_prob, cdf, ccdf, and the derivatives
+log_cdf_dk, log_ccdf_dk, log_rect_prob_dk (location to order six, theta by the
+heat equation), log_cdf_dy_dk, log_ccdf_dy_dk, detected by the named concept
+`mv_has_cdf`; the class with a singular precision returns quiet NaN.
+
+**References.** mpmath, `tools/reference/mvnormal.py`:
+- `bvn_rect`, 2654 rows: lower, upper and mixed orthants on a grid of limits
+  (-37 to 8) and correlations (to +-0.9999), and finite rectangles of widths
+  1e-6 to 5; log P by the one-dimensional integral of phi(x) times the
+  conditional interval probability, a log-concave integrand, cut around its
+  mode at multiples of its width, at 40 and 50 digits with different cuts,
+  kept when the two agree to 1e-30.
+- `mvn_factor`, 700 rows, k = 3..10, one-factor correlations r_ij = l_i l_j
+  (loadings to +-0.99), orthants and rectangles: the one-dimensional integral
+  over the factor of the product of the conditional intervals.
+- `mvn_laml`, 840 rows, k = 2..6: the orthants of the piecewise LAML of the
+  lasso (note/penalties.md 5f): one-factor R, t = lam sigma from 0.5 to 20,
+  log P to about -1400.
+- `tvn_general`: trivariate rectangles with a general correlation by Plackett's
+  identity along R(t) = I + t (R - I) and inclusion-exclusion, the precision
+  doubled until two runs agree to 1e-30.
+- `mvn_trunc_moments`, 359 rows (one-factor, LAML and rectangles, k = 2..6):
+  the raw moments of T to order 4 (k <= 3) or 2 by Gauss-Legendre over the
+  factor at 60 digits, the conditional truncated moments closed, the cumulants
+  from them at that precision; two rules (degree 6 and 7) must agree to 1e-24.
+- `tools/reference/mvnormal_lattice.py`: Korobov generators for N = 1021,
+  4093, 16381, 65521 and lattice dimensions 1..18, minimizing the weighted P_2
+  criterion with gamma_j = 1/j^2 (unweighted, the criterion grows like 3.3^s
+  and from s = 13 picks degenerate generators such as 2).
+
+**The bivariate.** Candidates measured on `bvn_rect` (max |error of log P|):
+
+| candidate | log P > -2.3 | > -23 | > -230 | > -2300 |
+|---|---|---|---|---|
+| Genz's bivariate (Drezner-Wesolowsky) | 3.1e-16 | 3.6e-7 | 1.8e2 | 1.7e3 |
+| separation of variables, tanh-sinh 129 nodes | 3.6e-3 | 8.0e-4 | 1.9e-10 | 1.6e-10 |
+| SOV, Gaussian-matched tilt | 3.2e-1 | 1.3e-3 | 9.2e-2 | 2.9e-6 |
+| principal axes + exponential tilt, 97 nodes per piece | 1.3e-15 | 1.8e-13 | 1.6e-10 | 1.9e-10 |
+
+The plain separation of variables fails for |r| near 1: the inner interval
+probability changes over a width sqrt(1 - r^2)/|r| of the outer variable. A
+Gaussian tilt matched to the curvature fails because the proposal's tails are
+lighter than the integrand's (the ratio grows like exp((1/w^2 - 1) x^2/2)).
+What works: X1 = al u + be v, X2 = al u - be v (al = sqrt((1 + r)/2),
+be = sqrt((1 - r)/2)), the outer variable v when r >= 0 and u when r < 0, so
+that the inner limits move with slope at most 1; the outer axis cut where the
+active lines of the inner interval change; an exponential tilt (unit
+variance, slope matched at the maximum) on each piece. The last two rows of
+the table were then limited by tiny rectangles (widths 1e-6), whose rounded
+limits lose eps |a| / width: the widths are now passed exactly
+(log_interval(a, b, width)), and a coordinate narrow relative to the slopes is
+summed by 16-point Gauss-Legendre. Library route (Genz while its result is
+>= 1e-3, else the above with 97 nodes per piece), gcc:
+
+| log P | > -2.3 | > -23 | > -230 | > -2300 | below (relative) |
+|---|---|---|---|---|---|
+| max error | 3.1e-16 | 9.9e-15 | 1.4e-13 | 8.5e-13 | 1.1e-14 |
+
+65 nodes give 2.4e-13, 1.6e-12 and 6.7e-12 in the middle bins. Cost, gcc one
+thread: 0.8 us in the bulk (Genz), 40 to 65 us in the tail.
+
+**Three and more coordinates.** The orthant session's bar (note/penalties.md
+5f: tilted log-SOV within 3.4e-13 at k = 2-4, 1e-4 at k = 4-6 with a Korobov
+lattice) is met as follows. The separation of variables with the
+Gibson-Glasbey-Elston order, every factor through log_Phi and Phi_inv_logp,
+tilted by Botev's (2017) minimax saddle point (Newton on the gradient with
+its exact Jacobian, 2 (m - 1) unknowns, step halved until the gradient's norm
+falls); m <= 4 constrained coordinates by a tensor tanh-sinh rule over the
+first m - 2 (193 nodes over one coordinate, 97 per coordinate over two) and the
+bivariate for the last two; m >= 5
+by the fixed lattice (N = 16381, Giovanni) over the first m - 1, the last by
+log_interval (the bivariate for the last two gave the same error at two to
+five times the cost). A first trivariate in principal axes of the most
+correlated pair, with the bivariate inside, reached only 1e-9 to 3e-5 in the
+tail and was dropped. With 49 nodes per coordinate a near-singular trivariate
+of `tvn_general` (r_12 = -0.95, det R = 0.0075) lost 3.3e-6 in log P in the
+bulk (the reference confirmed by an independent nested integral and by Monte
+Carlo); 193 nodes over one coordinate give 9.4e-16 there, and 97 per coordinate
+over two were kept for m = 4 (Giovanni; a tail value then costs about 230 ms,
+against about 60 ms with 49). Measured, gcc (max |error of log P|):
+
+| set | k | > -2.3 | > -23 | > -230 | > -2300 |
+|---|---|---|---|---|---|
+| mvn_laml | 2 | 1.8e-16 | 4.8e-15 | 4.4e-14 | 2.0e-13 |
+| mvn_laml | 3 | 2.0e-16 | 5.2e-15 | 3.4e-14 | 1.3e-13 |
+| mvn_laml | 4 | 5.2e-15 | 1.1e-14 | 3.3e-14 | 2.4e-13 |
+| mvn_laml | 5 | 1.6e-6 | 1.6e-5 | 1.1e-5 | 9.3e-6 |
+| mvn_laml | 6 | - | 7.3e-5 | 4.9e-5 | 1.5e-5 |
+| tvn_general | 3 | 9.4e-16 | 5.5e-14 | 1.1e-12 | 2.2e-11 |
+| mvn_factor | 3 | 7.7e-16 | 1.7e-14 | 8.2e-14 | 1.9e-12 |
+| mvn_factor | 4 | 7.3e-15 | 4.8e-14 | 6.1e-13 | 2.1e-12 |
+| mvn_factor | 5..8 | 1.2e-5 | 4.7e-5 | 2.9e-5 | 8.9e-6 |
+
+The lattice's error does not grow in the tail (the tilt). Lattice size
+against error, one-factor rows k = 5..10 (largest over k): N = 1021 1.4e-3,
+4093 1.4e-4, 16381 4.7e-5, 65521 7.3e-6; the cost is linear in N
+(k = 6: 1.6, 6.5, 26 and 102 ms per value, gcc one thread).
+
+**Derivatives in the shift.** For a set S of coordinates and a choice e of a
+finite end for each, G_{S,e} = phi_{Sigma_SS}(c_S) Pr(rest | X_S = c_S); then
+d_j G_S = sum_e sgn G_{S+j} for j outside S and d_i G_S = -v_i G_S - sum_j
+B_ji sum_e sgn G_{S+j} inside (v = Sigma_SS^-1 c_S, B = Sigma_TS Sigma_SS^-1),
+so every derivative is a combination of lower-dimensional rectangle
+probabilities. Central differences of the order below agree to 1e-10 at every
+order to six, k = 1..4, orthants, rectangles and mixed (test bound 1e-8). In
+the far tail the log-derivatives built from these moments cancel: at k = 1
+against log_Phi_dk, order 3 lost 1.2e-9 at z = -10 and order 6 0.21 at z = -20.
+
+**The truncated law, and the log-derivatives through it.** One dimension:
+W = Z | lo < Z <= hi is c -+ Y with c the end nearer the bulk and Y of density
+proportional to exp(-a y - y^2/2); E[Y^j] = (-1)^j B_j(l_1, ..., l_j), l_i
+the derivatives of the log Mills ratio (normal.hpp) and B_j the complete Bell
+polynomials, whose terms share a sign; a finite window subtracts the part
+beyond it, a narrow one is summed by Gauss-Legendre about the mean. Against
+mpmath: within 2e-15 to z = -40 (relative, every central moment to six), the
+odd moments of windows of width 1e-5 within 5e-11 of their own (nearly zero)
+size. Several dimensions: two passes over the tilted nodes (the last
+coordinate exact), weights and mean, then the central moments as sums of
+products of d = E[X | node] - E[T] and the last coordinate's exact central
+moments; cumulants over the set partitions without singleton blocks. Against
+mvn_trunc_moments, errors in units of the product of standard deviations
+(gcc; the same in the rows with log P < -23):
+
+| k | log P | mean | covariance | kappa_3 | kappa_4 | ms per call |
+|---|---|---|---|---|---|---|
+| 2 | 5.7e-14 | 2.1e-13 | 2.8e-14 | 6.0e-13 | 4.7e-12 | 0.15 |
+| 3 | 1.8e-12 | 1.1e-10 | 3.6e-11 | 1.0e-9 | 2.3e-8 | 16 |
+| 4..6, N = 16381 | 1.3e-5..5.7e-5 | 1.6e-4..2.1e-4 | 3.1e-3 | | | 52..65 |
+| 4..6, N = 65521 | 2.7e-6..8.2e-6 | 1.9e-5..6.1e-5 | 3.0e-4..6.7e-4 | | | 207..271 |
+
+Tensor rule for the moments to m = 3 with 65 nodes per coordinate (49 gave
+cov 4.7e-14 / 1.9e-9 at k = 2 / 3, 97 gave 1.4e-12 at k = 3 for 34 ms); the
+moments' lattice defaults to N = 65521 (Giovanni), log P and its derivatives
+stay at 16381. With log F(delta) = log P + K_T(-Q delta) - delta' Q delta / 2
+(phi_Sigma(u + delta) = phi_Sigma(u) exp(-delta'Q u - delta'Q delta/2),
+Q = Sigma_cc^-1), d^n log F = (-Q)^n kappa_n for n >= 3, -Q + Q kappa_2 Q and
+-Q kappa_1 below: at k = 1 the six orders of log Phi are within 3.3e-13 of
+log_Phi_dk from z = 3 to z = -40. The distrib members take this route for
+the blocks without theta (every order in the location and in y).
+
+**Theta in the far tail.** The theta blocks go through the heat equation on
+the moments (y-order A + 2K) and the set-partition logarithm, which cancels
+at high orders in the tail: against differences in theta of the order below,
+K = 1 and 2 (A <= 1) hold to <= 2e-9 at y = -15; K = 3 with A = 2 loses 1.2e-5
+at y = -6, 4.4e-4 at -10 and 6e-2 at -15 (bivariate, unstructured
+log-Cholesky). Open: the heat equation written for log F, so that the theta
+blocks are assembled from the cumulants too.
+
+**Costs (gcc -O2, one thread).** Derivatives with the recursion are dominated
+by the conditional probabilities of dimension >= 3 (measured after the tensor
+rule's final node counts): k = 3 0.24 ms (order 1) to 0.35 ms (y-order 12);
+k = 4 17 to 18 ms; k = 5 48 to 52 ms; k = 6 34 ms (order 1) to 172 ms (lattice
+of the conditional probabilities N = 4093). Scratch: 3 KB (k = 2) to 2.9 MB (k = 6, y-order 12).
+
+**CUDA (RTX 4070 SUPER, default build).** The same tests on the device, one
+thread per reference row. The lattice routes (k >= 5) and the truncated law at
+k >= 4 give the gcc figures to the digit. Elsewhere (max |error of log P|):
+bivariate 2.6e-16, 9.5e-15, 1.4e-13, 9.1e-13 (relative below -2300 1.1e-14);
+mvn_laml k = 2..4 at most 4.3e-15, 1.1e-14, 4.3e-14, 2.4e-13; mvn_factor k = 3
+7.1e-16, 1.7e-14, 9.9e-14, 2.1e-12 and k = 4 6.4e-15, 3.0e-14, 2.1e-13,
+1.3e-12; tvn_general 9.4e-16, 3.8e-14, 8.3e-13, 1.0e-11. Truncated law, k = 2:
+log P 1.1e-13, mean 4.1e-13, covariance 2.9e-14, kappa_3 1.5e-12, kappa_4
+6.4e-12; k = 3: 2.3e-12, 1.1e-10, 3.6e-11, 1.0e-9, 2.3e-8. The distrib members
+inside a kernel differ from their host values by at most 1.8e-14 relative. The
+test bounds are the larger of the two builds times about 1.5.

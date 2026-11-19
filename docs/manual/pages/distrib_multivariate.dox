@@ -77,6 +77,20 @@ A distribution may split \f$y\f$ and each dense parameter into \f$G\f$ blocks, e
 
 With \f$d = 1000\f$ coordinates in \f$1000\f$ singleton blocks, a second-order tensor drops from \f$500{,}500\f$ doubles to \f$1000\f$, and a third-order tensor from \f$1.67 \times 10^8\f$ doubles to \f$1000\f$.
 
+## Distribution function (optional members)
+
+A multivariate law may provide the distribution function of its observation. These members are not part of \ref laplace::distrib::multivariate_distrib "multivariate_distrib": a law declares the ones it has, and a caller asks for them through the named concept \ref laplace::distrib::mv_has_cdf "mv_has_cdf". The concept requires the scratch sizes `cdf_value_scratch_size()` and `cdf_scratch_size(K, A)`, the log-probabilities `log_cdf()`, `log_ccdf()` and `log_rect_prob()`, and the derivative members `log_cdf_dk<K, A...>()` and `log_rect_prob_dk<K, A...>()`. It does not check `cdf()`, `ccdf()`, `log_ccdf_dk()` or the derivatives in \f$y\f$.
+
+The members take a state as the other members do, and they are:
+
+- `cdf_value_scratch_size()`, the number of doubles of `w` that the log-probabilities need;
+- `cdf_scratch_size(K, A)`, the number of doubles of `w` that the derivatives need, for order \f$K\f$ in \f$\theta\f$ and order \f$A\f$ in the dense parameters, where for the derivatives in \f$y\f$ the order \f$A\f$ is the order in the dense parameters plus the order in \f$y\f$;
+- `log_cdf(state, y, x, w)`, `log_ccdf(state, y, x, w)` and `log_rect_prob(state, a, b, x, w)`, the logarithms of \f$\Pr(Y \le y)\f$ (componentwise), of \f$\Pr(Y > y)\f$ (componentwise) and of \f$\Pr(a < Y \le b)\f$, where \f$x\f$ denotes the dense parameters, and `cdf()` and `ccdf()`, which return the probabilities themselves;
+- `log_cdf_dk<K, A...>(state, y, x, idx, out, w)`, `log_ccdf_dk<K, A...>(state, y, x, idx, out, w)` and `log_rect_prob_dk<K, A...>(state, a, b, x, idx, out, w)`, the derivatives of the three logarithms;
+- `log_cdf_dy_dk<J, K, A...>(state, y, x, idx, out, w)` and `log_ccdf_dy_dk<J, K, A...>(state, y, x, idx, out, w)`, the derivatives of the cdf and the ccdf in \f$y\f$ together with those in \f$\theta\f$ and the dense parameters.
+
+The derivatives follow the layouts of `logpdf_dk<K, A...>()` and `logpdf_dy_dk<J, K, A...>()`, described in the section "Derivative blocks" above, with the same bounds \f$K + \sum_j A_j \le 6\f$ and \f$J + K + \sum_j A_j \le 6\f$. The rectangle derivatives take the two limits \f$a\f$ and \f$b\f$ in place of \f$y\f$, and they have no derivative in \f$y\f$.
+
 ## Coordinate atoms
 
 A law may put mass on the hyperplane \f$y_i = c\f$ of one coordinate \f$i\f$ of \f$y\f$, as a product of one-dimensional laws with atoms does (see \ref distrib_independent_product "Independent product"). Here \f$c\f$ is the position of an atom. On each coordinate the reference measure is then Lebesgue measure plus counting measure on that coordinate's atoms, and the product of these measures over the coordinates is the one with respect to which `logpdf` is a density. A coordinate that sits on an atom thus contributes a log mass, and any other coordinate a log density.

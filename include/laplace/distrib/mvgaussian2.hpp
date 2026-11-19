@@ -11,6 +11,7 @@
 // needed only by the expected information in theta and by covariance().
 #pragma once
 
+#include <laplace/distrib/detail/mvgaussian_cdf.hpp>
 #include <laplace/distrib/detail/mvgaussian_common.hpp>
 #include <laplace/distrib/detail/mvgaussian_rank_deficient.hpp>
 
@@ -354,6 +355,87 @@ struct mvgaussian2_distrib<S> {
    */
   // Q^-1, packed; w has structure.scratch_size() doubles
   LAPLACE_HD void covariance(const double* theta, double* out, double* w) const { structure.inverse(theta, out, w); }
+
+  /// \name Distribution function (optional members, detected by `mv_has_cdf`)
+  ///@{
+  /**
+   * \brief Doubles of `w` needed by `log_cdf`, `log_ccdf`, `log_rect_prob` and their exponentials.
+   */
+  LAPLACE_HD int cdf_value_scratch_size() const { return detail_mvgaussian_cdf::value_scratch(structure.dim); }
+  /**
+   * \brief Doubles of `w` needed by the derivatives of orders `K` in \f$\theta\f$ and `A` in \f$\mu\f$ (or in \f$y\f$ and \f$\mu\f$ together).
+   * \param K Order in \f$\theta\f$.
+   * \param A Order in \f$\mu\f$ plus order in \f$y\f$.
+   */
+  LAPLACE_HD int cdf_scratch_size(int K, int A = 0) const {
+    return detail_mvgaussian_cdf::deriv_scratch(structure, K, A) + sym_tensor_size(structure.dim, A);
+  }
+  /// \brief \f$\log\Pr(Y \le y)\f$ (componentwise). `w` has `cdf_value_scratch_size()` doubles.
+  LAPLACE_HD double log_cdf(const mvgaussian2_state& st, const double* y, const double* mu, double* w) const {
+    return detail_mvgaussian_cdf::log_value<true, detail_mvgaussian_cdf::region::lower>(structure, st, y, nullptr, mu, w);
+  }
+  /// \brief \f$\log\Pr(Y > y)\f$ (componentwise). `w` has `cdf_value_scratch_size()` doubles.
+  LAPLACE_HD double log_ccdf(const mvgaussian2_state& st, const double* y, const double* mu, double* w) const {
+    return detail_mvgaussian_cdf::log_value<true, detail_mvgaussian_cdf::region::upper>(structure, st, y, nullptr, mu, w);
+  }
+  /// \brief \f$\log\Pr(a < Y \le b)\f$; infinite limits allowed. `w` has `cdf_value_scratch_size()` doubles.
+  LAPLACE_HD double log_rect_prob(const mvgaussian2_state& st, const double* a, const double* b, const double* mu, double* w) const {
+    return detail_mvgaussian_cdf::log_value<true, detail_mvgaussian_cdf::region::rect>(structure, st, a, b, mu, w);
+  }
+  /// \brief \f$\Pr(Y \le y)\f$.
+  LAPLACE_HD double cdf(const mvgaussian2_state& st, const double* y, const double* mu, double* w) const {
+    return math::exp(log_cdf(st, y, mu, w));
+  }
+  /// \brief \f$\Pr(Y > y)\f$.
+  LAPLACE_HD double ccdf(const mvgaussian2_state& st, const double* y, const double* mu, double* w) const {
+    return math::exp(log_ccdf(st, y, mu, w));
+  }
+  /**
+   * \brief Derivatives of \f$\log\Pr(Y \le y)\f$ of order `K` in \f$\theta\f$ along `idx` and `A` in \f$\mu\f$.
+   *
+   * Same layout as `logpdf_dk`; \f$A + K \le 6\f$. `w` has `cdf_scratch_size(K, A)` doubles.
+   */
+  template <int K, int... A>
+  LAPLACE_HD bool log_cdf_dk(const mvgaussian2_state& st, const double* y, const double* mu, const int* idx, double* out,
+                             double* w) const {
+    return detail_mvgaussian_cdf::log_dk<true, detail_mvgaussian_cdf::region::lower, K, detail_mv::dense_order<A...>()>(
+        structure, st, y, nullptr, mu, idx, out, w);
+  }
+  /// \brief Derivatives of \f$\log\Pr(Y > y)\f$, as `log_cdf_dk`.
+  template <int K, int... A>
+  LAPLACE_HD bool log_ccdf_dk(const mvgaussian2_state& st, const double* y, const double* mu, const int* idx, double* out,
+                              double* w) const {
+    return detail_mvgaussian_cdf::log_dk<true, detail_mvgaussian_cdf::region::upper, K, detail_mv::dense_order<A...>()>(
+        structure, st, y, nullptr, mu, idx, out, w);
+  }
+  /// \brief Derivatives of \f$\log\Pr(a < Y \le b)\f$, as `log_cdf_dk`.
+  template <int K, int... A>
+  LAPLACE_HD bool log_rect_prob_dk(const mvgaussian2_state& st, const double* a, const double* b, const double* mu, const int* idx,
+                                   double* out, double* w) const {
+    return detail_mvgaussian_cdf::log_dk<true, detail_mvgaussian_cdf::region::rect, K, detail_mv::dense_order<A...>()>(
+        structure, st, a, b, mu, idx, out, w);
+  }
+  /**
+   * \brief Derivatives of \f$\log\Pr(Y \le y)\f$ of order `J` in \f$y\f$, `K` in \f$\theta\f$ and `A` in \f$\mu\f$.
+   *
+   * \f$\log F\f$ depends on \f$y - \mu\f$ only, so \f$\partial_y = -\partial_\mu\f$: the output is the
+   * Kronecker product (the \f$y\f$ factor first) of the packed tensors of orders `J` and `A`, as `logpdf_dy_dk`.
+   * `w` has `cdf_scratch_size(K, J + A)` doubles.
+   */
+  template <int J, int K, int... A>
+  LAPLACE_HD bool log_cdf_dy_dk(const mvgaussian2_state& st, const double* y, const double* mu, const int* idx, double* out,
+                                double* w) const {
+    return detail_mvgaussian_cdf::log_dy_dk<true, detail_mvgaussian_cdf::region::lower, J, K, detail_mv::dense_order<A...>()>(
+        structure, st, y, mu, idx, out, w);
+  }
+  /// \brief Derivatives of \f$\log\Pr(Y > y)\f$ in \f$y\f$, \f$\theta\f$ and \f$\mu\f$, as `log_cdf_dy_dk`.
+  template <int J, int K, int... A>
+  LAPLACE_HD bool log_ccdf_dy_dk(const mvgaussian2_state& st, const double* y, const double* mu, const int* idx, double* out,
+                                 double* w) const {
+    return detail_mvgaussian_cdf::log_dy_dk<true, detail_mvgaussian_cdf::region::upper, J, K, detail_mv::dense_order<A...>()>(
+        structure, st, y, mu, idx, out, w);
+  }
+  ///@}
 };
 
 /**
@@ -726,6 +808,61 @@ struct mvgaussian2_distrib<S> {
     detail_mvgaussian::rank_deficient_start_value<true>(structure, summary, theta);
   }
   ///@}
+
+  /// \name Distribution function of the improper class: every value and component is quiet NaN
+  ///@{
+  /// \brief 0: the members below use no workspace.
+  int cdf_value_scratch_size() const { return 0; }
+  /// \brief 0: the members below use no workspace.
+  int cdf_scratch_size(int K, int A = 0) const { return (void)K, (void)A, 0; }
+  /// \brief Quiet NaN: an intrinsic law has no distribution function.
+  double log_cdf(const mvgaussian_rank_deficient_state&, const double*, const double*, double*) const { return nan_(); }
+  /// \brief Quiet NaN.
+  double log_ccdf(const mvgaussian_rank_deficient_state&, const double*, const double*, double*) const { return nan_(); }
+  /// \brief Quiet NaN.
+  double log_rect_prob(const mvgaussian_rank_deficient_state&, const double*, const double*, const double*, double*) const {
+    return nan_();
+  }
+  /// \brief Quiet NaN.
+  double cdf(const mvgaussian_rank_deficient_state&, const double*, const double*, double*) const { return nan_(); }
+  /// \brief Quiet NaN.
+  double ccdf(const mvgaussian_rank_deficient_state&, const double*, const double*, double*) const { return nan_(); }
+  /// \brief Every component quiet NaN (layout of `logpdf_dk`); returns true.
+  template <int K, int... A>
+  bool log_cdf_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const int*, double* out, double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  /// \brief Every component quiet NaN; returns true.
+  template <int K, int... A>
+  bool log_ccdf_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const int*, double* out, double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  /// \brief Every component quiet NaN; returns true.
+  template <int K, int... A>
+  bool log_rect_prob_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const double*, const int*,
+                        double* out, double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  /// \brief Every component quiet NaN (layout of `logpdf_dy_dk`); returns true.
+  template <int J, int K, int... A>
+  bool log_cdf_dy_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const int*, double* out,
+                     double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, J) * sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  /// \brief Every component quiet NaN; returns true.
+  template <int J, int K, int... A>
+  bool log_ccdf_dy_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const int*, double* out,
+                      double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, J) * sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  ///@}
+
+ private:
+  static double nan_() { return math::detail::quiet_nan(); }
+  static bool fill_nan_(int n, double* out) {
+    for (int q = 0; q < n; ++q) out[q] = nan_();
+    return true;
+  }
 };
 
 }  // namespace laplace::distrib

@@ -36,6 +36,7 @@ set(LAPLACE_TEST_SOURCES
   math/test_log1prel.cpp
   math/test_stirling.cpp
   math/test_dawson.cpp
+  math/test_mvnormal.cpp
   math/test_psi_remainder.cpp
   distrib/test_pilot.cpp
   distrib/test_generic.cpp
@@ -77,6 +78,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_powerexp.cpp
   distrib/test_mvgaussian.cpp
   distrib/test_mvgaussian_rank_deficient.cpp
+  distrib/test_mvgaussian_cdf.cpp
   penalty/test_distrib_penalty.cpp
   penalty/test_independent_product.cpp
   penalty/test_linear_map.cpp

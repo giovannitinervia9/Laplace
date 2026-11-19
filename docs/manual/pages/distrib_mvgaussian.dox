@@ -77,6 +77,49 @@ No product of the form \f$V(\partial_a W)V(\partial_b W)\f$ is formed. On this r
 
 On the host, `start_value(summary, theta)` reads a \ref laplace::distrib::distrib_mv_sample_summary "distrib_mv_sample_summary", floors the eigenvalues of the sample covariance at \f$10^{-6}\f$ times the largest one, and maps the result to \f$\theta\f$ with `structure.params_from_matrix()` (see \ref pdmat "Positive definite structures").
 
+\anchor mvgaussian1_cdf
+## Distribution function
+
+The proper class provides the optional distribution function members described on \ref distrib_multivariate "Multivariate". They are `log_cdf()`, `log_ccdf()` and `log_rect_prob()`, with `cdf()` and `ccdf()`, the derivatives `log_cdf_dk()`, `log_ccdf_dk()`, `log_rect_prob_dk()`, `log_cdf_dy_dk()` and `log_ccdf_dy_dk()`, and the scratch sizes. A law that has them satisfies \ref laplace::distrib::mv_has_cdf "mv_has_cdf". The degenerate class does not provide them.
+
+With \f$\Sigma = M(\theta)\f$ and \f$X \sim \mathcal{N}_d(0, \Sigma)\f$, the three regions are rectangle probabilities of \f$X\f$. The cdf region is \f$\Pr(Y \le y) = \Pr(-\infty < X \le y - \mu)\f$. The ccdf region is \f$\Pr(Y > y)\f$ taken componentwise, \f$\Pr(y - \mu < X < +\infty)\f$. The rectangle region is \f$\Pr(a < Y \le b) = \Pr(a - \mu < X \le b - \mu)\f$, where infinite limits are allowed. Each region is a rectangle probability \f$P(\mathrm{lo}, \mathrm{hi}; \Sigma)\f$ of \ref mvnormal "the multivariate normal probabilities", evaluated by \ref laplace::math::log_mvn_rect "log_mvn_rect()". The limits are \f$\mathrm{lo} = -\infty\f$ and \f$\mathrm{hi} = y - \mu\f$ for the cdf, \f$\mathrm{lo} = y - \mu\f$ and \f$\mathrm{hi} = +\infty\f$ for the ccdf, and \f$\mathrm{lo} = a - \mu\f$ and \f$\mathrm{hi} = b - \mu\f$ for the rectangle. The members `log_cdf()`, `log_ccdf()` and `log_rect_prob()` return these logarithms, and `cdf()` and `ccdf()` return the probabilities themselves.
+
+### Derivatives in the location and in the observation
+
+Let \f$F(\delta) = \Pr(\mathrm{lo} + \delta < X \le \mathrm{hi} + \delta)\f$, and let \f$\partial^\alpha F / F\f$ be its normalized derivatives at \f$\delta = 0\f$, as defined on the \ref mvnormal "multivariate normal probabilities" page. The location moves the rectangle by \f$-\mu\f$, so \f$\partial_\mu = -\partial_\delta\f$. The observation moves the finite end of the cdf and ccdf regions by \f$+y\f$, so \f$\partial_y = \partial_\delta\f$ on that end. Both regions depend on \f$y\f$ and \f$\mu\f$ through \f$y - \mu\f$ only, so \f$\partial_y^J \partial_\mu^A = (-1)^J \partial_\mu^{J + A}\f$. The rectangle region has no derivative in \f$y\f$.
+
+The derivatives in \f$\mu\f$ of the blocks without \f$\theta\f$ (\f$K = 0\f$) are taken through the cumulants of the truncated law, by `log_mvn_rect_log_derivs()` (see the log-derivatives section of the \ref mvnormal "multivariate normal probabilities" page). This route is used at every order of the location and of \f$y\f$, because it does not cancel in the tail where the moments of the shift do.
+
+### Derivatives in theta
+
+The covariance enters through the heat equation of the Gaussian (Plackett, 1954; Price, 1958): the change of \f$F\f$ under a change of \f$\Sigma\f$ is
+\f[
+\mathrm{d}F = \tfrac{1}{2} \sum_{i,j} (\mathrm{d}\Sigma)_{ij}\, \partial_i \partial_j F,
+\f]
+where \f$\partial_i\f$ is the derivative in the shift along coordinate \f$i\f$. For a sorted set \f$T\f$ of \f$\theta\f$ indices, the derivative of \f$F\f$ is a sum over the set partitions \f$\sigma\f$ of \f$T\f$, by Faà di Bruno's formula. Every block \f$c\f$ of \f$\sigma\f$ contributes a pair of coordinates \f$(i_c, j_c)\f$ and the derivative \f$\partial_c \Sigma\f$ of the covariance along the indices of \f$c\f$, supplied by the structure:
+\f[
+\partial_T F = \sum_{\sigma} 2^{-|\sigma|} \sum_{i_c, j_c} \Big( \prod_{c \in \sigma} (\partial_c \Sigma)_{i_c j_c} \Big) \, \partial_{i_1 j_1 \dots i_{|\sigma|} j_{|\sigma|}} F.
+\f]
+The derivative of \f$\log F\f$ along a set of items, which are the location coordinates and the \f$\theta\f$ indices together, is the sum over the set partitions \f$\pi\f$ of the items,
+\f[
+\partial \log F = \sum_{\pi} (-1)^{|\pi| - 1} (|\pi| - 1)! \prod_{B \in \pi} \frac{\partial_B F}{F},
+\f]
+where \f$\partial_B F\f$ is the derivative along the items of the block \f$B\f$. The blocks with \f$K \ge 1\f$ read the normalized derivatives \f$\partial^\alpha F / F\f$ of order \f$A + 2K\f$ from `log_mvn_rect_derivs()`, which computes them by the recursion on the corner densities.
+
+For the covariance form, the derivatives \f$\partial_c \Sigma\f$ along the indices of each block are those of the structure, `matrix_dk`.
+
+### Accuracy of the distribution function
+
+The tests in `tests/distrib/test_mvgaussian_cdf.cpp` check `log_cdf()`, `log_ccdf()` and `log_rect_prob()` against \ref laplace::math::log_mvn_rect "log_mvn_rect()" on the covariance of the state, with a relative bound of \f$10^{-15}\f$ for the log-probabilities of the covariance form and an absolute bound of \f$10^{-15}\f$ for `cdf()`. They also check the members inside a Kokkos kernel against their host values, with a bound of \f$10^{-12}\f$.
+
+Each derivative block is checked against central differences with step \f$10^{-5}\f$ of the block of the order below, for each of the three regions and in both forms, with a relative bound of \f$10^{-8}\f$. The blocks checked are the location derivatives of orders 1, 2, 3, 4 and 6 with \f$K = 0\f$, the mixed block \f$K = 1\f$, \f$A = 2\f$, the derivatives in \f$\theta\f$ of orders 1 to 4 with \f$A = 0\f$, and the mixed blocks \f$(K, A) = (1, 1)\f$ and \f$(2, 2)\f$. The derivatives in \f$y\f$ are checked against the location derivatives: the test requires the block \f$J = 1\f$, \f$K = 1\f$, \f$A = 1\f$ to equal the negated block \f$K = 1\f$, \f$A = 2\f$ exactly.
+
+The central differences of the blocks agree to \f$10^{-10}\f$ at every order up to six for \f$k = 1\f$ to \f$4\f$ (on orthants, rectangles and mixed sets), as recorded in `docs/numerics.md`. In the far tail the \f$\theta\f$ blocks lose accuracy. For the bivariate with an unstructured log-Cholesky covariance, the blocks of orders \f$K = 1\f$ and \f$K = 2\f$ with \f$A \le 1\f$ agree with differences in \f$\theta\f$ to \f$2 \times 10^{-9}\f$ at \f$y = -15\f$. The block of order \f$K = 3\f$ with \f$A = 2\f$ has an error of \f$1.2 \times 10^{-5}\f$ at \f$y = -6\f$, \f$4.4 \times 10^{-4}\f$ at \f$y = -10\f$ and \f$6 \times 10^{-2}\f$ at \f$y = -15\f$.
+
+### Costs of the distribution function
+
+Each derivative block with \f$\theta\f$ is a combination of the normalized derivatives of the rectangle in dimension \f$d\f$, so its cost is that of the rectangle derivatives on the multivariate normal page. On one gcc thread, the rectangle derivatives take 0.24 ms in dimension 3 for order 1 and 0.35 ms for order 12, 17 to 18 ms in dimension 4, 48 to 52 ms in dimension 5, and 34 to 172 ms in dimension 6. `cdf_value_scratch_size()` gives the doubles of `w` for the values, and `cdf_scratch_size(K, A)` those for the derivatives.
+
 \anchor mvgaussian1_degenerate
 ## The degenerate class
 
@@ -193,6 +236,8 @@ The example on \ref distrib_mvgaussian2 "mvgaussian2" applies unchanged with `mv
 ## References
 
 - The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+- R. L. Plackett (1954), A Reduction Formula for Normal Multivariate Integrals, Biometrika, 41(3-4). https://doi.org/10.1093/biomet/41.3-4.351
+- R. Price (1958), A useful theorem for nonlinear devices having Gaussian inputs, IEEE Transactions on Information Theory, 4(2). https://doi.org/10.1109/tit.1958.1057444
 */
 
 /**
@@ -237,6 +282,14 @@ I_{ab} = -\tfrac{1}{2}\,\partial_{ab}\log\det Q + \tfrac{1}{2}\operatorname{tr}\
 ## Draws, moments and starting values
 
 `rng(state, mu, seed, unit, y)` writes \f$y = \mu + L^{-\top} z\f$ (\f$Q = L L^\top\f$), with the standard normal \f$z\f$ generated as on \ref mvgaussian1_draws "mvgaussian1". `mean(mu, out)` copies \f$\mu\f$, and `covariance(theta, out, w)` writes the packed \f$Q^{-1}\f$ from `structure.inverse()`, with `structure.scratch_size()` doubles in `w`. On the host, `start_value(summary, theta)` floors the eigenvalues of the sample covariance at \f$10^{-6}\f$ times the largest one, inverts the result, and maps it to \f$\theta\f$ with `structure.params_from_matrix()`.
+
+## Distribution function
+
+The precision form has the same members, the same layouts and the same three regions as the covariance form described on \ref mvgaussian1_cdf "the distribution function of mvgaussian1", and the same derivative rules hold once the covariance is written as \f$\Sigma = Q^{-1}\f$. Only two things differ. The covariance is formed from the lower Cholesky factor \f$L\f$ of \f$Q\f$, with \f$Q = L L^\top\f$, as \f$\Sigma = L^{-\top} L^{-1}\f$, by inverting the factor. The derivatives of \f$\Sigma\f$ along the indices of each block are those of the inverse, supplied by the structure as `inverse_dk`, in place of `matrix_dk`.
+
+The tests check the values of the precision form against \ref laplace::math::log_mvn_rect "log_mvn_rect()" on the covariance of the same \f$\theta\f$, with a relative bound of \f$10^{-13}\f$, and check its derivative blocks by central differences as for the covariance form.
+
+The improper class below provides the same members, which return quiet NaN for every value and component.
 
 ## The improper class
 

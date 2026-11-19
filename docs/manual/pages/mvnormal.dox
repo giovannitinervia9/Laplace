@@ -1,0 +1,187 @@
+/**
+\defgroup mvnormal Multivariate normal probabilities
+\brief Rectangle probabilities of the multivariate normal law on the log scale, their derivatives in the shift, and the moments and cumulants of the truncated law.
+
+The header `<laplace/math/mvnormal.hpp>` provides the log probability of a rectangle of a centred multivariate normal vector, \f$\log \Pr(a < X \le b)\f$, with its derivatives in the position of the rectangle to any order, and the cumulants of the law truncated to the rectangle to order 6. Every public function is called in `laplace::math` and is marked `LAPLACE_HD`, so it runs on the host and inside Kokkos kernels on the device; no function allocates memory, and each takes its workspace from the caller. The log probability keeps a small relative error in the tail. Measured on gcc, its absolute error is at most \f$2.2 \times 10^{-11}\f$ in the bins of \f$\log P\f$ above \f$-2300\f$ for the bivariate and for the sets of three and four coordinates, and at most \f$7.3 \times 10^{-5}\f$ for the sets of five to eight coordinates (see Accuracy).
+
+## Definitions
+
+Let \f$X \sim N(0, \Sigma)\f$ be a centred normal vector of dimension \f$k\f$ with covariance \f$\Sigma\f$, and let \f$a, b \in (\mathbb{R} \cup \{\pm\infty\})^k\f$ be lower and upper limits with \f$a_i < b_i\f$. The rectangle probability is
+\f[
+P(a, b; \Sigma) = \Pr(a_i < X_i \le b_i \text{ for } i = 1, \dots, k), \qquad \log P = \log P(a, b; \Sigma).
+\f]
+A coordinate with both limits infinite is dropped, and \f$m\f$ denotes the number of the others, the constrained coordinates. After standardization by \f$\sqrt{\Sigma_{ii}}\f$, the constrained part has the correlation matrix \f$R\f$ with entries \f$r_{ij}\f$, and the standardized limits are \f$a_i / \sqrt{\Sigma_{ii}}\f$ and \f$b_i / \sqrt{\Sigma_{ii}}\f$.
+
+For a shift \f$\delta \in \mathbb{R}^k\f$, the shifted rectangle probability is \f$F(\delta) = \Pr(a + \delta < X \le b + \delta)\f$, and its normalized derivatives are \f$\partial^\alpha F / F\f$ at \f$\delta = 0\f$, for a multi-index \f$\alpha\f$. The truncated law is \f$T = X \mid a < X \le b\f$, with mean \f$\mathrm{E}[T]\f$ and central moments taken over its constrained coordinates.
+
+## Domain and special values
+
+Every function returns quiet NaN for a NaN argument. `log_mvn_rect()` returns \f$-\infty\f$ for an empty rectangle (some \f$a_i \ge b_i\f$), \f$0\f$ when every coordinate is unconstrained, and quiet NaN for a dimension outside \f$1 \le k \le 19\f$ or for a diagonal entry of \f$\Sigma\f$ that is not positive. `log_interval()` returns \f$-\infty\f$ when \f$a \ge b\f$. `log_bvn_rect()` returns quiet NaN unless \f$|r| \le 1\f$, and the limits \f$r = \pm 1\f$ reduce to a single interval.
+
+## Method by the number of constrained coordinates
+
+The value is computed from the standardized limits by \f$m\f$, the number of constrained coordinates. Every route sums positive terms on the logarithmic scale, so the relative accuracy carries into the tail.
+
+### One constrained coordinate
+
+The value is \f$\log(\Phi(b) - \Phi(a))\f$, evaluated by `log_interval()` through \f$\log \Phi\f$ and \f$\log(1 - e^x)\f$ on the side of zero where the interval lies, and across zero through \f$1 - \Phi(a) - \Phi(-b)\f$. A narrow interval, with half-width \f$h\f$ and midpoint \f$c\f$ such that \f$h \max(1, |c|) \le 1\f$, is integrated by 16-point Gauss-Legendre quadrature of the density relative to its value at \f$c\f$. The width \f$b - a\f$ can be passed on its own, for a caller that knows the width more precisely than the difference of the two rounded limits.
+
+### Two constrained coordinates
+
+Genz's form of the Drezner and Wesolowsky integral (Drezner and Wesolowsky, 1990; Genz, 2004) gives the probability \f$p\f$: an orthant directly, after sign changes that make it an upper orthant, and any other rectangle by inclusion and exclusion of lower orthants. Its result is kept while \f$p\f$ is at least \f$10^{-3}\f$ (the constant `bvn_genz_threshold`), where its absolute error is about \f$10^{-16}\f$. Below the threshold the second route is taken.
+
+The second route writes the pair as \f$X_1 = \alpha u + \beta v\f$ and \f$X_2 = \alpha u - \beta v\f$, with \f$\alpha = \sqrt{(1 + r)/2}\f$, \f$\beta = \sqrt{(1 - r)/2}\f$, and \f$u\f$ and \f$v\f$ independent standard normal variables. The outer variable is \f$v\f$ when \f$r \ge 0\f$ and \f$u\f$ when \f$r < 0\f$, so that the limits of the inner variable move with slope at most one in it. The outer axis is cut where the active lines of the inner interval change. On each piece, the integral over the outer variable is an exponentially tilted separation of variables (a normal proposal of unit variance whose slope matches the integrand's at its maximum), summed by a tanh-sinh rule of 97 nodes (Takahasi and Mori, 1973). A coordinate whose interval is narrow relative to the slope of its integrand is summed by 16-point Gauss-Legendre instead.
+
+### Three and more constrained coordinates
+
+The separation of variables (Genz, 1992) orders the coordinates by the Gibson, Glasbey and Elston rule (Gibson, Glasbey and Elston, 1994): at each step the coordinate of smallest conditional probability, given the earlier ones at their truncated means, is taken next. Every factor is evaluated through \f$\log \Phi\f$ and the conditional quantile \f$\Phi^{-1}\f$ of a log probability.
+
+The tilt is Botev's minimax tilt (Botev, 2017): the saddle point of the tilting function is found by Newton's method on its gradient, with the exact Jacobian and \f$2(m - 1)\f$ unknowns, with the step halved until the norm of the gradient falls. If the Newton iteration does not converge, the tilt is zero.
+
+For \f$m \le 4\f$, the first \f$m - 2\f$ coordinates are integrated by a tensor tanh-sinh rule and the last two by the bivariate of the previous section. Over one coordinate the rule has 193 nodes (for \f$m = 3\f$), and over two it has 97 nodes per coordinate (for \f$m = 4\f$).
+
+For \f$m \ge 5\f$, the first \f$m - 1\f$ coordinates are integrated over the points of a rank-1 Korobov lattice (Sloan and Joe, 1994), shifted and folded by the baker's transform (Hickernell, 2002). The generators are chosen by a weighted P_2 criterion (Sloan and Joe, 1994). The default lattice has 16381 points, which can be replaced by 1021, 4093 or 65521 points. The last coordinate is integrated in closed form, by the interval probability `log_interval()`. The generators are tabulated for lattice dimensions 1 to 18.
+
+## Derivatives in the shift
+
+`log_mvn_rect_derivs()` computes \f$\partial^\alpha F / F\f$ for every sorted tuple \f$\alpha\f$ of length \f$0\f$ to \f$N\f$ over the \f$k\f$ coordinates, for any order \f$N\f$. The recursion works on the corner densities. For a set \f$S\f$ of coordinates and a choice \f$e\f$ of a finite end \f$c_i \in \{a_i, b_i\}\f$ for each \f$i \in S\f$, put
+\f[
+G_{S,e} = \phi_{\Sigma_{SS}}(c_S)\, \Pr(\text{rest in its rectangle} \mid X_S = c_S),
+\f]
+where \f$\phi_{\Sigma_{SS}}\f$ is the density of \f$X_S\f$, \f$c_S\f$ is the vector of the chosen ends, and \f$T\f$ denotes the coordinates outside \f$S\f$. Let \f$Q = \Sigma_{SS}^{-1}\f$, \f$v = Q c_S\f$, and \f$B = \Sigma_{TS} Q\f$. With \f$\mathrm{sgn}(b_j) = 1\f$ and \f$\mathrm{sgn}(a_j) = -1\f$, the first derivatives of \f$G\f$ are
+\f[
+\partial_j G_{S,e} = \sum_{e_j} \mathrm{sgn}(e_j)\, G_{S+j,\,e+e_j} \quad (j \in T), \qquad
+\partial_i G_{S,e} = -v_i G_{S,e} - \sum_{j \in T} B_{ji} \sum_{e_j} \mathrm{sgn}(e_j)\, G_{S+j,\,e+e_j} \quad (i \in S),
+\f]
+where the second rule holds because the conditional limits move with \f$c_S\f$ by \f$-B\f$. Hence the derivative of order \f$\alpha\f$ with support \f$U\f$ is
+\f[
+\partial^\alpha F = \sum_{e} \prod_{i \in U} \mathrm{sgn}(e_i)\, \partial^{\alpha - \mathbf{1}_U} G_{U,e},
+\f]
+with \f$\mathbf{1}_U\f$ the indicator of \f$U\f$. Every derivative of \f$G\f$ with a support inside \f$S\f$ follows from the second rule by Leibniz's rule, since \f$v_i\f$ is linear in \f$c_S\f$ with \f$\partial_l v_i = Q_{il}\f$. Every \f$G\f$ is divided by \f$F\f$ before it is stored, so the tables hold \f$\partial^\alpha F / F\f$ and nothing underflows.
+
+Every derivative is therefore a combination of rectangle probabilities of lower dimension, evaluated by the routes above. The cost is dominated by the conditional probabilities of dimension three and more (see Speed).
+
+## Truncated law: moments and cumulants
+
+`log_mvn_trunc_cumulants()` returns the cumulants of \f$T\f$ over its constrained coordinates, to order \f$N \le 6\f$, together with \f$\log P\f$. `mvn_trunc_mean()` and `mvn_trunc_cov()` return the mean and the covariance. The moments are computed by the same tilted separation of variables as the probability, and every quantity is accumulated relative to the mean, so that no large term is subtracted.
+
+For one constrained coordinate, the truncated variable is \f$W = Z \mid \mathrm{lo} < Z \le \mathrm{hi}\f$, which equals \f$c \mp Y\f$ with \f$c\f$ the end nearer the bulk of the density and \f$Y\f$ of density proportional to \f$\exp(-a y - y^2/2)\f$ on \f$y > 0\f$, where \f$a \ge 0\f$ is the argument at which the Mills ratio is taken. The normalized moments of \f$Y\f$ are
+\f[
+\mathrm{E}[Y^j] = (-1)^j B_j(l_1, \dots, l_j),
+\f]
+where \f$l_i\f$ is the \f$i\f$-th derivative of the log Mills ratio \f$\log M\f$ of \f$\Phi\f$ (see \ref normal "the normal distribution function"), \f$B_j\f$ is the complete Bell polynomial, and every term of \f$B_j\f$ has the sign of \f$(-1)^j\f$. A finite window subtracts the part of the tail beyond it, the window having width \f$w\f$ from the end. A narrow window, with \f$w \max(1, |a|) \le 1\f$, is summed by 16-point Gauss-Legendre about the mean instead.
+
+For several coordinates, the tilted nodes give the weights and the mean in a first pass, and the central moments in a second, each node contributing products of the difference between its conditional mean and the mean of \f$T\f$, with the exact central moments of its last coordinate. The cumulants then follow from the central moments over the set partitions of the indices that have no singleton block. For up to three constrained coordinates, the nodes form a tensor tanh-sinh rule with 65 nodes per coordinate over the first \f$m - 1\f$ coordinates. From four constrained coordinates they form a lattice of 65521 points, the default for the truncated law, over the first \f$m - 1\f$ coordinates.
+
+Coordinates with both limits infinite are free, and the moments of the whole vector follow from those of its constrained part: each free coordinate is a linear function of the constrained ones plus an independent normal term, with the conditional covariance of that term.
+
+## Log-derivatives through the cumulants
+
+Let \f$Q = \Sigma_{cc}^{-1}\f$ be the inverse covariance of the constrained coordinates, \f$K_T\f$ the cumulant generating function of \f$T\f$, and \f$\kappa_n\f$ its cumulant tensors. Since the density of \f$X\f$ at \f$u + \delta\f$ equals its density at \f$u\f$ times \f$\exp(-\delta^\top Q u - \delta^\top Q \delta / 2)\f$,
+\f[
+\log F(\delta) = \log P + K_T(-Q\delta) - \tfrac{1}{2} \delta^\top Q \delta.
+\f]
+Hence the derivatives of \f$\log F\f$ at \f$\delta = 0\f$ are
+\f[
+\partial \log F = -Q \kappa_1, \qquad \partial^2 \log F = -Q + Q \kappa_2 Q, \qquad \partial^n \log F = (-Q)^{\otimes n} \kappa_n \quad (n \ge 3),
+\f]
+where \f$\otimes\f$ denotes the tensor product, so that \f$(-Q)^{\otimes n}\kappa_n\f$ contracts each index of \f$\kappa_n\f$ with a factor \f$-Q\f$. `log_mvn_rect_log_derivs()` writes these for every sorted tuple of length \f$1\f$ to \f$N\f$, with \f$N \le 6\f$. The cumulants are small where the derivatives are, and they come from centred sums, so this route does not cancel in the tail as the shift moments do.
+
+## Accuracy
+
+See \ref accuracy "How accuracy is measured" for the error measures and for the reference generation. The bivariate references are one-dimensional integrals computed with mpmath at 40 and 50 digits, kept when the two agree to \f$10^{-30}\f$ relative. The one-factor references are one-dimensional integrals over the factor, and the trivariate references use Plackett's identity (Plackett, 1954) with the precision doubled until two runs agree to \f$10^{-30}\f$. The truncated moments are computed at 60 digits. The tests in `tests/math/test_mvnormal.cpp` bound the error of \f$\log P\f$ in five bins of its value: the absolute error for \f$\log P > -2.3\f$, \f$> -23\f$, \f$> -230\f$ and \f$> -2300\f$, and the error relative to \f$|\log P|\f$ below \f$-2300\f$.
+
+The bivariate route on the library's rule, with Genz's form used while its value is at least \f$10^{-3}\f$, was measured on 2654 rectangles and orthants, with correlations up to \f$\pm 0.9999\f$ and \f$\log P\f$ down to \f$-1.1 \times 10^{7}\f$:
+
+| Bin of \f$\log P\f$ | \f$> -2.3\f$ | \f$> -23\f$ | \f$> -230\f$ | \f$> -2300\f$ | below \f$-2300\f$ (relative) |
+|---|---|---|---|---|---|
+| Measured max, gcc | \f$3.1 \times 10^{-16}\f$ | \f$9.9 \times 10^{-15}\f$ | \f$1.4 \times 10^{-13}\f$ | \f$8.5 \times 10^{-13}\f$ | \f$1.1 \times 10^{-14}\f$ |
+| Measured max, CUDA | \f$2.6 \times 10^{-16}\f$ | \f$9.5 \times 10^{-15}\f$ | \f$1.4 \times 10^{-13}\f$ | \f$9.1 \times 10^{-13}\f$ | \f$1.1 \times 10^{-14}\f$ |
+| Test bound | \f$4.8 \times 10^{-16}\f$ | \f$1.5 \times 10^{-14}\f$ | \f$2.1 \times 10^{-13}\f$ | \f$1.4 \times 10^{-12}\f$ | \f$1.7 \times 10^{-14}\f$ |
+
+The other sets give the following maxima of the absolute error of \f$\log P\f$ in the first four bins, on gcc. Each row is one set of references and one number of constrained coordinates \f$k\f$. The deep one-factor orthants are one-factor orthants whose depth \f$t\f$ runs from 0.5 to 20. A dash marks a bin without reference rows.
+
+| Set | \f$k\f$ | \f$> -2.3\f$ | \f$> -23\f$ | \f$> -230\f$ | \f$> -2300\f$ |
+|---|---|---|---|---|---|
+| Deep one-factor orthants | 2 | \f$1.8 \times 10^{-16}\f$ | \f$4.8 \times 10^{-15}\f$ | \f$4.4 \times 10^{-14}\f$ | \f$2.0 \times 10^{-13}\f$ |
+| Deep one-factor orthants | 3 | \f$2.0 \times 10^{-16}\f$ | \f$5.2 \times 10^{-15}\f$ | \f$3.4 \times 10^{-14}\f$ | \f$1.3 \times 10^{-13}\f$ |
+| Deep one-factor orthants | 4 | \f$5.2 \times 10^{-15}\f$ | \f$1.1 \times 10^{-14}\f$ | \f$3.3 \times 10^{-14}\f$ | \f$2.4 \times 10^{-13}\f$ |
+| Deep one-factor orthants | 5 | \f$1.6 \times 10^{-6}\f$ | \f$1.6 \times 10^{-5}\f$ | \f$1.1 \times 10^{-5}\f$ | \f$9.3 \times 10^{-6}\f$ |
+| Deep one-factor orthants | 6 | - | \f$7.3 \times 10^{-5}\f$ | \f$4.9 \times 10^{-5}\f$ | \f$1.5 \times 10^{-5}\f$ |
+| Trivariate, general correlation | 3 | \f$9.4 \times 10^{-16}\f$ | \f$5.5 \times 10^{-14}\f$ | \f$1.1 \times 10^{-12}\f$ | \f$2.2 \times 10^{-11}\f$ |
+| One-factor rectangles and orthants | 3 | \f$7.7 \times 10^{-16}\f$ | \f$1.7 \times 10^{-14}\f$ | \f$8.2 \times 10^{-14}\f$ | \f$1.9 \times 10^{-12}\f$ |
+| One-factor rectangles and orthants | 4 | \f$7.3 \times 10^{-15}\f$ | \f$4.8 \times 10^{-14}\f$ | \f$6.1 \times 10^{-13}\f$ | \f$2.1 \times 10^{-12}\f$ |
+| One-factor rectangles and orthants | 5 to 8 | \f$1.2 \times 10^{-5}\f$ | \f$4.7 \times 10^{-5}\f$ | \f$2.9 \times 10^{-5}\f$ | \f$8.9 \times 10^{-6}\f$ |
+
+The test bounds are the larger of the gcc and CUDA maxima times about 1.5; on CUDA the lattice rows give the gcc figures to the digit, and the other rows differ from gcc only in the last digits (`docs/numerics.md` lists them). For the same four bins, in order, they are: deep one-factor orthants \f$7.8 \times 10^{-15}\f$, \f$1.7 \times 10^{-14}\f$, \f$6.6 \times 10^{-14}\f$ and \f$3.7 \times 10^{-13}\f$ for \f$k = 2\f$ to \f$4\f$, and \f$2.5 \times 10^{-6}\f$, \f$1.1 \times 10^{-4}\f$, \f$7.3 \times 10^{-5}\f$ and \f$2.3 \times 10^{-5}\f$ for \f$k = 5\f$ and \f$6\f$; one-factor rectangles and orthants \f$1.2 \times 10^{-15}\f$, \f$2.6 \times 10^{-14}\f$, \f$1.5 \times 10^{-13}\f$ and \f$3.2 \times 10^{-12}\f$ for \f$k = 3\f$, \f$1.1 \times 10^{-14}\f$, \f$7.2 \times 10^{-14}\f$, \f$9.2 \times 10^{-13}\f$ and \f$3.2 \times 10^{-12}\f$ for \f$k = 4\f$, and \f$1.8 \times 10^{-5}\f$, \f$7.1 \times 10^{-5}\f$, \f$4.3 \times 10^{-5}\f$ and \f$1.4 \times 10^{-5}\f$ for \f$k = 5\f$ to \f$8\f$; the trivariate with a general correlation \f$1.5 \times 10^{-15}\f$, \f$8.3 \times 10^{-14}\f$, \f$1.8 \times 10^{-12}\f$ and \f$3.4 \times 10^{-11}\f$.
+
+The lattice error falls as the number of points grows. For the one-factor rows with \f$k = 5\f$ to \f$10\f$, the largest error over \f$k\f$ is \f$1.4 \times 10^{-3}\f$ with 1021 points, \f$1.4 \times 10^{-4}\f$ with 4093, \f$4.7 \times 10^{-5}\f$ with 16381 and \f$7.3 \times 10^{-6}\f$ with 65521 points. The error of the lattice does not grow in the tail. The full measurements, with the breakdown by subinterval, are in `docs/numerics.md`.
+
+For the truncated law, the tests compare the cumulants with 359 mpmath references at 60 digits (one-factor sets, rectangles and orthants, \f$k = 2\f$ to \f$6\f$), computed from Gauss-Legendre quadrature of the factor and checked against a second rule at 1e-24. Errors of the moments are in units of the product of the standard deviations of \f$T\f$, measured on gcc; CUDA gives the same figures to two digits except at \f$k = 2\f$, where \f$\log P\f$, the mean, \f$\kappa_3\f$ and \f$\kappa_4\f$ reach \f$1.1 \times 10^{-13}\f$, \f$4.1 \times 10^{-13}\f$, \f$1.5 \times 10^{-12}\f$ and \f$6.4 \times 10^{-12}\f$:
+
+| \f$k\f$ | \f$\log P\f$ | Mean | Covariance | \f$\kappa_3\f$ | \f$\kappa_4\f$ | Time per call, gcc |
+|---|---|---|---|---|---|---|
+| 2 | \f$5.7 \times 10^{-14}\f$ | \f$2.1 \times 10^{-13}\f$ | \f$2.8 \times 10^{-14}\f$ | \f$6.0 \times 10^{-13}\f$ | \f$4.7 \times 10^{-12}\f$ | 0.15 ms |
+| 3 | \f$1.8 \times 10^{-12}\f$ | \f$1.1 \times 10^{-10}\f$ | \f$3.6 \times 10^{-11}\f$ | \f$1.0 \times 10^{-9}\f$ | \f$2.3 \times 10^{-8}\f$ | 16 ms |
+| 4 to 6, 65521 points | \f$2.7 \times 10^{-6}\f$ to \f$8.2 \times 10^{-6}\f$ | \f$1.9 \times 10^{-5}\f$ to \f$6.1 \times 10^{-5}\f$ | \f$3.0 \times 10^{-4}\f$ to \f$6.7 \times 10^{-4}\f$ | not recorded | not recorded | 207 to 271 ms |
+
+For \f$k = 4\f$ to \f$6\f$ with 16381 points the errors are \f$1.3 \times 10^{-5}\f$ to \f$5.7 \times 10^{-5}\f$ in \f$\log P\f$, \f$1.6 \times 10^{-4}\f$ to \f$2.1 \times 10^{-4}\f$ in the mean, and \f$3.1 \times 10^{-3}\f$ in the covariance, at 52 to 65 ms per call. The default for the truncated law is 65521 points. The tests of the truncated law bound the errors of \f$\log P\f$, the mean and the covariance for \f$k = 4\f$ to \f$6\f$ at the default lattice, and check the cumulants only for \f$k \le 3\f$.
+
+The derivatives in the shift agree with central differences of the order below to \f$10^{-10}\f$ at every order up to six, for \f$k = 1\f$ to \f$4\f$ on orthants, rectangles and mixed sets; the test checks \f$k = 2\f$ to \f$4\f$ with a relative bound of \f$10^{-8}\f$. The cumulant route agrees with `log_Phi_dk()` for \f$k = 1\f$, at every order up to six, to \f$3.3 \times 10^{-13}\f$ from \f$z = 3\f$ to \f$z = -40\f$, and the test bounds the relative difference by \f$5 \times 10^{-13}\f$. The shift-derivative recursion is less accurate in the far tail: at \f$k = 1\f$, against `log_Phi_dk()`, order 3 loses \f$1.2 \times 10^{-9}\f$ at \f$z = -10\f$ and order 6 loses 0.21 at \f$z = -20\f$; the log-derivatives through the cumulants do not.
+
+## Speed
+
+Times are on one gcc thread. A bivariate value costs about 0.8 microseconds in the bulk through Genz's form, and \f$40\f$ to \f$65\f$ microseconds in the tail. Derivatives in the shift cost, per call, about 0.24 ms for \f$k = 3\f$ (order 1) to 0.35 ms for order 12; 17 to 18 ms for \f$k = 4\f$; 48 to 52 ms for \f$k = 5\f$; and 34 to 172 ms for \f$k = 6\f$, with the lattice of the conditional probabilities at 4093 points. Their scratch runs from 3 KB for \f$k = 2\f$ to 2.9 MB for \f$k = 6\f$ at order 12. The truncated cumulants cost as the table above shows. The lattice costs about 1.6, 6.5, 26 and 102 ms per value for \f$k = 6\f$ with 1021, 4093, 16381 and 65521 points, so its cost is linear in the number of points.
+
+## Example
+
+Evaluating the log probability of a bivariate rectangle inside a `Kokkos::parallel_for` kernel, with the covariance packed by rows of its lower triangle (\f$\Sigma_{11}\f$, \f$\Sigma_{21}\f$, \f$\Sigma_{22}\f$):
+
+\code{.cpp}
+#include <laplace/math/mvnormal.hpp>
+#include <Kokkos_Core.hpp>
+
+void rectangle_log_probabilities(const Kokkos::View<double*>& log_p, int n) {
+  Kokkos::parallel_for("rectangle_log_probabilities", n, KOKKOS_LAMBDA(const int i) {
+    const double a[2] = {-2.0, -1.0};
+    const double b[2] = {1.0, 0.5 + 0.001 * i};
+    const double S[3] = {1.0, 0.5, 1.0};
+    double w[laplace::math::mvn_rect_scratch(2)];
+    log_p(i) = laplace::math::log_mvn_rect(2, a, b, S, w);
+  });
+}
+\endcode
+
+## Module functions
+
+Functions in this module are called as `laplace::math::NAME`.
+
+- \ref laplace::math::log_interval "log_interval()" — Log of a one-dimensional normal interval probability
+- \ref laplace::math::log_bvn_rect "log_bvn_rect()" — Log of a bivariate normal rectangle probability
+- \ref laplace::math::log_mvn_rect "log_mvn_rect()" — Log of a multivariate normal rectangle probability
+- \ref laplace::math::mvn_rect_scratch "mvn_rect_scratch()" — Workspace of `log_mvn_rect()`
+- \ref laplace::math::log_mvn_rect_derivs "log_mvn_rect_derivs()" — Log rectangle probability and its normalized derivatives in the shift
+- \ref laplace::math::mvn_rect_derivs_size "mvn_rect_derivs_size()" — Output length of `log_mvn_rect_derivs()`
+- \ref laplace::math::mvn_rect_derivs_scratch "mvn_rect_derivs_scratch()" — Workspace of `log_mvn_rect_derivs()`
+- \ref laplace::math::log_mvn_trunc_cumulants "log_mvn_trunc_cumulants()" — Cumulants of the truncated law
+- \ref laplace::math::mvn_trunc_scratch "mvn_trunc_scratch()" — Workspace of `log_mvn_trunc_cumulants()`
+- \ref laplace::math::mvn_trunc_mean "mvn_trunc_mean()" — Mean of the truncated law
+- \ref laplace::math::mvn_trunc_cov "mvn_trunc_cov()" — Covariance of the truncated law
+- \ref laplace::math::mvn_trunc_moment_scratch "mvn_trunc_moment_scratch()" — Workspace of `mvn_trunc_mean()` and `mvn_trunc_cov()`
+- \ref laplace::math::log_mvn_rect_log_derivs "log_mvn_rect_log_derivs()" — Derivatives of the log rectangle probability in the shift, through the cumulants
+- \ref laplace::math::mvn_rect_log_derivs_scratch "mvn_rect_log_derivs_scratch()" — Workspace of `log_mvn_rect_log_derivs()`
+
+The constants of the module are `bvn_genz_threshold` (\f$10^{-3}\f$), `mvn_max_dim` (19), `mvn_deriv_max_dim` (12), `mvn_default_lattice` (16381), `mvn_ts_half_nodes` (48), `mvn_tensor_max_dim` (4), `mvn_tensor_half_nodes_1` (96), `mvn_tensor_half_nodes_2` (48), `mvn_tilt` (`true`), `mvn_trunc_max_order` (6), `mvn_trunc_tensor_max_dim` (3), `mvn_trunc_tensor_half_nodes` (32) and `mvn_trunc_default_lattice` (65521).
+
+## References
+
+- A. Genz (2004), Numerical computation of rectangular bivariate and trivariate normal and t probabilities, Statistics and Computing, 14(3). https://doi.org/10.1023/b:stco.0000035304.20635.31
+- Z. Drezner and G. O. Wesolowsky (1990), On the computation of the bivariate normal integral, Journal of Statistical Computation and Simulation, 35(1-2). https://doi.org/10.1080/00949659008811236
+- A. Genz (1992), Numerical Computation of Multivariate Normal Probabilities, Journal of Computational and Graphical Statistics, 1(2). https://doi.org/10.1080/10618600.1992.10477010
+- Z. I. Botev (2017), The Normal Law Under Linear Restrictions: Simulation and Estimation via Minimax Tilting, Journal of the Royal Statistical Society Series B: Statistical Methodology, 79(1). https://doi.org/10.1111/rssb.12162
+- G. J. Gibson, C. A. Glasbey and D. A. Elston (1994), Monte Carlo evaluation of multivariate normal integrals and sensitivity to variate ordering, in Advances in Numerical Methods and Applications, World Scientific.
+- I. H. Sloan and S. Joe (1994), Lattice Methods for Multiple Integration, Oxford University Press. https://doi.org/10.1093/oso/9780198534723.001.0001
+- F. J. Hickernell (2002), Obtaining O(N^-2+e) Convergence for Lattice Quadrature Rules, in Monte Carlo and Quasi-Monte Carlo Methods 2000, Springer. https://doi.org/10.1007/978-3-642-56046-0_18
+- H. Takahasi and M. Mori (1973), Double Exponential Formulas for Numerical Integration, Publications of the Research Institute for Mathematical Sciences, 9(3), 721–741. https://doi.org/10.2977/prims/1195192451
+- R. L. Plackett (1954), A Reduction Formula for Normal Multivariate Integrals, Biometrika, 41(3-4). https://doi.org/10.1093/biomet/41.3-4.351
+*/

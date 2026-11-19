@@ -59,12 +59,14 @@ parent here, in tree order; the module pages define their groups without
 
 /** \defgroup special_cdf Distribution functions
 \ingroup special
-\brief The normal, Student t and skew normal distribution functions. */
+\brief The normal, Student t, skew normal and multivariate normal distribution functions. */
 /** \addtogroup normal
 \ingroup special_cdf */
 /** \addtogroup student
 \ingroup special_cdf */
 /** \addtogroup owen
+\ingroup special_cdf */
+/** \addtogroup mvnormal
 \ingroup special_cdf */
 
 /** \addtogroup dawson

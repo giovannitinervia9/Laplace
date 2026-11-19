@@ -184,6 +184,33 @@ concept multivariate_distrib =
              { d.template logpmf_dk<1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
            });
 
+/**
+ * \ingroup distrib_multivariate
+ * \brief A multivariate law with the optional distribution function members.
+ *
+ * `log_cdf`, `log_ccdf` and `log_rect_prob` (with `cdf`, `ccdf` and the sizes
+ * `cdf_value_scratch_size()` and `cdf_scratch_size(K, A)`), and their derivatives
+ * `log_cdf_dk`, `log_ccdf_dk`, `log_rect_prob_dk`, `log_cdf_dy_dk`,
+ * `log_ccdf_dy_dk` in the layout of `logpdf_dk` and `logpdf_dy_dk`. The concept
+ * itself checks the sizes, `log_cdf`, `log_ccdf`, `log_rect_prob`, `log_cdf_dk` and
+ * `log_rect_prob_dk`, not `cdf`, `ccdf` or the other derivatives. They are not
+ * part of `multivariate_distrib`: a law declares them when it has them, and a
+ * caller asks through this named concept.
+ *
+ * \tparam D Multivariate distribution type to check.
+ * \see multivariate_distrib, distrib_multivariate
+ */
+template <class D>
+concept mv_has_cdf = requires(const D d, const double* p, double* w, const int* idx, const typename D::state_type& st) {
+  { d.cdf_value_scratch_size() } -> std::convertible_to<int>;
+  { d.cdf_scratch_size(1, 0) } -> std::convertible_to<int>;
+  { d.log_cdf(st, p, p, w) } -> std::same_as<double>;
+  { d.log_ccdf(st, p, p, w) } -> std::same_as<double>;
+  { d.log_rect_prob(st, p, p, p, w) } -> std::same_as<double>;
+  { d.template log_cdf_dk<1>(st, p, p, idx, w, w) } -> std::same_as<bool>;
+  { d.template log_rect_prob_dk<0, 1>(st, p, p, p, idx, w, w) } -> std::same_as<bool>;
+};
+
 // Coordinate atoms (Giovanni, 2026-11-17). A law may put mass on the
 // hyperplanes y_i = c of single coordinates, as a product of one-dimensional
 // factors with atoms does: its logpdf is then the log density with respect to
