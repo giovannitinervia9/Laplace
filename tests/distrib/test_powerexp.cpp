@@ -185,22 +185,18 @@ std::vector<info_row> read_info_reference() {
 
 double ulp_of(double v) { return std::ldexp(1.0, std::ilogb(v) - 52); }
 
-// The bound is the worst scaled error measured on 2026-11-18 on the gcc build and on the CUDA build
-// (RTX 4070 SUPER), the larger of the two, times about one and a half, in ulp of the largest
-// component of the order at that point; the row of K = 0 is the value itself, in ulp of the value.
-// Two regions of p only because the worst points fall on the two sides of 2.5; the cause of the
-// loss is the same throughout, and it is the cancellation between the derivatives in p of Lambda
-// and those of g, which both carry the derivatives of log c(p): a factor up to 677 over the grid of
-// the reference file (order 4 at p = 0.8). The worst row, order 5 at p = 4, has a cancellation of
-// 234 there and also a structural one inside A^(5) = -(p lambda^(5) + 5 lambda^(4)), where the
-// leading gamma/p term of lambda cancels exactly; with correctly rounded polygamma values the same
-// route still loses 1.85e3 ulp at that row, so a more accurate polygamma would not lower this bound.
-// Measured on both builds on 2026-11-18: the CUDA build matches gcc to the digit in every entry but
-// one, order 5 at p >= 2.5, where it reads 483 ulp against gcc's 2.27e3 (the worst row, order 5 at
-// p = 4, where fused multiply-add happens to round the cancelling terms more favourably). Every bound
-// is therefore gcc's measurement times one and a half.
+// The bound is the worst scaled error measured on the gcc build and on the CUDA build (RTX 4070
+// SUPER), the larger of the two, times about one and a half, in ulp of the largest component of the
+// order at that point; the row of K = 0 is the value itself, in ulp of the value. Two regions of p
+// only because the worst points fall on the two sides of 2.5; the cause of the loss is the same
+// throughout, and it is the cancellation between the derivatives in p of Lambda and those of g,
+// which both carry the derivatives of log c(p): a factor up to 677 over the grid of the reference
+// file (order 4 at p = 0.8). The worst row of p >= 2.5, order 5 at p = 4, has a cancellation of 234
+// there; with every shape derivative exact the same row would still lose 314 ulp. Measured on
+// 2026-11-19, after the shape derivatives for p >= 2 moved to the chi route of shape_derivs: both
+// builds read the same values to the digit in every entry.
 const double BOUND_LOGPDF[2][7] = {{75.0, 60.0, 95.0, 660.0, 155.0, 1050.0, 410.0},
-                                   {50.0, 50.0, 50.0, 400.0, 50.0, 3450.0, 125.0}};
+                                   {50.0, 50.0, 50.0, 45.0, 50.0, 535.0, 55.0}};
 inline int p_region(double p) { return p < 2.5 ? 0 : 1; }
 
 }  // namespace

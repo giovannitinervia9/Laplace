@@ -22,7 +22,9 @@
 //   g(p) = log p - log 2 - (3/2) lgamma(1/p) + (1/2) lgamma(3/p),
 //
 // both evaluated in the equivalent forms of shape_derivs, through lgamma(1 + 1/p) and
-// lgamma(1 + 3/p), which never form the logarithms that cancel between them.
+// lgamma(1 + 3/p), which never form the logarithms that cancel between them, and whose derivatives
+// for p >= 2 go through chi(x) = lgamma(1 + x)/x + gamma, which removes the cancellation of the
+// gamma/p terms in p log c(p).
 //
 // g and -log sigma add their own derivatives to the pure-p and the pure-sigma component, as the
 // other location-scale families with one shape parameter do; Lambda is differentiated in the three
@@ -218,6 +220,93 @@ LAPLACE_HD void lgamma1p_over_p_derivs(double a, double p, double* G) {
   }
 }
 
+// chi(x) = lgamma(1 + x)/x + gamma, x in (0, 3/2], from three Taylor expansions whose coefficients
+// chi^(n)(c)/n! were computed with mpmath at 60 digits and rounded once
+// (tools/reference/powerexp_chi_table.py): centre 0 on [0, 0.15] (there chi^(n)(0)/n! is
+// (-1)^(n+1) zeta(n+1)/(n+1)), centre 0.4 on (0.15, 0.65], centre 1.05 on (0.65, 1.5]. Measured on
+// 80 points of each interval against mpmath, chi^(j) for j = 0..6 is within 6.3 ulp.
+// clang-format off
+// centre 0.0, up to x = 0.15: 33 coefficients
+#define LAPLACE_POWEREXP_CHI_0 \
+    0x0.0p+0, 0x1.a51a6625307d3p-1, -0x1.9a4d55beab2d7p-2, 0x1.151322ac7d848p-2, \
+    -0x1.a8b9c17aa6149p-3, 0x1.5b40cb100c306p-3, -0x1.2703a1dcea3aep-3, 0x1.010b36af86397p-3, \
+    -0x1.c806706d57db4p-4, 0x1.9a01e385d5f8fp-4, -0x1.748c33114c6d6p-4, 0x1.556ad63243bc4p-4, \
+    -0x1.3b1d971fc5985p-4, 0x1.2496df8320c5fp-4, -0x1.11133476e7fe0p-4, 0x1.00010064cdeb2p-4, \
+    -0x1.e1e2d311e8abdp-5, 0x1.c71ce3a20b419p-5, -0x1.af28a1b5688a0p-5, 0x1.9999b3352d5bap-5, \
+    -0x1.86186db77bfbfp-5, 0x1.745d1d1778df9p-5, -0x1.642c88591b66dp-5, 0x1.555556aaafdcdp-5, \
+    -0x1.47ae151eb9fb7p-5, 0x1.3b13b189d925ep-5, -0x1.2f684c00002bcp-5, 0x1.24924936db7bcp-5, \
+    -0x1.1a7b961a7b9aap-5, 0x1.111111155556dp-5, -0x1.08421086318cep-5, 0x1.0000000100002p-5, \
+    -0x1.f07c1f08ba2eap-6
+// centre 0.4, up to x = 0.65: 37 coefficients
+#define LAPLACE_POWEREXP_CHI_1 \
+    0x1.1cdc1a9477d01p-2, 0x1.303069668156ep-1, -0x1.a0fa6c0a6cebep-3, 0x1.8cc7386815732p-4, \
+    -0x1.ae9a72bcea1e6p-5, 0x1.f4874efe06cd3p-6, -0x1.2f20a829d81c0p-6, 0x1.7935bcd76aab2p-7, \
+    -0x1.de6144c64ff2fp-8, 0x1.339fb1c451e7bp-8, -0x1.8fef7e843eb74p-9, 0x1.06394d42b1706p-9, \
+    -0x1.5a4c55ce4b5a9p-10, 0x1.cc0a3a3267645p-11, -0x1.331d0ffbf3a43p-11, 0x1.9bd5f93a365cep-12, \
+    -0x1.15301de32723dp-12, 0x1.76622d62ac18bp-13, -0x1.fb2de1bf49b6dp-14, 0x1.5876ec4a66ff8p-14, \
+    -0x1.d50ad5467944bp-15, 0x1.400a9f7a4fbebp-15, -0x1.b5a02d3605f2bp-16, 0x1.2bc18b377d0d3p-16, \
+    -0x1.9b5616ac05738p-17, 0x1.1aaa68cc70c26p-17, -0x1.850ccca09e1cbp-18, 0x1.0c185daada334p-18, \
+    -0x1.71f34884f2fe2p-19, 0x1.ff1887cecf420p-20, -0x1.616dfe15678c6p-20, 0x1.e94cf154d6d3dp-21, \
+    -0x1.5306c36e8dafdp-21, 0x1.d63b51d43a92dp-22, -0x1.4662376c6bcc3p-22, 0x1.c57156299cf1cp-23, \
+    -0x1.3b3892f128cbep-23
+// centre 1.05, up to x = 1.5: 41 coefficients
+#define LAPLACE_POWEREXP_CHI_2 \
+    0x1.323b3aaec0cc1p-1, 0x1.a6e7d8f00d42dp-2, -0x1.8761cdf050704p-4, 0x1.f57b78c8b7079p-6, \
+    -0x1.6f52386bb37ffp-7, 0x1.211da3e419520p-8, -0x1.db9dfd367aa80p-10, 0x1.92d67013ca57cp-11, \
+    -0x1.5c4e85f5144f9p-12, 0x1.31c4e437182c0p-13, -0x1.0f8f5acb6988ep-14, 0x1.e6c84b118d556p-16, \
+    -0x1.b7849d51b02b6p-17, 0x1.8f43d637b98b0p-18, -0x1.6c8f0739c89d8p-19, 0x1.4e53bd891499bp-20, \
+    -0x1.33c3da8ed794dp-21, 0x1.1c411dc84a2aap-22, -0x1.074fb244e05f5p-23, 0x1.e91a2d3ab0340p-25, \
+    -0x1.c7539bac88876p-26, 0x1.a8c9c9af23a6dp-27, -0x1.8d11670e93901p-28, 0x1.73d0ee9fabc5ep-29, \
+    -0x1.5cbd0d02ca0acp-30, 0x1.4795e2631a9a2p-31, -0x1.3424e3c851186p-32, 0x1.223b32857bc81p-33, \
+    -0x1.11b04c57d6daep-34, 0x1.0260fefdb8731p-35, -0x1.e85d1f7e3ebbfp-37, 0x1.cdfc16c8885f9p-38, \
+    -0x1.b56f6be94f094p-39, 0x1.9e8d275a49398p-40, -0x1.89300c443a51bp-41, 0x1.7536f349df4d6p-42, \
+    -0x1.62843fbb9c9c4p-43, 0x1.50fd6a60c6780p-44, -0x1.408a9e00aead2p-45, 0x1.311662996a3fdp-46, \
+    -0x1.228d54cacf79dp-47
+// clang-format on
+#if defined(__CUDACC__)
+LAPLACE_DEVICE_GLOBAL_TABLE double chi_dev[111] = {LAPLACE_POWEREXP_CHI_0, LAPLACE_POWEREXP_CHI_1,
+                                                   LAPLACE_POWEREXP_CHI_2};
+#endif
+inline constexpr double chi_host[111] = {LAPLACE_POWEREXP_CHI_0, LAPLACE_POWEREXP_CHI_1,
+                                         LAPLACE_POWEREXP_CHI_2};
+LAPLACE_HD_FORCEINLINE double chi_coef(int i) {
+  KOKKOS_IF_ON_DEVICE((return chi_dev[i];))
+  KOKKOS_IF_ON_HOST((return chi_host[i];))
+}
+
+// d[j] = chi^(j)(x), j = 0..K, 0 < x <= 3/2: Horner's rule for each order on the j-th derivative of
+// the expansion, sum_n a_n n!/(n-j)! t^(n-j), the K + 1 recurrences advanced together in one loop
+// over n so that their latencies overlap; the integer n!/(n-j)! is built by multiplications (exact,
+// below 2^53). Each order performs the same operations as its own Horner pass. Measured against
+// mpmath, this is more accurate than one pass carrying the Taylor coefficients at x by repeated
+// synthetic division (2.7 ulp against 4.0 near x = 0, 6.3 at the worst point for both), and the
+// difference reaches the pure-p components at p >= 2.5 amplified by their final cancellation
+// (order 5 at p = 4: 355 ulp against 547).
+template <int K>
+LAPLACE_HD void chi_derivs(double x, double* d) {
+  int off = 0, last = 32;
+  double c = 0.0;
+  if (x > 0.65) {
+    off = 70;
+    last = 40;
+    c = 1.05;
+  } else if (x > 0.15) {
+    off = 33;
+    last = 36;
+    c = 0.4;
+  }
+  const double t = x - c;
+  for (int j = 0; j <= K; ++j) d[j] = 0.0;
+  for (int n = last; n >= 0; --n) {
+    const double a = chi_coef(off + n);
+    double f = 1.0;  // n!/(n-j)!
+    for (int j = 0; j <= K; ++j) {
+      if (j <= n) d[j] = d[j] * t + a * f;
+      f *= double(n - j);
+    }
+  }
+}
+
 // lambda(p) = log c(p) and the derivatives of A(p) = -p lambda(p) and of g(p), orders 0..K, through
 // G1 and G3, the derivatives of lgamma(1 + 1/p) and lgamma(1 + 3/p). With
 // lgamma(v) = lgamma(1 + v) - log v the two functions of the header comment become
@@ -231,8 +320,56 @@ LAPLACE_HD void lgamma1p_over_p_derivs(double a, double p, double* G) {
 // lgamma(3/p) instead costs a factor 9 in the pure-p component of the derivative: there the pole
 // terms of lgamma(0.25) and lgamma(0.75) are several times larger than their difference.
 // A = -p lambda is one Leibniz rule against the factor p (two terms, p being linear).
+//
+// For p >= 2 the derivatives (m >= 1) take another route. In the one above, the product p lambda(p)
+// loses digits to a cancellation of its own: lambda = (1/2) log 3 + gamma/p + O(p^-2) at large p,
+// and the gamma/p term contributes equal and opposite amounts to p lambda^(m) and m lambda^(m-1)
+// (the next terms nearly so), so A^(m) comes out as a small difference of computed numbers. The
+// same terms cancel between lgamma(1 + 1/p) and lambda in g. With chi(x) = lgamma(1 + x)/x + gamma,
+// which starts at zeta(2) x/2, the two functions are
+//
+//   A(p) = -(chi(1/p) - 3 chi(3/p))/2 - gamma - (p/2) log 3,
+//   g(p) = -log 2 - (1/2) log 3 - (3/(2p)) (chi(1/p) - chi(3/p)),
+//
+// in which nothing cancels: chi(a/p) is differentiated in p by Faa di Bruno through x = a/p, and
+// g by Leibniz's rule against 1/p. At p >= 2 both arguments lie in (0, 3/2], where chi_derivs
+// holds chi without a polygamma. Values (m = 0) are the same in both routes.
 template <int K>
 LAPLACE_HD void shape_derivs(double p, double* A, double* B, double& logc) {
+  if constexpr (K >= 1) {
+    if (p >= 2.0) {
+      const double G1 = math::lgamma(1.0 + 1.0 / p), G3 = math::lgamma(1.0 + 3.0 / p);
+      logc = 0.5 * (G1 - G3 + 1.0986122886681097821);  // + log 3
+      A[0] = -p * logc;
+      B[0] = -0.69314718055994530942 - G1 - logc;
+      double h1[K + 1], h3[K + 1], x1[K + 1], x3[K + 1], c1[K + 1], c3[K + 1], D[K + 1];
+      chi_derivs<K>(1.0 / p, h1);
+      chi_derivs<K>(3.0 / p, h3);
+      x1[0] = x3[0] = 0.0;
+      double pk = p, kf = 1.0;
+      for (int k = 1; k <= K; ++k) {
+        kf *= k;
+        pk *= p;
+        x1[k] = (k % 2 == 0 ? 1.0 : -1.0) * kf / pk;  // d^k/dp^k (1/p)
+        x3[k] = 3.0 * x1[k];
+      }
+      c1[0] = h1[0];
+      c3[0] = h3[0];
+      for (int m = 1; m <= K; ++m) {
+        c1[m] = chain(m, h1, x1);
+        c3[m] = chain(m, h3, x3);
+      }
+      for (int m = 0; m <= K; ++m) D[m] = c1[m] - c3[m];
+      for (int m = 1; m <= K; ++m) {
+        A[m] = -0.5 * (c1[m] - 3.0 * c3[m]);
+        double s = D[m] / p;  // i = 0 of Leibniz, with d^i/dp^i (1/p) = x1[i]
+        for (int i = 1; i <= m; ++i) s += fact(m) / (fact(i) * fact(m - i)) * x1[i] * D[m - i];
+        B[m] = -1.5 * s;
+      }
+      A[1] -= 0.54930614433405484570;  // (1/2) log 3
+      return;
+    }
+  }
   double G1[K + 1], G3[K + 1], lam[K + 1];
   lgamma1p_over_p_derivs<K>(1.0, p, G1);
   lgamma1p_over_p_derivs<K>(3.0, p, G3);

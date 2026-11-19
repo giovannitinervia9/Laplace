@@ -41,6 +41,11 @@ What this checks, each against SymPy's own derivative of the definition:
   7. the expected information in closed form, I(mu, sigma, p), against the integrals of the score
      products over the density (mpmath quadrature), and the divergence of I_mu mu at p <= 1/2.
 
+  9. for p >= 2, the derivatives of A and g through chi(x) = lgamma(1 + x)/x + gamma,
+     A = -(chi(1/p) - 3 chi(3/p))/2 - gamma - (p/2) log 3 and
+     g = -log 2 - (1/2) log 3 - (3/(2p)) (chi(1/p) - chi(3/p)), assembled as the header does.
+     The Taylor tables of chi are written and checked by powerexp_chi_table.py.
+
 Nothing of the library's code is used here; the point is that two independent routes to the same
 number agree.
 """
@@ -358,6 +363,7 @@ def main():
     check_reductions()
     check_info()
     check_tensor()
+    check_chi_route()
     print()
     if fails:
         print(f"{len(fails)} checks FAILED:")
@@ -450,6 +456,44 @@ def check_tensor():
                             if e2 > worst:
                                 worst, where = e2, f"({a},{b},{c})"
                 report(f"mu {muv} sigma {sgv} y {yv} p {pv}: all 84 components", True, f"worst relative {worst:.3g} at {where}")
+
+
+# ---------------------------------------------------------------- 9. the chi route for p >= 2
+
+def chi_route(pv, K):
+    """[A^(m)], [g^(m)] for m = 1..K as the header's shape_derivs forms them for p >= 2:
+    chi(x) = lgamma(1 + x)/x + gamma, A = -(chi(1/p) - 3 chi(3/p))/2 - gamma - (p/2) log 3,
+    g = -log 2 - (1/2) log 3 - (3/(2p)) (chi(1/p) - chi(3/p)); chi(a/p) by Faa di Bruno through
+    x = a/p, g by Leibniz's rule against 1/p"""
+    X = sp.Symbol("x", positive=True)
+    chi = sp.loggamma(1 + X) / X + sp.EulerGamma
+    hd = [sp.diff(chi, X, j) for j in range(K + 1)]
+    c = {}
+    for a in (1, 3):
+        h = [e.subs(X, sp.Integer(a) / pv) for e in hd]
+        xg = [0] + [a * (-1) ** k * sp.factorial(k) / pv ** (k + 1) for k in range(1, K + 1)]
+        c[a] = [h[0]] + [chain(m, h, xg) for m in range(1, K + 1)]
+    D = [c[1][m] - c[3][m] for m in range(K + 1)]
+    u = [(-1) ** i * sp.factorial(i) / pv ** (i + 1) for i in range(K + 1)]
+    A = [None] + [-(c[1][m] - 3 * c[3][m]) / 2 for m in range(1, K + 1)]
+    A[1] -= sp.log(3) / 2
+    G = [None] + [-sp.Rational(3, 2) * sum(sp.binomial(m, i) * u[i] * D[m - i] for i in range(m + 1))
+                  for m in range(1, K + 1)]
+    return A, G
+
+
+def check_chi_route():
+    print("9. the chi route of A^(m) and g^(m), m = 1..6, used for p >= 2, against SymPy's own")
+    print("   derivatives of the ORIGINAL definitions")
+    exA = [sp.diff(A_EXPR, P, m) for m in range(7)]
+    exG = [sp.diff(G_EXPR, P, m) for m in range(7)]
+    for pv in [sp.Integer(2), sp.Rational(5, 2), sp.Integer(4), sp.Integer(40)]:
+        a, g = chi_route(pv, 6)
+        for m in range(1, 7):
+            ok, d = close(a[m], exA[m].subs(P, pv))
+            report(f"A at p = {pv}, order {m}", ok, d)
+            ok, d = close(g[m], exG[m].subs(P, pv))
+            report(f"g at p = {pv}, order {m}", ok, d)
 
 if __name__ == "__main__":
     main()

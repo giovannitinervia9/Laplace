@@ -13256,11 +13256,17 @@ mpmath, nothing of the library's own code):
 | `l` against the logarithm of the density, and `A`, `g` against their definitions | 16 | 0 |
 | `d^m/dp^m lgamma(1 + a/p)`, m = 0..6, by Faa di Bruno through v = 1 + a/p, a = 1, 3; p = 1/3, 1, 5/2, 40 | 56 | 0 |
 | `A^(m)` and `g^(m)`, m = 0..6, in the shifted forms, against SymPy's derivatives of the original definitions through `lgamma(1/p)` and `lgamma(3/p)`; same four `p` | 56 | 0 |
+| `A^(m)` and `g^(m)`, m = 1..6, through `chi` (the route for `p >= 2`), against the same derivatives; p = 2, 5/2, 4, 40 | 48 | 0 |
 | the `(zeta, p)` table `d^c/dp^c d^j/dzeta^j Lambda`, every `c + j <= 6`; p = 1/2, 3/2, 2, 9/2; zeta = 3/7, 2, -5/3 | 336 | 0 |
 | `d^i/dp^i fall(p, j)` from the integer coefficients; j = 0..6; p = 1/2, 2, 17/4 | 147 | 0 |
 | the factorized tensor, all 84 components with `K <= 6`, both sides of the location; p = 1/2, 3/2, 2, 9/2; two `(mu, sigma)` pairs | 16 point sets | 1.6e-166 |
 | the reductions at `p = 2` and `p = 1` | 6 | 0 |
 | the closed `I` against the quadrature of the score products | p = 0.8, 1, 1.5, 2, 3, 6 | 1.3e-6 at p = 0.8, 9.5e-11 at p = 1, <= 2.9e-19 above |
+
+The Taylor tables of `chi` are checked by their own script
+(`tools/reference/powerexp_chi_table.py check`): `chi^(j)`, j = 0..6, evaluated in
+double as the header does, at 80 points of each of the three intervals against
+mpmath, within 6.3 ulp (order 6 near `x = 1.5`), 3.3 for every lower order.
 
 The figure at `p = 0.8` is the quadrature's, not the closed form's: `I_mu mu` is
 the integral of `|z|^(2p-2) = |z|^(-0.4)`, whose endpoint singularity the
@@ -13283,23 +13289,26 @@ over 0.03, 0.3, 1, -1, 2.5, -7 and 30, with `(mu, sigma) = (0.5, 1)`,
 `(-2, 2^-10)` and `(1, 2^10)`.
 
 **Worst scaled error against those references**, in ulp of the largest component
-of the order at that point, the row of order 0 in ulp of the value. gcc and CUDA
-(the default build, not `nofmad`) agree to the digit in every entry but one,
-order 5 at `p >= 2.5`, where CUDA reads 483 against gcc's 2.27e3 below; the
-bounds are gcc's figures times about one and a half:
+of the order at that point, the row of order 0 in ulp of the value, measured on
+2026-11-19 with the `chi` route of the next paragraphs. gcc and CUDA (the default
+build, not `nofmad`) agree to the digit in every entry; the bounds are those
+figures times about one and a half:
 
 | order | p < 2.5: worst (bound) | p >= 2.5: worst (bound) |
 | --- | --- | --- |
 | 0 | 49.5 (75) | 32.9 (50) |
 | 1 | 39.7 (60) | 31.2 (50) |
 | 2 | 60.9 (95) | 32.1 (50) |
-| 3 | 440 (660) | 266 (400) |
+| 3 | 440 (660) | 29.9 (45) |
 | 4 | 102 (155) | 32.8 (50) |
-| 5 | 678 (1050) | 2.27e3 (3450) |
-| 6 | 273 (410) | 80.6 (125) |
+| 5 | 678 (1050) | 355 (535) |
+| 6 | 273 (410) | 35.9 (55) |
 
 By `p`, over every order: 0.4: 188; 0.75: 440; 0.95: 107; 1: 78.5; 1.05: 678;
-1.5: 27; 2: 88.8; 2.5: 266; 3: 80.6; 4: 2.27e3; 7.5: 29.7; 30: 35.9.
+1.5: 27; 2: 25.8; 2.5: 26.3; 3: 10.6; 4: 355; 7.5: 13; 30: 35.9. Before the
+`chi` route (2026-11-18, gcc): 2: 88.8; 2.5: 266; 3: 80.6; 4: 2.27e3 (483 on
+CUDA); 7.5: 29.7; the region `p >= 2.5` read 266 at order 3, 2.27e3 at order 5
+and 80.6 at order 6.
 
 **Where the loss comes from, measured.** At the points of large error the
 pure-`p` component of the derivative is the sum of the derivatives in `p` of
@@ -13346,22 +13355,57 @@ the library itself, the shifted forms took order 2 at `p = 0.4` from 1.08e3 to
 (order 3 at `p = 0.75`, 188 to 440; order 3 at `p >= 2.5`, 130 to 266; order 6,
 185 to 273), within the spread the table shows for order 3.
 
-**What is left, and why a better polygamma would not remove it.** The worst row,
-order 5 at `p = 4` (2.27e3 ulp on gcc, 483 on CUDA, where fused multiply-add
-happens to round the cancelling terms more favourably), emulated with correctly rounded lgamma and polygamma values
-through the shifted route, loses 1.85e3 ulp, against 2.27e3 in the library: the
-polygamma's own few ulp account for a factor 1.2 only. Every shape quantity of
-that emulation is right to under one ulp except `A^(5)`, at 3.3 ulp, and the
-final cancellation (234 there) amplifies those. The 3.3 ulp come from a
-structural cancellation inside `A^(m) = -(p lambda^(m) + m lambda^(m-1))`: for
-large `p`, `lambda = (1/2) log 3 + gamma/p + O(p^-2)` with `gamma` Euler's
-constant, so `A = -p lambda = -(p/2) log 3 - gamma + O(1/p)` and the leading term
-of `lambda` contributes `gamma (-1)^m m!/p^m` and its opposite to the two
-products, which cancel exactly. **Open, for Giovanni:** removing that would take
-the series of `A` in `1/p`, `A = -(p/2) log 3 - gamma - (1/2) sum_(k>=2) (-1)^k
-zeta(k) (1 - 3^k) / (k p^(k-1))`, convergent for `p > 3` only and slowly near
-it (ratio 3/4 at `p = 4`), so a branch and a derivation to order six for one
-row, whose floor with every shape derivative exact is 314 ulp.
+**The structural cancellation at large `p`, and the `chi` route that removes it.**
+After the shifted forms the worst row was order 5 at `p = 4`, 2.27e3 ulp on gcc
+and 483 on CUDA. Emulated with correctly rounded lgamma and polygamma values it
+still lost 1.85e3 ulp, so the polygamma's own error accounted for a factor 1.2
+only. The rest came from a cancellation inside
+`A^(m) = -(p lambda^(m) + m lambda^(m-1))`: for large `p`,
+`lambda = (1/2) log 3 + gamma/p + O(p^-2)` with `gamma` Euler's constant, and the
+term `gamma/p` contributes `gamma (-1)^m m!/p^m` and its opposite to the two
+products, while each next term of the expansion `c_k p^-k` contributes two
+products that cancel to a fraction `1/(2m+1)`, `2/(2m+2)`, ... of their size. The
+same terms cancel between `lgamma(1 + 1/p)` and `lambda` in `g`.
+
+The cure is to never form the product. With `chi(x) = lgamma(1 + x)/x + gamma`,
+which is analytic for `x > -1` and starts at `zeta(2) x/2`,
+
+    A(p) = -(chi(1/p) - 3 chi(3/p))/2 - gamma - (p/2) log 3,
+    g(p) = -log 2 - (1/2) log 3 - (3/(2p)) (chi(1/p) - chi(3/p)),
+
+exact identities in which `gamma` has been removed by hand; `chi(a/p)` is
+differentiated in `p` by Faa di Bruno through `x = a/p`, whose derivatives
+`a (-1)^k k!/p^(k+1)` all have the sign `(-1)^k`, and `g` by Leibniz's rule
+against `1/p`. The values `A(p)`, `g(p)` and `log c(p)` keep the shifted forms.
+For `p >= 2` both arguments lie in `(0, 3/2]`, and `chi` is evaluated there
+without a polygamma, from three Taylor expansions whose coefficients
+`chi^(n)(c)/n!` were computed with mpmath at 60 digits: centre 0 on `[0, 0.15]`
+(33 coefficients, `(-1)^(n+1) zeta(n+1)/(n+1)`), centre 0.4 on `(0.15, 0.65]`
+(37) and centre 1.05 on `(0.65, 1.5]` (41), 111 doubles in
+`LAPLACE_DEVICE_GLOBAL_TABLE`, outside the constant bank. Each order `j` is
+Horner's rule on `sum_n a_n n!/(n-j)! t^(n-j)`, the seven recurrences advanced
+in one loop over `n`; one pass carrying the Taylor coefficients at `x` by
+repeated synthetic division is as fast but measured 4.0 ulp against 2.7 near
+`x = 0`, and 547 against 355 ulp on the worst row. Below `p = 2` the route of the
+shifted forms is kept: there `3/p > 3/2`, and at `p = 1.5` emulating the `chi`
+route with exact `chi` values did not improve on it (18.7 against 16.7 ulp at
+order 1).
+
+Emulated over the reference grid with correctly rounded inputs (the current
+route with correctly rounded polygamma values, the `chi` route with correctly
+rounded `chi^(j)`, and the floor with `A^(m)` and `g^(m)` themselves correctly
+rounded), worst over `|zeta|` of the pure-`p` component in ulp, order 5:
+`p = 2`: 36.8, 7.2, 3.66; `p = 2.5`: 45.8, 13.8, 5.2; `p = 3`: 40.7, 26, 26;
+`p = 4`: 1.85e3, 454, 314. Measured on the library, gcc and CUDA alike: order 5
+at `p = 4` from 2.27e3 (483 on CUDA) to 355 ulp, order 3 at `p >= 2.5` from 266 to
+29.9, order 6 from 80.6 to 35.9, and `p = 2` from 88.8 to 25.8 over every order;
+no entry rose. What is left at the worst row is the final cancellation of 234
+between the derivatives of `Lambda` and of `g`, on shape derivatives now right to
+a few ulp; with every shape derivative exact the row would read 314.
+
+Cost, one thread, gcc `-O3` (the test build), `p = 1.99` (old route) against
+`p = 2.01` and `p = 4`: `shape_derivs<6>` 218 ns against 276 and 280 ns, all of
+`logpdf_dk<6>` 960 against 1000 and 1030 ns, about 5 per cent.
 
 **The other checks** (`tests/distrib/test_powerexp.cpp`), worst measured
 difference, identical on gcc and CUDA except where the table says:
@@ -13377,7 +13421,7 @@ difference, identical on gcc and CUDA except where the table says:
 | the closed `log F` and `log(1 - F)` against the generic quadrature route | 9.93e-16 relative |
 | the quantile against its own cumulative function | 1.79e-14 relative |
 | every order inside a Kokkos kernel, host against device, at the exact points y = -3 + i/4, as a fraction of the sum of the absolute values of the components | 0 on gcc; on CUDA 2.4e-16 (order 1) to 7.5e-15 (order 5) |
-| the value, a mixed derivative, the cumulative functions, the information and the quantile inside a kernel, host against device | 0 on gcc; 6.4e-15 relative on CUDA |
+| the value, a mixed derivative, the cumulative functions, the information and the quantile inside a kernel, host against device | 0 on gcc; 7.0e-15 relative on CUDA |
 
 Every derivative order is also checked against a five-point difference of the
 order below, in the parameters, in `y` and mixed (`check_derivs` and the
@@ -13398,6 +13442,8 @@ representable on both sides and never near the location.
 **Builds.** gcc (Kokkos Serial and OpenMP): 13 cases, 25405 assertions, 0
 failed. CUDA (sm_89, RTX 4070 SUPER, the default build): 13 cases, 25405
 assertions, 0 failed, confirmed by a second build after the bounds were set.
+Both again on 2026-11-19 after the `chi` route, with the same counts and 0
+failed.
 
 ## The multivariate power exponential: mvpowerexp1 and mvpowerexp2 (2026-11-18)
 
