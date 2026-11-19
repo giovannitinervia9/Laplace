@@ -2,17 +2,18 @@
 \defgroup pdmat Positive definite structures
 \brief Structured symmetric positive definite matrices with exact values, log-determinants, inverses, Cholesky factors, and derivatives to order 6.
 
-Functions in this module are marked `LAPLACE_HD` for host and Kokkos device execution, except host-only \ref laplace::pdmat::factor_analytic_max_factors "factor_analytic_max_factors()" and `params_from_matrix()`. Include `<laplace/pdmat/core.hpp>` with `diagonal.hpp`, `compound_symmetry.hpp`, `ar1.hpp`, `toeplitz.hpp`, `unstructured.hpp`, `unit_diagonal_scaled.hpp`, or `factor_analytic.hpp`.
+Functions in this module are marked `LAPLACE_HD` for host and Kokkos device execution, except host-only \ref laplace::pdmat::factor_analytic_max_factors "factor_analytic_max_factors()" and `params_from_matrix()`. Include `<laplace/pdmat/core.hpp>` with `diagonal.hpp`, `scaled_identity.hpp`, `compound_symmetry.hpp`, `ar1.hpp`, `toeplitz.hpp`, `unstructured.hpp`, `unit_diagonal_scaled.hpp`, or `factor_analytic.hpp`.
 
 Each structure holds dimension \f$p \ge 1\f$ in `dim`, parameter count \f$q\f$ via `n_params()`, and scratch requirement via `scratch_size()`. Symmetric matrices and lower Cholesky factors use row-major packed lower-triangular storage indexed by \ref laplace::pdmat::packed_index "packed_index(i, j)" (\f$i(i + 1)/2 + j\f$, \f$0 \le j \le i < p\f$), of length \ref laplace::pdmat::packed_size "packed_size(p)" (\f$p(p + 1)/2\f$). Across orders 0–6, diagonal, compound symmetry, AR(1), and unstructured structures stay within 60 ulpN, Toeplitz within 163 ulpN, and factor-analytic within \f$2.3 \times 10^4\f$ ulpN.
 
 ## Overview and interface
 
-Eight structures implement diagonal, correlation, scaled, unstructured, and factor-analytic covariance models:
+Nine structures implement diagonal, scaled identity, correlation, scaled, unstructured, and factor-analytic covariance models:
 
 | Structure | \f$q\f$ | `unit_diagonal` | `closed_inverse` | `closed_factor` | `has_density` | `scratch_size()` | Max gcc error |
 |---|---|---|---|---|---|---|---|
 | `diagonal_pdmat` | \f$p\f$ | `false` | `true` | `true` | `false` | `0` | 0.89 ulpN |
+| `scaled_identity_pdmat` | `1` | `false` | `true` | `true` | `false` | `0` | equal to `diagonal_pdmat` |
 | `compound_symmetry_pdmat` | `1` | `true` | `true` | `true` | `false` | `0` | 9.34 ulpN |
 | `ar1_pdmat` | `1` | `true` | `true` | `true` | `false` | `0` | 13.0 ulpN |
 | `toeplitz_pdmat` | \f$p - 1\f$ | `true` | `true` | `true` | `false` | \f$64(p^2+3p-2)\f$ (\f$0\f$ at \f$p=1\f$) | 163 ulpN |
@@ -32,6 +33,10 @@ All structures map unconstrained parameters \f$\theta \in \mathbb{R}^q\f$ and di
 ### Diagonal structure
 
 In \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat", \f$\theta_i = \log\sigma_i\f$ defines \f$M_{ii} = \sigma_i^2 = e^{2\theta_i}\f$ (off-diagonals zero), \f$M^{-1}_{ii} = e^{-2\theta_i}\f$, \f$L_{ii} = e^{\theta_i}\f$, and \f$\log\det M = 2\sum_{i=0}^{p-1}\theta_i\f$. Pure tuples `(i, ..., i)` scale `(i, i)` by \f$2^K\f$, \f$(-2)^K\f$, and `1`, with \f$\partial\log\det M/\partial\theta_i = 2\f$ (higher orders zero); mixed tuples return `false` or `0.0`.
+
+### Scaled identity structure
+
+In \ref laplace::pdmat::scaled_identity_pdmat "scaled_identity_pdmat", one parameter \f$\theta = \log\sigma\f$ defines \f$M(\theta) = e^{2\theta} I_p\f$ for any dimension \f$p\f$, with \f$M^{-1} = e^{-2\theta} I_p\f$, \f$L = e^\theta I_p\f$, and \f$\log\det M = 2p\theta\f$. Every derivative is along \f$\theta\f$ alone: order \f$K\f$ gives \f$2^K e^{2\theta} I_p\f$ for \f$M\f$, \f$(-2)^K e^{-2\theta} I_p\f$ for \f$M^{-1}\f$, and \f$e^\theta I_p\f$ for \f$L\f$, while \f$\partial\log\det M/\partial\theta = 2p\f$ and higher orders vanish. In `tests/penalty/test_power_prox.cpp`, \f$M\f$, \f$M^{-1}\f$, and \f$L\f$ match `diagonal_pdmat` bit for bit when all diagonal parameters are equal, \f$\log\det M\f$ agrees within \f$10^{-15}\f$ relative, and `matrix_d1()`, `matrix_d2()`, `inverse_d1()`, and `cholesky_d1()` agree with central differences within \f$10^{-9}\f$.
 
 ### Compound symmetry structure
 
@@ -84,6 +89,7 @@ Every structure provides a host-only `params_from_matrix()` that takes a symmetr
 | Structure | Start rule from \f$\hat{M}\f$ |
 | :--- | :--- |
 | `diagonal_pdmat` | \f$\theta_i = \frac{1}{2}\log \hat{M}_{ii}\f$ |
+| `scaled_identity_pdmat` | \f$\theta = \frac{1}{2}\log\bigl(\frac{1}{p}\sum_{i=0}^{p-1}\hat{M}_{ii}\bigr)\f$ (\f$0\f$ when that mean is not positive) |
 | `ar1_pdmat` | \f$\rho\f$ from mean lag-1 correlation, \f$\theta_0 = \operatorname{atanh}\rho\f$ |
 | `compound_symmetry_pdmat` | \f$\rho\f$ from mean off-diagonal correlation, \f$(\rho - a)/(1 - a) = \operatorname{expit}(\theta_0)\f$, \f$a = -1/(p - 1)\f$ |
 | `toeplitz_pdmat` | Mean correlation \f$m_k\f$ on diagonal \f$k\f$, then Durbin-Levinson partial autocorrelations (Durbin, 1960) |
@@ -104,7 +110,7 @@ On exact model matrices `matrix(theta)`, round-trip parameter recovery errors \f
 | `unstructured_pdmat` (`matrix_log_bijector`, \f$p = 3\f$) | \f$5.6 \times 10^{-16}\f$ |
 | `ar1_pdmat` (\f$p = 5, \theta = -1.9\f$) | \f$8.9 \times 10^{-16}\f$ |
 
-The tests bound these errors between \f$10^{-15}\f$ and \f$10^{-13}\f$.
+The tests bound these errors between \f$10^{-15}\f$ and \f$10^{-13}\f$. For `scaled_identity_pdmat` (\f$p = 4\f$), `params_from_matrix()` recovers \f$\theta\f$ within \f$10^{-15}\f$ in `tests/penalty/test_power_prox.cpp`.
 
 For `factor_analytic_pdmat` (\f$p = 8, d = 2\f$), relative matrix error \f$\max \lvert M(\hat{\theta}) - \hat{M} \rvert / \max \lvert \hat{M} \rvert\f$ is \f$1.1 \times 10^{-3}\f$ on its own model matrix (test bound \f$0.05\f$) and \f$0.17\f$ on a generic SPD matrix. These errors are expected: the result is a starting value for the optimizer, which refines it, and not a fit of the factor model to \f$\hat{M}\f$. A rank-one target with a zero diagonal entry and a target whose correlations all equal 1 give finite parameters inside the guards.
 
@@ -198,6 +204,7 @@ void eval_pdmat(const Kokkos::View<double*>& theta) {
 ## Public classes and concepts
 
 - \ref laplace::pdmat::diagonal_pdmat "diagonal_pdmat": Diagonal matrix structure.
+- \ref laplace::pdmat::scaled_identity_pdmat "scaled_identity_pdmat": Scaled identity matrix structure.
 - \ref laplace::pdmat::compound_symmetry_pdmat "compound_symmetry_pdmat": Compound symmetry matrix structure.
 - \ref laplace::pdmat::ar1_pdmat "ar1_pdmat": First-order autoregressive AR(1) correlation structure.
 - \ref laplace::pdmat::toeplitz_pdmat "toeplitz_pdmat": Toeplitz correlation structure.

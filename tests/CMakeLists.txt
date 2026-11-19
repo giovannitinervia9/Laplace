@@ -86,6 +86,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_univariate_as_multivariate.cpp
   penalty/test_prox.cpp
   penalty/test_nonconvex.cpp
+  penalty/test_power_prox.cpp
   distrib/test_mvstudent_t.cpp
   distrib/test_mvstudent_t_improper.cpp
   distrib/test_mvpowerexp.cpp

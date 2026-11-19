@@ -14129,3 +14129,80 @@ so the sum divides over threads.
 **Open.** Pruning the orthants whose saddle-point bound is 40 below the
 largest removes some only at correlation 0.99 (202 of 256 at k = 8): not
 implemented.
+
+## The power exponential penalties: the prox of a|x|^p, powerexp and the isotropic mvpowerexp (2026-11-19)
+
+What. The penalty side of powerexp_distrib and mvpowerexp1/2 (note/penalties.md
+section 5g). One scalar problem,
+
+  x*(u, a, p) = argmin_x a|x|^p + (x - u)^2/2,   a > 0, p > 0,
+
+in include/laplace/distrib/detail/power_prox.hpp, behind three members:
+powerexp_distrib::prox_y(v, t) = mu + s x*((v - mu)/s, t/s^2, p) with s the
+natural scale sigma c(p) (written in units of s so that s^-p never overflows);
+mvpowerexp1/2::prox_y, present only over the new one-parameter structure
+scaled_identity_pdmat (M = e^(2 theta) I), where the minimizer lies along
+u = v - mu with norm c x*(||u||/c, t q/2, 2 beta), q the diagonal of Sigma^-1
+or Q and c = q^(-1/2); at beta = 1/2 the block soft threshold. General Sigma
+has no prox (a secular equation with a factorization per step). Descriptors:
+proper, beta_regularity 0, kinks per coordinate (powerexp) or radial
+(mvpowerexp), prox closed_form, rho = 0 for p >= 1 and beta >= 1/2, infinity
+below.
+
+How. p = 1 is the soft threshold and p = 2 is u/(1 + 2a), exactly. Otherwise a
+nonzero |x*| solves phi(x) = x + a p x^(p-1) - |u| = 0, by Newton from a bound
+on the side where the iteration is monotone, stopped when a step no longer
+moves x in its direction (a test that FMA cannot fool, unlike a tolerance):
+1 < p < 2, phi concave, from the lower bound (|u|/(|u|^(2-p) + a p))^(1/(p-1));
+p > 2, phi convex, from min(|u|, (|u|/(a p))^(1/(p-1))); p < 1 (the bridge,
+nonconvex) zero when |u| <= tau = x_b + a p x_b^(p-1), x_b =
+(2a(1-p))^(1/(2-p)), zero on the tie, otherwise the larger root from |u| on the
+convex branch. The global minimizer is returned for every t: rho is infinite
+for p < 1, so no step satisfies t rho < 1, and the optimizers that require it
+(MFISTA, proximal Newton) refuse the penalty; a plain iterative thresholding
+may use it, without a convergence guarantee.
+
+Measured before writing (Python against a 200-bit bisection, 400 random (u, a)
+per p in 1e-8..1e8): at most 12 Newton steps, mean 1.2 to 4.1; C++ -O3 on one
+core with std::pow, 4 ns for the soft threshold, 250 ns for p < 1, 360-510 ns
+for 1 < p < 2, 67-126 ns for p > 2.
+
+References. tools/reference/power_prox.py, mpmath: bisection in log x (400
+halvings), the bracket from the monotone branch, for p < 1 the comparison with
+the objective at 0; at 200 and 260 bits, kept when they agree to 2^-120. 2798
+rows, 21 values of p from 0.1 to 50 (0.99, 1.01, 1.05, 1.99, 2.01 among them),
+(u, a) log-uniform in 1e-8..1e8, and for p < 1 the threshold approached at
+relative 1e-6 and 1e-10 on both sides.
+
+Error measure. The error in ulps of x* is divided by the condition number of
+the problem, kappa = |u|/(|x*| phi'(x*)), phi'(x) = 1 + a p (p - 1) |x|^(p-2):
+rounding the data moves x* by kappa ulps. kappa tends to 1/(p - 1) near p = 1
+when x* is tiny and is large for p < 1 just above the threshold, where phi'
+vanishes at the edge of the branch.
+
+**Tests** (tests/penalty/test_power_prox.cpp, kernels on gcc and CUDA):
+
+| check | gcc | CUDA | bound |
+|---|---|---|---|
+| x* against mpmath, ulp / max(1, kappa) | 7.17 | 7.27 | 11 |
+| x* against mpmath, plain ulp (printed) | 164 | 192 | - |
+| zeros of the bridge where the reference is zero | exact | exact | exact |
+| powerexp prox_y: objective above a 4001-point grid + golden (relative) | 2.51e-15 | 2.51e-15 | 4e-15 |
+| powerexp prox_y: optimality residual (scaled) | 5.68e-16 | 5.68e-16 | 9e-16 |
+| mvpowerexp1 at beta = 1/2 against the block soft threshold | 2.22e-16 | 2.22e-16 | 4e-16 |
+| mvpowerexp1: optimality residual of the gradient (scaled) | 2.22e-16 | 2.37e-16 | 4e-16 |
+| mvpowerexp1: objective above the least along the ray (relative) | 3.99e-16 | 4.25e-16 | 7e-16 |
+| mvpowerexp2 at Q = I/sigma^2 against mvpowerexp1 | 0 | 0 | exact |
+
+The worst ulp/kappa point is p = 0.9 just above the threshold
+(u = 1.25e-3, a = 4.92e-4). p = 1 and p = 2 equal the closed forms bit for bit,
+the prox is odd in u bit for bit, NaN gives NaN and u = 0 gives 0; mvpowerexp at
+u = 0 and in the zero region of beta = 1/2 returns mu exactly; the group-lasso
+product (mvpowerexp2 over scaled_identity_pdmat) and the powerexp product with
+mu_0 forward prox_y copy by copy exactly. scaled_identity_pdmat equals
+diagonal_pdmat with equal parameters bit for bit (matrix, inverse, factor), and
+its derivatives agree with central differences to 1e-9.
+
+Open. A prox for a general Sigma (beta >= 1/2: a secular equation in gamma,
+x = (I + gamma Sigma^-1)^-1 u; beta < 1/2: several stationary points), if a
+consumer asks.

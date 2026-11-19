@@ -169,6 +169,10 @@ Other checks agree on gcc and CUDA. At \f$\beta = 1\f$ the blocks agree with `mv
 
 The test bounds are these measured values times 1.5, rounded up. See `docs/numerics.md` for the measurements behind these figures.
 
+## Proximal operator
+
+The member `prox_y(st, v, x, t, out, w)` is defined only when `S` is \ref laplace::pdmat::scaled_identity_pdmat "pdmat::scaled_identity_pdmat", detected at compile time, and does not exist for any other matrix structure. With \f$u = v - \mu\f$ (where `x` is \f$\mu\f$) and \f$q\f$ the common diagonal entry of \f$\Sigma^{-1}\f$, the minimizer is \f$\mu\f$ when \f$u = 0\f$ and otherwise lies along \f$u\f$ with norm \f$c\,x^\star(\lVert u\rVert / c,\ tq/2,\ 2\beta)\f$, where \f$c = q^{-1/2}\f$ and \f$x^\star\f$ is the scalar operator documented on \ref penalty_prox "Proximal operators". At \f$\beta = 1/2\f$ with \f$\Sigma = \sigma^2 I\f$, `out` equals \f$\mu + \bigl(1 - t/(2\sigma\lVert u\rVert)\bigr)_+\,u\f$ (the block soft threshold, where \f$a_+ = \max(a, 0)\f$), and for \f$\beta < 1/2\f$ the global minimizer is returned.
+
 ## Example
 
 Evaluating `logpdf()` and the gradient in \f$\mu\f$ on the device, with one shared state:
@@ -253,6 +257,10 @@ The constant is the one of the first page, \ref mvpowerexp1_constant "the normal
 `theta_state(theta, w)` returns `mvpowerexp_state<mvgaussian2_state>`, which holds the Gaussian state of \f$Q\f$, with a factor \f$L\f$ such that \f$Q = LL^\top\f$. Its `rng()` writes \f$y = \mu + L^{-\top}v\f$, with the draw \f$v\f$ of the first page. Since \f$\Sigma = Q^{-1} = L^{-\top}L^{-1}\f$, the draws have scale matrix \f$\Sigma\f$. `mean()` writes \f$\mu\f$, and `covariance()` writes \f$Q^{-1}\f$ times the factor above. `start_value(summary, theta)` runs on the host, sets \f$\beta = 1\f$, and sets the parameters of \f$Q\f$ by the Gaussian starting rule for the inverse scale. `start_value(y, n, theta)` also runs on the host on stacked units `y`: it solves for \f$\beta\f$ from Mardia's kurtosis as on \ref mvpowerexp1_draws "the first page", and sets the parameters of \f$Q\f$ from the sample covariance divided by the covariance factor above at that \f$\beta\f$, by the Gaussian starting rule for the inverse scale.
 
 Form 2 takes \f$Q\f$ directly and never inverts it, so it does not carry the error of the computed \f$\Sigma^{-1}\f$ that form 1 inherits at the near-singular point of the `log_cholesky` structure. At that point form 2 stays within 18.1 ulp1N on gcc/OpenMP and 17.4 ulp1N on CUDA, while form 1 reaches \f$3.96 \times 10^{3}\f$ and \f$3.86 \times 10^{3}\f$ ulp1N. The accuracy table and the other checks are those of \ref mvpowerexp1_accuracy "the accuracy section of the first page".
+
+## Proximal operator
+
+As in the first parametrization, `prox_y(st, v, x, t, out, w)` is defined only when `S` is \ref laplace::pdmat::scaled_identity_pdmat "pdmat::scaled_identity_pdmat", and does not exist for any other matrix structure. With \f$u = v - \mu\f$ (where `x` is \f$\mu\f$) and \f$q\f$ the common diagonal entry of \f$Q\f$, the minimizer is \f$\mu\f$ when \f$u = 0\f$ and otherwise lies along \f$u\f$ with norm \f$c\,x^\star(\lVert u\rVert / c,\ tq/2,\ 2\beta)\f$, where \f$c = q^{-1/2}\f$ and \f$x^\star\f$ is the scalar operator documented on \ref penalty_prox "Proximal operators". At \f$\beta = 1/2\f$, `out` equals \f$\mu + \bigl(1 - t\sqrt{q}/(2\lVert u\rVert)\bigr)_+\,u\f$ (the block soft threshold, where \f$a_+ = \max(a, 0)\f$), and for \f$\beta < 1/2\f$ the global minimizer is returned.
 
 ## Module types
 

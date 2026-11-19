@@ -20,6 +20,9 @@
 #include <laplace/distrib/independent_product.hpp>
 #include <laplace/distrib/laplace1.hpp>
 #include <laplace/distrib/laplace2.hpp>
+#include <laplace/distrib/mvpowerexp1.hpp>
+#include <laplace/distrib/mvpowerexp2.hpp>
+#include <laplace/distrib/powerexp.hpp>
 #include <laplace/distrib/pseudohuber.hpp>
 #include <laplace/distrib/student_t1.hpp>
 #include <laplace/distrib/student_t2.hpp>
@@ -35,8 +38,8 @@ namespace laplace::penalty {
  * \ingroup distrib_independent_product
  * \brief What the declarations of a univariate law `D` do not say about its penalty: scale mixture and \f$\rho\f$.
  *
- * Undefined for a general `D`; specialized for laplace1, enet, student_t1,
- * student_t2, pseudohuber, gaussian1 and gaussian2. `weak_convexity(theta)`
+ * Undefined for a general `D`; specialized for laplace1, laplace2, enet, student_t1,
+ * student_t2, pseudohuber, gaussian1, gaussian2 and powerexp. `weak_convexity(theta)`
  * reads the parameters of `D` after the location, in their order.
  *
  * \tparam D Univariate distribution.
@@ -143,6 +146,22 @@ struct univariate_penalty_reading<distrib::student_t2_distrib> {
   }
 };
 
+/**
+ * \ingroup distrib_independent_product
+ * \brief Power exponential penalty \f$|(\beta - \mu)/s|^p\f$: \f$\rho = 0\f$ for \f$p \ge 1\f$, \f$+\infty\f$ below (the bridge).
+ *
+ * For \f$p < 1\f$, \f$\mathrm{pen}'' = p(p-1)|z|^{p-2}/s^2\f$ is unbounded below at the location.
+ */
+template <>
+struct univariate_penalty_reading<distrib::powerexp_distrib> {
+  /// None declared.
+  static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::none;
+  /// \param theta \f$(\sigma, p)\f$. \return 0 for \f$p \ge 1\f$, \f$+\infty\f$ otherwise.
+  LAPLACE_HD static double weak_convexity(const double* theta) {
+    return theta[1] >= 1.0 ? 0.0 : distrib::distrib_infinity;
+  }
+};
+
 namespace detail_penalty {
 template <class D>
 constexpr int least_theta_regularity() {
@@ -176,6 +195,52 @@ struct distrib_penalty_traits<distrib::univariate_as_multivariate<D>> {
   /// \param theta Parameters of `D` after the location. \return \f$\rho\f$ from `univariate_penalty_reading<D>`.
   LAPLACE_HD static double weak_convexity(const double* theta) { return univariate_penalty_reading<D>::weak_convexity(theta); }
 };
+
+namespace detail_penalty {
+/// Descriptors shared by the penalties of mvpowerexp1 and mvpowerexp2 (note/penalties.md section 5g).
+template <class M>
+struct mvpowerexp_penalty_traits {
+  /// Regularity in \f$\beta\f$: 0, the worst case over the shape (the radial kink at the location).
+  static constexpr int beta_regularity = 0;
+  /// Kinks: radial, at the location.
+  static constexpr penalty_kink_geometry kinks = penalty_kink_geometry::radial;
+  /// Structure: coupled through the matrix.
+  static constexpr penalty_structure structure = penalty_structure::coupled;
+  /// Regularity in \f$\theta\f$: \f$C^\infty\f$.
+  static constexpr int theta_regularity = distrib::infinitely_smooth;
+  /// Not a quadratic penalty.
+  static constexpr bool q_linear_in_theta = false;
+  /// Scale mixture: none declared.
+  static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::none;
+  /**
+   * \brief \f$\rho = 0\f$ for a shape \f$\beta \ge 1/2\f$ (convex), \f$+\infty\f$ below.
+   * \param m The distribution, whose structure locates the shape in \f$\theta\f$.
+   * \param theta Hyperparameters, the shape at index `m.structure.n_params()`.
+   * \return \f$\rho\f$.
+   */
+  LAPLACE_HD static double weak_convexity(const M& m, const double* theta) {
+    return theta[m.structure.n_params()] >= 0.5 ? 0.0 : distrib::distrib_infinity;
+  }
+};
+}  // namespace detail_penalty
+
+/**
+ * \ingroup penalty_distrib_penalty
+ * \brief Descriptors of the penalty of `distrib::mvpowerexp1_distrib<S>`: radial kink, \f$\rho\f$ from the shape.
+ * \tparam S Matrix structure.
+ */
+template <class S>
+struct distrib_penalty_traits<distrib::mvpowerexp1_distrib<S>>
+    : detail_penalty::mvpowerexp_penalty_traits<distrib::mvpowerexp1_distrib<S>> {};
+
+/**
+ * \ingroup penalty_distrib_penalty
+ * \brief Descriptors of the penalty of `distrib::mvpowerexp2_distrib<S>`: radial kink, \f$\rho\f$ from the shape.
+ * \tparam S Matrix structure.
+ */
+template <class S>
+struct distrib_penalty_traits<distrib::mvpowerexp2_distrib<S>>
+    : detail_penalty::mvpowerexp_penalty_traits<distrib::mvpowerexp2_distrib<S>> {};
 
 namespace detail_penalty {
 template <class E>
@@ -246,7 +311,10 @@ struct distrib_penalty_traits<distrib::independent_product_distrib<M...>> {
         double r = distrib::distrib_infinity;
         if (q <= 32) {
           distrib::independent_product_distrib<M...>::gather_set_theta(c, tk, h, buf);
-          r = distrib_penalty_traits<Mk>::weak_convexity(buf);
+          if constexpr (requires { distrib_penalty_traits<Mk>::weak_convexity(c.distribution, buf); })
+            r = distrib_penalty_traits<Mk>::weak_convexity(c.distribution, buf);
+          else
+            r = distrib_penalty_traits<Mk>::weak_convexity(buf);
         }
         rho = r > rho ? r : rho;
       }

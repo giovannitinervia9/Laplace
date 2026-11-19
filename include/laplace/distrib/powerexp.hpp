@@ -150,6 +150,7 @@
 
 #include <laplace/core/config.hpp>
 #include <laplace/distrib/core.hpp>
+#include <laplace/distrib/detail/power_prox.hpp>
 #include <laplace/math/elementary.hpp>
 #include <laplace/math/faa_di_bruno.hpp>
 #include <laplace/math/incomplete_gamma.hpp>
@@ -497,6 +498,25 @@ struct powerexp_distrib {
     detail_powerexp::shape_derivs<0>(p, A, B, logc);
     const double az = Kokkos::fabs(y - mu) / sigma;
     return -detail_powerexp::abs_z_power(az, p, logc) + B[0] - math::log(sigma);
+  }
+
+  /**
+   * \ingroup distrib_powerexp
+   * \brief Proximal operator in \f$y\f$: \f$\arg\min_y \{-\log f(y) + (y - v)^2/(2t)\}\f$.
+   *
+   * With \f$s\f$ = natural_scale() and \f$u = v - \mu\f$ it is \f$\mu + s\,x^\star(u/s, t/s^2, p)\f$,
+   * \f$x^\star(u, a, p) = \arg\min_x a|x|^p + (x - u)^2/2\f$: the soft threshold at \f$p = 1\f$,
+   * \f$u/(1 + 2a)\f$ at \f$p = 2\f$, a monotone Newton iteration to rounding otherwise, and for
+   * \f$p < 1\f$, where the penalty is not convex, the global minimizer (zero up to an exact
+   * threshold, zero on the tie). Every \f$t > 0\f$ is accepted.
+   * \param v Point \f$v\f$.
+   * \param t Step \f$t > 0\f$.
+   * \return The minimizer.
+   * \see penalty_prox
+   */
+  LAPLACE_HD double prox_y(double v, double t) const {
+    const double s = natural_scale();
+    return mu + s * detail_power_prox::power_prox((v - mu) / s, t / (s * s), p);
   }
 
   /**

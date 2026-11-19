@@ -156,6 +156,10 @@ The tests compare the closed forms and the derivatives with the references below
 
 The mass of the density is checked to \f$10^{-12}\f$ relative, and its variance to \f$\sigma^2\f$ within \f$10^{-10}\f$ relative, by quadrature with a cut at the location. Every derivative order is checked against five-point differences of the order below, in the parameters, in \f$y\f$, and mixed. The shapes run from \f$0.45\f$ to \f$5\f$, away from the location. The expected information is zero in the entries that vanish by symmetry, and the infinite \f$I_{\mu\mu}\f$ at \f$p \le 1/2\f$ is tested exactly. The tests run on the gcc build and on the CUDA build. For the kernel comparison, the bound applies to the difference between host and device, as a fraction of the sum of the absolute values of the components.
 
+## Proximal operator
+
+The member `prox_y(v, t)` returns the proximal operator in \f$y\f$ for any step \f$t > 0\f$ as \f$\mu + s\,x^\star\bigl((v - \mu)/s,\ t/s^2,\ p\bigr)\f$, where \f$s = \sigma\,c(p)\f$ is the natural scale returned by `natural_scale()` (not \f$\sigma\f$), and \f$x^\star\f$ is the scalar operator documented on \ref penalty_prox "Proximal operators". For \f$p < 1\f$, where the penalty is not convex, it returns the global minimizer for every \f$t > 0\f$.
+
 ## Kokkos usage
 
 ```cpp
@@ -174,7 +178,7 @@ void eval_powerexp(Kokkos::View<const double*> y, Kokkos::View<double*> out,
 
 ## Members
 
-Struct \ref laplace::distrib::powerexp_distrib "powerexp_distrib" implements \ref distrib_core "distrib_core" for `n_params = 3`. Its members are `mu`, `sigma`, `p`, `kind`, `n_params`, `y_regularity`, `params`, `log_scale_ratio()`, `natural_scale()`, `logpdf()`, `logpdf_d1()` to `logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `quantile()`, `expected_info()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, `kink_order()`, `kurtosis_of_shape()`, and `start_value()`.
+Struct \ref laplace::distrib::powerexp_distrib "powerexp_distrib" implements \ref distrib_core "distrib_core" for `n_params = 3`. Its members are `mu`, `sigma`, `p`, `kind`, `n_params`, `y_regularity`, `params`, `log_scale_ratio()`, `natural_scale()`, `logpdf()`, `prox_y()`, `logpdf_d1()` to `logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `quantile()`, `expected_info()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()`, `kink_order()`, `kurtosis_of_shape()`, and `start_value()`.
 
 ## References
 

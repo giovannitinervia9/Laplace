@@ -35,6 +35,10 @@
 
 #include <laplace/distrib/detail/mvpowerexp_common.hpp>
 #include <laplace/distrib/mvgaussian1.hpp>
+#include <laplace/distrib/detail/power_prox.hpp>
+#include <laplace/pdmat/scaled_identity.hpp>
+
+#include <type_traits>
 
 namespace laplace::distrib {
 
@@ -159,6 +163,27 @@ struct mvpowerexp1_distrib {
    */
   LAPLACE_HD double logpdf(const state_type& st, const double* y, const double* mu) const {
     return detail_mvpowerexp::logpdf_value<false>(structure, st, y, mu);
+  }
+  /**
+   * \brief Proximal operator in \f$y\f$, \f$\arg\min_y \{-\ell_1(y) + \lVert y - v\rVert^2/(2t)\}\f$; present only for \f$\Sigma = \sigma^2 I\f$ (`pdmat::scaled_identity_pdmat`).
+   *
+   * With \f$u = v - \mu\f$ the minimizer lies along \f$u\f$, with the norm of the scalar
+   * proximal operator of \f$\tfrac12 \sigma^{-2\beta} r^{2\beta}\f$ at \f$\lVert u\rVert\f$ (see powerexp_distrib::prox_y);
+   * at \f$\beta = 1/2\f$ it is the block soft threshold \f$(1 - t/(2\sigma\lVert u\rVert))_+\,u\f$. For
+   * \f$\beta < 1/2\f$, where the penalty is not convex, it is the global minimizer.
+   * \param st Precomputed state from `theta_state()`.
+   * \param v Point \f$v\f$, length `dim()`.
+   * \param x Location \f$\mu\f$, length `dim()`.
+   * \param t Step \f$t > 0\f$.
+   * \param out Output, length `dim()`.
+   * \param w Unused.
+   * \see penalty_prox
+   */
+  LAPLACE_HD void prox_y(const state_type& st, const double* v, const double* x, double t, double* out,
+                         [[maybe_unused]] double* w) const
+    requires std::is_same_v<S, pdmat::scaled_identity_pdmat>
+  {
+    detail_power_prox::isotropic_power_prox(st.dim, st.gauss.quadratic[0], st.beta, v, x, t, out);
   }
   /**
    * \brief Evaluate partial derivatives of the log-density with respect to \f$\mu\f$ (order `A`) and the rest \f$(\theta, \beta)\f$ (order `K`).

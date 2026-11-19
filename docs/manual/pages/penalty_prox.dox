@@ -1,6 +1,6 @@
 /** \addtogroup penalty_prox
 
-The proximal operator of a distribution, and of the penalty that the distribution defines. This page defines the operator, lists the laws whose closed forms the library implements, and gives the measured accuracy of those forms. The univariate laws have the member `prox_y(v, t)`, the multivariate laws have `prox_y(st, v, x, t, out, w)`, and \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>" has `prox_beta()`. Include `<laplace/penalty/distrib_penalty.hpp>` for the penalty and the header of each law for its `prox_y`. The members are marked `LAPLACE_HD` and run on the host and inside Kokkos kernels. On the test grid the closed forms satisfy the optimality condition to \f$4 \times 10^{-16}\f$ and lie within \f$10^{-7}\f$ of a direct numerical minimization.
+The proximal operator of a distribution, and of the penalty that the distribution defines. This page defines the operator, lists the laws whose proximal operators the library implements, and gives the measured accuracy of those operators. The univariate laws have the member `prox_y(v, t)`, the multivariate laws have `prox_y(st, v, x, t, out, w)`, and \ref laplace::penalty::distrib_penalty "distrib_penalty\<M\>" has `prox_beta()`. Include `<laplace/penalty/distrib_penalty.hpp>` for the penalty and the header of each law for its `prox_y`. The members are marked `LAPLACE_HD` and run on the host and inside Kokkos kernels. On the test grids, the elementary closed forms satisfy the optimality condition to \f$4 \times 10^{-16}\f$ and lie within \f$10^{-7}\f$ of a direct numerical minimization, while the power exponential operators satisfy it to \f$9 \times 10^{-16}\f$ and match high-precision references within \f$11\f$ conditioned ulps.
 
 ## Definition
 
@@ -20,7 +20,7 @@ Let \f$u = v - \mu\f$ be the offset of the point from the location, and let
 \f[
 S(u, k) = \operatorname{sgn}(u) \max(|u| - k, 0)
 \f]
-be the soft threshold at the level \f$k \ge 0\f$. The three univariate laws with a closed form have the following minimizers. Here \f$\sigma\f$ is the scale of \ref distrib_laplace1 "laplace1", \f$\lambda\f$ is the rate of \ref distrib_laplace2 "laplace2" and the penalty weight of \ref distrib_enet "enet", and \f$\alpha \in (0, 1)\f$ is the mixing weight of \ref distrib_enet "enet".
+be the soft threshold at the level \f$k \ge 0\f$. Three univariate laws have elementary closed-form minimizers. Here \f$\sigma\f$ is the scale of \ref distrib_laplace1 "laplace1", \f$\lambda\f$ is the rate of \ref distrib_laplace2 "laplace2" and the penalty weight of \ref distrib_enet "enet", and \f$\alpha \in (0, 1)\f$ is the mixing weight of \ref distrib_enet "enet".
 
 | Law | Threshold \f$k\f$ | Minimizer |
 |---|---|---|
@@ -28,7 +28,23 @@ be the soft threshold at the level \f$k \ge 0\f$. The three univariate laws with
 | \ref distrib_laplace2 "laplace2" | \f$t\lambda\f$ | \f$\mu + S(u, t\lambda)\f$ |
 | \ref distrib_enet "enet" | \f$t\lambda\alpha\f$ | \f$\mu + S(u, t\lambda\alpha) / (1 + t\lambda(1 - \alpha))\f$ |
 
-The minimizer is \f$\mu\f$ whenever \f$|u|\f$ does not exceed the threshold. The two Laplace laws compute the minimizer as \f$\mu + (u - k)\f$ when \f$u > 0\f$ and as \f$\mu + (u + k)\f$ when \f$u < 0\f$, so that rounding never moves the result to the other side of \f$\mu\f$. The Gaussian laws, the Student t laws, the pseudo-Huber law and the multivariate Gaussian law \ref distrib_mvgaussian2 "mvgaussian2" have no `prox_y`.
+The minimizer is \f$\mu\f$ whenever \f$|u|\f$ does not exceed the threshold. The two Laplace laws compute the minimizer as \f$\mu + (u - k)\f$ when \f$u > 0\f$ and as \f$\mu + (u + k)\f$ when \f$u < 0\f$, so that rounding never moves the result to the other side of \f$\mu\f$. The Gaussian laws, the Student t laws, the pseudo-Huber law and the multivariate Gaussian law \ref distrib_mvgaussian2 "mvgaussian2" have no `prox_y`. The power exponential laws are described next.
+
+## Power exponential laws
+
+The proximal operators of \ref distrib_powerexp "powerexp_distrib", \ref distrib_mvpowerexp1 "mvpowerexp1_distrib", and \ref distrib_mvpowerexp2 "mvpowerexp2_distrib" reduce to the one-dimensional problem
+\f[
+x^\star(u, a, p) = \operatorname*{arg\,min}_{x} \left\{ a|x|^p + \frac{(x - u)^2}{2} \right\}, \qquad a > 0,\ p > 0.
+\f]
+Here \f$x^\star\f$ has the sign of \f$u\f$ and satisfies \f$|x^\star| \le |u|\f$, with \f$x^\star(0, a, p) = 0\f$ and NaN returned for a NaN input. At \f$p = 1\f$ it is the soft threshold \f$\operatorname{sgn}(u)\max(|u| - a, 0)\f$, and at \f$p = 2\f$ it is \f$u / (1 + 2a)\f$. For all other \f$p > 0\f$, a nonzero \f$|x^\star|\f$ is a root of \f$\varphi(x) = x + a p x^{p-1} - |u|\f$, computed by Newton's method from a bound on the side where the iteration is monotone and stopped once a step no longer moves \f$x\f$ in its direction, at rounding level:
+
+- For \f$1 < p < 2\f$, \f$\varphi\f$ is concave and increasing, and Newton's method starts from the lower bound \f$\bigl(|u| / (|u|^{2-p} + a p)\bigr)^{1/(p-1)}\f$.
+- For \f$p > 2\f$, \f$\varphi\f$ is convex and increasing, and Newton's method starts from the upper bound \f$\min\bigl(|u|,\ (|u| / (a p))^{1/(p-1)}\bigr)\f$.
+- For \f$p < 1\f$ (the bridge penalty, which is not convex), \f$x^\star = 0\f$ when \f$|u| \le \tau\f$, where \f$x_b = (2a(1 - p))^{1/(2-p)}\f$ and \f$\tau = x_b + a p x_b^{p-1}\f$. At \f$|u| = \tau\f$ the objective has two minimizers, \f$0\f$ and \f$x_b\f$, and \f$0\f$ is returned. Beyond \f$\tau\f$, Newton's method starts from \f$|u|\f$ on the branch where \f$\varphi\f$ is convex and increasing, returning the larger root of \f$\varphi\f$. This is the global minimizer for every \f$t > 0\f$.
+
+Because the iteration always ends at rounding level and reports no convergence flag, the penalty descriptor is `penalty_prox_kind::closed_form`. In standalone measurements made before the library implementation, this scalar solver took at most \f$12\f$ Newton steps over \f$400\f$ random pairs \f$(u, a)\f$ per \f$p\f$ in \f$[10^{-8}, 10^8]\f$ (mean \f$1.2\f$ to \f$4.1\f$), and on one CPU core with `gcc -O3` and the C library's `pow` took \f$4\f$ ns per call for the soft threshold, \f$250\f$ ns for \f$p < 1\f$, \f$360\f$ to \f$510\f$ ns for \f$1 < p < 2\f$, and \f$67\f$ to \f$126\f$ ns for \f$p > 2\f$.
+
+For \ref distrib_powerexp "powerexp_distrib", `prox_y(v, t)` returns \f$\mu + s\,x^\star\bigl((v - \mu)/s,\ t/s^2,\ p\bigr)\f$, where \f$s = \sigma\,c(p)\f$ is `natural_scale()`, the natural scale of the density rather than the standard deviation \f$\sigma\f$. For \ref distrib_mvpowerexp1 "mvpowerexp1_distrib\<S\>" and \ref distrib_mvpowerexp2 "mvpowerexp2_distrib\<S\>", `prox_y(st, v, x, t, out, w)` is defined only when `S` is \ref laplace::pdmat::scaled_identity_pdmat "pdmat::scaled_identity_pdmat", detected at compile time. With \f$u = v - \mu\f$ (where `x` is the location \f$\mu\f$) and \f$q\f$ the common diagonal entry of \f$\Sigma^{-1}\f$ for `mvpowerexp1` or of \f$Q\f$ for `mvpowerexp2`, the minimizer lies along \f$u\f$ because the quadratic term is least there for a fixed norm. Its norm is \f$c\,x^\star(\lVert u\rVert / c,\ tq/2,\ 2\beta)\f$ with \f$c = q^{-1/2}\f$, and `out` equals \f$\mu\f$ when \f$u = 0\f$. At \f$\beta = 1/2\f$ this is the block soft threshold \f$\mu + \bigl(1 - t\sqrt{q}/(2\lVert u\rVert)\bigr)_+\,u\f$, which is the group lasso, where \f$(a)_+ = \max(a, 0)\f$; for `mvpowerexp1` with \f$\Sigma = \sigma^2 I\f$ the thresholded offset is \f$\bigl(1 - t/(2\sigma\lVert u\rVert)\bigr)_+\,u\f$. For \f$\beta < 1/2\f$ it returns the global minimizer. For `powerexp` a NaN \f$v\f$ gives NaN, and for all three laws \f$v = \mu\f$ gives \f$\mu\f$ exactly. For any other matrix structure there is no `prox_y`, because a general \f$\Sigma\f$ would require solving a scalar secular equation with a matrix factorization per step, and the penalty's `prox` descriptor is `penalty_prox_kind::none`. The group lasso over \f$G\f$ groups is `distrib_penalty<independent_product_distrib<mvpowerexp2_distrib<scaled_identity_pdmat>>>` (or with `mvpowerexp1_distrib`), whose `prox_beta()` applies each group's `prox_y`.
 
 ## Penalty
 
@@ -36,7 +52,7 @@ The penalty \f$\mathrm{pen}(\beta) = -\log p_M(\beta \mid \mu_0, \theta)\f$ of \
 
 ## Step and weak convexity
 
-Let \f$\rho = \sup(-\mathrm{pen}'')\f$ be the weak-convexity constant, where \f$\mathrm{pen}''\f$ is the second derivative of the penalty and the supremum is taken over the argument off the kink. The member `weak_convexity(theta)` returns \f$\rho\f$ (see \ref penalty_framework "Framework"). When \f$\rho = 0\f$ the minimization above has a unique solution for every \f$t > 0\f$. When \f$\rho > 0\f$ the objective is strongly convex, and its minimizer unique, when \f$t\rho < 1\f$. The three laws with `prox_y` are convex, so their \f$\rho\f$ is \f$0\f$. The weak-convexity constants of the Student penalties are given on \ref distrib_independent_product "Independent product".
+Let \f$\rho = \sup(-\mathrm{pen}'')\f$ be the weak-convexity constant, where \f$\mathrm{pen}''\f$ is the second derivative of the penalty and the supremum is taken over the argument off the kink. The member `weak_convexity(theta)` returns \f$\rho\f$ (see \ref penalty_framework "Framework"). When \f$\rho = 0\f$ the minimization above has a unique solution for every \f$t > 0\f$. When \f$\rho > 0\f$ the objective is strongly convex, and its minimizer unique, when \f$t\rho < 1\f$. The Laplace and elastic-net laws are convex, so their \f$\rho\f$ is \f$0\f$. For \ref distrib_powerexp "powerexp_distrib", \f$\rho = 0\f$ for \f$p \ge 1\f$ and \f$\rho = +\infty\f$ for \f$p < 1\f$, because \f$\mathrm{pen}'' = p(p - 1)|z|^{p-2}/s^2\f$ is unbounded below at the location. For \ref distrib_mvpowerexp1 "mvpowerexp1_distrib" and \ref distrib_mvpowerexp2 "mvpowerexp2_distrib", \f$\rho = 0\f$ for \f$\beta \ge 1/2\f$ and \f$\rho = +\infty\f$ below. When \f$\rho = +\infty\f$, no step satisfies \f$t\rho < 1\f$: optimization methods that require this condition refuse such a penalty, whereas plain iterative thresholding may still apply `prox_y`, with no guarantee of convergence to a stationary point. The weak-convexity constants of the Student penalties are given on \ref distrib_independent_product "Independent product".
 
 ## Accuracy
 
@@ -55,5 +71,30 @@ The penalty is checked against the law it wraps. For a lasso product of three co
 For \ref distrib_student_t2 "student_t2" with \f$\sigma = 1.5\f$ and \f$\nu = 5\f$, the largest value of \f$-\mathrm{pen}''\f$ on a grid off the kink equals \f$\rho\f$ within \f$10^{-7}\f$ relative, and \f$-\mathrm{pen}''\f$ at \f$|y - \mu| = \sqrt{3(\nu - 2)}\,\sigma\f$ equals \f$\rho\f$ within \f$10^{-14}\f$ relative. Here \f$\rho = 1/9\f$ for these values. On the same kind of grid, \f$\mathrm{pen}''\f$ is nonnegative for \ref distrib_laplace1 "laplace1", \ref distrib_laplace2 "laplace2", \ref distrib_enet "enet", \ref distrib_pseudohuber "pseudohuber", \ref distrib_gaussian1 "gaussian1" and \ref distrib_gaussian2 "gaussian2".
 
 Finally, a NaN point gives a NaN minimizer and an infinite point an infinite minimizer, checked for \ref distrib_laplace1 "laplace1" and \ref distrib_enet "enet".
+
+The power exponential proximal operators are checked in `tests/penalty/test_power_prox.cpp` inside Kokkos kernels on gcc 14.2 OpenMP and CUDA (RTX 4070 SUPER). For the scalar problem \f$x^\star(u, a, p)\f$, `tools/reference/power_prox.py` generates \f$2798\f$ reference rows in mpmath (The mpmath development team, 2023) by bisection in \f$\log x\f$ (\f$400\f$ halvings) at \f$200\f$ and \f$260\f$ bits, keeping points where the two precisions agree to \f$2^{-120}\f$ relative. The points cover \f$21\f$ values of \f$p\f$ from \f$0.1\f$ to \f$50\f$ (including \f$0.99\f$, \f$1.01\f$, \f$1.05\f$, \f$1.99\f$, and \f$2.01\f$), with \f$(u, a)\f$ log-uniform in \f$[10^{-8}, 10^8]\f$, and for \f$p < 1\f$ the threshold \f$\tau\f$ is approached at relative distances \f$10^{-6}\f$ and \f$10^{-10}\f$ on both sides.
+
+The error in ulps of \f$x^\star\f$ (see \ref accuracy "How accuracy is measured") is divided by \f$\max(1, \kappa)\f$, where
+\f[
+\kappa = \frac{|u|}{|x^\star|\,\varphi'(x^\star)}, \qquad \varphi'(x) = 1 + a p (p - 1)|x|^{p-2}
+\f]
+is the condition number, the relative change of \f$x^\star\f$ per relative change of \f$u\f$ (rounding the data alone moves \f$x^\star\f$ by \f$\kappa\f$ ulps). Here \f$\kappa\f$ tends to \f$1/(p - 1)\f$ near \f$p = 1\f$ when \f$x^\star\f$ is tiny, and is large for \f$p < 1\f$ just above the threshold \f$\tau\f$. For `powerexp`, the test grid takes \f$p \in \{0.3, 0.5, 0.9, 1, 1.05, 1.5, 2, 3, 8\}\f$, \f$\sigma \in \{0.4, 2\}\f$, \f$t \in \{10^{-3}, 0.5, 4, 100\}\f$, and \f$v - \mu \in \{\pm 10^{-3}, 0.07, 0.7, -2.5, 30, -300\}\f$. For `mvpowerexp`, it takes \f$d = 3\f$, \f$\beta \in \{0.25, 0.45, 0.5, 0.8, 1, 2.5\}\f$, \f$\sigma \in \{0.5, 3\}\f$, \f$t \in \{0.01, 0.7, 20\}\f$, and \f$\lVert u\rVert \in \{10^{-4}, 0.05, 0.9, 4, 60\}\f$ along two unit directions.
+
+| Check | gcc | CUDA | Bound |
+|---|---|---|---|
+| \f$x^\star\f$ against mpmath, \f$\mathrm{ulp} / \max(1, \kappa)\f$ | \f$7.17\f$ | \f$7.27\f$ | \f$11\f$ |
+| \f$x^\star\f$ against mpmath, plain ulp | \f$164\f$ | \f$192\f$ | (not bounded) |
+| `powerexp` `prox_y`: objective above a \f$4001\f$-point grid refined by golden section (relative) | \f$2.51 \times 10^{-15}\f$ | \f$2.51 \times 10^{-15}\f$ | \f$4 \times 10^{-15}\f$ |
+| `powerexp` `prox_y`: optimality residual, scaled | \f$5.68 \times 10^{-16}\f$ | \f$5.68 \times 10^{-16}\f$ | \f$9 \times 10^{-16}\f$ |
+| `mvpowerexp1` at \f$\beta = 1/2\f$ against the block soft threshold | \f$2.22 \times 10^{-16}\f$ | \f$2.22 \times 10^{-16}\f$ | \f$4 \times 10^{-16}\f$ |
+| `mvpowerexp1`: optimality residual of the gradient, scaled | \f$2.22 \times 10^{-16}\f$ | \f$2.37 \times 10^{-16}\f$ | \f$4 \times 10^{-16}\f$ |
+| `mvpowerexp1`: objective above its least along the ray (relative) | \f$3.99 \times 10^{-16}\f$ | \f$4.25 \times 10^{-16}\f$ | \f$7 \times 10^{-16}\f$ |
+| `mvpowerexp2` at \f$Q = I/\sigma^2\f$ against `mvpowerexp1` | \f$0\f$ | \f$0\f$ | exact |
+
+The worst point of the first row is \f$p = 0.9\f$ just above the threshold (\f$u = 1.25 \times 10^{-3}\f$, \f$a = 4.92 \times 10^{-4}\f$). Exact checks verify the zeros of the bridge where the reference is zero, bit-for-bit equality with the closed forms at \f$p = 1\f$ and \f$p = 2\f$, bit-for-bit oddness in \f$u\f$, \f$0\f$ at \f$u = 0\f$, \f$\mu\f$ returned by `mvpowerexp` at \f$u = 0\f$ and in the zero region of \f$\beta = 1/2\f$, and exact equality between `prox_beta()` and each component's `prox_y()` for the group-lasso product and a `powerexp` product with prior location \f$\mu_0\f$.
+
+## References
+
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 
 */
