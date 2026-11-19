@@ -134,6 +134,8 @@ parent here, in tree order; the module pages define their groups without
 \ingroup distrib_framework */
 /** \addtogroup distrib_start
 \ingroup distrib_framework */
+/** \addtogroup distrib_properizing_tail
+\ingroup distrib_framework */
 
 /** \defgroup distrib_wrapper Wrappers
 \ingroup distrib

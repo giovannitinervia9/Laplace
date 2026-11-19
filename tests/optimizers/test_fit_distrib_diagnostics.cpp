@@ -107,12 +107,12 @@ void poor_start_trace(const std::string& name, long n) {
 void fit_distrib_poor_start_traces() {
   poor_start_trace<ld::pseudohuber_distrib>("pseudohuber", 1000);
   poor_start_trace<ld::enet_distrib>("enet", 1000);
-  poor_start_trace<ld::mcp_distrib>("mcp", 1000);
-  poor_start_trace<ld::scad_distrib>("scad", 1000);
+  poor_start_trace<ld::mcp_distrib<ld::gaussian_tail>>("mcp", 1000);
+  poor_start_trace<ld::scad_distrib<ld::gaussian_tail>>("scad", 1000);
   poor_start_trace<ld::pseudohuber_distrib>("pseudohuber", 100000);
   poor_start_trace<ld::enet_distrib>("enet", 100000);
-  poor_start_trace<ld::mcp_distrib>("mcp", 100000);
-  poor_start_trace<ld::scad_distrib>("scad", 100000);
+  poor_start_trace<ld::mcp_distrib<ld::gaussian_tail>>("mcp", 100000);
+  poor_start_trace<ld::scad_distrib<ld::gaussian_tail>>("scad", 100000);
 }
 
 TEST_CASE("fit_distrib bench: poor-start trace (diagnostic)" * doctest::skip()) { fit_distrib_poor_start_traces(); }
@@ -221,8 +221,8 @@ void fit_distrib_fisher_caps() {
     fisher_cap_law("enet", ld::enet_distrib{}, aggregate_builder<ld::enet_distrib>{}, n);
     fisher_cap_law("powerexp_p1.5", ld::powerexp_distrib{}, aggregate_builder<ld::powerexp_distrib>{}, n);
     fisher_cap_law("powerexp_p3", ld::powerexp_distrib{}, aggregate_builder<ld::powerexp_distrib>{}, n);
-    fisher_cap_law("mcp", ld::mcp_distrib{}, aggregate_builder<ld::mcp_distrib>{}, n);
-    fisher_cap_law("scad", ld::scad_distrib{}, aggregate_builder<ld::scad_distrib>{}, n);
+    fisher_cap_law("mcp", ld::mcp_distrib<ld::gaussian_tail>{}, aggregate_builder<ld::mcp_distrib<ld::gaussian_tail>>{}, n);
+    fisher_cap_law("scad", ld::scad_distrib<ld::gaussian_tail>{}, aggregate_builder<ld::scad_distrib<ld::gaussian_tail>>{}, n);
   }
 }
 

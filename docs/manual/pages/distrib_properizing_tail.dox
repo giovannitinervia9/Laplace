@@ -1,0 +1,131 @@
+/**
+\defgroup distrib_properizing_tail Properizing tails
+\brief Properizing tails that replace the flat region beyond the last knot of the MCP and SCAD penalties so that their negative exponentials integrate to one.
+
+Defined in `<laplace/distrib/properizing_tail.hpp>` in namespace `laplace::distrib`, this module provides the three properizing tails used as the template parameter of \ref laplace::distrib::mcp_distrib "mcp_distrib" (\ref distrib_mcp "Properized MCP") and \ref laplace::distrib::scad_distrib "scad_distrib" (\ref distrib_scad "Properized SCAD"): \ref laplace::distrib::student_tail "student_tail" (their default), \ref laplace::distrib::gaussian_tail "gaussian_tail", and \ref laplace::distrib::logistic_tail "logistic_tail". Every member that evaluates a tail is marked `LAPLACE_HD`, so it runs on the host and inside Kokkos kernels; `start_value()` runs on the host only. Against SymPy (Meurer and others, 2017) and mpmath (mpmath) references, the mixed partials of the tail exponent agree within \f$8.1 \times 10^{-13}\f$, the tail constants and partial integrals agree with 40-digit quadrature within \f$1.3 \times 10^{-27}\f$, and across the MCP and SCAD distributions the worst measured error of the log-density and its derivatives to order \f$6\f$ is \f$163\f$ ulp of the scale of their order; the measures are those of \ref accuracy "How accuracy is measured", and the figures are in the section "Accuracy and limits" below.
+
+## Definition and comparison of the three tails
+
+Zhang's MCP (Zhang, 2010) and Fan and Li's SCAD (Fan and Li, 2001) penalties are flat beyond their last knot. A density proportional to \f$e^{-\rho}\f$ therefore has an infinite integral for every parameter value, so the penalty cannot serve as a log-density as it stands. A properizing tail replaces the flat part beyond the last knot by an exponent that grows, leaving the penalty untouched on the inner pieces.
+
+Let \f$u = |y - \mu|\f$ be the distance of an observation \f$y \in \mathbb{R}\f$ from the location \f$\mu \in \mathbb{R}\f$, and let \f$u_0\f$ be the law's last knot, equal to \f$\gamma\lambda\f$ for the MCP and \f$a\lambda\f$ for the SCAD. With \f$x = u - u_0 \ge 0\f$ the distance beyond the knot and \f$\theta\f$ the tail's own parameters, a tail defines the exponent
+\f[
+H(x; \theta) = \kappa(\theta)\,\Psi\!\left(\frac{x}{\varsigma(\theta)}\right), \qquad x \ge 0,
+\f]
+where \f$\Psi\f$ is the shape function, \f$\kappa(\theta)\f$ is an overall factor, and \f$\varsigma(\theta)\f$ is a monomial in the tail's parameters. Every tail satisfies \f$H(0) = H'(0) = 0\f$, which keeps \f$q\f$ and \f$q'\f$ continuous at the knot.
+
+| Tail | \f$\Psi(z)\f$ | \f$\varsigma(\theta)\f$ | \f$\kappa(\theta)\f$ | Parameters |
+| --- | --- | --- | --- | --- |
+| `gaussian_tail` | \f$z^2/2\f$ | \f$V^{1/2}\f$ | \f$1\f$ | `tail_sigma2` \f$= V > 0\f$ |
+| `student_tail` | \f$\log(1 + z^2)\f$ | \f$s\nu^{1/2}\f$ | \f$(\nu + 1)/2\f$ | `tail_scale` \f$= s > 0\f$, `tail_df` \f$= \nu > 0\f$ |
+| `logistic_tail` | \f$2\log\cosh z\f$ | \f$s\f$ | \f$1\f$ | `tail_scale` \f$= s > 0\f$ |
+
+Beyond the weight of the tail, the three forms differ in the score \f$q'\f$ far from the location. The penalties exist because \f$q' = 0\f$ beyond the knot leaves large deviations unpenalized. With `gaussian_tail`, \f$q'(x) = x/V\f$ grows without bound, so beyond \f$x = \lambda V\f$ the law shrinks more than a Laplace distribution of rate \f$\lambda\f$ (\ref distrib_laplace2 "laplace2"). With `logistic_tail`, the score tends to \f$2/s\f$, so when \f$2/s \le \lambda\f$ that tail never shrinks more than the rate-\f$\lambda\f$ Laplace distribution. With `student_tail`, the score is \f$(\nu + 1)x / (\nu s^2 + x^2)\f$ and tends to zero, so the unpenalized tail behaviour survives up to \f$O(1/x)\f$; this is why `student_tail` is the default. Measured at \f$s = 1\f$ and \f$\nu = 3\f$ (with \f$V = 1\f$ for `gaussian_tail`), where \f$x\f$ is the distance beyond the knot, the scores are as follows.
+
+| \f$x\f$ | Gaussian \f$q'\f$ | Logistic \f$q'\f$ | Student \f$q'\f$ | Student \f$x q'\f$ |
+| --- | --- | --- | --- | --- |
+| \f$10\f$ | \f$10\f$ | \f$2\f$ | \f$0.3883495\f$ | \f$3.8834951\f$ |
+| \f$100\f$ | \f$100\f$ | \f$2\f$ | \f$0.03998800\f$ | \f$3.9988004\f$ |
+| \f$1000\f$ | \f$1000\f$ | \f$2\f$ | \f$0.003999988\f$ | \f$3.999988\f$ |
+| \f$10000\f$ | \f$10000\f$ | \f$2\f$ | \f$0.000399999988\f$ | \f$3.9999999\f$ |
+
+The Gaussian tail is the limit of the Student tail as \f$\nu\f$ grows at a fixed scale \f$s\f$ with \f$V = s^2\f$. At \f$y\f$ equal to \f$5.1\f$ beyond the knot, the difference of the log-densities is \f$9.15 \times 10^{-1}\f$, \f$1.046 \times 10^{-2}\f$, \f$1.047 \times 10^{-4}\f$, and \f$1.049 \times 10^{-6}\f$ at \f$\nu = 10^2, 10^4, 10^6, 10^8\f$, so \f$\nu\f$ times the difference settles at \f$104.9\f$ and the difference falls like \f$1/\nu\f$. In the Cauchy case \f$\nu = 1\f$, the Student tail gives \f$T = s\pi/2\f$.
+
+## Normalizing constants and partial integrals
+
+Both the MCP and SCAD laws have normalizing constant \f$Z = 2[A(\lambda, p) + B(\lambda, p)\,T]\f$, where \f$p\f$ is \f$\gamma\f$ for MCP or \f$a\f$ for SCAD, and \f$T = \int_0^\infty e^{-H(v; \theta)}\,\mathrm{d}v\f$ is the tail's own constant. The tail's parameters enter \f$Z\f$ through \f$T\f$ alone. For the cumulative functions, each tail also supplies its partial integral \f$G(x) = \int_x^\infty e^{-H(v; \theta)}\,\mathrm{d}v\f$ and its logarithm.
+
+| Tail | \f$T\f$ | \f$\int_x^\infty e^{-H(v; \theta)}\,\mathrm{d}v\f$ |
+| --- | --- | --- |
+| `gaussian_tail` | \f$\sqrt{\pi V/2}\f$ | \f$2\sqrt{\pi V/2}\,\Phi(-x/\sqrt{V})\f$ |
+| `student_tail` | \f$\dfrac{s}{2}\sqrt{\pi\nu}\,\dfrac{\Gamma(\nu/2)}{\Gamma((\nu+1)/2)}\f$ | \f$T\,I_w(\nu/2, 1/2)\f$, with \f$w = \varsigma^2/(\varsigma^2 + x^2)\f$ |
+| `logistic_tail` | \f$s\f$ | \f$s(1 - \tanh(x/s))\f$ |
+
+Here \f$\Phi\f$ is the standard normal cumulative distribution function (\ref normal "normal"), and \f$I_w\f$ is the regularized incomplete beta function (\ref incomplete_beta "incomplete beta"). For `student_tail`, the substitution \f$v = \varsigma\tau\f$ followed by \f$w = 1/(1 + \tau^2)\f$ turns the tail integral into a beta integral.
+
+Two numerical precautions govern the partial integrals. First, for `student_tail`, whichever of the two beta arguments \f$w = \varsigma^2 / (\varsigma^2 + x^2)\f$ and \f$1 - w = x^2 / (\varsigma^2 + x^2)\f$ is smaller is formed directly, never by subtracting the other from one. Just beyond the knot, \f$1 - w\f$ is of the order \f$x^2/\varsigma^2\f$, which the quotient for \f$w\f$ rounds away; when \f$x^2 \le \varsigma^2\f$, the implementation therefore forms \f$x^2 / (\varsigma^2 + x^2)\f$ and calls the complementary incomplete beta function. Second, for `logistic_tail`, \f$1 - \tanh z\f$ is about \f$2e^{-2z}\f$, so forming it by subtraction gives zero from \f$z = x/s\f$ of about \f$19\f$, where it falls below the spacing of \f$1\f$; the partial integral is written as \f$2se^{-2z} / (1 + e^{-2z})\f$ and its logarithm as \f$\log(2s) - 2z - \log(1 + e^{-2z})\f$.
+
+## Mixed partial derivatives
+
+Two identities carry every mixed partial derivative in the tail piece of the penalty, both derived and checked against SymPy (Meurer and others, 2017) in `tools/reference/properized_tail_forms.py`.
+
+Through the knot, both laws have \f$u_0 = p\lambda\f$. For any smooth function \f$F\f$ of \f$x = u - p\lambda\f$,
+\f[
+\partial_u^j \partial_\lambda^i \partial_p^m F(x) = \sum_{r=\max(i,m)}^{i+m} c_r(i,m)\,F^{(j+r)}(x), \qquad
+c_r(i,m) = \binom{i}{m + i - r}(-1)^m \frac{m!}{(r - i)!}\lambda^{r-i}(-p)^{r-m}.
+\f]
+The derivatives in \f$u\f$ only shift the order of differentiation of \f$F\f$.
+
+In the tail's own parameters, write \f$\mathcal{D} = \varsigma\,\partial_\varsigma\f$ and \f$E = z\,\partial_z\f$, where \f$z = x/\varsigma\f$. Every parameter \f$\theta_j\f$ enters \f$\varsigma\f$ only through the monomial \f$\varsigma = \prod_j \theta_j^{e_j}\f$, so \f$\theta_j\partial_{\theta_j} = e_j\mathcal{D}\f$. Signed Stirling numbers of the first kind \f$s_1(n, k)\f$ turn \f$\partial^n\f$ into \f$(\theta\partial_\theta)^k\f$, and Stirling numbers of the second kind \f$S_2(q, j)\f$ express \f$E^q f = \sum_{j=0}^q S_2(q, j)\,z^j f^{(j)}\f$:
+\f[
+\partial_{\theta_1}^{n_1}\partial_{\theta_2}^{n_2} G
+= \theta_1^{-n_1}\theta_2^{-n_2} \sum_{k_1=0}^{n_1}\sum_{k_2=0}^{n_2} s_1(n_1, k_1)\,s_1(n_2, k_2)\,e_1^{k_1} e_2^{k_2}\,\mathcal{D}^{k_1+k_2} G,
+\f]
+\f[
+\mathcal{D}^m\bigl[\varsigma^{-r}\Psi^{(r)}(z)\bigr]
+= (-1)^m \varsigma^{-r} \sum_{q=0}^m \binom{m}{q} r^{m-q} \sum_{j=0}^q S_2(q, j)\,z^j\,\Psi^{(r+j)}(z),
+\f]
+because \f$\mathcal{D}\f$ acts on a function of \f$z\f$ as \f$-E\f$ and on \f$\varsigma^{-r}\f$ as multiplication by \f$-r\f$. Since \f$\kappa\f$ is constant for `gaussian_tail` and `logistic_tail` and affine in \f$\nu\f$ for `student_tail`, the Leibniz rule over \f$\kappa\Psi\f$ has at most two terms. Each component is therefore a finite sum of values of \f$\Psi\f$ with integer coefficients, without Bell polynomials, evaluated through one code path for all three tails with only a few scalars on the stack.
+
+The highest order of \f$\Psi\f$ reached is \f$r + j\f$ with \f$r \le J + K\f$ and \f$j \le K\f$, which is \f$18\f$ at \f$J = K = 6\f$, where \f$J\f$ is the order in \f$y\f$ and \f$K\f$ is the total order in the parameters. For `gaussian_tail`, \f$\Psi'(z) = z\f$, \f$\Psi''(z) = 1\f$, and higher orders vanish. For `student_tail`, \f$\Psi^{(k)}(z) = N_k(z)\,\omega^k\f$ with \f$\omega = 1/(1 + z^2)\f$, \f$N_1(z) = 2z\f$, and \f$N_{k+1}(z) = N_k'(z)(1 + z^2) - 2kzN_k(z)\f$; each term of degree \f$j\f$ with coefficient \f$c_j\f$ is assembled as \f$c_j(z\omega)^j\omega^{k-j}\f$, where \f$|z\omega| \le 1/2\f$ and \f$\omega \le 1\f$ for every \f$z\f$, so nothing overflows at any order. For `logistic_tail`, \f$\Psi^{(k)}(z) = 2\,\partial^{k-1}\tanh z\f$ for \f$k \ge 1\f$, written in \f$g = \operatorname{sech}^2 z\f$ and \f$t = \tanh z\f$ as \f$R_n(g)\f$ for odd \f$n = k - 1\f$ and \f$t\,R_n(g)\f$ for even \f$n\f$, with \f$R_0 = 1\f$, \f$R_{n+1} = -2g R_n'\f$ from odd to even \f$n\f$, and \f$R_{n+1} = g R_n - 2g(1 - g)R_n'\f$ from even to odd \f$n\f$. Every \f$R_n\f$ with \f$n \ge 1\f$ vanishes at \f$g = 0\f$, so nothing cancels in the far tail, and \f$g\f$ is built from \f$4e^{-2|z|}/(1 + e^{-2|z|})^2\f$ rather than from \f$1 - \tanh^2 z\f$.
+
+The table of \f$\log Z\f$ runs over \f$(\lambda, p, \theta_1)\f$ for a one-parameter tail and over \f$(\lambda, p, s, \nu)\f$ for `student_tail`. The four-variable case uses a four-variable logarithm recursion over a triangularly packed table, which at order \f$6\f$ holds \f$210\f$ entries against the \f$2401\f$ of the square box. For `student_tail`, the mixed partials of \f$T = s\,G(\nu)\f$ are formed through \f$\log G(\nu)\f$, whose derivatives in \f$\nu\f$ are elementary plus one polygamma difference per order, followed by the scalar exponential recursion.
+
+## Tail structure
+
+Each tail is an aggregate holding its own parameters (`tail_sigma2` for `gaussian_tail`, `tail_scale` and `tail_df` for `student_tail`, and `tail_scale` for `logistic_tail`), `n_tail_params`, and `tail_params`. It supplies \f$\Psi^{(k)}\f$ at a runtime order via `psi_deriv()`, the exponents of its parameters in \f$\varsigma\f$ via `exponent()`, its \f$\kappa\f$ via `kappa()` (affine in one parameter at most), the constant \f$T\f$ with its mixed partials and its logarithm (`tail_const()`, `const_mixed()`, `log_tail_const()`), the partial integral \f$\int_x^\infty e^{-H(v; \theta)}\,\mathrm{d}v\f$ with its logarithm (`upper()`, `log_upper()`), a rough spread for quadratures (`scale_hint()`), and a starting value from a sample summary (`start_value()`).
+
+## Accuracy and limits
+
+Against SymPy's own derivatives at the exact rationals of the doubles used by the transcribed route (`tools/reference/properized_tail_forms.py`), the chain through the knot agrees within \f$1.0 \times 10^{-15}\f$ over every multi-index of total order up to \f$6\f$, the components of \f$H\f$ agree within \f$4.4 \times 10^{-16}\f$, \f$2.7 \times 10^{-14}\f$, and \f$3.0 \times 10^{-13}\f$ for the Gaussian, Student, and logistic tails, the two identities composed agree within \f$8.9 \times 10^{-16}\f$, \f$8.1 \times 10^{-13}\f$, and \f$1.1 \times 10^{-14}\f$, and the four-variable logarithm of \f$Z\f$ agrees within \f$6.2 \times 10^{-15}\f$. Against mpmath (mpmath), the two transcriptions of \f$\Psi^{(k)}\f$ agree to order \f$18\f$ within \f$4.6 \times 10^{-14}\f$ and \f$3.5 \times 10^{-13}\f$ relative over \f$z\f$ from \f$0\f$ to \f$200\f$. Against 40-digit quadrature of \f$e^{-H}\f$, the closed \f$T\f$ agrees within \f$1.4 \times 10^{-41}\f$ for `gaussian_tail` and is exact for `student_tail` and `logistic_tail`; its mixed partials to total order \f$6\f$ agree with SymPy within \f$1.4 \times 10^{-16}\f$, \f$1.6 \times 10^{-16}\f$, and exactly. Over \f$x\f$ from \f$0\f$ to \f$20\f$, the partial integrals agree with 40-digit quadrature within \f$3.9 \times 10^{-40}\f$, \f$4.1 \times 10^{-41}\f$, and \f$1.3 \times 10^{-27}\f$ for the three tails.
+
+Across both the MCP and SCAD distributions (`tests/distrib/test_mcp_scad_tails.cpp` and `tests/distrib/test_mcp_scad.cpp`, host in both gcc and CUDA builds), the closed \f$Z\f$ agrees with 400-bit quadrature \f$Z = 2\int_0^\infty e^{-q(u)}\,\mathrm{d}u\f$ to \f$1.1 \times 10^{-48}\f$ over all \f$36\f$ cases of `tools/reference/distrib_mcp_scad.py`, which also verifies that each density integrates to one. On the inner pieces, both laws equal `mcp_penalty` and `scad_penalty` bit for bit in value for every tail and within \f$2\varepsilon\f$ of \f$\max(|\mathrm{value}|, 1)\f$ in the derivatives (test bound \f$8\varepsilon\f$, where \f$\varepsilon\f$ is double-precision machine epsilon), while the derivatives in the tail's own parameters are zero there. The mass by panel quadrature with every knot declared as a cut is out by \f$3.3 \times 10^{-16}\f$ (test bound \f$10^{-13}\f$) for `student_tail` and `logistic_tail` and by \f$4.4 \times 10^{-16}\f$ (test bound \f$10^{-15}\f$) for `gaussian_tail`; the increment of \f$F\f$ against the quadrature of the density is out by \f$8.7 \times 10^{-17}\f$ (test bound \f$10^{-10}\f$ relative) for `student_tail` and `logistic_tail`.
+
+Against mpmath references computed at 300 and 400 bits (`tools/reference/distrib_mcp_scad.py`, over \f$74184\f$ values for `student_tail` and `logistic_tail`, and separately for `gaussian_tail`), the worst measured errors and test bounds are listed below. The log-density errors are in ulp of the scale of their order (the largest component of that order at the point), and the cumulative function errors are in ulp of \f$\max(|\log F|, 1)\f$; the measures are those of \ref accuracy "How accuracy is measured". The worst point at order \f$6\f$ is the SCAD with `logistic_tail` at \f$\lambda = 3\f$, \f$a = 1.1\f$, and \f$s = 0.5\f$.
+
+| Quantity | Student and logistic, measured | Student and logistic, bound | Gaussian, measured | Gaussian, bound |
+| --- | --- | --- | --- | --- |
+| Log-density, order 0 | \f$2\f$ ulp | \f$4\f$ ulp | \f$3.66\f$ ulp | \f$6\f$ ulp |
+| Log-density, order 1 | \f$6\f$ ulp | \f$10\f$ ulp | \f$8\f$ ulp | \f$18\f$ ulp |
+| Log-density, order 2 | \f$6\f$ ulp | \f$10\f$ ulp | \f$6.3\f$ ulp | \f$18\f$ ulp |
+| Log-density, order 3 | \f$10\f$ ulp | \f$16\f$ ulp | \f$4.45\f$ ulp | \f$14\f$ ulp |
+| Log-density, order 4 | \f$9\f$ ulp | \f$16\f$ ulp | \f$11.2\f$ ulp | \f$18\f$ ulp |
+| Log-density, order 5 | \f$25\f$ ulp | \f$40\f$ ulp | \f$40.2\f$ ulp | \f$64\f$ ulp |
+| Log-density, order 6 | \f$163\f$ ulp | \f$250\f$ ulp | \f$163\f$ ulp | \f$250\f$ ulp |
+| \f$\log F\f$ and \f$\log(1 - F)\f$ | \f$2\f$ ulp | \f$4\f$ ulp | \f$2.46\f$ ulp | \f$4\f$ ulp |
+| Normalizing constant \f$Z\f$ | \f$2\f$ ulp | \f$3\f$ ulp | \f$1.33\f$ ulp | \f$2\f$ ulp |
+
+In the limit, \f$\gamma \to 0\f$ for the MCP and \f$\lambda \to 0\f$ for the SCAD leave no inner region and give \f$e^{-H}/(2T)\f$, while sending the last knot to infinity makes the tail's mass vanish and gives the Laplace distribution of rate \f$\lambda\f$. Neither law has a closed expected information or a proximal operator with any tail: the \ref distrib_generic "generic routes" serve them. The degrees of freedom \f$\nu\f$ of `student_tail` are weakly identified when only the tail informs them, so they will often be held fixed; the law admits them as a free parameter.
+
+For the full measurement record, see `docs/numerics.md`.
+
+## Kokkos usage
+
+```cpp
+#include <Kokkos_Core.hpp>
+#include <laplace/distrib/properizing_tail.hpp>
+
+void eval_student_tail(Kokkos::View<const double*> x, Kokkos::View<double*> out,
+                       double tail_scale, double tail_df) {
+  const laplace::distrib::student_tail tail{tail_scale, tail_df};
+  Kokkos::parallel_for("student_tail_eval", x.extent(0), KOKKOS_LAMBDA(const int i) {
+    const double z = x(i) / tail.varsigma();
+    // the exponent H(x) and the logarithm of the mass beyond x
+    out(i) = tail.kappa(0) * tail.psi_deriv(0, z) + tail.log_upper(x(i));
+  });
+}
+```
+
+## Tail types
+
+- \ref laplace::distrib::student_tail "student_tail" — Student properizing tail (default), with `tail_scale` and `tail_df`
+- \ref laplace::distrib::gaussian_tail "gaussian_tail" — Gaussian properizing tail, with `tail_sigma2`
+- \ref laplace::distrib::logistic_tail "logistic_tail" — logistic properizing tail, with `tail_scale`
+
+## References
+
+- C.-H. Zhang (2010), Nearly unbiased variable selection under minimax concave penalty, The Annals of Statistics, 38(2), 894-942. https://doi.org/10.1214/09-aos729
+- J. Fan and R. Li (2001), Variable Selection via Nonconcave Penalized Likelihood and its Oracle Properties, Journal of the American Statistical Association, 96(456), 1348-1360. https://doi.org/10.1198/016214501753382273
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
+*/

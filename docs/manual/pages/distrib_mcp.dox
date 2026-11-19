@@ -1,8 +1,8 @@
 /**
 \defgroup distrib_mcp Properized MCP
-\brief Continuous real-line distribution whose negative log-density is Zhang's minimax concave penalty on an interval around the location and a Gaussian beyond it, with a normalizing constant in closed form through Dawson's integral.
+\brief Continuous real-line distribution whose negative log-density is Zhang's minimax concave penalty on an interval around the location and a properizing tail beyond it, with a normalizing constant in closed form through Dawson's integral.
 
-Defined in `<laplace/distrib/mcp.hpp>` as \ref laplace::distrib::mcp_distrib "mcp_distrib", this module gives the log-density and its partial derivatives to order \f$6\f$ in the four parameters, the mixed derivatives in the observation and the parameters, the cumulative functions with their logarithms, the non-smooth points and starting values. Every member that evaluates the law is marked `LAPLACE_HD`, so it runs on the host and inside Kokkos kernels; `start_value()` runs on the host only. Against mpmath references (mpmath), the worst measured error of the log-density and its derivatives is \f$162\f$ ulp of the scale of their order, and that of the logarithms of the cumulative functions is \f$2.46\f$ ulp of \f$\max(\lvert \log F \rvert, 1)\f$; the measures are those of \ref accuracy "How accuracy is measured", and the figures are in the section \"Accuracy and limits\" below.
+Defined in `<laplace/distrib/mcp.hpp>` as \ref laplace::distrib::mcp_distrib "mcp_distrib", a class template parametrized by the \ref distrib_properizing_tail "properizing tail" `Tail` whose default is \ref laplace::distrib::student_tail "student_tail" (alternatives are \ref laplace::distrib::gaussian_tail "gaussian_tail" and \ref laplace::distrib::logistic_tail "logistic_tail"). The distribution has three parameters of its own plus the tail's own: four parameters with `gaussian_tail` or `logistic_tail`, and five with `student_tail`. This module gives the log-density and its partial derivatives to order \f$6\f$ in those parameters, the mixed derivatives in the observation and the parameters, the cumulative functions with their logarithms, the non-smooth points and starting values; everything about the tails themselves is documented on \ref distrib_properizing_tail "the properizing tails page". Every member that evaluates the law is marked `LAPLACE_HD`, so it runs on the host and inside Kokkos kernels; `start_value()` runs on the host only. Against mpmath references (mpmath), the worst measured error of the log-density and its derivatives is \f$163\f$ ulp of the scale of their order, and that of the logarithms of the cumulative functions is \f$2\f$ ulp of \f$\max(\lvert \log F \rvert, 1)\f$ (\f$2.46\f$ ulp with `gaussian_tail`); the measures are those of \ref accuracy "How accuracy is measured", and the figures are in the section \"Accuracy and limits\" below.
 
 ## Classic form and parametrization
 
@@ -10,15 +10,15 @@ The minimax concave penalty of Zhang (Zhang, 2010) is a function of \f$u = |y - 
 \f[
 \rho(u) = \begin{cases} \lambda u - \dfrac{u^2}{2\gamma}, & u \le \gamma\lambda, \\[4pt] \dfrac{\gamma\lambda^2}{2}, & u > \gamma\lambda. \end{cases}
 \f]
-The knot \f$u = \gamma\lambda\f$ separates the two pieces. Beyond the knot \f$\rho\f$ is flat, so \f$e^{-\rho(u)}\f$ has an infinite integral for every value of the parameters. The law keeps \f$\rho\f$ on the inner piece and replaces the flat piece by a Gaussian tail with variance \f$V > 0\f$, the tail variance:
+The knot \f$u = \gamma\lambda\f$ separates the two pieces. Beyond the knot \f$\rho\f$ is flat, so \f$e^{-\rho(u)}\f$ has an infinite integral for every value of the parameters. The law keeps \f$\rho\f$ on the inner piece and replaces the flat piece by the exponent \f$H(u - \gamma\lambda)\f$ of a properizing tail (\ref distrib_properizing_tail "Properizing tails"):
 \f[
-q(u) = \begin{cases} \lambda u - \dfrac{u^2}{2\gamma}, & u \le \gamma\lambda, \\[4pt] \dfrac{\gamma\lambda^2}{2} + \dfrac{(u - \gamma\lambda)^2}{2V}, & u > \gamma\lambda, \end{cases}
+q(u) = \begin{cases} \lambda u - \dfrac{u^2}{2\gamma}, & u \le \gamma\lambda, \\[4pt] \dfrac{\gamma\lambda^2}{2} + H(u - \gamma\lambda), & u > \gamma\lambda, \end{cases}
 \f]
 and the density is
 \f[
 f(y) = \frac{e^{-q(|y - \mu|)}}{Z}, \qquad y \in \mathbb{R},
 \f]
-with \f$Z\f$ the normalizing constant. The log-density is therefore \f$\log f(y) = -q(|y - \mu|) - \log Z\f$.
+with \f$Z\f$ the normalizing constant. The log-density is therefore \f$\log f(y) = -q(|y - \mu|) - \log Z\f$. The definition of \f$H\f$ and the parameters of each tail are given on \ref distrib_properizing_tail "the properizing tails page".
 
 The parameters are readable from \f$q\f$. The location \f$\mu\f$ is the mode and the median of the law, and the density is symmetric about it, so its mean is \f$\mu\f$ as well. The rate \f$\lambda\f$ is the slope of \f$q\f$ at the location, because \f$q'(0^+) = \lambda\f$, and the concavity \f$\gamma\f$ places the knot at \f$\gamma\lambda\f$. On the inner piece the exponent of the density is the penalty \f$\rho\f$ of Zhang, which is what gives the parameters their meaning. The SCAD law of \ref distrib_scad "the Properized SCAD page" has the same property with the penalty of Fan and Li (Fan and Li, 2001).
 
@@ -26,19 +26,19 @@ The parameters are readable from \f$q\f$. The location \f$\mu\f$ is the mode and
 
 The normalizing constant is
 \f[
-Z = 2\left[\sqrt{2\gamma}\,\mathcal{D}\!\left(\lambda\sqrt{\gamma/2}\right) + e^{-\gamma\lambda^2/2}\sqrt{\pi V/2}\right],
+Z = 2\left[\sqrt{2\gamma}\,\mathcal{D}\!\left(\lambda\sqrt{\gamma/2}\right) + e^{-\gamma\lambda^2/2}\,T\right],
 \f]
-where \f$\mathcal{D}\f$ is Dawson's integral, \ref laplace::math::dawson "dawson()" on \ref dawson "its own page".
+where \f$\mathcal{D}\f$ is Dawson's integral, \ref laplace::math::dawson "dawson()" on \ref dawson "its own page", and \f$T = \int_0^\infty e^{-H(x)}\,\mathrm{d}x\f$ is the tail's constant (\ref distrib_properizing_tail "Properizing tails").
 
-Each piece of \f$q\f$ is a polynomial of degree two in \f$u\f$. On the inner piece the exponent \f$-q\f$ is convex in \f$u\f$, so completing the square turns the inner integral into an integral of \f$e^{s^2}\f$, and that integral is Dawson's integral. On the Gaussian tail the same step gives an integral of \f$e^{-s^2}\f$, which contributes the term with \f$\sqrt{\pi V/2}\f$. Both terms of \f$Z\f$ are positive, so nothing cancels in the sum. The implementation adds the two terms in logarithms, which keeps the tail term when \f$e^{-\gamma\lambda^2/2}\f$ underflows.
+Each piece of \f$q\f$ is polynomial or defined by the tail in \f$u\f$. On the inner piece the exponent \f$-q\f$ is convex in \f$u\f$, so completing the square turns the inner integral into an integral of \f$e^{s^2}\f$, and that integral is Dawson's integral. Beyond the knot, the change of variables \f$x = u - \gamma\lambda\f$ contributes the term \f$e^{-\gamma\lambda^2/2}\,T\f$. Both terms of \f$Z\f$ are positive, so nothing cancels in the sum. The implementation adds the two terms in logarithms, which keeps the tail term when \f$e^{-\gamma\lambda^2/2}\f$ underflows.
 
 ## Shape of the log-density
 
-The function \f$q\f$ and its first derivative are continuous at the knot, where \f$q'\f$ vanishes on both sides. The second derivative jumps there from \f$-1/\gamma\f$ to \f$1/V\f$, so the density is \f$C^1\f$ in \f$y\f$ at the knot. At \f$u = 0\f$ the derivative \f$q'\f$ jumps from \f$-\lambda\f$ to \f$\lambda\f$, so the log-density has a kink at the location and is \f$C^0\f$ there. The field `y_regularity` is therefore 0.
+The function \f$q\f$ and its first derivative are continuous at the knot, where \f$q'\f$ vanishes on both sides. The second derivative jumps there from \f$-1/\gamma\f$ to \f$H''(0)\f$, so the density is \f$C^1\f$ in \f$y\f$ at the knot. At \f$u = 0\f$ the derivative \f$q'\f$ jumps from \f$-\lambda\f$ to \f$\lambda\f$, so the log-density has a kink at the location and is \f$C^0\f$ there. The field `y_regularity` is therefore 0.
 
-Two limits are tested. When \f$\gamma\f$ tends to zero the inner piece disappears, and the density becomes the normal density with mean \f$\mu\f$ and variance \f$V\f$ (\ref distrib_gaussian2 "gaussian2"). The test takes \f$\gamma = 10^{-14}\f$ and compares the log-density with the Gaussian one.
+Two limits hold for every tail. When \f$\gamma\f$ tends to zero the inner piece disappears, and the density becomes \f$e^{-H(|y - \mu|)}/(2T)\f$; for `gaussian_tail` this is the normal density with mean \f$\mu\f$ and variance \f$V\f$ (\ref distrib_gaussian2 "gaussian2"). The test takes \f$\gamma = 10^{-14}\f$ with `gaussian_tail` and compares the log-density with the Gaussian one.
 
-The second limit concerns the Laplace density \f$f_{\mathrm{L}}(y) = \tfrac{\lambda}{2} e^{-\lambda|y - \mu|}\f$ of rate \f$\lambda\f$ (\ref distrib_laplace2 "laplace2"). Let \f$x = \lambda\sqrt{\gamma/2}\f$. When \f$x\f$ is large, the tail carries no mass and the density approaches \f$f_{\mathrm{L}}\f$. The two log-densities differ exactly by
+The second limit concerns the Laplace density \f$f_{\mathrm{L}}(y) = \tfrac{\lambda}{2} e^{-\lambda|y - \mu|}\f$ of rate \f$\lambda\f$ (\ref distrib_laplace2 "laplace2"). Let \f$x = \lambda\sqrt{\gamma/2}\f$. When the last knot is sent to infinity so that \f$x\f$ is large, the tail carries no mass and the density approaches \f$f_{\mathrm{L}}\f$. For `gaussian_tail`, the two log-densities differ exactly by
 \f[
 \log f(y) - \log f_{\mathrm{L}}(y) = \frac{u^2}{2\gamma} - \log\frac{\lambda Z}{2},
 \f]
@@ -46,22 +46,22 @@ and \f$\log(\lambda Z/2) = 1/(2x^2) + O(x^{-4})\f$, which is the asymptotic expa
 
 ## Derivatives
 
-The observation and the location enter through \f$u\f$ only, with \f$\partial u / \partial y = \operatorname{sign}(y - \mu)\f$ and \f$\partial u / \partial \mu = -\operatorname{sign}(y - \mu)\f$. Let \f$i\f$ be the order of differentiation in \f$\mu\f$, \f$J\f$ the order in \f$y\f$, and \f$(b, m, n)\f$ the orders in \f$(\lambda, \gamma, V)\f$. Each component of the derivative of \f$\log f\f$ is then
+The observation and the location enter through \f$u\f$ only, with \f$\partial u / \partial y = \operatorname{sign}(y - \mu)\f$ and \f$\partial u / \partial \mu = -\operatorname{sign}(y - \mu)\f$. Let \f$i\f$ be the order of differentiation in \f$\mu\f$, \f$J\f$ the order in \f$y\f$, \f$(b, m)\f$ the orders in \f$(\lambda, \gamma)\f$, and \f$n\f$ the multi-index of orders in the tail's own parameters \f$\theta_t\f$. Each component of the derivative of \f$\log f\f$ is then
 \f[
--(-1)^{i}\,\operatorname{sign}(y - \mu)^{\,i+J}\,\partial_u^{\,i+J}\,\partial_\lambda^{\,b}\,\partial_\gamma^{\,m}\,\partial_V^{\,n}\,q(u)
-\;-\;[\,i + J = 0\,]\,\partial_\lambda^{\,b}\,\partial_\gamma^{\,m}\,\partial_V^{\,n}\,\log Z,
+-(-1)^{i}\,\operatorname{sign}(y - \mu)^{\,i+J}\,\partial_u^{\,i+J}\,\partial_\lambda^{\,b}\,\partial_\gamma^{\,m}\,\partial_{\theta_t}^{\,n}\,q(u)
+\;-\;[\,i + J = 0\,]\,\partial_\lambda^{\,b}\,\partial_\gamma^{\,m}\,\partial_{\theta_t}^{\,n}\,\log Z,
 \f]
 where \f$[\,\cdot\,]\f$ is 1 when its statement holds and 0 otherwise. The power \f$\operatorname{sign}(y - \mu)^{t}\f$ is 1 for even \f$t\f$ and \f$\operatorname{sign}(y - \mu)\f$ for odd \f$t\f$, with \f$\operatorname{sign}(0) = 0\f$.
 
-At \f$y = \mu\f$ the odd orders in \f$\mu\f$ are zero, which is the mean of the two one-sided values. The even orders agree on the two sides and are taken from the inner piece. At a knot the value and every derivative come from the inner piece. Because \f$q\f$ is quadratic in \f$u\f$ on each piece, every component with \f$i + J \ge 3\f$ vanishes inside a piece.
+At \f$y = \mu\f$ the odd orders in \f$\mu\f$ are zero, which is the mean of the two one-sided values. The even orders agree on the two sides and are taken from the inner piece. At a knot the value and every derivative come from the inner piece. Because \f$q\f$ is quadratic in \f$u\f$ on the inner piece, every component with \f$i + J \ge 3\f$ vanishes there; in the tail, the mixed partials of \f$q\f$ are formed by the chain rules through the knot and the tail's parameters (\ref distrib_properizing_tail "Properizing tails").
 
-The mixed partials of \f$q\f$ are closed forms. They were derived with SymPy (Meurer and others, 2017) in `tools/reference/distrib_mcp_scad_forms.py`, which compares them with SymPy's own derivatives for every order up to six at points inside each piece. The forms agree with those derivatives to \f$1.4 \times 10^{-15}\f$ in relative terms.
+The mixed partials of \f$q\f$ are closed forms. They were derived with SymPy (Meurer and others, 2017) in `tools/reference/distrib_mcp_scad_forms.py` and `tools/reference/properized_tail_forms.py`, which compare them with SymPy's own derivatives for every order up to six at points inside each piece.
 
-The derivatives of \f$\log Z\f$ are built by recursions, not written out. The constant \f$V\f$ enters \f$Z\f$ only through the factor \f$\sqrt{\pi V/2}\f$, so
+The derivatives of \f$\log Z\f$ are built by recursions, not written out. The tail's parameters enter \f$Z\f$ only through \f$T(\theta_t)\f$, so
 \f[
-Z = 2\left[A(\lambda, \gamma) + B(\lambda, \gamma)\sqrt{\pi V/2}\right],
+Z = 2\left[A(\lambda, \gamma) + B(\lambda, \gamma)\,T(\theta_t)\right],
 \f]
-and the table of \f$Z\f$ over the three parameters comes from two tables over \f$(\lambda, \gamma)\f$ and from the derivatives of \f$V^{1/2}\f$. The tables over \f$(\lambda, \gamma)\f$ come from the exponential and from Dawson's integral by the chain rule. The table of \f$\log Z\f$ then comes from the logarithm of the table of \f$Z\f$. Three recursions do this work. Each binomial coefficient \f$\binom{\alpha'}{\beta}\f$ below is a product over the variables. In each recursion \f$\alpha\f$ is a multi-index, \f$r\f$ is the first index with \f$\alpha_r > 0\f$, and \f$\alpha' = \alpha - e_r\f$ with \f$e_r\f$ the unit multi-index in direction \f$r\f$. The letter \f$\gamma\f$ is the concavity throughout this page and never a multi-index.
+and the table of \f$Z\f$ over all non-location parameters comes from two tables over \f$(\lambda, \gamma)\f$ and from the mixed partials of \f$T\f$ (\ref distrib_properizing_tail "Properizing tails"). The tables over \f$(\lambda, \gamma)\f$ come from the exponential and from Dawson's integral by the chain rule. The table of \f$\log Z\f$ then comes from the logarithm of the table of \f$Z\f$. Three recursions do this work. Each binomial coefficient \f$\binom{\alpha'}{\beta}\f$ below is a product over the variables. In each recursion \f$\alpha\f$ is a multi-index, \f$r\f$ is the first index with \f$\alpha_r > 0\f$, and \f$\alpha' = \alpha - e_r\f$ with \f$e_r\f$ the unit multi-index in direction \f$r\f$. The letter \f$\gamma\f$ is the concavity throughout this page and never a multi-index.
 
 The table of \f$e^{\varphi}\f$ comes from the table of \f$\varphi\f$:
 \f[
@@ -78,13 +78,13 @@ The table of \f$\log Z\f$ comes from the table of \f$Z\f$, with \f$Z_{\mathbf{0}
 \partial^{\alpha} \log Z = \frac{1}{Z_{\mathbf{0}}}\Big(\partial^{\alpha} Z - \sum_{\mathbf{0} \ne \beta \le \alpha'} \binom{\alpha'}{\beta}\, \partial^{\beta} Z\; \partial^{\alpha' - \beta + e_r} \log Z\Big).
 \f]
 
-The first two recursions act on tables over \f$(\lambda, \gamma)\f$, and the last on the table over \f$(\lambda, \gamma, V)\f$. A table over three variables is packed over the multi-indices of total order at most the order of the derivative, which at order six is 84 entries against 343 for a full cube.
+The first two recursions act on tables over \f$(\lambda, \gamma)\f$. The last acts on a triangularly packed table over \f$(\lambda, \gamma, \theta_1)\f$ for a one-parameter tail, holding 84 entries against 343 for a cube at order 6, or over \f$(\lambda, \gamma, s, \nu)\f$ for `student_tail`, where the four-variable logarithm recursion holds 210 entries against 2401 for a four-dimensional box (\ref distrib_properizing_tail "Properizing tails").
 
 ## Cumulative functions
 
-Let \f$U(u) = \int_u^\infty e^{-q(t)}\,\mathrm{d}t\f$ for \f$u \ge 0\f$, the integral of the unnormalized density beyond the distance \f$u\f$. It has a closed form, with \f$\Phi\f$ the standard normal cumulative distribution function:
+Let \f$U(u) = \int_u^\infty e^{-q(t)}\,\mathrm{d}t\f$ for \f$u \ge 0\f$, the integral of the unnormalized density beyond the distance \f$u\f$. With \f$T = \int_0^\infty e^{-H(v)}\,\mathrm{d}v\f$ and \f$G(x) = \int_x^\infty e^{-H(v)}\,\mathrm{d}v\f$ the tail's constant and partial integral (\ref distrib_properizing_tail "Properizing tails"),
 \f[
-U(u) = \begin{cases} \sqrt{2\gamma}\; e^{-q(u)}\,\mathcal{D}\!\left(\dfrac{\gamma\lambda - u}{\sqrt{2\gamma}}\right) + e^{-\gamma\lambda^2/2}\sqrt{\pi V/2}, & u \le \gamma\lambda, \\[8pt] 2\, e^{-\gamma\lambda^2/2}\sqrt{\pi V/2}\; \Phi\!\left(-\dfrac{u - \gamma\lambda}{\sqrt{V}}\right), & u > \gamma\lambda. \end{cases}
+U(u) = \begin{cases} \sqrt{2\gamma}\; e^{-q(u)}\,\mathcal{D}\!\left(\dfrac{\gamma\lambda - u}{\sqrt{2\gamma}}\right) + e^{-\gamma\lambda^2/2}\,T, & u \le \gamma\lambda, \\[8pt] e^{-\gamma\lambda^2/2}\,G(u - \gamma\lambda), & u > \gamma\lambda. \end{cases}
 \f]
 The cumulative distribution function is \f$F(y) = U(|y - \mu|)/Z\f$ for \f$y \le \mu\f$ and \f$F(y) = 1 - U(|y - \mu|)/Z\f$ for \f$y > \mu\f$. Every term of \f$U\f$ is a product of positive factors, so no difference is taken between two nearly equal numbers.
 
@@ -96,30 +96,31 @@ The derivatives of \f$\log F\f$ in the parameters, the expected information and 
 
 `y_kinks()` declares three points, \f$\mu - \gamma\lambda\f$, \f$\mu\f$ and \f$\mu + \gamma\lambda\f$, each with `continuous_order` 0. The two knots are not kinks, since the second derivative of the density jumps there and the first does not. They are declared so that a quadrature which takes the declared points as cuts has a panel end at every knot.
 
-`param_kinks(j, y)` gives, for each parameter, the points of its own axis where the log-density is not smooth. For \f$\mu\f$ the point is \f$\mu = y\f$, with order 0. For \f$\lambda\f$, when \f$u = |y - \mu| > 0\f$, the point is \f$\lambda = u/\gamma\f$, the value at which the knot reaches \f$u\f$, with order 1. For \f$\gamma\f$, when \f$u > 0\f$, the point is \f$\gamma = u/\lambda\f$, also with order 1. The tail variance has no points.
+`param_kinks(j, y)` gives, for each parameter, the points of its own axis where the log-density is not smooth. For \f$\mu\f$ the point is \f$\mu = y\f$, with order 0. For \f$\lambda\f$, when \f$u = |y - \mu| > 0\f$, the point is \f$\lambda = u/\gamma\f$, the value at which the knot reaches \f$u\f$, with order 1. For \f$\gamma\f$, when \f$u > 0\f$, the point is \f$\gamma = u/\lambda\f$, also with order 1. The tail's parameters have no points, because every tail is smooth in its parameters.
 
 ## Accuracy and limits
 
-The table lists the worst errors measured against mpmath references (mpmath), computed at 300 and 400 bits, with the bounds of the tests. The same test loop covers the properized MCP and SCAD laws, so each figure is the worst over both laws. The measurements were made on gcc (Kokkos Serial and OpenMP) and on CUDA (RTX 4070 SUPER), and the host against CUDA row compares the two backends. The method of measurement is described on \ref accuracy "How accuracy is measured".
+The table lists the worst errors measured against mpmath references (mpmath), computed at 300 and 400 bits (`tools/reference/distrib_mcp_scad.py`). The test loops cover both the properized MCP and SCAD laws, so each figure is the worst over both laws (`tests/distrib/test_mcp_scad_tails.cpp` for `student_tail` and `logistic_tail` over 74184 values, and `tests/distrib/test_mcp_scad.cpp` for `gaussian_tail`). The reference checks run on the host in both the gcc and CUDA (RTX 4070 SUPER) builds, which therefore give the same figures. The method of measurement is described on \ref accuracy "How accuracy is measured". The worst point at order 6 is the SCAD with `logistic_tail` at \f$\lambda = 3\f$, \f$a = 1.1\f$ and \f$s = 0.5\f$.
 
-| Quantity | Worst measured | Test bound |
-| --- | --- | --- |
-| Log-density, order 0 | \f$3.66\f$ ulp | \f$6\f$ ulp |
-| Log-density, order 1 | \f$11.4\f$ ulp | \f$18\f$ ulp |
-| Log-density, order 2 | \f$11.5\f$ ulp | \f$18\f$ ulp |
-| Log-density, order 3 | \f$8.75\f$ ulp | \f$14\f$ ulp |
-| Log-density, order 4 | \f$11.2\f$ ulp | \f$18\f$ ulp |
-| Log-density, order 5 | \f$41.7\f$ ulp | \f$64\f$ ulp |
-| Log-density, order 6 | \f$162\f$ ulp | \f$250\f$ ulp |
-| \f$\log F\f$ and \f$\log(1 - F)\f$ | \f$2.46\f$ ulp of \f$\max(\lvert \log F \rvert, 1)\f$ | \f$4\f$ ulp |
-| Normalizing constant \f$Z\f$ | \f$1.33\f$ ulp | \f$2\f$ ulp |
-| \f$F\f$ and \f$1 - F\f$ against the quadrature of the definition (bound on \f$F\f$) | \f$6.8 \times 10^{-16}\f$ relative | \f$10^{-11}\f$ relative |
-| Mass of the density, every knot declared as a cut | \f$4.4 \times 10^{-16}\f$ | \f$10^{-15}\f$ |
-| Log-density against the normal limit | \f$8.0 \times 10^{-14}\f$ absolute | \f$10^{-10}\f$ |
-| Cumulative function of the quantile against \f$p\f$, for \f$p\f$ from \f$10^{-8}\f$ to \f$1 - 10^{-8}\f$ | \f$2.5 \times 10^{-15}\f$ relative | \f$10^{-10}\f$ relative |
-| Host against CUDA, sum of the components of each order | \f$1.18 \times 10^{-15}\f$ at order 1, \f$2.1 \times 10^{-16}\f$ to \f$5.5 \times 10^{-16}\f$ at the others | \f$2 \times 10^{-15}\f$ |
+| Quantity | Student and logistic, measured | Student and logistic, bound | Gaussian, measured | Gaussian, bound |
+| --- | --- | --- | --- | --- |
+| Log-density, order 0 | \f$2\f$ ulp | \f$4\f$ ulp | \f$3.66\f$ ulp | \f$6\f$ ulp |
+| Log-density, order 1 | \f$6\f$ ulp | \f$10\f$ ulp | \f$8\f$ ulp | \f$18\f$ ulp |
+| Log-density, order 2 | \f$6\f$ ulp | \f$10\f$ ulp | \f$6.3\f$ ulp | \f$18\f$ ulp |
+| Log-density, order 3 | \f$10\f$ ulp | \f$16\f$ ulp | \f$4.45\f$ ulp | \f$14\f$ ulp |
+| Log-density, order 4 | \f$9\f$ ulp | \f$16\f$ ulp | \f$11.2\f$ ulp | \f$18\f$ ulp |
+| Log-density, order 5 | \f$25\f$ ulp | \f$40\f$ ulp | \f$40.2\f$ ulp | \f$64\f$ ulp |
+| Log-density, order 6 | \f$163\f$ ulp | \f$250\f$ ulp | \f$163\f$ ulp | \f$250\f$ ulp |
+| \f$\log F\f$ and \f$\log(1 - F)\f$ | \f$2\f$ ulp of \f$\max(\lvert \log F \rvert, 1)\f$ | \f$4\f$ ulp | \f$2.46\f$ ulp of \f$\max(\lvert \log F \rvert, 1)\f$ | \f$4\f$ ulp |
+| Normalizing constant \f$Z\f$ | \f$2\f$ ulp | \f$3\f$ ulp | \f$1.33\f$ ulp | \f$2\f$ ulp |
+| \f$F\f$ and \f$1 - F\f$ or increment of \f$F\f$ against quadrature | \f$8.7 \times 10^{-17}\f$ | \f$10^{-10}\f$ relative | \f$5.7 \times 10^{-14}\f$ relative | \f$10^{-11}\f$ relative |
+| Mass of the density, every knot declared as a cut | \f$3.3 \times 10^{-16}\f$ | \f$10^{-13}\f$ | \f$4.4 \times 10^{-16}\f$ | \f$10^{-15}\f$ |
 
-The log-density bounds are in ulp of the largest component of each order at the point, as the test defines them. The figure \f$2.46\f$ ulp refers to \f$\max(\lvert \log F \rvert, 1)\f$. In ulp of \f$\log F\f$ itself the same rows reach \f$437\f$ ulp, which is the conditioning of a Gaussian tail: the argument of \f$\Phi\f$ carries one ulp, and the logarithm of \f$\Phi\f$ has slope \f$-z\f$ in its argument, \f$z\f$ the standardized distance beyond the knot. The expected information of this law is not closed; the test checks that the generic route yields finite components.
+For `gaussian_tail`, the log-density agrees with the normal limit within \f$8.17 \times 10^{-14}\f$ absolute (test bound \f$10^{-10}\f$) and the cumulative function of the quantile agrees with \f$p\f$ for \f$p\f$ from \f$10^{-8}\f$ to \f$1 - 10^{-8}\f$ within \f$2.5 \times 10^{-15}\f$ relative (test bound \f$10^{-10}\f$ relative). On the RTX 4070 SUPER the sum of the components of each order on the host against the device agrees within \f$10^{-15}\f$ at order 1 and \f$1.7 \times 10^{-16}\f$ to \f$1.01 \times 10^{-15}\f$ at the others for `gaussian_tail`, and within \f$1.2 \times 10^{-17}\f$ to \f$7.0 \times 10^{-16}\f$ over the orders 1 to 6 for `student_tail` and `logistic_tail` (test bound \f$2 \times 10^{-15}\f$ in both).
+
+The closed \f$Z\f$ of each law agrees with the 400-bit quadrature of the definition \f$Z = 2\int_0^\infty e^{-q(u)}\,\mathrm{d}u\f$ to \f$1.1 \times 10^{-48}\f$ over all 36 cases, which also checks that each density integrates to one. On the inner pieces the two laws equal `mcp_penalty` and `scad_penalty` bit for bit in the value for every tail, and within \f$2\varepsilon\f$ of \f$\max(|\mathrm{value}|, 1)\f$ in the derivatives (test bound \f$8\varepsilon\f$, where \f$\varepsilon\f$ is double-precision machine epsilon); the derivatives in the tail's own parameters are zero there.
+
+The log-density bounds are in ulp of the largest component of each order at the point, as the test defines them. For `gaussian_tail`, the figure \f$2.46\f$ ulp refers to \f$\max(\lvert \log F \rvert, 1)\f$; in ulp of \f$\log F\f$ itself the same rows reach \f$437\f$ ulp, which is the conditioning of a Gaussian tail, where the argument of \f$\Phi\f$ carries one ulp and \f$\log\Phi\f$ has slope \f$-z\f$ in its argument, \f$z\f$ the standardized distance beyond the knot. There is no closed expected information and no proximal operator for this law with any tail: the \ref distrib_generic "generic routes" serve them. The degrees of freedom \f$\nu\f$ of `student_tail` are weakly identified when only the tail informs them, so they will often be held fixed; the law admits them as a free parameter.
 
 The references and the derivative checks are described in `docs/numerics.md`.
 
@@ -130,8 +131,9 @@ The references and the derivative checks are described in `docs/numerics.md`.
 #include <laplace/distrib/mcp.hpp>
 
 void eval_mcp(Kokkos::View<const double*> y, Kokkos::View<double*> out,
-              double mu, double lambda, double gamma, double tail_sigma2) {
-  const laplace::distrib::mcp_distrib d{mu, lambda, gamma, tail_sigma2};
+              double mu, double lambda, double gamma, double tail_scale, double tail_df) {
+  const laplace::distrib::mcp_distrib<laplace::distrib::student_tail> d{
+      mu, lambda, gamma, tail_scale, tail_df};
   Kokkos::parallel_for("mcp_eval", y.extent(0), KOKKOS_LAMBDA(const int i) {
     out(i) = d.logpdf(y(i)) + d.logpdf_d1(y(i))[0] + d.cdf(y(i));
   });
@@ -140,7 +142,7 @@ void eval_mcp(Kokkos::View<const double*> y, Kokkos::View<double*> out,
 
 ## Members
 
-Struct \ref laplace::distrib::mcp_distrib "mcp_distrib" has the structure of \ref distrib_core "a univariate distribution" with `n_params = 4`, with the fields `mu`, `lambda`, `gamma` and `tail_sigma2`. Its members are `kind`, `n_params`, `y_regularity`, `params`, `logpdf()`, `logpdf_d1()` to `logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()` and `start_value()`. The member `scale()` returns \f$1/\lambda + \sqrt{V}\f$, a rough spread of the law. The member `start_value()` takes the sample median as \f$\mu\f$, the reciprocal of the mean absolute deviation about the median as \f$\lambda\f$, the value 3 as \f$\gamma\f$ and the sample variance as \f$V\f$ (\ref distrib_start "Starting values").
+Struct template \ref laplace::distrib::mcp_distrib "mcp_distrib" (default `Tail = student_tail`) has the structure of \ref distrib_core "a univariate distribution" with `n_params = 3 + Tail::n_tail_params`, which is 4 with `gaussian_tail` or `logistic_tail` and 5 with `student_tail`. Its fields are `mu`, `lambda`, `gamma` and `tail`. Its members are `kind`, `n_params`, `y_regularity`, `params`, `logpdf()`, `logpdf_d1()` to `logpdf_d6()`, `logpdf_dk()`, `logpdf_dy_dk()`, `cdf()`, `ccdf()`, `log_cdf()`, `log_ccdf()`, `support_lower()`, `support_upper()`, `center()`, `scale()`, `param_kinks()`, `y_kinks()` and `start_value()`. The member `scale()` returns \f$1/\lambda\f$ plus `tail.scale_hint()`, a rough spread of the law. The member `start_value()` takes the sample median as \f$\mu\f$, the reciprocal of the mean absolute deviation about the median as \f$\lambda\f$, the value 3 as \f$\gamma\f$ and `tail.start_value(summary)` for the tail (\ref distrib_properizing_tail "Properizing tails", \ref distrib_start "Starting values").
 
 ## References
 

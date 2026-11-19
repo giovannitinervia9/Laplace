@@ -1,49 +1,54 @@
 // What mcp_distrib and scad_distrib share (laplace::distrib::detail_properized):
-// the pieces of the penalty q that the two laws have in common, the tables of
-// partial derivatives over multi-indices used for log Z, and the Gaussian tail.
+// the pieces of the penalty q that the two laws have in common, and the tables of
+// partial derivatives over multi-indices used for log Z. The properizing tail itself
+// is a template parameter of the two laws and lives in distrib/properizing_tail.hpp.
 //
 // Both laws have the log-density
 //
-//   l(mu, lambda, p, V; y) = -q(u; lambda, p, V) - log Z(lambda, p, V),
-//   u = |y - mu|,  p = gamma (MCP) or a (SCAD),  V the variance of the Gaussian tail,
+//   l(mu, lambda, p, theta_t; y) = -q(u; lambda, p, theta_t) - log Z(lambda, p, theta_t),
+//   u = |y - mu|,  p = gamma (MCP) or a (SCAD),  theta_t the tail's own parameters,
 //
-// with q a polynomial of degree two in u on each piece, whose coefficients are
-// rational in the parameters, and with the same tail piece in both:
+// with q a polynomial of degree two in u on each inner piece, whose coefficients are
+// rational in the parameters, and with the same shape of tail piece in both:
 //
-//   q = C(lambda, p) + (u - K)^2 / (2 V),   K = p lambda the knot, C the value of q there.
+//   q = C(lambda, p) + H(u - K; theta_t),   K = p lambda the knot, C the value of q
+//                                           there, H the tail's exponent.
 //
 // Two groups of functions live here.
 //
-// (a) One mixed partial of q at a time. The orders are (j, i, m, n) in
-//     (u, lambda, p, V); d^a/dmu^a is carried by the caller, which multiplies by
-//     (-1)^a sign(y - mu)^(a + J) (the laws' logpdf_dy_dk). q is quadratic in u, so
-//     every component with j >= 3 is zero inside a piece. The forms were derived and
+// (a) One mixed partial of q at a time. The orders are (j, i, m, n1, n2) in
+//     (u, lambda, p, theta_t); d^a/dmu^a is carried by the caller, which multiplies by
+//     (-1)^a sign(y - mu)^(a + J) (the laws' logpdf_dy_dk). The inner pieces are
+//     quadratic in u, so every component with j >= 3 is zero inside one of them; the
+//     tail piece goes through q_tail_piece, which composes identity (1) of
+//     properizing_tail.hpp with the tail's own components. The forms were derived and
 //     checked against SymPy's own derivatives in
-//     tools/reference/distrib_mcp_scad_forms.py, for every (j, i, m, n) of total
-//     order up to six and at points inside every piece.
+//     tools/reference/distrib_mcp_scad_forms.py and
+//     tools/reference/properized_tail_forms.py, for every multi-index of total order
+//     up to six and at points inside every piece.
 //
 // (b) Tables of partial derivatives over multi-indices, for log Z. In both laws
 //
-//       Z = 2 [ A(lambda, p) + B(lambda, p) sqrt(pi V / 2) ],
+//       Z = 2 [ A(lambda, p) + B(lambda, p) T(theta_t) ],
 //
-//     so V enters through one factor only and the table of Z over the three
-//     parameters is assembled from two tables over (lambda, p) and the derivatives
-//     of V^(1/2). The tables are built by the Leibniz and chain-rule recursions over
-//     multi-indices (mul2, exp2, comp2) and log Z by the recursion log3, the same
-//     recursions enet_distrib uses for its own normalizing constant. The finished
-//     log Z table was checked against SymPy's derivatives of Z written with erfi,
-//     F(x) = sqrt(pi)/2 e^(-x^2) erfi(x), in the script named above: worst relative
-//     error 1.2e-13 over the five test points at total order up to six, rising to
-//     3e-9 for the sixth pure derivative in p at lambda = 0.01, where that
-//     derivative is itself 2.7e-11 and the absolute error is 8e-20.
+//     so the tail's parameters enter through T only, and the table of Z over every
+//     parameter is assembled from two tables over (lambda, p) and the mixed partials of
+//     T. The tables are built by the Leibniz and chain-rule recursions over
+//     multi-indices (mul2, exp2, comp2) and log Z by the recursion log3 for a tail with
+//     one parameter or log4 for a tail with two, the same recursions enet_distrib uses
+//     for its own normalizing constant. The finished log Z table was checked against
+//     SymPy's derivatives of Z written with erfi, F(x) = sqrt(pi)/2 e^(-x^2) erfi(x),
+//     in the first script named above.
 //
-// The tables are local arrays of (K + 1)^2 or (K + 1)^3 doubles, so an order-six
-// call of logpdf_dk holds about ten kilobytes of them; at order one or two, which
-// is what a fit reads, they are a few hundred bytes.
+// The tables are local arrays of (K + 1)^2 doubles over (lambda, p) and of
+// (K+1)(K+2)(K+3)/6 or (K+1)(K+2)(K+3)(K+4)/24 doubles for log Z, so an order-six call
+// of logpdf_dk holds a few kilobytes of them; at order one or two, which is what a fit
+// reads, they are a few hundred bytes.
 #pragma once
 
 #include <laplace/core/config.hpp>
 #include <laplace/distrib/core.hpp>
+#include <laplace/distrib/properizing_tail.hpp>
 #include <laplace/math/dawson.hpp>
 #include <laplace/math/elementary.hpp>
 #include <laplace/math/normal.hpp>
@@ -112,12 +117,20 @@ LAPLACE_HD_FORCEINLINE double q_rate(int j, int i, double u, double lambda) {
   return d1_pow(j, u) * d1_pow(i, lambda);
 }
 
-// d^j_u d^i_lambda d^m_p of (u - p lambda)^2 / 2, the numerator of both tail pieces
-LAPLACE_HD double q_tail_square(int j, int i, int m, double u, double lambda, double p) {
+// One mixed partial of the tail piece q = C(lambda, p) + H(u - p lambda; theta_t), the
+// constant C excluded: identity (1) of properizing_tail.hpp carries the knot, and the
+// tail supplies the components of H. The derivatives in theta_t commute through, the
+// knot being free of them.
+template <class Tail>
+LAPLACE_HD double q_tail_piece(int j, int i, int m, int n1, int n2, double u, double lambda, double p,
+                               const Tail& tail) {
+  const double x = u - p * lambda;
+  const int lo = i > m ? i : m;
   double s = 0.0;
-  if (i == 0 && m == 0) s += 0.5 * d2_pow(j, u);
-  if (j <= 1 && i <= 1 && m <= 1) s -= d1_pow(j, u) * d1_pow(i, lambda) * d1_pow(m, p);
-  if (j == 0) s += 0.5 * d2_pow(i, lambda) * d2_pow(m, p);
+  for (int r = lo; r <= i + m; ++r) {
+    const double c = detail_tail::x_chain_coef(r, i, m, lambda, p);
+    if (c != 0.0) s += c * detail_tail::h_mixed(tail, j + r, n1, n2, x);
+  }
   return s;
 }
 
@@ -139,8 +152,24 @@ LAPLACE_HD_FORCEINLINE constexpr int idx3(int i, int m, int n) {
   const int t = i + m + n;
   return t * (t + 1) * (t + 2) / 6 + i * (t + 1) - i * (i - 1) / 2 + m;
 }
+// The same ranking over four variables, for a tail with two parameters of its own: the
+// blocks of equal total order in turn, and inside a block the colex rank, which for
+// three variables is idx3 above. At order six it holds 210 entries against the 2401 of
+// the square box.
+LAPLACE_HD_FORCEINLINE constexpr int idx4(int i, int m, int n, int o) {
+  const int t = i + m + n + o;
+  int pos = binomial_coef(t + 3, 4);
+  for (int j = 0; j < i; ++j) pos += binomial_coef(t - j + 2, 2);
+  for (int j = 0; j < m; ++j) pos += binomial_coef(t - i - j + 1, 1);
+  return pos + n;
+}
 LAPLACE_HD constexpr int tab2_size(int K) { return (K + 1) * (K + 1); }
 LAPLACE_HD constexpr int tab3_size(int K) { return (K + 1) * (K + 2) * (K + 3) / 6; }
+LAPLACE_HD constexpr int tab4_size(int K) { return (K + 1) * (K + 2) * (K + 3) * (K + 4) / 24; }
+// the size of the log Z table: one slot per parameter of the law except the location
+LAPLACE_HD constexpr int z_tab_size(int K, int n_tail_params) {
+  return n_tail_params == 1 ? tab3_size(K) : tab4_size(K);
+}
 
 template <int K>
 LAPLACE_HD void zero2(double* t) {
@@ -249,6 +278,45 @@ LAPLACE_HD void log3(const double* F, double* U) {
       }
 }
 
+// the table of log(F) over four variables from the table of F (F at 0 positive), the
+// same recursion as log3 with one index more
+template <int K>
+LAPLACE_HD void log4(const double* F, double* U) {
+  const double f0 = F[idx4(0, 0, 0, 0)];
+  U[idx4(0, 0, 0, 0)] = math::log(f0);
+  for (int tot = 1; tot <= K; ++tot)
+    for (int i = 0; i <= tot; ++i)
+      for (int m = 0; i + m <= tot; ++m)
+        for (int n = 0; i + m + n <= tot; ++n) {
+          const int o = tot - i - m - n;
+          int gi = i, gm = m, gn = n, go = o, r = 3;
+          if (i > 0) {
+            gi = i - 1;
+            r = 0;
+          } else if (m > 0) {
+            gm = m - 1;
+            r = 1;
+          } else if (n > 0) {
+            gn = n - 1;
+            r = 2;
+          } else {
+            go = o - 1;
+          }
+          double s = F[idx4(i, m, n, o)];
+          for (int bi = 0; bi <= gi; ++bi)
+            for (int bm = 0; bm <= gm; ++bm)
+              for (int bn = 0; bn <= gn; ++bn)
+                for (int bo = 0; bo <= go; ++bo) {
+                  if (bi + bm + bn + bo == 0) continue;
+                  const int di = gi - bi + (r == 0 ? 1 : 0), dm = gm - bm + (r == 1 ? 1 : 0),
+                            dn = gn - bn + (r == 2 ? 1 : 0), dd = go - bo + (r == 3 ? 1 : 0);
+                  s -= binomial_coef(gi, bi) * binomial_coef(gm, bm) * binomial_coef(gn, bn) *
+                       binomial_coef(go, bo) * F[idx4(bi, bm, bn, bo)] * U[idx4(di, dm, dn, dd)];
+                }
+          U[idx4(i, m, n, o)] = s / f0;
+        }
+}
+
 // F^(k)(x), k = 0..K, of Dawson's integral
 template <int K>
 LAPLACE_HD void dawson_derivs(double x, double* fd) {
@@ -282,42 +350,41 @@ LAPLACE_HD void dawson_term(double lambda, double r, double* out) {
   mul2<K>(sq, g, out);
 }
 
-// the table over (lambda, p, V) of log Z from the two tables over (lambda, p) of
-// A and B in Z = 2 [A + B sqrt(pi V / 2)]
-template <int K>
-LAPLACE_HD void log_z_table(const double* A, const double* B, double V, double* out) {
-  constexpr double root_half_pi = 1.25331413731550025121;  // sqrt(pi / 2)
-  double Z[tab3_size(K)];
-  for (int q = 0; q < tab3_size(K); ++q) Z[q] = 0.0;
-  for (int i = 0; i <= K; ++i)
-    for (int m = 0; i + m <= K; ++m)
-      for (int n = 0; i + m + n <= K; ++n) {
-        double v = 2.0 * root_half_pi * B[idx2<K>(i, m)] * sqrt_deriv(n, V);
-        if (n == 0) v += 2.0 * A[idx2<K>(i, m)];
-        Z[idx3(i, m, n)] = v;
-      }
-  log3<K>(Z, out);
+// The table over (lambda, p, theta_t...) of log Z from the two tables over (lambda, p)
+// of A and B in Z = 2 [A + B T], T the tail's constant: T carries every derivative in
+// the tail's own parameters, so the table over all of them is assembled from A, B and
+// the mixed partials of T, and the logarithm follows by log3 or log4.
+template <int K, class Tail>
+LAPLACE_HD void log_z_table(const double* A, const double* B, const Tail& tail, double* out) {
+  if constexpr (Tail::n_tail_params == 1) {
+    double Z[tab3_size(K)];
+    for (int i = 0; i <= K; ++i)
+      for (int m = 0; i + m <= K; ++m)
+        for (int n = 0; i + m + n <= K; ++n) {
+          double v = 2.0 * B[idx2<K>(i, m)] * tail.const_mixed(n, 0);
+          if (n == 0) v += 2.0 * A[idx2<K>(i, m)];
+          Z[idx3(i, m, n)] = v;
+        }
+    log3<K>(Z, out);
+  } else {
+    double Z[tab4_size(K)];
+    for (int i = 0; i <= K; ++i)
+      for (int m = 0; i + m <= K; ++m)
+        for (int n = 0; i + m + n <= K; ++n)
+          for (int o = 0; i + m + n + o <= K; ++o) {
+            double v = 2.0 * B[idx2<K>(i, m)] * tail.const_mixed(n, o);
+            if (n == 0 && o == 0) v += 2.0 * A[idx2<K>(i, m)];
+            Z[idx4(i, m, n, o)] = v;
+          }
+    log4<K>(Z, out);
+  }
 }
 
-// ---------------------------------------------------------------------------
-// the Gaussian tail, shared by the two laws
-// ---------------------------------------------------------------------------
-
-// log of the whole tail integral int_K^inf exp(-q) du = e^(-C) sqrt(pi V / 2),
-// C the value of q at the knot; kept in logs, since e^(-C) underflows for a large knot
-LAPLACE_HD_FORCEINLINE double log_tail_integral(double C, double V) {
-  constexpr double log_root_half_pi = 0.22579135264472743236;  // log sqrt(pi / 2)
-  return -C + log_root_half_pi + 0.5 * math::log(V);
-}
-
-// int_u^inf exp(-q) du beyond the knot, w = u - knot >= 0:
-// 2 e^(-C) sqrt(pi V / 2) Phi(-w / sqrt(V))
-LAPLACE_HD_FORCEINLINE double tail_upper(double w, double C, double V) {
-  return 2.0 * math::exp(-C) * 1.25331413731550025121 * Kokkos::sqrt(V) * math::Phi(-w / Kokkos::sqrt(V));
-}
-
-LAPLACE_HD_FORCEINLINE double log_tail_upper(double w, double C, double V) {
-  return 0.69314718055994530942 + log_tail_integral(C, V) + math::log_Phi(-w / Kokkos::sqrt(V));
+// the position of a component of the log Z table, whichever of the two packings it uses
+template <class Tail>
+LAPLACE_HD_FORCEINLINE int z_tab_index(int b, int m, int n1, int n2) {
+  if constexpr (Tail::n_tail_params == 1) return idx3(b, m, n1);
+  else return idx4(b, m, n1, n2);
 }
 
 }  // namespace laplace::distrib::detail_properized

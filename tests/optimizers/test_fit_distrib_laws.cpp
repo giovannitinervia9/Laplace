@@ -195,9 +195,9 @@ void fit_distrib_laws_cases() {
               {.kink_at_mle = true, .poor_unasserted = {"Newton expected,"}, .poor_trust_region = true});
     laws_case("powerexp_p1.5", ld::powerexp_distrib{}, aggregate_builder<ld::powerexp_distrib>{}, n);
     laws_case("powerexp_p3", ld::powerexp_distrib{}, aggregate_builder<ld::powerexp_distrib>{}, n);
-    laws_case("mcp", ld::mcp_distrib{}, aggregate_builder<ld::mcp_distrib>{}, n,
+    laws_case("mcp", ld::mcp_distrib<ld::gaussian_tail>{}, aggregate_builder<ld::mcp_distrib<ld::gaussian_tail>>{}, n,
               {.kink_at_mle = true, .poor_boundary_only = true});
-    laws_case("scad", ld::scad_distrib{}, aggregate_builder<ld::scad_distrib>{}, n,
+    laws_case("scad", ld::scad_distrib<ld::gaussian_tail>{}, aggregate_builder<ld::scad_distrib<ld::gaussian_tail>>{}, n,
               {.kink_at_mle = true, .poor_unasserted = {"BFGS"}});
   }
 }

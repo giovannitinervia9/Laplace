@@ -1,11 +1,12 @@
-// The test of mcp_distrib and scad_distrib (include/laplace/distrib/mcp.hpp, scad.hpp),
-// the properized MCP and SCAD: descriptors and kinks, the inner region against the
+// The test of mcp_distrib and scad_distrib (include/laplace/distrib/mcp.hpp, scad.hpp)
+// with the Gaussian properizing tail: descriptors and kinks, the inner region against the
 // original mcp_penalty and scad_penalty (an exact twin, the properization changing
 // nothing there), the conventions at the kink u = 0 and at the knots, every derivative
 // order against differences, the mixed (y, theta) derivatives, the closed cumulative
 // functions, the normal and the Laplace limits, the mass by quadrature with and without
 // the knots as cuts, the generic quantile and expected information, the references of
-// tools/reference/distrib_mcp_scad.py, and a kernel launch per order.
+// tools/reference/distrib_mcp_scad.py, and a kernel launch per order. The Student and
+// the logistic tails are in tests/distrib/test_mcp_scad_tails.cpp.
 #include <doctest/doctest.h>
 
 #include <laplace/distrib/gaussian2.hpp>
@@ -34,12 +35,12 @@
 namespace laplace_distrib_check {
 // the shared checks build a distribution from a parameter vector, two parameters at most by default
 template <>
-ld::mcp_distrib make<ld::mcp_distrib>(const double* t) {
-  return ld::mcp_distrib{t[0], t[1], t[2], t[3]};
+ld::mcp_distrib<ld::gaussian_tail> make<ld::mcp_distrib<ld::gaussian_tail>>(const double* t) {
+  return {t[0], t[1], t[2], t[3]};  // brace elision carries t[3] into the tail
 }
 template <>
-ld::scad_distrib make<ld::scad_distrib>(const double* t) {
-  return ld::scad_distrib{t[0], t[1], t[2], t[3]};
+ld::scad_distrib<ld::gaussian_tail> make<ld::scad_distrib<ld::gaussian_tail>>(const double* t) {
+  return {t[0], t[1], t[2], t[3]};
 }
 }  // namespace laplace_distrib_check
 
@@ -47,8 +48,9 @@ using namespace laplace_distrib_check;  // the shared checks, ld included
 
 namespace {
 
-using mcp = ld::mcp_distrib;
-using scad = ld::scad_distrib;
+using mcp = ld::mcp_distrib<ld::gaussian_tail>;
+using scad = ld::scad_distrib<ld::gaussian_tail>;
+using gauss_tail = ld::gaussian_tail;
 namespace lp = laplace::penalty;
 
 // ---------------------------------------------------------------- the four-parameter y-derivatives
@@ -110,6 +112,8 @@ struct ref_row {
   int kind, law, K, pos;
   double y, hi, lo, mu, lam, p, V;
 };
+constexpr int REF_FIELDS = 13;  // kind, law, tail, K, pos, y, hi, lo, mu, lam, p, t1, t2
+constexpr int REF_TAIL_GAUSSIAN = 0;
 
 std::vector<std::string> split_csv(const char* line) {
   std::vector<std::string> f;
@@ -135,12 +139,14 @@ std::vector<ref_row> read_reference(const char* name) {
   std::fgets(line, sizeof line, f);
   while (std::fgets(line, sizeof line, f)) {
     const auto s = split_csv(line);
-    if (s.size() != 11) continue;
+    if ((int)s.size() != REF_FIELDS) continue;
     auto num = [&](int i) { return std::strtod(s[i].c_str(), nullptr); };
     auto in = [&](int i) { return std::atoi(s[i].c_str()); };
+    if (in(2) != REF_TAIL_GAUSSIAN) continue;  // the other tails have their own test
     ref_row r;
-    r.kind = in(0), r.law = in(1), r.K = in(2), r.pos = in(3);
-    r.y = num(4), r.hi = num(5), r.lo = num(6), r.mu = num(7), r.lam = num(8), r.p = num(9), r.V = num(10);
+    r.kind = in(0), r.law = in(1), r.K = in(3), r.pos = in(4);
+    r.y = num(5), r.hi = num(6), r.lo = num(7), r.mu = num(8), r.lam = num(9), r.p = num(10),
+    r.V = num(11);
     rows.push_back(r);
   }
   std::fclose(f);
@@ -164,11 +170,14 @@ const std::vector<std::array<double, 4>> CASES = {{0.5, 1.3, 3.0, 2.0},
 // functions and 1.33 ulp for Z. The orders rise because log Z goes through the
 // multi-index recursions, whose conditioning at a small lambda is what the sixth
 // derivative in p sees.
+// Measured again on 2026-11-19, the tail having become a template parameter and the
+// Gaussian one going through the same route as the other two: 3.66, 8, 6.3, 4.45, 11.2,
+// 40.2 and 163 ulp, 2.46 ulp and 1.33 ulp, so the bounds below stand unchanged.
 const double BOUND_LOGPDF[7] = {6.0, 18.0, 18.0, 14.0, 18.0, 64.0, 250.0};
 const double BOUND_CDF = 4.0;
 const double BOUND_Z = 2.0;
 
-double detail_z_mcp(const mcp& d) { return ld::detail_mcp::z_value(d.lambda, d.gamma, d.tail_sigma2); }
+double detail_z_mcp(const mcp& d) { return ld::detail_mcp::z_value(d.lambda, d.gamma, d.tail); }
 
 }  // namespace
 
@@ -276,8 +285,8 @@ TEST_CASE("mcp and scad: the inner region is the original penalty, exactly") {
           double out[1];
           // the penalty itself: q is the original one, so the value matches exactly
           const double pen = law == 0 ? pm.value(sm, &y, nullptr) : ps.value(ss, &y, nullptr);
-          const double q = law == 0 ? ld::detail_mcp::q_value(u, lam, p, V)
-                                    : ld::detail_scad::q_value(u, lam, p, V);
+          const double q = law == 0 ? ld::detail_mcp::q_value(u, lam, p, gauss_tail{V})
+                                    : ld::detail_scad::q_value(u, lam, p, gauss_tail{V});
           INFO("law " << law << " y " << y << " q " << q << " pen " << pen);
           CHECK(q == pen);
           worst = std::fmax(worst, std::fabs(q - pen));
@@ -430,6 +439,7 @@ TEST_CASE("mcp and scad: the density integrates to one, with and without the kno
 }
 
 TEST_CASE("mcp and scad: the closed cumulative functions") {
+  double worst = 0.0;
   for (const auto& c : CASES) {
     const mcp d{c[0], c[1], c[2], c[3]};
     const scad e{c[0], c[1], c[2], c[3]};
@@ -459,9 +469,13 @@ TEST_CASE("mcp and scad: the closed cumulative functions") {
                              law == 0 ? cm : cs, law == 0 ? 3 : 5)
                              .value;
         CHECK(F == doctest::Approx(q).epsilon(1e-11));
+        worst = std::fmax(worst, std::fabs(F - q) / std::fmax(q, 1e-300));
       }
     }
   }
+  if (std::getenv("LAPLACE_PRINT_ERRORS"))
+    std::printf("mcp/scad closed cumulative functions: worst relative departure of F from the quadrature %.3g\n",
+                worst);
 }
 
 TEST_CASE("mcp and scad: the normal limit") {
@@ -540,10 +554,10 @@ TEST_CASE("mcp and scad: start values") {
   const auto a = ld::distrib_start_value(mcp{0.0, 1.0, 3.0, 1.0}, s);
   CHECK(a.lambda > 0.0);
   CHECK(a.gamma > 0.0);
-  CHECK(a.tail_sigma2 > 0.0);
+  CHECK(a.tail.tail_sigma2 > 0.0);
   const auto b = ld::distrib_start_value(scad{0.0, 1.0, 3.7, 1.0}, s);
   CHECK(b.a > 1.0);
-  CHECK(b.tail_sigma2 > 0.0);
+  CHECK(b.tail.tail_sigma2 > 0.0);
 }
 
 TEST_CASE("mcp and scad: the generic expected information") {
@@ -591,8 +605,8 @@ TEST_CASE("mcp and scad: the log-density, the cumulative functions and Z against
     const mcp d{r.mu, r.lam, r.p, r.V};
     const scad e{r.mu, r.lam, r.p, r.V};
     if (r.kind == 3) {
-      const double z = std::exp(r.law == 0 ? ld::detail_mcp::log_z(r.lam, r.p, r.V)
-                                           : ld::detail_scad::log_z(r.lam, r.p, r.V));
+      const double z = std::exp(r.law == 0 ? ld::detail_mcp::log_z(r.lam, r.p, gauss_tail{r.V})
+                                           : ld::detail_scad::log_z(r.lam, r.p, gauss_tail{r.V}));
       const double err = std::fabs((z - r.hi) - r.lo) / ulp_of(r.hi);
       worst_z = std::fmax(worst_z, err);
       INFO("Z: law " << r.law << " lambda " << r.lam << " p " << r.p << " V " << r.V << " ulp " << err);
@@ -649,8 +663,8 @@ void mcp_scad_kernel_order(double lam, double p, double V, double bound) {
   Kokkos::parallel_for(
       "mcp_scad_order", n, KOKKOS_LAMBDA(const int i) {
         const double y = -6.0 + 0.3 * i;
-        const ld::mcp_distrib a{0.4, lam, p, V};
-        const ld::scad_distrib b{0.4, lam, p, V};
+        const mcp a{0.4, lam, p, V};
+        const scad b{0.4, lam, p, V};
         const auto t = a.logpdf_dk<K>(y);
         const auto s = b.logpdf_dk<K>(y);
         double v = 0.0, m = 0.0;
@@ -688,8 +702,8 @@ void mcp_scad_kernel_other(double lam, double p, double V) {
   Kokkos::parallel_for(
       "mcp_scad_other", n, KOKKOS_LAMBDA(const int i) {
         const double y = -6.0 + 0.8 * i;
-        const ld::mcp_distrib a{0.4, lam, p, V};
-        const ld::scad_distrib b{0.4, lam, p, V};
+        const mcp a{0.4, lam, p, V};
+        const scad b{0.4, lam, p, V};
         out(i) = a.logpdf(y) + b.logpdf(y) + a.log_cdf(y) + b.log_ccdf(y) + a.cdf(y) + b.cdf(y) +
                  a.logpdf_dy_dk<2, 2>(y)[3] + b.logpdf_dy_dk<1, 1>(y)[2];
       });

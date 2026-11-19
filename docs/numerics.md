@@ -14206,3 +14206,214 @@ its derivatives agree with central differences to 1e-9.
 Open. A prox for a general Sigma (beta >= 1/2: a secular equation in gamma,
 x = (I + gamma Sigma^-1)^-1 u; beta < 1/2: several stationary points), if a
 consumer asks.
+
+## The properizing tails of the MCP and SCAD laws: Student, Gaussian and logistic (2026-11-19)
+
+**What.** `mcp_distrib` and `scad_distrib` take the tail that makes them proper
+as a template parameter, whose default is `student_tail`; the Gaussian tail of
+2026-11-18 is `gaussian_tail`, and `logistic_tail` is the third. The laws'
+own parameters are unchanged, the tail's follow them, so a law has four
+parameters with a one-parameter tail and five with the Student one. Decided with
+Giovanni on 2026-11-19 after the question of what else could replace the flat
+tail: three tails, not five, with the Student one as the default.
+
+A tail is an exponent in `x = u - K`, the distance beyond the law's last knot,
+of the form
+
+    H(x; theta) = kappa(theta) Psi(x / varsigma(theta)),   x >= 0,
+
+with `H(0) = H'(0) = 0`, so that `q` and `q'` stay continuous at the knot, and
+with `varsigma` a MONOMIAL in the tail's own parameters:
+
+    gaussian   Psi(z) = z^2/2          varsigma = V^(1/2)      kappa = 1
+    student    Psi(z) = log(1 + z^2)   varsigma = s nu^(1/2)   kappa = (nu + 1)/2
+    logistic   Psi(z) = 2 log cosh z   varsigma = s            kappa = 1
+
+**Why three, and why the Student one is the default.** The penalties exist
+because `q' = 0` beyond the knot leaves large deviations unpenalized, which is
+what makes them asymptotically unbiased. The Gaussian tail destroys exactly
+that: `q'(x) = x/V` grows without bound, so beyond `x = lambda V` the law
+shrinks MORE than a rate-`lambda` Laplace, the opposite of what the MCP and the
+SCAD are for. Measured at `s = 1` and `nu = 3`, with `x` the distance beyond the
+knot:
+
+    x        gaussian q'   logistic q'   student q'    x times the student q'
+    10       10            2             0.3883495     3.8834951
+    100      100           2             0.03998800    3.9988004
+    1000     1000          2             0.003999988   3.999988
+    10000    10000         2             0.000399999988 3.9999999
+
+The logistic score is bounded by `2/s`, so with `2/s <= lambda` that tail never
+shrinks more than a rate-`lambda` Laplace; the Student score is
+`(nu + 1) x/(nu s^2 + x^2)`, which tends to zero, so `x q'` climbs to `nu + 1`
+and the original behaviour survives up to `O(1/x)`. That is the whole argument
+for the default. Three rather than more: the pure Pareto tail
+`(1 + x^2/s^2)^(-c)` is the Student tail reparametrized, with `c = (nu + 1)/2`
+and the scale `s sqrt(nu)`, and the pure exponential tail `x/s` has
+`H'(0) = 1/s`, which breaks the `C^1` join and would add two knots to each law.
+The power exponential tail `|x/s|^p/p` was left out: its score grows without
+bound like the Gaussian one, so it buys nothing, and for `1 < p < 2` its second
+derivative at the knot is infinite.
+
+**How. Two identities carry every mixed partial.** Both derived and checked
+against SymPy's own derivatives in `tools/reference/properized_tail_forms.py`.
+
+(1) Through the knot. Both laws have `K = p lambda` (`p` the concavity gamma of
+MCP and the shape a of SCAD), so for any `F` of `x = u - p lambda`
+
+    d^j_u d^i_lambda d^m_p F(x) = sum_r c_r(i, m) F^(j + r)(x),
+    c_r(i, m) = C(i, m + i - r) (-1)^m m!/(r - i)! lambda^(r - i) (-p)^(r - m),
+
+over `max(i, m) <= r <= i + m`; the derivatives in `u` only shift the order, the
+coefficients being free of `u`. This is `x_chain_coef`, and it replaces the
+closed `q_tail_square` of the Gaussian-only version, which was the same
+statement for a parabola.
+
+(2) In the tail's own parameters. With `D = varsigma d/dvarsigma` and
+`E = z d/dz`, every `theta_j` enters through `varsigma` alone, so
+`theta_j d/dtheta_j = e_j D`, and the Stirling numbers of the first kind turn
+`d^n` into `(theta d/dtheta)^k`:
+
+    d^n1_theta1 d^n2_theta2 G = theta1^(-n1) theta2^(-n2)
+        sum_(k1,k2) s1(n1,k1) s1(n2,k2) e1^k1 e2^k2 D^(k1 + k2) G,
+    D^m [varsigma^(-r) Psi^(r)(z)] = (-1)^m varsigma^(-r)
+        sum_q C(m,q) r^(m-q) sum_j S2(q,j) z^j Psi^(r+j)(z),
+
+the second line because `D` acts on a function of `z` as `-E` and on
+`varsigma^(-r)` as multiplication by `-r`, with `E^q f = sum_j S2(q,j) z^j f^(j)`.
+So one component of the tail piece of `q` is a finite sum of values of `Psi`,
+with integer coefficients and powers of `z`, `r`, `e_j` and `1/theta_j`: no Bell
+polynomials, nothing on the stack beyond a few doubles, and one code path for
+every tail. The Stirling values are generated where they are used, `s1` from the
+falling factorial into a local array of seven doubles and `s2` from its closed
+alternating sum, rather than from a `static constexpr` table, which in device
+code has no definition at a runtime index.
+
+Measured against SymPy's own derivatives, at the exact rationals of the doubles
+the transcribed route uses: the two Stirling identities reproduce the falling
+factorial and `E^n` to order six exactly, identity (1) is within 1.0e-15 over
+every `(j, i, m)` of total order up to six, the components of `H` within
+4.4e-16, 2.7e-14 and 3.0e-13 for the Gaussian, Student and logistic tails, and
+the two identities composed - one component of the tail piece of `q` - within
+8.9e-16, 8.1e-13 and 1.1e-14. The reference points must be exact: with `sp.Float`
+substitutions, which carry fifteen digits, `evalf` cannot reach the thirty digits
+asked of it, and the comparison then measures SymPy's own loss rather than the
+transcription. That showed as 2.8e-10 on the logistic tail piece at order six,
+where the transcribed route is right to 1.3e-14 (checked against mpmath's own
+numerical derivative at 60 digits) while SymPy's unsimplified derivative at
+`sp.N(..., 30)` was out by 3.7e-10.
+
+The highest derivative of `Psi` reached is `r + j` with `r <= J + K` and
+`j <= K`, so eighteen at `J = K = 6`; both transcriptions were measured against
+mpmath at 60 digits to that order, over `z` from zero to 200, and are within
+4.6e-14 and 3.5e-13 relative there.
+
+**The two derivative sequences, and what was rejected.** For the Student tail
+`Psi^(k) = N_k(z) omega^k` with `omega = 1/(1 + z^2)`, `N_1 = 2z` and
+`N_(k+1) = N_k'(1 + z^2) - 2 k z N_k`, each term assembled as
+`c_j (z omega)^j omega^(k-j)`, where `z omega <= 1/2` and `omega <= 1` for every
+`z`, so nothing overflows at any order. The closed form
+`(-1)^(k-1) (k-1)! 2 cos(k (pi/2 - arctan z))/(1 + z^2)^(k/2)` was written
+first, is a single term and cancels nowhere, and was rejected on measurement:
+where the odd orders vanish at `z = 0` it returns `(k-1)!` times the rounding of
+the angle, 1.5e-14 at `k = 5` against an exact zero, which the polynomial gives.
+For the logistic tail `Psi^(k) = 2 d^(k-1) tanh`, written in
+`g = sech^2 z` as `R_n(g)` for odd `n` and `t R_n(g)` for even, with `R_0 = 1`,
+`R_(n+1) = -2 g R_n'` from odd to even and `R_(n+1) = g R_n - 2 g (1 - g) R_n'`
+from even to odd. Every `R_n` with `n >= 1` vanishes at `g = 0`, so the leading
+term carries the value in the far tail and nothing cancels there; `g` itself is
+built from `4 e^(-2|z|)/(1 + e^(-2|z|))^2` and not from `1 - tanh^2`, which
+would lose every digit for large `|z|`.
+
+**The constants and the partial integrals.** `Z = 2 [A(lambda, p) + B(lambda, p) T]`
+in both laws, with `T = int_0^inf exp(-H)` the tail's own constant, so the tail's
+parameters enter through `T` alone:
+
+    T = sqrt(pi V/2)                                    the Gaussian tail
+    T = s sqrt(pi nu) Gamma(nu/2)/(2 Gamma((nu+1)/2))   the Student tail
+    T = s                                               the logistic tail
+
+and the partial integrals, which the cumulative functions need, are
+
+    int_x^inf e^(-H) = 2 sqrt(pi V/2) Phi(-x/sqrt(V))     the Gaussian tail
+    int_x^inf e^(-H) = T I_w(nu/2, 1/2)                   the Student tail
+    int_x^inf e^(-H) = s (1 - tanh(x/s))                  the logistic tail
+
+with `w = varsigma^2/(varsigma^2 + x^2)` and `I` the regularized incomplete beta
+(`math/incomplete_beta.hpp`). The Student constant comes from `v = varsigma t`
+and then `w = 1/(1 + t^2)`, which turns the tail integral into a beta integral;
+the Cauchy case `nu = 1` gives `T = s pi/2`. Three things were measured here.
+
+- The closed `T` against the quadrature of `exp(-H)` at 40 digits: 1.4e-41 for
+  the Gaussian tail and exact for the other two. Its mixed partials to total
+  order six against SymPy: 1.4e-16, 1.6e-16 and exact, the Student one through
+  `log T = log s + log G(nu)`, whose derivatives in `nu` are elementary plus one
+  polygamma difference per order.
+- The partial integrals against the quadrature of the definition, factored by
+  the value at the left end so that the integrand starts at one: 3.9e-40,
+  4.1e-41 and 1.3e-27 over `x` from zero to twenty.
+- **Whichever of the two beta arguments is small must be formed directly**, never
+  by subtracting the other from one. Just beyond the knot `1 - w` is of the
+  order `x^2/varsigma^2`, which the quotient `v2/(v2 + x^2)` rounds away: at the
+  second knot of SCAD with `lambda = 3`, `a = 1.1`, `s = 0.5` and `nu = 40`, at
+  `x = 3.3e-7`, `log F` through `w` alone was out by 1.3e5 ulp of
+  `max(|log F|, 1)` — the whole size of the increment of `F` across that step —
+  and through `ibetac(1/2, nu/2, x^2/(v2 + x^2))` it is within two. The logistic
+  tail needs the same care for the opposite reason: `s (1 - tanh(x/s))`
+  underflows to zero from `x/s` of about nineteen, so `log_upper` is written as
+  `log(2 s) - 2 z - log1p(e^(-2 z))`.
+
+**The table of log Z.** With a one-parameter tail the table runs over
+`(lambda, p, theta)` and the logarithm follows by the existing `log3`; with the
+Student tail it runs over `(lambda, p, s, nu)` and needed `log4`, the same
+recursion with one index more, and `idx4`, the triangular packing over four
+variables, which at order six holds 210 entries against the 2401 of the square
+box. `log4` was checked against SymPy's derivatives of `log Z` for MCP with the
+Student tail, taking `A` and `B` from SymPy so that only the assembly and the
+four-variable recursion were under test: 6.2e-15 at total order up to six.
+
+**What was measured.** References from `tools/reference/distrib_mcp_scad.py`,
+extended to carry a tail column and two tail parameters, with six parameter sets
+per tail (the Student ones including `nu = 1`, the Cauchy tail, `nu = 0.7`,
+which has no mean, and `nu = 40`, close to the Gaussian tail). The closed `Z`
+agrees with the quadrature of the definition `Z = 2 int_0^inf e^(-q) du` to
+1.1e-48 at 400 bits over all 36 cases, which is also the check that each density
+integrates to one.
+
+Over 74184 values, with 97668 rows in the file for the three tails together, the
+worst errors of the log-density and its derivatives, in ulp of the largest
+component of their order at that point:
+
+    order    0    1    2    3    4    5     6
+    ulp      2    6    6   10    9   25   163
+
+and the logarithms of the cumulative functions within 2 ulp of
+`max(|log F|, 1)`, `Z` within 2 ulp. The orders rise because `log Z` goes
+through the multi-index recursions and the tail's components through the
+Stirling expansion of its parameters, whose conditioning at a small lambda is
+what the sixth derivative sees; the worst point at order six is SCAD with the
+logistic tail at `lambda = 3`, `a = 1.1`, `s = 0.5`. The reference case runs on
+the host in both builds, so the gcc and the CUDA figures are the same. The
+Gaussian tail, measured again through the new route, is where it was on
+2026-11-18 or slightly better: 3.66, 8, 6.3, 4.45, 11.2, 40.2 and 163 ulp for
+the orders 0 to 6, 2.46 ulp of `max(|log F|, 1)` for the cumulative functions
+and 1.33 ulp for `Z`.
+
+Besides the references: the inner pieces equal `mcp_penalty` and `scad_penalty`
+bit for bit in the value for every tail, and within 2 eps of `max(|value|, 1)`
+in the derivatives, the two sides writing the same quantity differently; the
+derivatives in the tail's own parameters are exactly zero there. The mass by the
+panel quadrature with every knot as a cut is out by 3.3e-16, the increment of
+`F` against the quadrature of the density by 8.7e-17, and every order against
+central differences within 2e-6 of the order's scale, the tolerance the Gaussian
+tail uses. The Gaussian tail is the Student tail's limit as `nu` grows at a fixed
+scale: at `y` 5.1 beyond the knot the difference of the log-densities is 9.15e-1,
+1.046e-2, 1.047e-4 and 1.049e-6 at `nu = 1e2, 1e4, 1e6, 1e8`, so `nu` times it
+settles at 104.9 and the difference falls like `1/nu`.
+
+**What is open.** No closed `expected_info` and no `prox_y` for either law with
+any tail; the generic score-form route serves the information, and it converges
+because `y_kinks()` declares every knot. No speed benchmark for these laws. The
+degrees of freedom of the Student tail are weakly identified when only the tail
+informs them, so in practice they will often be held with `fixed_distrib`; the
+law admits them as a free parameter and nothing stops a fit from estimating them.

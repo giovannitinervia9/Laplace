@@ -152,6 +152,6 @@ int main(int argc, char** argv) {
   if (on("weibull")) bench_law<ld::weibull_distrib>("weibull");
   if (on("beta")) bench_law<ld::beta_distrib>("beta");
   if (on("negbin2")) bench_law<ld::negbin2_distrib>("negbin2");
-  if (on("mcp")) bench_law<ld::mcp_distrib>("mcp");
+  if (on("mcp")) bench_law<ld::mcp_distrib<ld::gaussian_tail>>("mcp");
   return 0;
 }
