@@ -767,12 +767,15 @@ inline constexpr int mvn_default_lattice = 16381;
  * \param S \f$\Sigma\f$ packed lower-triangular (`pdmat::packed_index`), positive definite.
  * \param w Workspace of `mvn_rect_scratch(k)` doubles.
  * \param n_lattice Points of the lattice for five or more constrained coordinates: 1021, 4093, 16381 or 65521.
+ * \param tensor_max_dim Largest number of constrained coordinates done by the tensor rule (at most
+ *        `mvn_tensor_max_dim`, the default); beyond it the lattice. A caller that needs speed more than
+ *        the last digits passes 3 to take the lattice at four coordinates.
  * \return \f$\log P\f$; \f$-\infty\f$ for an empty rectangle; \f$0\f$ when every coordinate is unconstrained;
  *         NaN for a NaN argument, a non-positive variance, \f$k\f$ out of range, or, when five or more
  *         coordinates are constrained, a lattice size other than 1021, 4093, 16381 or 65521.
  */
 LAPLACE_HD double log_mvn_rect(int k, const double* a, const double* b, const double* S, double* w,
-                               int n_lattice = mvn_default_lattice) {
+                               int n_lattice = mvn_default_lattice, int tensor_max_dim = mvn_tensor_max_dim) {
   using namespace detail_mvnormal;
   if (k < 1 || k > mvn_max_dim) return nan();
   // standardized limits of the constrained coordinates, and their correlations
@@ -799,7 +802,7 @@ LAPLACE_HD double log_mvn_rect(int k, const double* a, const double* b, const do
   if (m == 2) return log_bvn_rect(A[0], B[0], A[1], B[1], C[1]);
   int row = lattice_row(n_lattice);
   if (row < 0) {
-    if (m > mvn_tensor_max_dim) return nan();
+    if (m > tensor_max_dim) return nan();
     row = 0;
   }
   double* y = w + 3 * k + k * k;  // conditional means, then the lattice point
@@ -819,7 +822,7 @@ LAPLACE_HD double log_mvn_rect(int k, const double* a, const double* b, const do
   // bivariate; beyond, the lattice over the first m - 1 and the last by
   // log_interval (the bivariate there cost two to five times more for the same
   // error, which is the lattice's)
-  const bool tensor = m <= mvn_tensor_max_dim, last_two = tensor;
+  const bool tensor = m <= tensor_max_dim && m <= mvn_tensor_max_dim, last_two = tensor;
   const int s = last_two ? m - 2 : n;
   // 193 nodes over one coordinate, 97 per coordinate over two: a near-singular
   // trivariate (r_12 = -0.95, det R = 0.0075) lost 3.3e-6 in log P with 49
@@ -1013,7 +1016,43 @@ LAPLACE_HD_FORCEINLINE void chol_inverse(int n, const double* l, double* q) {
 namespace detail_mvnormal {
 
 // E_j(a) = E[Y^j], j = 0..N, Y with density proportional to exp(-a y - y^2/2) on y > 0, a >= 0
+// orders beyond six (the derivatives of log M the library has): for a < 4 by
+// 64-point Gauss-Legendre on [0, 12] (the weight is below e^-72 beyond), for
+// a >= 4 by Miller's backward recurrence of E_(j+1) = -a E_j + j E_(j-1), whose
+// minimal solution E_j is (the other grows like a^j), started at j = N + 60 and
+// normalized by E_0 = 1
+LAPLACE_HD_FORCEINLINE void half_moments_inf_high(double a, int N, double* E) {
+  if (a < 4.0) {
+    double S[13] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    for (int i = 0; i < 64; ++i) {
+      const double y = 6.0 + 6.0 * quad::detail::legendre64(i);
+      double f = quad::detail::legendre64(64 + i) * math::exp(-a * y - 0.5 * y * y);
+      for (int j = 0; j <= N; ++j) S[j] += f, f *= y;
+    }
+    for (int j = 0; j <= N; ++j) E[j] = S[j] / S[0];
+    return;
+  }
+  const int J = N + 60;
+  double e_hi = 0.0, e_j = 1.0;  // E_(J+1), E_J up to a factor
+  for (int j = J; j >= 1; --j) {
+    const double e_lo = (e_hi + a * e_j) / j;  // E_(j-1)
+    e_hi = e_j;
+    e_j = e_lo;
+    if (j - 1 <= N) E[j - 1] = e_j;
+    if (Kokkos::fabs(e_j) > 1e200) {
+      e_hi *= 1e-200, e_j *= 1e-200;
+      for (int q = j - 1; q <= N; ++q) E[q] *= 1e-200;
+    }
+  }
+  const double e0 = E[0];
+  for (int j = 0; j <= N; ++j) E[j] /= e0;
+}
+
 LAPLACE_HD_FORCEINLINE void half_moments_inf(double a, int N, double* E) {
+  if (N > 6) {
+    half_moments_inf_high(a, N, E);
+    return;
+  }
   double l[7];
   l[1] = log_mills_d1(a);
   if (N >= 2) l[2] = log_mills_d2(a);
@@ -1043,7 +1082,7 @@ LAPLACE_HD_FORCEINLINE void half_moments(double a, double w, int N, double* E) {
   }
   if (w * Kokkos::fmax(1.0, a) <= 1.0) {
     // narrow: Gauss-Legendre on [0, w]
-    double S[7] = {0, 0, 0, 0, 0, 0, 0};
+    double S[13] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     const double h = 0.5 * w;
     for (int i = 0; i < 16; ++i) {
       const double y = h + h * quad::detail::legendre16(i);
@@ -1054,7 +1093,7 @@ LAPLACE_HD_FORCEINLINE void half_moments(double a, double w, int N, double* E) {
     for (int j = 0; j <= N; ++j) E[j] = S[j] / S[0];
     return;
   }
-  double Ea[7], Eb[7];
+  double Ea[13], Eb[13];
   half_moments_inf(a, N, Ea);
   half_moments_inf(a + w, N, Eb);
   // r = I_0(a + w) exp(-a w - w^2/2) / I_0(a): the share of the mass beyond w
@@ -1096,19 +1135,19 @@ LAPLACE_HD void trunc1_moments(double lo, double hi, int N, double& mean, double
       return;
     }
   }
-  double M[7];  // moments about c
+  double M[13];  // moments about c
   double c;
   if (hi <= 0.0 || lo >= 0.0) {
     const bool lower = hi <= 0.0;
     c = lower ? hi : lo;
     const double w = lower ? (lo == -inf() ? inf() : hi - lo) : (hi == inf() ? inf() : hi - lo);
-    double E[7];
+    double E[13];
     half_moments(Kokkos::fabs(c), w, N, E);
     for (int j = 0; j <= N; ++j) M[j] = (lower && (j % 2)) ? -E[j] : E[j];
   } else {
     // across zero: the halves (lo, 0] and (0, hi], weighted by their masses
     c = 0.0;
-    double Ep[7], Em[7];
+    double Ep[13], Em[13];
     half_moments(0.0, hi, N, Ep);
     half_moments(0.0, -lo, N, Em);
     const double pp = Phi(hi) - 0.5, pm = 0.5 - Phi(lo);
@@ -1410,7 +1449,7 @@ LAPLACE_HD double log_mvn_rect_derivs(int k, int N, const double* lo, const doub
 inline constexpr int mvn_trunc_default_lattice = 65521;
 /// \ingroup mvnormal
 /// \brief Largest order of `log_mvn_trunc_cumulants`.
-inline constexpr int mvn_trunc_max_order = 6;
+inline constexpr int mvn_trunc_max_order = 12;
 /// \ingroup mvnormal
 /// \brief Largest dimension done by the tensor rule in `log_mvn_trunc_cumulants` (the lattice beyond).
 inline constexpr int mvn_trunc_tensor_max_dim = 3;
@@ -1440,9 +1479,12 @@ LAPLACE_HD int mvn_trunc_scratch(int k, int N) {
  * \return \f$\log P\f$; \f$-\infty\f$ for an empty rectangle; NaN for a NaN argument, a non-positive
  *         variance, \f$k\f$ or \f$N\f$ out of range, or, when four or more coordinates are constrained,
  *         a lattice size other than 1021, 4093, 16381 or 65521.
+ * The nodes are a tensor tanh-sinh rule up to `tensor_max_dim` constrained coordinates (at most
+ * `mvn_trunc_tensor_max_dim`, the default) and the lattice of `n_lattice` points beyond.
  */
 LAPLACE_HD double log_mvn_trunc_cumulants(int k, int N, const double* lo, const double* hi, const double* S, int& m,
-                                          int* keep, double* kap, double* w, int n_lattice = mvn_trunc_default_lattice) {
+                                          int* keep, double* kap, double* w, int n_lattice = mvn_trunc_default_lattice,
+                                          int tensor_max_dim = mvn_trunc_tensor_max_dim) {
   using namespace detail_mvnormal;
   m = 0;
   if (k < 1 || k > mvn_max_dim || N < 1 || N > mvn_trunc_max_order) return nan();
@@ -1483,7 +1525,7 @@ LAPLACE_HD double log_mvn_trunc_cumulants(int k, int N, const double* lo, const 
   }
   // the nodes: the tensor tanh-sinh rule over the first n coordinates when
   // m <= mvn_trunc_tensor_max_dim, else the lattice
-  const bool tensor = m <= mvn_trunc_tensor_max_dim;
+  const bool tensor = m <= tensor_max_dim && m <= mvn_trunc_tensor_max_dim;
   constexpr int Mt = mvn_trunc_tensor_half_nodes, Nt1 = 2 * Mt + 1;
   long long NP = 1;
   int row = 0;
@@ -1601,29 +1643,24 @@ LAPLACE_HD double log_mvn_trunc_cumulants(int k, int N, const double* lo, const 
   // then unpermuted and unstandardized into kap
   double* cum = mom + nt;
   for (int i = 0; i < m; ++i) cum[1 + i] = mean[i];
+  // kappa(S) = m(S) - sum over B containing the first position, B != S, of
+  // kappa(B) m(S \ B), with m the central moments (zero on one position) and
+  // the cumulants of order one zero for the centred law: 2^(o-1) subsets per
+  // tuple, the set partitions being far too many at order twelve
   for (int o = 2; o <= N; ++o) {
-    int t[mvn_trunc_max_order], g[mvn_trunc_max_order], mx[mvn_trunc_max_order], sub[mvn_trunc_max_order];
+    int t[mvn_trunc_max_order], sb[mvn_trunc_max_order], sr[mvn_trunc_max_order];
     for (int q = 0; q < o; ++q) t[q] = 0;
     int pos = tuples_upto(m, o - 1);
     do {
-      for (int q = 0; q < o; ++q) g[q] = 0, mx[q] = 0;
-      double v = 0.0;
-      do {
-        const int nb = mx[o - 1] + 1;
-        bool single = false;
-        double prod = 1.0;
-        for (int b = 0; b < nb && !single; ++b) {
-          int sz = 0;
-          for (int q = 0; q < o; ++q)
-            if (g[q] == b) sub[sz++] = t[q];
-          if (sz < 2) single = true;
-          else prod *= mom[tuples_upto(m, sz - 1) + tuple_rank(m, sz, sub)];
-        }
-        if (single) continue;
-        double fac = 1.0;
-        for (int b = 1; b < nb; ++b) fac *= -b;
-        v += fac * prod;
-      } while (next_partition_rgs(o, g, mx));
+      double v = mom[pos];
+      for (unsigned mask = 0; mask + 1 < (1u << (o - 1)); ++mask) {
+        // B = {0} + the positions q >= 1 with bit q - 1 of mask; the rest is S \ B
+        int nb = 0, nr = 0;
+        sb[nb++] = t[0];
+        for (int q = 1; q < o; ++q) ((mask >> (q - 1)) & 1u ? sb[nb++] : sr[nr++]) = t[q];
+        if (nb < 2 || nr < 2) continue;
+        v -= cum[tuples_upto(m, nb - 1) + tuple_rank(m, nb, sb)] * mom[tuples_upto(m, nr - 1) + tuple_rank(m, nr, sr)];
+      }
       cum[pos++] = v;
     } while (next_tuple(m, o, t));
   }

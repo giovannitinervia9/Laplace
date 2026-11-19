@@ -24,7 +24,18 @@
 // (-1)^(|pi| - 1) (|pi| - 1)! prod_{B in pi} (d_B F) / F.
 // The contractions with the matrices are done one block at a time on the
 // symmetric tensors of normalized derivatives, so every location tuple of the
-// output comes out of the same chain.
+// output comes out of the same chain. This is the recursion route
+// (log_dk_recursion): its pieces are lower-dimensional probabilities, exact in
+// the bulk, but the logarithm subtracts large products in the far tail.
+//
+// The log route (log_dk_heat) assembles everything on the log scale: the heat
+// equation written for psi = log F, d_E psi [M] = (1/2) M : (grad^2 psi +
+// grad psi grad psi'), driven by the derivatives of psi in the shift from the
+// cumulants of the truncated law (log_mvn_rect_log_derivs, to order 12). It
+// holds in the far tail, but its cumulants come from the tilted nodes, a
+// lattice beyond three coordinates, where the high orders are noisy. So the log
+// route serves at most three coordinates with log F below heat_log_threshold,
+// and the recursion everything else (log_dk).
 #pragma once
 
 #include <laplace/distrib/multivariate_core.hpp>
@@ -105,30 +116,68 @@ LAPLACE_HD double log_value(const S& s, const St& st, const double* y, const dou
 }
 
 // ---------------------------------------------------------------- derivatives
+//
+// Everything is assembled on the log scale. psi(delta; E) = log F(delta;
+// Sigma + E) satisfies the heat equation written for its logarithm,
+//   d_E psi [M] = (1/2) M : (grad^2 psi + grad psi grad psi'),
+// so along directions M_1, ..., M_n of Sigma the derivatives G_S = d_E^S psi
+// (S a set of directions) follow from those of psi in delta alone:
+//   G_(S + t) = (1/2) M_t : grad^2 G_S + (1/2) sum_(S1 + S2 = S) grad G_S1' M_t grad G_S2,
+// the sum over the ordered splits of S, G_(empty) = psi; their derivatives in
+// delta by Leibniz's rule over the positions of the derivative. The
+// derivatives of psi in delta are those of log_mvn_rect_log_derivs (the
+// cumulants of the truncated law), which do not cancel in the tail. A
+// derivative along a set T of theta indices is the sum, over the set
+// partitions sigma of T, of G for the directions d_c Sigma of the blocks c of
+// sigma (Faa di Bruno; d_c Sigma by the structure's matrix_dk, or inverse_dk for
+// the precision form), and the location enters as d_mu = -d_delta.
 
-// doubles of w of the derivative of orders (A in mu, K in theta): Sigma, limits,
-// the normalized shift derivatives to order A + 2K and their workspace, the
-// structure's derivative matrices of the 2^K - 1 subsets of the items, the
-// tensors W[T][a] of normalized derivatives, two chain buffers, and the
-// structure's own workspace
+namespace detail_heat {
+// the sorted tuple t (length n) with the indices i and j inserted, into o
+LAPLACE_HD_FORCEINLINE void insert2(const int* t, int n, int i, int j, int* o) {
+  const int lo = i < j ? i : j, hi = i < j ? j : i;
+  int r = 0;
+  bool pi = false, pj = false;
+  for (int u = 0; u < n; ++u) {
+    if (!pi && lo < t[u]) o[r++] = lo, pi = true;
+    if (pi && !pj && hi < t[u]) o[r++] = hi, pj = true;
+    o[r++] = t[u];
+  }
+  if (!pi) o[r++] = lo;
+  if (!pj) o[r++] = hi;
+}
+LAPLACE_HD_FORCEINLINE void insert1(const int* t, int n, int i, int* o) {
+  int r = 0;
+  bool p = false;
+  for (int u = 0; u < n; ++u) {
+    if (!p && i < t[u]) o[r++] = i, p = true;
+    o[r++] = t[u];
+  }
+  if (!p) o[r++] = i;
+}
+}  // namespace detail_heat
+
+// doubles of w of the derivative of orders (A in mu, K in theta)
 template <class S>
 LAPLACE_HD int deriv_scratch(const S& s, int K, int A) {
   const int d = s.dim, N = A + 2 * K, np = packed_size(d);
   const int nf = mn::tuples_upto(d, N);
+  // Sigma, limits, the log-derivatives of psi, the matrices of the 2^K subsets,
+  // the G tables of the 2^K subsets of a partition's blocks, the workspaces
+  const int heat = np + 2 * d + nf + (1 << K) * np + (1 << K) * nf + math::mvn_rect_log_derivs_scratch(d, N) + np +
+                   s.scratch_size();
+  // the recursion route: Sigma, limits, the moments to order N and their
+  // workspace, the matrices, the tensors W[T][a], two chain buffers
   int nW = 0;
   for (int a = 0; a <= A; ++a) nW += mn::tuples(d, a);
-  const int general = np + 2 * d + nf + math::mvn_rect_derivs_scratch(d, N) + (1 << K) * np + (1 << K) * nW +
-                      2 * mn::tuples(d, N) + np + s.scratch_size();
-  if (K > 0 || A == 0) return general;
-  // K = 0: the cumulant route
-  const int cum = np + 2 * d + nf + math::mvn_rect_log_derivs_scratch(d, A) + np + s.scratch_size();
-  return general > cum ? general : cum;
+  const int rec = np + 2 * d + nf + math::mvn_rect_derivs_scratch(d, N) + (1 << K) * np + (1 << K) * nW +
+                  2 * mn::tuples(d, N) + np + s.scratch_size();
+  return heat > rec ? heat : rec;
 }
 
 // the next restricted growth string of length n (a set partition); false after the last
 template <int Nmax>
 LAPLACE_HD bool next_partition(int n, int* g, int* mx) {
-  // g[i] <= mx[i-1] + 1, mx[i] = max(g[0..i])
   for (int i = n - 1; i > 0; --i) {
     if (g[i] <= mx[i - 1]) {
       ++g[i];
@@ -140,11 +189,127 @@ LAPLACE_HD bool next_partition(int n, int* g, int* mx) {
   return false;
 }
 
-// d^K_theta d^A_mu log F of the region, the location tensor packed as logpdf_dk
+// the log route (above): d^K_theta d^A_mu log F from the cumulants
 template <bool Prec, region Rg, int K, int A, class St, class S>
-LAPLACE_HD bool log_dk(const S& s, const St& st, const double* y, const double* b, const double* mu, const int* idx,
+LAPLACE_HD bool log_dk_heat(const S& s, const St& st, const double* y, const double* b, const double* mu, const int* idx,
                        double* out, double* w) {
-  static_assert(K >= 0 && A >= 0 && K + A <= 6, "orders K + A <= 6");
+  const int d = s.dim, N = A + 2 * K, np = packed_size(d);
+  const int nf = mn::tuples_upto(d, N);
+  const int nout = sym_tensor_size(d, A);
+  double* Sg = w;
+  double* lo = Sg + np;
+  double* hi = lo + d;
+  double* psi = hi + d;              // d^alpha psi, orders 1..N (position 0: log F)
+  double* Dm = psi + nf;             // (1 << K) matrices
+  double* Gt = Dm + (1 << K) * np;   // (1 << K) tables of nf
+  double* wd = Gt + (1 << K) * nf;   // log_mvn_rect_log_derivs's workspace
+  double* ws = wd + math::mvn_rect_log_derivs_scratch(d, N);
+  sigma_from_state<Prec>(d, st, Sg, ws);
+  limits<Rg>(d, y, b, mu, lo, hi);
+  if constexpr (K == 0 && A == 0) {
+    out[0] = math::log_mvn_rect(d, lo, hi, Sg, wd);
+    return true;
+  }
+  const double lF = math::log_mvn_rect_log_derivs(d, N, lo, hi, Sg, psi, wd);
+  if (!(lF > -inf()) || lF != lF) {
+    for (int q = 0; q < nout; ++q) out[q] = nan();
+    return true;
+  }
+  psi[0] = lF;
+  const double sg = A % 2 ? -1.0 : 1.0;  // d_mu = -d_delta
+  if constexpr (K == 0) {
+    int u[6] = {0, 0, 0, 0, 0, 0};
+    do {
+      out[mv::block_position(d, A, u)] = sg * psi[mn::tuples_upto(d, A - 1) + mn::tuple_rank(d, A, u)];
+    } while (mn::next_tuple(d, A, u));
+    return true;
+  } else {
+    // the structure's derivative matrices of every nonempty subset of the items
+    bool nz[1 << K];
+    nz[0] = false;
+    for (unsigned c = 1; c < (1u << K); ++c) {
+      int sub[6], n = 0;
+      for (int q = 0; q < K; ++q)
+        if ((c >> q) & 1u) sub[n++] = idx[q];
+      nz[c] = mv::structure_matrix_runtime<Prec>(s, n, st.theta, sub, Dm + c * np, ws);
+    }
+    for (int q = 0; q < nout; ++q) out[q] = 0.0;
+    int g[6] = {0, 0, 0, 0, 0, 0}, mx[6] = {0, 0, 0, 0, 0, 0};
+    int t[16], t2[16], t3[16], sb[16], sr[16];
+    do {
+      const int nb = mx[K - 1] + 1;
+      unsigned blk[6] = {0, 0, 0, 0, 0, 0};
+      for (int q = 0; q < K; ++q) blk[g[q]] |= 1u << q;
+      bool zero = false;
+      for (int q = 0; q < nb; ++q)
+        if (!nz[blk[q]]) zero = true;
+      if (zero) continue;
+      // G tables over the subsets S of the nb directions, by size; G_S holds the
+      // derivatives in delta to order A + 2 (nb - |S|), G_(empty) is psi
+      auto G = [&](unsigned U) -> double* { return U == 0 ? psi : Gt + U * nf; };
+      for (int size = 1; size <= nb; ++size) {
+        for (unsigned U = 1; U < (1u << nb); ++U) {
+          if (mn::popcount(U) != size) continue;
+          int tl = 31;
+          while (!((U >> tl) & 1u)) --tl;  // the largest direction of S
+          const unsigned Sp = U & ~(1u << tl);
+          const double* M = Dm + blk[tl] * np;
+          const int R = A + 2 * (nb - size);
+          double* GS = G(U);
+          for (int r = 0; r <= R; ++r) {
+            for (int q = 0; q < r; ++q) t[q] = 0;
+            int pos = mn::tuples_upto(d, r - 1);
+            do {
+              double v = 0.0;
+              for (int i = 0; i < d; ++i)
+                for (int j = 0; j < d; ++j) {
+                  const double Mij = M[packed_index(i > j ? i : j, i > j ? j : i)];
+                  if (Mij == 0.0) continue;
+                  // (1/2) M : grad^2 G_S'
+                  detail_heat::insert2(t, r, i, j, t2);
+                  double term = G(Sp)[mn::tuples_upto(d, r + 1) + mn::tuple_rank(d, r + 2, t2)];
+                  // (1/2) sum over ordered splits S1 + S2 = S' and position splits of t
+                  for (unsigned S1 = Sp;; S1 = (S1 - 1) & Sp) {
+                    const unsigned S2 = Sp & ~S1;
+                    for (unsigned pm = 0; pm < (1u << r); ++pm) {
+                      int n1 = 0, n2 = 0;
+                      for (int q = 0; q < r; ++q) ((pm >> q) & 1u ? sb[n1++] : sr[n2++]) = t[q];
+                      detail_heat::insert1(sb, n1, i, t3);
+                      const double a1 = G(S1)[mn::tuples_upto(d, n1) + mn::tuple_rank(d, n1 + 1, t3)];
+                      detail_heat::insert1(sr, n2, j, t3);
+                      const double a2 = G(S2)[mn::tuples_upto(d, n2) + mn::tuple_rank(d, n2 + 1, t3)];
+                      term += a1 * a2;
+                    }
+                    if (S1 == 0) break;
+                  }
+                  v += 0.5 * Mij * term;
+                }
+              GS[pos++] = v;
+            } while (r > 0 && mn::next_tuple(d, r, t));
+          }
+        }
+      }
+      const double* Gf = G((1u << nb) - 1);
+      if constexpr (A == 0) {
+        out[0] += Gf[0];
+      } else {
+        int u[6] = {0, 0, 0, 0, 0, 0};
+        do {
+          out[mv::block_position(d, A, u)] += sg * Gf[mn::tuples_upto(d, A - 1) + mn::tuple_rank(d, A, u)];
+        } while (mn::next_tuple(d, A, u));
+      }
+    } while (next_partition<6>(K, g, mx));
+    return true;
+  }
+}
+
+// the recursion route: d^K_theta d^A_mu log F from the normalized shift
+// derivatives of log_mvn_rect_derivs (the corner densities) through the heat
+// equation on F and the set-partition logarithm; exact pieces in the bulk, but
+// the logarithm cancels in the far tail
+template <bool Prec, region Rg, int K, int A, class St, class S>
+LAPLACE_HD bool log_dk_recursion(const S& s, const St& st, const double* y, const double* b, const double* mu, const int* idx,
+                       double* out, double* w) {
   const int d = s.dim, N = A + 2 * K, np = packed_size(d);
   const int nout = sym_tensor_size(d, A);
   double* Sg = w;
@@ -159,20 +324,6 @@ LAPLACE_HD bool log_dk(const S& s, const St& st, const double* y, const double* 
   double* buf0 = Wt + (1 << K) * nW;
   double* buf1 = buf0 + mn::tuples(d, N);
   double* ws = buf1 + mn::tuples(d, N) + np;
-  if constexpr (K == 0 && A > 0) {
-    // derivatives in the location alone: through the cumulants of the
-    // truncated law (log_mvn_rect_log_derivs), which do not cancel in the tail
-    double* ws2 = f + mn::tuples_upto(d, N);
-    sigma_from_state<Prec>(d, st, Sg, ws2);
-    limits<Rg>(d, y, b, mu, lo, hi);
-    math::log_mvn_rect_log_derivs(d, A, lo, hi, Sg, f, ws2);
-    const double sg = A % 2 ? -1.0 : 1.0;  // d_mu = -d_delta
-    int u[6] = {0, 0, 0, 0, 0, 0};
-    do {
-      out[mv::block_position(d, A, u)] = sg * f[mn::tuples_upto(d, A - 1) + mn::tuple_rank(d, A, u)];
-    } while (mn::next_tuple(d, A, u));
-    return true;
-  }
   sigma_from_state<Prec>(d, st, Sg, ws);
   limits<Rg>(d, y, b, mu, lo, hi);
   const double lF = math::log_mvn_rect_derivs(d, N, lo, hi, Sg, f, wd);
@@ -280,6 +431,35 @@ LAPLACE_HD bool log_dk(const S& s, const St& st, const double* y, const double* 
     out[A == 0 ? 0 : mv::block_position(d, A, u)] = tot;
   } while (A > 0 && mn::next_tuple(d, A, u));
   return true;
+}
+
+
+/// log F below which, with at most three coordinates, the derivatives go through
+/// the cumulants (the tail); above, and always beyond three coordinates, through
+/// the recursion, whose pieces are exact and cheaper there (k = 3: 0.3 ms
+/// against 12 to 29 ms) and whose high-order cumulants on a lattice would be
+/// noisy (5e-2 at order 4, k = 4)
+inline constexpr double heat_log_threshold = -6.0;
+
+// d^K_theta d^A_mu log F of the region, the location tensor packed as logpdf_dk
+template <bool Prec, region Rg, int K, int A, class St, class S>
+LAPLACE_HD bool log_dk(const S& s, const St& st, const double* y, const double* b, const double* mu, const int* idx,
+                       double* out, double* w) {
+  static_assert(K >= 0 && A >= 0 && K + A <= 6, "orders K + A <= 6");
+  const int d = s.dim;
+  if (d <= 3) {
+    // the value first, on the scratch, to choose the route
+    const int np = packed_size(d);
+    double* Sg = w;
+    double* lo = Sg + np;
+    double* hi = lo + d;
+    double* ws = hi + d;
+    sigma_from_state<Prec>(d, st, Sg, ws);
+    limits<Rg>(d, y, b, mu, lo, hi);
+    const double lF = math::log_mvn_rect(d, lo, hi, Sg, ws);
+    if (lF < heat_log_threshold) return log_dk_heat<Prec, Rg, K, A>(s, st, y, b, mu, idx, out, w);
+  }
+  return log_dk_recursion<Prec, Rg, K, A>(s, st, y, b, mu, idx, out, w);
 }
 
 // d^J_y d^K_theta d^A_mu log F: log F depends on y - mu, so d_y = -d_mu; the

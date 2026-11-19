@@ -82,7 +82,7 @@ struct Bvn {
 template <int KF>
 struct Factor {
   Rows x, y, w;
-  int n_lattice;
+  int n_lattice, tensor_max_dim;
   KOKKOS_INLINE_FUNCTION void operator()(int i) const {
     const int k = int(x(i, 0));
     double a[KF], b[KF], S[KF * (KF + 1) / 2];
@@ -91,7 +91,7 @@ struct Factor {
       b[p] = x(i, 1 + KF + p);
       for (int q = 0; q <= p; ++q) S[p * (p + 1) / 2 + q] = p == q ? 1.0 : x(i, 1 + 2 * KF + p) * x(i, 1 + 2 * KF + q);
     }
-    y(i, 0) = lm::log_mvn_rect(k, a, b, S, &w(i, 0), n_lattice);
+    y(i, 0) = lm::log_mvn_rect(k, a, b, S, &w(i, 0), n_lattice, tensor_max_dim);
   }
 };
 
@@ -134,9 +134,9 @@ std::vector<double> mvnormal_run_bvn(const Rows& x) {
   return o;
 }
 template <int KF>
-std::vector<double> mvnormal_run_factor(const Rows& x, int n_lattice) {
+std::vector<double> mvnormal_run_factor(const Rows& x, int n_lattice, int tensor_max_dim = lm::mvn_tensor_max_dim) {
   Rows y("y", x.extent(0), 1), w("w", x.extent(0), lm::mvn_rect_scratch(KF));
-  Kokkos::parallel_for("factor", int(x.extent(0)), Factor<KF>{x, y, w, n_lattice});
+  Kokkos::parallel_for("factor", int(x.extent(0)), Factor<KF>{x, y, w, n_lattice, tensor_max_dim});
   auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), y);
   std::vector<double> o(x.extent(0));
   for (std::size_t i = 0; i < o.size(); ++i) o[i] = h(i, 0);
@@ -208,6 +208,15 @@ TEST_CASE("mvnormal: the orthants of the lasso LAML against mpmath, k = 2..6") {
   const auto y = mvnormal_run_factor<10>(to_device(rows), lm::mvn_default_lattice);
   for (int k = 2; k <= 4; ++k) check_logp("mvn_laml", rows, y, 31, 0, k, {7.8e-15, 1.7e-14, 6.6e-14, 3.7e-13, 1e-14});
   for (int k = 5; k <= 6; ++k) check_logp("mvn_laml", rows, y, 31, 0, k, {2.5e-6, 1.1e-4, 7.3e-5, 2.3e-5, 3.9e-9});
+}
+
+TEST_CASE("mvnormal: the lattice at four coordinates (tensor_max_dim = 3) on the LAML orthants") {
+  const auto rows = read_rows("mvn_laml");
+  std::vector<std::vector<double>> sub;
+  for (const auto& r : rows)
+    if (int(r[0]) == 4) sub.push_back(r);
+  const auto y = mvnormal_run_factor<10>(to_device(sub), lm::mvn_default_lattice, 3);
+  check_logp("mvn_laml lattice", sub, y, 31, 0, 4, {6.5e-6, 2e-5, 2e-5, 1.5e-5, 1e-7});
 }
 
 TEST_CASE("mvnormal: trivariate rectangles with a general correlation against mpmath") {
@@ -304,6 +313,52 @@ TEST_CASE("mvnormal: derivatives in the shift against central differences of the
     INFO("k = ", k, ": max relative difference ", worst);
     CHECK(worst <= 1e-8);
   }
+}
+
+TEST_CASE("mvnormal: the cumulant route to order 12 against central differences of the order below") {
+  // bivariate and trivariate, bulk and tail: d^n log F against the difference of
+  // d^(n-1) log F, n = 2..12 (the orders beyond six through Miller's recurrence)
+  const double I = lm::detail_mvnormal::inf();
+  struct Case {
+    int k;
+    double hi[3], S[6];
+  };
+  const Case cases[] = {{2, {0.3, -0.7}, {1.0, 0.5, 1.0}}, {2, {-8.0, -7.5}, {1.0, 0.5, 1.0}},
+                        {3, {-6.0, -5.0, -7.0}, {1.0, 0.4, 1.0, 0.2, -0.3, 1.0}}};
+  const int N = 12;
+  double worst = 0.0;
+  for (const auto& c : cases) {
+    const int k = c.k;
+    double lo[3] = {-I, -I, -I};
+    std::vector<double> l(lm::mvn_rect_derivs_size(k, N)), lp(l.size()), lmn(l.size()), w(lm::mvn_rect_log_derivs_scratch(k, N));
+    lm::log_mvn_rect_log_derivs(k, N, lo, c.hi, c.S, l.data(), w.data());
+    const double h = 1e-4;
+    for (int d = 0; d < k; ++d) {
+      double hp[3], hm[3];
+      for (int i = 0; i < k; ++i) hp[i] = hm[i] = c.hi[i];
+      hp[d] += h, hm[d] -= h;
+      lm::log_mvn_rect_log_derivs(k, N - 1, lo, hp, c.S, lp.data(), w.data());
+      lm::log_mvn_rect_log_derivs(k, N - 1, lo, hm, c.S, lmn.data(), w.data());
+      for (int n = 1; n < N; ++n) {
+        int t[16] = {0}, t2[16];
+        do {
+          const int pn = dm::tuples_upto(k, n - 1) + dm::tuple_rank(k, n, t);
+          const double fd = (lp[pn] - lmn[pn]) / (2 * h);
+          int m = 0;
+          bool ins = false;
+          for (int i = 0; i < n; ++i) {
+            if (!ins && d < t[i]) t2[m++] = d, ins = true;
+            t2[m++] = t[i];
+          }
+          if (!ins) t2[m++] = d;
+          const double an = l[dm::tuples_upto(k, n) + dm::tuple_rank(k, n + 1, t2)];
+          worst = std::fmax(worst, std::fabs(fd - an) / std::fmax(1.0, std::fabs(an)));
+        } while (dm::next_tuple(k, n, t));
+      }
+    }
+  }
+  INFO("max relative difference ", worst);
+  CHECK(worst <= 1e-6);
 }
 
 TEST_CASE("mvnormal: the cumulant route of the log-derivatives against log_Phi_dk in the tail") {

@@ -88,7 +88,7 @@ With \f$\Sigma = M(\theta)\f$ and \f$X \sim \mathcal{N}_d(0, \Sigma)\f$, the thr
 
 Let \f$F(\delta) = \Pr(\mathrm{lo} + \delta < X \le \mathrm{hi} + \delta)\f$, and let \f$\partial^\alpha F / F\f$ be its normalized derivatives at \f$\delta = 0\f$, as defined on the \ref mvnormal "multivariate normal probabilities" page. The location moves the rectangle by \f$-\mu\f$, so \f$\partial_\mu = -\partial_\delta\f$. The observation moves the finite end of the cdf and ccdf regions by \f$+y\f$, so \f$\partial_y = \partial_\delta\f$ on that end. Both regions depend on \f$y\f$ and \f$\mu\f$ through \f$y - \mu\f$ only, so \f$\partial_y^J \partial_\mu^A = (-1)^J \partial_\mu^{J + A}\f$. The rectangle region has no derivative in \f$y\f$.
 
-The derivatives in \f$\mu\f$ of the blocks without \f$\theta\f$ (\f$K = 0\f$) are taken through the cumulants of the truncated law, by `log_mvn_rect_log_derivs()` (see the log-derivatives section of the \ref mvnormal "multivariate normal probabilities" page). This route is used at every order of the location and of \f$y\f$, because it does not cancel in the tail where the moments of the shift do.
+Two routes compute the derivative blocks, chosen by the dimension and by the value of \f$\log F\f$ (see the next section).
 
 ### Derivatives in theta
 
@@ -104,7 +104,19 @@ The derivative of \f$\log F\f$ along a set of items, which are the location coor
 \f[
 \partial \log F = \sum_{\pi} (-1)^{|\pi| - 1} (|\pi| - 1)! \prod_{B \in \pi} \frac{\partial_B F}{F},
 \f]
-where \f$\partial_B F\f$ is the derivative along the items of the block \f$B\f$. The blocks with \f$K \ge 1\f$ read the normalized derivatives \f$\partial^\alpha F / F\f$ of order \f$A + 2K\f$ from `log_mvn_rect_derivs()`, which computes them by the recursion on the corner densities.
+where \f$\partial_B F\f$ is the derivative along the items of the block \f$B\f$. This is the recursion route: it reads the normalized derivatives \f$\partial^\alpha F / F\f$ of order \f$A + 2K\f$ from `log_mvn_rect_derivs()`, which computes them by the recursion on the corner densities, whose pieces are lower-dimensional probabilities. In the far tail the logarithm subtracts large products of these normalized derivatives.
+
+The log route writes the heat equation for \f$\psi = \log F\f$ instead. With \f$\psi\f$ a function of the shift \f$\delta\f$ and of a change \f$E\f$ of the covariance,
+\f[
+\partial_E \psi [M] = \tfrac{1}{2} M : \big(\nabla^2 \psi + \nabla \psi \, \nabla \psi^\top\big),
+\f]
+where \f$M\f$ is a direction of change of \f$\Sigma\f$, \f$\nabla\f$ the gradient in \f$\delta\f$ and \f$M : X = \sum_{ij} M_{ij} X_{ij}\f$. For a set partition \f$\sigma\f$ of the \f$\theta\f$ indices with directions \f$M_c = \partial_c \Sigma\f$, the derivatives \f$G_U\f$ of \f$\psi\f$ along a set \f$U\f$ of directions follow from those of \f$\psi\f$ in \f$\delta\f$ alone,
+\f[
+G_{U + t} = \tfrac{1}{2} M_t : \nabla^2 G_U + \tfrac{1}{2} \sum_{U_1 + U_2 = U} (\nabla G_{U_1})^\top M_t \, \nabla G_{U_2}, \qquad G_{\emptyset} = \psi,
+\f]
+the sum over the ordered splits of \f$U\f$, and their derivatives in \f$\delta\f$ by Leibniz's rule; the derivative along the \f$\theta\f$ indices is the sum of \f$G\f$ over the set partitions, and the location enters as \f$\partial_\mu = -\partial_\delta\f$. Only products of derivatives of \f$\log F\f$ enter, which come from the cumulants of the truncated law to order twelve, by `log_mvn_rect_log_derivs()` (see the log-derivatives section of the \ref mvnormal "multivariate normal probabilities" page).
+
+The log route is taken when \f$d \le 3\f$ and \f$\log F < -6\f$, the recursion route otherwise: with four or more coordinates the cumulants come from a lattice and their high orders are noisy, and in the bulk the recursion is the cheaper of the two.
 
 For the covariance form, the derivatives \f$\partial_c \Sigma\f$ along the indices of each block are those of the structure, `matrix_dk`.
 
@@ -114,11 +126,11 @@ The tests in `tests/distrib/test_mvgaussian_cdf.cpp` check `log_cdf()`, `log_ccd
 
 Each derivative block is checked against central differences with step \f$10^{-5}\f$ of the block of the order below, for each of the three regions and in both forms, with a relative bound of \f$10^{-8}\f$. The blocks checked are the location derivatives of orders 1, 2, 3, 4 and 6 with \f$K = 0\f$, the mixed block \f$K = 1\f$, \f$A = 2\f$, the derivatives in \f$\theta\f$ of orders 1 to 4 with \f$A = 0\f$, and the mixed blocks \f$(K, A) = (1, 1)\f$ and \f$(2, 2)\f$. The derivatives in \f$y\f$ are checked against the location derivatives: the test requires the block \f$J = 1\f$, \f$K = 1\f$, \f$A = 1\f$ to equal the negated block \f$K = 1\f$, \f$A = 2\f$ exactly.
 
-The central differences of the blocks agree to \f$10^{-10}\f$ at every order up to six for \f$k = 1\f$ to \f$4\f$ (on orthants, rectangles and mixed sets), as recorded in `docs/numerics.md`. In the far tail the \f$\theta\f$ blocks lose accuracy. For the bivariate with an unstructured log-Cholesky covariance, the blocks of orders \f$K = 1\f$ and \f$K = 2\f$ with \f$A \le 1\f$ agree with differences in \f$\theta\f$ to \f$2 \times 10^{-9}\f$ at \f$y = -15\f$. The block of order \f$K = 3\f$ with \f$A = 2\f$ has an error of \f$1.2 \times 10^{-5}\f$ at \f$y = -6\f$, \f$4.4 \times 10^{-4}\f$ at \f$y = -10\f$ and \f$6 \times 10^{-2}\f$ at \f$y = -15\f$.
+The central differences of the blocks agree to \f$10^{-10}\f$ at every order up to six for \f$k = 1\f$ to \f$4\f$ (on orthants, rectangles and mixed sets), as recorded in `docs/numerics.md`. In the far tail, for the bivariate with an unstructured log-Cholesky covariance at \f$y = -6\f$, \f$-10\f$ and \f$-15\f$, the blocks \f$(K, A) = (1, 0)\f$, \f$(2, 0)\f$, \f$(3, 0)\f$, \f$(3, 2)\f$ and \f$(2, 4)\f$ agree with central differences of the block below to \f$1.4 \times 10^{-9}\f$ on gcc; the test bounds this by \f$10^{-8}\f$.
 
 ### Costs of the distribution function
 
-Each derivative block with \f$\theta\f$ is a combination of the normalized derivatives of the rectangle in dimension \f$d\f$, so its cost is that of the rectangle derivatives on the multivariate normal page. On one gcc thread, the rectangle derivatives take 0.24 ms in dimension 3 for order 1 and 0.35 ms for order 12, 17 to 18 ms in dimension 4, 48 to 52 ms in dimension 5, and 34 to 172 ms in dimension 6. `cdf_value_scratch_size()` gives the doubles of `w` for the values, and `cdf_scratch_size(K, A)` those for the derivatives.
+On the recursion route each derivative block is a combination of the normalized derivatives of the rectangle in dimension \f$d\f$, so its cost is that of the rectangle derivatives on the multivariate normal page: on one gcc thread 0.24 ms in dimension 3 for order 1 and 0.35 ms for order 12, 17 to 18 ms in dimension 4, 48 to 52 ms in dimension 5, and 34 to 172 ms in dimension 6. The blocks with \f$K = 1\f$ to \f$3\f$ and \f$A \le 2\f$ take 2.8 to 6.3 microseconds for the bivariate and 0.41 to 0.43 ms for the trivariate in the bulk, and 0.15 to 0.29 ms and 23 to 38 ms at \f$y = -8\f$ on the log route. `cdf_value_scratch_size()` gives the doubles of `w` for the values, and `cdf_scratch_size(K, A)` those for the derivatives.
 
 \anchor mvgaussian1_degenerate
 ## The degenerate class

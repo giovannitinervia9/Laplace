@@ -14009,3 +14009,47 @@ log P 1.1e-13, mean 4.1e-13, covariance 2.9e-14, kappa_3 1.5e-12, kappa_4
 6.4e-12; k = 3: 2.3e-12, 1.1e-10, 3.6e-11, 1.0e-9, 2.3e-8. The distrib members
 inside a kernel differ from their host values by at most 1.8e-14 relative. The
 test bounds are the larger of the two builds times about 1.5.
+
+**Theta on the log scale (Giovanni, 2026-11-19, after the commit 6065021).**
+The theta blocks are assembled on the log scale where the recursion's
+logarithm cancels. psi(delta; E) = log F(delta; Sigma + E) satisfies
+d_E psi [M] = (1/2) M : (grad^2 psi + grad psi grad psi'), so along the
+directions M_c = d_c Sigma of the blocks of a set partition of the theta
+indices, G_(S + t) = (1/2) M_t : grad^2 G_S + (1/2) sum over the ordered
+splits S1 + S2 = S of grad G_S1' M_t grad G_S2 (G of the empty set is psi),
+the derivatives in delta by Leibniz over the positions; only products of
+derivatives of psi enter, never the moments of F. The derivatives of psi to
+order A + 2K (twelve at most) come from the cumulants: trunc1_moments
+extended to order 12 (for a < 4 by 64-point Gauss-Legendre on [0, 12], for
+a >= 4 by Miller's backward recurrence of E_(j+1) = -a E_j + j E_(j-1),
+started at j = N + 60; central moments within 2.3e-13 of mpmath at every
+order to 12, z from 3 to -40) and the cumulants from the central moments by
+the recursion over the subsets containing the first position (2^(n-1)
+subsets per tuple; the set partitions are 4.2 million at order 12).
+Measured: the K = 3, A = 2 block of the bivariate (unstructured
+log-Cholesky) against differences of the order below, 6.9e-10 at y = -6 and
+1.7e-9 at y = -15 (the recursion route: 1.2e-5 and 6e-2); the cumulant route
+against differences of the order below to order 12, 1.1e-7 (bivariate and
+trivariate, bulk and tail, step 1e-4). Against the recursion in the bulk the
+two agree to 1e-12..1e-11 at k = 2-3 and order 6; at k >= 4 the cumulants
+come from the lattice and their high orders are noisy (k = 4 at order 4:
+5e-2, order 2: 4.5e-4), while the recursion's pieces are exact there. The
+log route also costs more in the bulk (k = 3: 12 to 29 ms against 0.3 ms). So
+log_dk takes the log route for at most three coordinates when log F < -6
+(heat_log_threshold), and the recursion otherwise (also for the location
+blocks, K = 0, which the commit had sent through the cumulants for every k).
+Member costs, gcc one thread, K = 1..3 with A <= 2: bivariate 2.8 to 6.3 us in
+the bulk and 0.15 to 0.29 ms in the tail (y = -8); trivariate 0.41 to 0.43 ms
+and 23 to 38 ms.
+
+**The lattice at four coordinates on request (2026-11-19).** `log_mvn_rect` and
+`log_mvn_trunc_cumulants` take `tensor_max_dim` (default `mvn_tensor_max_dim`
+= 4 and `mvn_trunc_tensor_max_dim` = 3): the largest number of constrained
+coordinates done by the tensor rule. With 3 the lattice (N = 16381) takes four
+coordinates: on the 180 LAML rows at k = 4 log P within 4.3e-6, 1.3e-5, 1.3e-5,
+9.7e-6 by bin (gcc), against 2.4e-13 with the tensor rule. The tensor rule's
+cost depends on the route of its inner bivariate: an equicorrelated orthant
+(r = 0.81) at limits -9 to -11 costs 12.4 ms with it and 13.9 ms with the
+lattice, while the orthant work measured 0.32 s for deep one-factor orthants
+at r = 0.9, where every inner bivariate takes the tail route (about 40 us,
+9409 nodes).

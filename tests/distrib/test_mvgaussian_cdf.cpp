@@ -180,6 +180,26 @@ TEST_CASE("mvgaussian cdf: derivative blocks against central differences, both f
   }
 }
 
+TEST_CASE("mvgaussian cdf: theta blocks in the far tail, against central differences of the order below") {
+  // bivariate, unstructured log-Cholesky, y deep in the lower tail, where the
+  // blocks are assembled through the cumulants (heat equation for log F)
+  using S2 = lp::unstructured_pdmat<laplace::bijector::log_cholesky_bijector>;
+  const D1 g(S2(2));
+  double th[3] = {0.1, 0.3, -0.2};
+  double worst = 0.0;
+  for (double t : {-6.0, -10.0, -15.0}) {
+    double y[2] = {t, t + 0.5}, b[2] = {0, 0}, mu[2] = {0.0, 0.0};
+    const int idx[3] = {1, 1, 2};
+    worst = std::fmax(worst, diff_theta<D1, 1, 0>(g, lower, th, y, b, mu, idx + 2));
+    worst = std::fmax(worst, diff_theta<D1, 2, 0>(g, lower, th, y, b, mu, idx + 1));
+    worst = std::fmax(worst, diff_theta<D1, 3, 0>(g, lower, th, y, b, mu, idx));
+    worst = std::fmax(worst, diff_theta<D1, 3, 2>(g, lower, th, y, b, mu, idx));
+    worst = std::fmax(worst, diff_mu<D1, 2, 4>(g, lower, th, y, b, mu, idx));
+  }
+  INFO("max relative difference ", worst);
+  CHECK(worst <= 1e-8);
+}
+
 TEST_CASE("mvgaussian cdf: values against log_mvn_rect, and y against the location") {
   const S s(3);
   const D1 g1(s);
