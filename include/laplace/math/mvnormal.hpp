@@ -1204,19 +1204,19 @@ LAPLACE_HD int mvn_rect_derivs_scratch(int k, int N) {
 
 /**
  * \ingroup mvnormal
- * \brief Log rectangle probability and its normalized derivatives in the shift.
- *
- * With \f$F(\delta) = \Pr(lo + \delta < X \le hi + \delta)\f$, writes to `f` the
- * values \f$\partial^\alpha F / F\f$ at \f$\delta = 0\f$ for every sorted tuple
- * \f$\alpha\f$ of length \f$n = 0..N\f$ over the \f$k\f$ coordinates, the block of
- * length \f$n\f$ starting at `tuples_upto(k, n - 1)` and ordered lexicographically.
- *
- * \return \f$\log F\f$; NaN components when \f$F = 0\f$ or an argument is NaN.
+ * \brief Size of the output of `log_mvn_rect_limit_derivs`: every sorted tuple of length \f$0..N\f$ over the \f$2k\f$ limits.
  */
-LAPLACE_HD double log_mvn_rect_derivs(int k, int N, const double* lo, const double* hi, const double* S, double* f,
-                                      double* w, int n_lattice = mvn_default_lattice) {
-  using namespace detail_mvnormal;
-  const int nf = tuples_upto(k, N);
+LAPLACE_HD int mvn_rect_limit_derivs_size(int k, int N) { return detail_mvnormal::tuples_upto(2 * k, N); }
+
+namespace detail_mvnormal {
+
+// the table of every d^beta G_(S,e) / F (corner densities), then the assembly:
+// Limits = false, d^alpha F / F in the shift (the signed sum over the end
+// choices); Limits = true, d^alpha F / F in the 2k limits (one end choice)
+template <bool Limits>
+LAPLACE_HD double rect_derivs(int k, int N, const double* lo, const double* hi, const double* S, double* f, double* w,
+                              int n_lattice) {
+  const int nf = tuples_upto(Limits ? 2 * k : k, N);
   if (k < 1 || k > mvn_deriv_max_dim || N < 0) {
     for (int q = 0; q < nf; ++q) f[q] = nan();
     return nan();
@@ -1394,8 +1394,49 @@ LAPLACE_HD double log_mvn_rect_derivs(int k, int N, const double* lo, const doub
       }
     }
   }
-  // assemble d^alpha F / F
   f[0] = 1.0;
+  if constexpr (Limits) {
+    // alpha over the 2k limits (lo_i is i, hi_i is k + i): each coordinate pinned
+    // at the one end it names, with a minus sign for a lower end; zero when a
+    // coordinate names both ends or an infinite one
+    for (int n = 1; n <= N; ++n) {
+      int alpha[2 * mvn_deriv_max_dim + 2], c[2 * mvn_deriv_max_dim + 2];
+      for (int q = 0; q < n; ++q) alpha[q] = 0;
+      int q = tuples_upto(2 * k, n - 1);
+      do {
+        unsigned U = 0, L = 0, H = 0;
+        bool inf_end = false;
+        for (int r = 0; r < n; ++r) {
+          const int i = alpha[r] % k;
+          c[r] = i;
+          U |= 1u << i;
+          if (alpha[r] < k) L |= 1u << i, inf_end = inf_end || lo[i] == -inf();
+          else H |= 1u << i, inf_end = inf_end || hi[i] == inf();
+        }
+        double val = 0.0;
+        if (!(L & H) && !inf_end && off[U] >= 0) {
+          // the coordinates sorted, then beta = c minus one of each distinct
+          for (int a = 1; a < n; ++a)
+            for (int b = a; b > 0 && c[b] < c[b - 1]; --b) {
+              const int x = c[b];
+              c[b] = c[b - 1], c[b - 1] = x;
+            }
+          const int s = popcount(U), nb = n - s;
+          int cnt = 0;
+          for (int r = 1; r < n; ++r)
+            if (c[r] == c[r - 1]) beta[cnt++] = local(U, c[r]);
+          const int rk = tuples_upto(s, nb - 1) + tuple_rank(s, nb, beta);
+          unsigned e = 0;
+          for (int i = 0; i < k; ++i)
+            if ((L >> i) & 1u) e |= 1u << local(U, i);
+          val = (popcount(L) % 2 ? -1.0 : 1.0) * Ep(U, e)[s + rk];
+        }
+        f[q++] = val;
+      } while (next_tuple(2 * k, n, alpha));
+    }
+    return lF;
+  }
+  // assemble d^alpha F / F
   for (int n = 1; n <= N; ++n) {
     int alpha[2 * mvn_deriv_max_dim + 2];
     for (int q = 0; q < n; ++q) alpha[q] = 0;
@@ -1433,6 +1474,43 @@ LAPLACE_HD double log_mvn_rect_derivs(int k, int N, const double* lo, const doub
   return lF;
 }
 
+}  // namespace detail_mvnormal
+
+/**
+ * \ingroup mvnormal
+ * \brief Log rectangle probability and its normalized derivatives in the shift.
+ *
+ * With \f$F(\delta) = \Pr(lo + \delta < X \le hi + \delta)\f$, writes to `f` the
+ * values \f$\partial^\alpha F / F\f$ at \f$\delta = 0\f$ for every sorted tuple
+ * \f$\alpha\f$ of length \f$n = 0..N\f$ over the \f$k\f$ coordinates, the block of
+ * length \f$n\f$ starting at `tuples_upto(k, n - 1)` and ordered lexicographically.
+ *
+ * \return \f$\log F\f$; NaN components when \f$F = 0\f$ or an argument is NaN.
+ */
+LAPLACE_HD double log_mvn_rect_derivs(int k, int N, const double* lo, const double* hi, const double* S, double* f,
+                                      double* w, int n_lattice = mvn_default_lattice) {
+  return detail_mvnormal::rect_derivs<false>(k, N, lo, hi, S, f, w, n_lattice);
+}
+
+/**
+ * \ingroup mvnormal
+ * \brief Log rectangle probability and its normalized derivatives in the lower and upper limits.
+ *
+ * With \f$F(lo, hi) = \Pr(lo < X \le hi)\f$ and the \f$2k\f$ limits numbered
+ * \f$z = (lo_1, \dots, lo_k, hi_1, \dots, hi_k)\f$, writes to `f` the values
+ * \f$\partial^\alpha F / F\f$ for every sorted tuple \f$\alpha\f$ of length
+ * \f$n = 0..N\f$ over \f$z\f$, the block of length \f$n\f$ starting at
+ * `tuples_upto(2k, n - 1)` and ordered lexicographically. A derivative in an
+ * infinite limit is zero, and so is one in both limits of a coordinate. The
+ * workspace is `mvn_rect_derivs_scratch(k, N)`.
+ *
+ * \return \f$\log F\f$; NaN components when \f$F = 0\f$ or an argument is NaN.
+ */
+LAPLACE_HD double log_mvn_rect_limit_derivs(int k, int N, const double* lo, const double* hi, const double* S, double* f,
+                                            double* w, int n_lattice = mvn_default_lattice) {
+  return detail_mvnormal::rect_derivs<true>(k, N, lo, hi, S, f, w, n_lattice);
+}
+
 
 // ---------------------------------------------------------------------------
 // The cumulants of the truncated law T = X | lo < X <= hi, from the nodes of
@@ -1445,17 +1523,20 @@ LAPLACE_HD double log_mvn_rect_derivs(int k, int N, const double* lo, const doub
 // ---------------------------------------------------------------------------
 
 /// \ingroup mvnormal
-/// \brief Default number of lattice points of the truncated moments for \f$k \ge 4\f$ (the covariance within 7e-4 of its scale; 16381 gives 3e-3).
+/// \brief Default number of lattice points of the truncated moments for \f$k \ge 5\f$ (at \f$k = 4..6\f$ the covariance within 7e-4 of its scale; 16381 gives 3e-3).
 inline constexpr int mvn_trunc_default_lattice = 65521;
 /// \ingroup mvnormal
 /// \brief Largest order of `log_mvn_trunc_cumulants`.
 inline constexpr int mvn_trunc_max_order = 12;
 /// \ingroup mvnormal
 /// \brief Largest dimension done by the tensor rule in `log_mvn_trunc_cumulants` (the lattice beyond).
-inline constexpr int mvn_trunc_tensor_max_dim = 3;
+inline constexpr int mvn_trunc_tensor_max_dim = 4;
 /// \ingroup mvnormal
 /// \brief Half the nodes per coordinate of the tensor rule of `log_mvn_trunc_cumulants`.
 inline constexpr int mvn_trunc_tensor_half_nodes = 32;
+/// \ingroup mvnormal
+/// \brief Half the nodes per coordinate of the tensor rule of `log_mvn_trunc_cumulants` over three coordinates (four constrained).
+inline constexpr int mvn_trunc_tensor_half_nodes_3 = 16;
 
 /**
  * \ingroup mvnormal
@@ -1477,10 +1558,11 @@ LAPLACE_HD int mvn_trunc_scratch(int k, int N) {
  * (positions in `keep`) lexicographically; order 1 is the mean.
  *
  * \return \f$\log P\f$; \f$-\infty\f$ for an empty rectangle; NaN for a NaN argument, a non-positive
- *         variance, \f$k\f$ or \f$N\f$ out of range, or, when four or more coordinates are constrained,
+ *         variance, \f$k\f$ or \f$N\f$ out of range, or, when the lattice is used,
  *         a lattice size other than 1021, 4093, 16381 or 65521.
  * The nodes are a tensor tanh-sinh rule up to `tensor_max_dim` constrained coordinates (at most
- * `mvn_trunc_tensor_max_dim`, the default) and the lattice of `n_lattice` points beyond.
+ * `mvn_trunc_tensor_max_dim`, the default; 65 nodes per coordinate over one or two coordinates,
+ * 33 over three) and the lattice of `n_lattice` points beyond.
  */
 LAPLACE_HD double log_mvn_trunc_cumulants(int k, int N, const double* lo, const double* hi, const double* S, int& m,
                                           int* keep, double* kap, double* w, int n_lattice = mvn_trunc_default_lattice,
@@ -1524,9 +1606,9 @@ LAPLACE_HD double log_mvn_trunc_cumulants(int k, int N, const double* lo, const 
     mu[0] = 0.0;
   }
   // the nodes: the tensor tanh-sinh rule over the first n coordinates when
-  // m <= mvn_trunc_tensor_max_dim, else the lattice
+  // m <= tensor_max_dim (at most mvn_trunc_tensor_max_dim), else the lattice
   const bool tensor = m <= tensor_max_dim && m <= mvn_trunc_tensor_max_dim;
-  constexpr int Mt = mvn_trunc_tensor_half_nodes, Nt1 = 2 * Mt + 1;
+  const int Mt = n <= 2 ? mvn_trunc_tensor_half_nodes : mvn_trunc_tensor_half_nodes_3, Nt1 = 2 * Mt + 1;
   long long NP = 1;
   int row = 0;
   if (tensor) {

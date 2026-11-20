@@ -11,6 +11,11 @@ hi, lo of log P (hexadecimal), as in elementary.py.
              cut around the mode of the (log-concave) integrand at multiples of
              its width; repeated at 50 digits on a shifted set of cuts and
              kept only when the two agree to 1e-30 relative.
+
+  mvn_limit_derivs  log P and its derivatives of orders 1..3 in the lower and
+             upper limits, one-factor correlation, k = 2..4 (factor_limit_derivs):
+             Gauss-Legendre over the factor at 50 digits with two rules (degree 6
+             and 7) that must agree to 1e-24.
 """
 import sys
 import random
@@ -507,9 +512,167 @@ def trunc_row(row):
     return ",".join(float.hex(float(x)) for x in cols)
 
 
+KL = 4  # the largest dimension of the limit-derivative rows
+
+
+def factor_limit_derivs(a, b, lam, dps, n_deg):
+    """log P and the derivatives of log P of orders 1..3 in the 2k limits
+    z = (a_1..a_k, b_1..b_k), for the one-factor correlation r_ij = lam_i lam_j.
+    Given the factor t the coordinates are independent, P = int phi(t) prod_i
+    D_i(t) dt with D_i = Phi(u_i) - Phi(l_i), u_i = (b_i - lam_i t)/s_i; a
+    derivative in b_i acts on D_i alone, d^m D_i / d b_i^m = s_i^-m
+    (-1)^(m-1) He_(m-1)(u_i) phi(u_i) (He the probabilists' Hermite
+    polynomials), the same in a_i with the opposite sign, and zero when both
+    ends of one coordinate are differentiated. Every d^zeta P / P by
+    Gauss-Legendre on pieces cut around the mode of the log-concave weight, then
+    the derivatives of log P over the set partitions, at the working precision."""
+    import itertools
+    with mp.workdps(dps):
+        k = len(lam)
+        lam = [mp.mpf(v) for v in lam]
+        s = [mp.sqrt((1 - l) * (1 + l)) for l in lam]
+        A = [mp.mpf(v) if v != -float("inf") else -mp.inf for v in a]
+        B = [mp.mpf(v) if v != float("inf") else mp.inf for v in b]
+        lims = A + B
+        tuples = [tp for o in range(1, 4) for tp in itertools.combinations_with_replacement(range(2 * k), o)]
+
+        def factor_derivs(t):
+            """per coordinate: D_i(t) and the derivatives of order 1..3 in a_i and in b_i"""
+            out = []
+            for i in range(k):
+                m, sd = lam[i] * t, s[i]
+                lo = (A[i] - m) / sd if A[i] != -mp.inf else -mp.inf
+                hi = (B[i] - m) / sd if B[i] != mp.inf else mp.inf
+                D = interval(lo, hi)
+                da, db = [], []
+                for q in range(1, 4):
+                    he = lambda x: mp.hermite(q - 1, x / mp.sqrt(2)) / mp.mpf(2) ** (mp.mpf(q - 1) / 2)
+                    c = (-1) ** (q - 1) / sd ** q
+                    db.append(c * he(hi) * mp.npdf(hi) if hi != mp.inf else mp.mpf(0))
+                    da.append(-c * he(lo) * mp.npdf(lo) if lo != -mp.inf else mp.mpf(0))
+                out.append((D, da, db))
+            return out
+
+        def logw(t):
+            return -t * t / 2 + sum(mp.log(D) for D, _, _ in factor_derivs(t))
+
+        x0, x1 = mp.mpf(-60), mp.mpf(60)
+        for _ in range(200):
+            m1, m2 = x0 + (x1 - x0) / 3, x1 - (x1 - x0) / 3
+            if logw(m1) < logw(m2):
+                x0 = m1
+            else:
+                x1 = m2
+        xs = (x0 + x1) / 2
+        e = mp.mpf(10) ** -8
+        d2 = (logw(xs + e) - 2 * logw(xs) + logw(xs - e)) / e ** 2
+        wd = 1 / mp.sqrt(-d2) if d2 < 0 else mp.mpf(1)
+        cuts = sorted(set([xs + q * wd for q in (-40, -20, -10, -6, -3, -1.5, -0.5, 0, 0.5, 1.5, 3, 6, 10, 20, 40)]))
+        nodes = gl_nodes(n_deg)
+        lw0 = logw(xs)
+        S0 = mp.mpf(0)
+        sums = [mp.mpf(0)] * len(tuples)
+        for pa, pb in zip(cuts[:-1], cuts[1:]):
+            h, c = (pb - pa) / 2, (pa + pb) / 2
+            for (xn, wn) in nodes:
+                t = c + h * xn
+                fd = factor_derivs(t)
+                wt = wn * h * mp.exp(-t * t / 2 - lw0)
+                pD = mp.mpf(1)
+                for D, _, _ in fd:
+                    pD *= D
+                S0 += wt * pD
+                for q, tp in enumerate(tuples):
+                    v = wt
+                    for i in range(k):
+                        na, nb = tp.count(i), tp.count(k + i)
+                        if na and nb:
+                            v = 0
+                            break
+                        v *= fd[i][1][na - 1] if na else fd[i][2][nb - 1] if nb else fd[i][0]
+                    sums[q] += v
+        logP = lw0 + mp.log(S0) - mp.log(2 * mp.pi) / 2
+        nd = {tp: sums[q] / S0 for q, tp in enumerate(tuples)}
+        for tp in tuples:
+            if any(not mp.isfinite(lims[v]) for v in tp):
+                nd[tp] = mp.mpf(0)
+
+        def partitions(seq):
+            if not seq:
+                yield []
+                return
+            first, rest = seq[0], seq[1:]
+            for p in partitions(rest):
+                yield [[first]] + p
+                for i in range(len(p)):
+                    yield p[:i] + [[first] + p[i]] + p[i + 1:]
+
+        out = []
+        for tp in tuples:
+            v = mp.mpf(0)
+            for p in partitions(list(range(len(tp)))):
+                nb = len(p)
+                term = (-1) ** (nb - 1) * mp.factorial(nb - 1)
+                for blk in p:
+                    term *= nd[tuple(sorted(tp[q] for q in blk))]
+                v += term
+            out.append(v)
+        return logP, out
+
+
+def limit_rows(rng):
+    lams = [-0.9, -0.7, -0.4, 0.0, 0.3, 0.6, 0.8, 0.9]
+    rows = []
+    for k in range(2, KL + 1):
+        for c in (-12, -8, -5, -3, -1, 0, 1.5):
+            for kind in range(3 if k < 4 else 2):
+                lam = [rng.choice(lams) for _ in range(k)]
+                a, b = [], []
+                for i in range(k):
+                    ci = c + rng.uniform(-0.5, 0.5)
+                    if kind == 0 or (kind == 2 and i == 0):  # a finite rectangle, wide or narrow
+                        w = 10 ** rng.uniform(-1.5, 0.5)
+                        a.append(ci), b.append(ci + w)
+                    elif rng.random() < 0.5:                 # one end infinite
+                        a.append(-float("inf")), b.append(ci)
+                    else:
+                        a.append(-ci), b.append(float("inf"))
+                rows.append((k, a, b, lam))
+    return rows
+
+
+def limit_row(row):
+    k, a, b, lam = row
+    lp1, d1 = factor_limit_derivs(a, b, lam, 50, 6)
+    lp2, d2 = factor_limit_derivs(a, b, lam, 50, 7)
+    with mp.workdps(50):
+        bad = abs(lp1 - lp2) > mp.mpf(10) ** -28 * max(1, abs(lp2))
+        for x, y in zip(d1, d2):
+            if abs(x - y) > mp.mpf(10) ** -24 * max(1, abs(y)):
+                bad = True
+        if bad:
+            print("disagree", row, file=sys.stderr)
+            return None
+        hi, lo = dd(lp2)
+    pad = lambda v, f, n: list(v) + [f] * (n - len(v))
+    nv = 2 * KL + 2 * KL * (2 * KL + 1) // 2 + 2 * KL * (2 * KL + 1) * (2 * KL + 2) // 6
+    cols = [float(k)] + pad(a, 0.0, KL) + pad(b, 0.0, KL) + pad(lam, 0.0, KL)
+    return (",".join(float.hex(float(x)) for x in cols) + f",{float.hex(hi)},{float.hex(lo)},"
+            + ",".join(float.hex(float(v)) for v in pad(d2, 0, nv)))
+
+
 def main(names):
     rng = random.Random(20261119)
     for name in names:
+        if name == "mvn_limit_derivs":
+            rows = limit_rows(random.Random(20261120))
+            with multiprocessing.Pool(8) as pool:
+                out = [o for o in pool.map(limit_row, rows, chunksize=1) if o is not None]
+            with open(f"{OUT}/{name}.csv", "w") as fh:
+                fh.write("k,a[4],b[4],lam[4],hi,lo of log P,d log P by order 1..3 then sorted tuple over (a, b)\n")
+                fh.write("\n".join(out) + "\n")
+            print(name, len(out), "rows")
+            continue
         if name == "mvn_trunc_moments":
             rows = trunc_rows(rng)
             with multiprocessing.Pool(8) as pool:

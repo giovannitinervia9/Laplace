@@ -28,6 +28,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifndef LAPLACE_REFERENCE_DIR
@@ -257,7 +258,7 @@ TEST_CASE("mvnormal: the truncated law's cumulants against mpmath") {
   const double bound[7][5] = {{0}, {0},
                               {1.8e-13, 6.1e-13, 4.4e-14, 2.2e-12, 9.6e-12},
                               {3.5e-12, 1.7e-10, 5.5e-11, 1.6e-9, 3.5e-8},
-                              {4.1e-6, 2.9e-5, 4.5e-4, 0, 0},
+                              {8.4e-10, 2.3e-8, 4.5e-7, 0, 0},
                               {4.6e-6, 4.4e-5, 6.5e-4, 0, 0},
                               {1.3e-5, 9.3e-5, 1.1e-3, 0, 0}};
   for (int k = 2; k <= 6; ++k) {
@@ -312,6 +313,41 @@ TEST_CASE("mvnormal: derivatives in the shift against central differences of the
     }
     INFO("k = ", k, ": max relative difference ", worst);
     CHECK(worst <= 1e-8);
+  }
+}
+
+TEST_CASE("mvnormal: derivatives in the limits, summed over the two sides, are those in the shift") {
+  // d_delta_i = d_lo_i + d_hi_i, so every shift tuple is the sum of the limit
+  // tuples over the 2^n choices of a side for each position; both come from the
+  // same table, so the sums agree to rounding
+  const double I = lm::detail_mvnormal::inf();
+  const double S[10] = {1.0, 0.5, 1.0, 0.2, -0.3, 1.2, 0.1, 0.2, 0.3, 1.0};
+  const double lo[4] = {-0.5, -I, -1.2, 0.1}, hi[4] = {0.7, 0.4, 0.3, I};
+  for (int k = 1; k <= 4; ++k) {
+    const int N = 5;
+    std::vector<double> f(lm::mvn_rect_limit_derivs_size(k, N)), fs(lm::mvn_rect_derivs_size(k, N)),
+        w(lm::mvn_rect_derivs_scratch(k, N));
+    const double lF = lm::log_mvn_rect_limit_derivs(k, N, lo, hi, S, f.data(), w.data());
+    CHECK(lm::log_mvn_rect_derivs(k, N, lo, hi, S, fs.data(), w.data()) == lF);
+    double worst = 0.0;
+    for (int n = 1; n <= N; ++n) {
+      int a[8] = {0};
+      int q = dm::tuples_upto(k, n - 1);
+      do {
+        double s = 0.0;
+        for (unsigned c = 0; c < (1u << n); ++c) {
+          int z[8];
+          for (int r = 0; r < n; ++r) z[r] = a[r] + ((c >> r) & 1u ? k : 0);
+          for (int x = 1; x < n; ++x)
+            for (int y = x; y > 0 && z[y] < z[y - 1]; --y) std::swap(z[y], z[y - 1]);
+          s += f[dm::tuples_upto(2 * k, n - 1) + dm::tuple_rank(2 * k, n, z)];
+        }
+        worst = std::fmax(worst, std::fabs(s - fs[q]) / std::fmax(1.0, std::fabs(fs[q])));
+        ++q;
+      } while (dm::next_tuple(k, n, a));
+    }
+    INFO("k = ", k, ": max relative difference ", worst);
+    CHECK(worst <= 1e-14);
   }
 }
 

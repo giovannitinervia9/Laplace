@@ -14078,6 +14078,112 @@ lattice, while the orthant work measured 0.32 s for deep one-factor orthants
 at r = 0.9, where every inner bivariate takes the tail route (about 40 us,
 9409 nodes).
 
+## The multivariate normal rectangle: derivatives in the two limits, and the far tail at four and more coordinates (2026-11-20)
+
+**What.** Two additions to the section above. (1) `log_mvn_rect_limit_derivs`,
+d^zeta F / F for the tuples zeta over the 2k limits z = (lo_1..lo_k,
+hi_1..hi_k), and the members `log_rect_prob_dab_dk<Ja, Jb, K, A...>` of
+mvgaussian1 and mvgaussian2: the derivatives of log Pr(a < Y <= b) of order Ja
+in a, Jb in b, K in theta and A in mu (Ja + Jb + K + A <= 6), the output the
+Kronecker product of the packed tensors of a, b and mu, a outermost
+(`cdf_dab_scratch_size`). (2) The theta and location blocks of log_cdf_dk and
+the rest in the far tail for four and more coordinates.
+
+**The limits.** The table of the recursion (G_{S,e}, the corner densities)
+already holds every end choice e separately; the shift derivative is their
+signed sum. A derivative in hi_j alone pins coordinate j at its upper end, one
+in lo_j at its lower end with a minus sign, and d lo_j d hi_j F = 0 exactly; so
+d^zeta F / F is one term of the sum, at no extra cost. The members contract the
+tensors over z with M~ = M (x) [[1, 1], [1, 1]] for the heat equation (the
+shift is d_lo + d_hi) and take d_mu = -(d_a + d_b); the logarithm is the
+set-partition logarithm over the items, as in the recursion route. For a
+coordinate with one infinite end the derivative in its finite end is the shift
+derivative of the coordinate, so where log F < -6 the entries whose a and b
+items lie on such coordinates come from the log route (the cumulants) and the
+others from the recursion. Checks: summed over the two sides, the limit tuples
+equal the shift tuples to rounding (k = 1..4, order 5); every block (d = 2, 3,
+both forms, orders to (Ja, Jb, K, A) = (3, 0, 1, 1), (1, 3, 1, 0), (2, 0, 3, 1),
+(2, 2, 1, 1)) agrees with central differences of the block one order lower to
+2.1e-10; Ja = Jb = 0 equals log_rect_prob_dk to 3.6e-15.
+
+**References.** `mvn_limit_derivs` in `tools/reference/mvnormal.py`, 56 rows,
+k = 2..4, one-factor correlation (loadings -0.9 to 0.9), centres -12 to 1.5,
+finite rectangles (widths 10^-1.5 to 10^0.5), one-sided coordinates and mixes:
+given the factor the coordinates are independent and a derivative in b_i acts
+on D_i(t) = Phi(u_i) - Phi(l_i) alone, d^m D_i / d b_i^m = s_i^-m (-1)^(m-1)
+He_(m-1)(u_i) phi(u_i); every d^zeta P / P by Gauss-Legendre over the factor at
+50 digits, the derivatives of log P over the set partitions, two rules
+(degree 6 and 7) agreeing to 1e-24. Every order 1..3 over the 2k limits.
+Measured, gcc (max relative error, |ref| below 1 read absolute):
+
+| rows | order 1 | order 2 | order 3 |
+|---|---|---|---|
+| log P > -23 | 1.3e-14 | 3.4e-12 | 1.5e-10 |
+| log P < -23, one infinite end (log route) | 5.8e-14 | 2.1e-15 | 1.9e-13 |
+| the same entries by the recursion | 9.3e-14 | 3.0e-11 | 2.3e-9 |
+| log P < -23, both ends finite (recursion) | 3.7e-13 | 3.2e-10 | 1.6e-8 |
+
+CUDA (RTX 4070 SUPER, default build): 1.3e-14, 3.5e-12, 1.5e-10; 5.4e-14,
+2.3e-15, 1.8e-13; 4.5e-13, 3.2e-10, 4.5e-8 (the last the only figure that
+moves). The k = 4 tail blocks, the k = 4 cumulants and the gaussian_laplace
+moments below give the gcc figures to two digits on CUDA. Test bounds: the
+larger of the two builds times 1.5.
+
+Open: an entry in the limits of a coordinate with both ends finite has no
+shift relation, so in the far tail it keeps the recursion's cancellation.
+
+**The far tail at four and more coordinates.** Before (recursion, mvgaussian1
+log_cdf_dk, unstructured log-Cholesky, y_i = t + 0.3 i, each block against
+central differences of the block one order lower, relative):
+
+| k = 4, t | K3 A0 | K3 A2 | location A6 | K2 A4 |
+|---|---|---|---|---|
+| -3 | 2.7e-10 | 3.4e-7 | 4.2e-6 | 3.8e-6 |
+| -6 | 1.0e-9 | 3.0e-5 | 2.4e-4 | 1.2e-3 |
+| -10 | 2.8e-8 | 7.6e-4 | 3.7e-3 | 2.8e-2 |
+| -15 | 8.1e-8 | 2.6e-2 | 7.3e-2 | 1.4 |
+
+At k = 5 the recursion (its conditional probabilities on the lattice) gave
+K3 A2 2.1e-2, 7.6e-1, 8.9e-1 and A6 2.7e-1, 1.0, 1.0 at t = -3, -6, -10. The
+log route needs cumulants that do not cancel; at k = 4 they came from the
+lattice (5e-2 at order 4). The repair: the truncated law's nodes are a tensor
+tanh-sinh rule over three coordinates when four are constrained
+(`mvn_trunc_tensor_max_dim` = 4, `mvn_trunc_tensor_half_nodes_3` = 16, 33
+nodes per coordinate; Giovanni, 2026-11-20). Against the 98 k = 4 rows of
+`mvn_trunc_moments` (units of the standard deviations), by nodes per
+coordinate:
+
+| nodes | log P | mean | covariance | ms per call |
+|---|---|---|---|---|
+| lattice 65521 (before) | 2.7e-6..8.2e-6 | to 6.1e-5 | 3.0e-4..6.7e-4 | 207..271 |
+| 25 | 1.2e-6 | 2.2e-6 | 1.4e-5 | 45 |
+| 33 | 5.6e-10 | 1.5e-8 | 3.0e-7 | 105 |
+| 49 | 1.5e-12 | 1.3e-9 | 5.5e-10 | 337 |
+| 65 | 1.4e-12 | 4.3e-9 | 2.6e-11 | 812 |
+
+(timed four at once on one thread each). With 33 nodes every k = 4 block above
+is at 1.4e-11..2.5e-8 for t = -3..-15 (49 and 65 nodes give the same, the floor
+of the difference check). The route is chosen by log F alone: the log route
+below heat_log_threshold (-6) for every k, the recursion above. At k = 5 the
+log route (lattice cumulants, N = 16381) gives K3 A2 3.9e-4, 2.7e-4, 1.3e-4
+and A6 1.2e-2, 7.4e-4, 4.9e-5 at t = -3, -6, -10, against the recursion's
+values above; in the bulk the recursion wins (t = -1: K3 A2 6.5e-5 and A6
+5.3e-3 against 1.4e-1 and 1.4e-1), so the threshold stays. Open: at five and
+more coordinates the tail blocks are limited by the lattice (1e-4..1e-2 at
+high orders).
+
+**Costs (gcc -O2, one thread, k = 4).** Per member call, K = 1..3 with A to 6:
+in the bulk (t = -1) the recursion, 20 to 21 ms; in the tail (t = -10) 0.62 to
+0.70 s on the log route, against 1.1 to 1.2 s on the recursion before, most of
+it log P itself (the tensor rule's inner bivariates take their tail route).
+With the tensor rule as the default at four coordinates, mvn_trunc_mean,
+mvn_trunc_cov and the moments of gaussian_laplace at k = 4 change too: the
+gaussian_laplace test (moments, k = 4) went from log I (moments) 5.0e-6, mean
+1.4e-4, covariance 2.7e-3 to 4.1e-11, 3.9e-9 and 3.2e-8 on gcc, and the case
+from 26 to 74 s (its moments were on the lattice of 16381 points, about 60 ms
+per orthant, against 105 ms now; the default lattice of 65521 cost 207 to
+271 ms).
+
 ## The Gaussian-lasso integral and its law: math/gaussian_laplace.hpp (2026-11-19)
 
 **What.** `gaussian_laplace_log_integral(k, m, Sigma, lam)`,

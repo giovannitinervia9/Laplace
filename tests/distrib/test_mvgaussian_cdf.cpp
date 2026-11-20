@@ -15,8 +15,12 @@
 
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <limits>
+#include <sstream>
+#include <string>
 #include <vector>
 
 namespace mvgaussian_cdf_test {
@@ -135,9 +139,132 @@ struct DeviceRows {
   }
 };
 
+// log_rect_prob_dab_dk against mpmath (mvn_limit_derivs): one thread per row,
+// every split Ja + Jb = 1..3 of the derivatives of log P in a and b, written in
+// the reference's layout (orders 1..3, then the sorted tuples over (a, b))
+using Dab = ld::mvgaussian1_distrib<S>;
+constexpr int dab_nv = 8 + 36 + 120;
+
+struct DabRows {
+  Dab g2, g3, g4;
+  Kokkos::View<double**, Kokkos::LayoutRight> in, out, w;  // in: k, a[4], b[4], theta[10]
+  template <int Ja, int Jb>
+  KOKKOS_INLINE_FUNCTION void split(const Dab& g, int k, const double* th, const double* a, const double* b, double* o,
+                                    double* ws) const {
+    const double mu[4] = {0, 0, 0, 0};
+    double v[64];
+    const auto st = g.theta_state(th, ws);
+    g.template log_rect_prob_dab_dk<Ja, Jb, 0>(st, a, b, mu, nullptr, v, ws + g.state_size());
+    const int z = 2 * k, n = Ja + Jb;
+    int ua[4] = {0, 0, 0, 0}, ub[4] = {0, 0, 0, 0}, t[4], q = 0;
+    do {
+      for (int c = 0; c < Jb; ++c) ub[c] = 0;
+      do {
+        for (int c = 0; c < Ja; ++c) t[c] = ua[c];
+        for (int c = 0; c < Jb; ++c) t[Ja + c] = k + ub[c];
+        o[laplace::math::detail_mvnormal::tuples_upto(z, n - 1) - 1 + laplace::math::detail_mvnormal::tuple_rank(z, n, t)] =
+            v[q++];
+      } while (ld::detail_mv::next_block_tuple(k, Jb, ub));
+    } while (ld::detail_mv::next_block_tuple(k, Ja, ua));
+  }
+  KOKKOS_INLINE_FUNCTION void operator()(int i) const {
+    const int k = int(in(i, 0));
+    const double* a = &in(i, 1);
+    const double* b = &in(i, 5);
+    const double* th = &in(i, 9);
+    const Dab& g = k == 2 ? g2 : k == 3 ? g3 : g4;
+    double* o = &out(i, 0);
+    double* ws = &w(i, 0);
+    split<1, 0>(g, k, th, a, b, o, ws);
+    split<0, 1>(g, k, th, a, b, o, ws);
+    split<2, 0>(g, k, th, a, b, o, ws);
+    split<1, 1>(g, k, th, a, b, o, ws);
+    split<0, 2>(g, k, th, a, b, o, ws);
+    split<3, 0>(g, k, th, a, b, o, ws);
+    split<2, 1>(g, k, th, a, b, o, ws);
+    split<1, 2>(g, k, th, a, b, o, ws);
+    split<0, 3>(g, k, th, a, b, o, ws);
+  }
+};
+
 }  // namespace mvgaussian_cdf_test
 
 using namespace mvgaussian_cdf_test;
+
+// the kernel in a function with external linkage (note/brief_agenti.md)
+Kokkos::View<double**, Kokkos::LayoutRight, Kokkos::HostSpace> mvgaussian_cdf_dab_rows(
+    const std::vector<std::vector<double>>& rows) {
+  const int n = int(rows.size());
+  Kokkos::View<double**, Kokkos::LayoutRight> in("in", n, 19), out("out", n, dab_nv);
+  auto hin = Kokkos::create_mirror_view(in);
+  for (int i = 0; i < n; ++i) {
+    const auto& r = rows[i];
+    const int k = int(r[0]);
+    hin(i, 0) = k;
+    for (int c = 0; c < 4; ++c) hin(i, 1 + c) = r[1 + c], hin(i, 5 + c) = r[5 + c];
+    // theta: the log-Cholesky coordinates of the one-factor correlation lam_i lam_j
+    double L[4][4] = {};
+    for (int p = 0; p < k; ++p)
+      for (int q = 0; q <= p; ++q) {
+        double s = p == q ? 1.0 : r[9 + p] * r[9 + q];
+        for (int c = 0; c < q; ++c) s -= L[p][c] * L[q][c];
+        L[p][q] = p == q ? std::sqrt(s) : s / L[q][q];
+        hin(i, 9 + p * (p + 1) / 2 + q) = p == q ? std::log(L[p][q]) : L[p][q];
+      }
+  }
+  Kokkos::deep_copy(in, hin);
+  const Dab g2{S(2)}, g3{S(3)}, g4{S(4)};
+  int sc = 0;
+  for (int J = 1; J <= 3; ++J) sc = std::max(sc, g4.cdf_dab_scratch_size(J, 0, 0));
+  Kokkos::View<double**, Kokkos::LayoutRight> w("w", n, g4.state_size() + g4.scratch_size() + sc);
+  Kokkos::parallel_for("mvgaussian_cdf_dab", Kokkos::RangePolicy<Kokkos::Schedule<Kokkos::Dynamic>>(0, n),
+                       DabRows{g2, g3, g4, in, out, w});
+  return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+}
+
+TEST_CASE("mvgaussian cdf: derivatives in the lower and upper limits against mpmath" * doctest::test_suite("slow")) {
+  std::ifstream f(std::string(LAPLACE_REFERENCE_DIR) + "/mvn_limit_derivs.csv");
+  REQUIRE(f.good());
+  std::string line;
+  std::getline(f, line);
+  std::vector<std::vector<double>> rows;
+  while (std::getline(f, line)) {
+    std::vector<double> x;
+    std::stringstream ss(line);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) x.push_back(std::strtod(tok.c_str(), nullptr));
+    if (!x.empty()) rows.push_back(x);
+  }
+  REQUIRE(rows.size() == 56);
+  const auto y = mvgaussian_cdf_dab_rows(rows);
+  // worst relative error by order: rows with log P above -23; below it, the
+  // entries in the limits of coordinates with one infinite end (the log route)
+  // and those touching a coordinate with both ends finite (the recursion)
+  namespace dm = laplace::math::detail_mvnormal;
+  double worst[3][3] = {};
+  for (std::size_t i = 0; i < rows.size(); ++i) {
+    const auto& r = rows[i];
+    const int k = int(r[0]), z = 2 * k;
+    for (int n = 1; n <= 3; ++n) {
+      const int o0 = dm::tuples_upto(z, n - 1) - 1;
+      int t[3] = {0, 0, 0}, q = 0;
+      do {
+        bool two = false;
+        for (int c = 0; c < n; ++c) two = two || (std::isfinite(r[1 + t[c] % k]) && std::isfinite(r[5 + t[c] % k]));
+        const int cls = r[13] > -23 ? 0 : two ? 2 : 1;
+        const double ref = r[15 + o0 + q], v = y(i, o0 + q);
+        worst[cls][n - 1] = std::fmax(worst[cls][n - 1], std::fabs(v - ref) / std::fmax(1.0, std::fabs(ref)));
+        ++q;
+      } while (dm::next_tuple(z, n, t));
+    }
+  }
+  INFO("log P > -23: orders 1-3 ", worst[0][0], " ", worst[0][1], " ", worst[0][2]);
+  INFO("log P < -23, one infinite end: orders 1-3 ", worst[1][0], " ", worst[1][1], " ", worst[1][2]);
+  INFO("log P < -23, both ends finite: orders 1-3 ", worst[2][0], " ", worst[2][1], " ", worst[2][2]);
+  const double bound[3][3] = {{2e-14, 5.3e-12, 2.3e-10}, {9e-14, 3.5e-15, 2.8e-13}, {6.8e-13, 4.8e-10, 6.8e-8}};
+  for (int c = 0; c < 3; ++c)
+    for (int n = 0; n < 3; ++n) CHECK(worst[c][n] <= bound[c][n]);
+}
 
 // the kernel in a function with external linkage (note/brief_agenti.md)
 Kokkos::View<double**, Kokkos::LayoutRight, Kokkos::HostSpace> mvgaussian_cdf_device_rows(int n) {
@@ -199,6 +326,24 @@ TEST_CASE("mvgaussian cdf: theta blocks in the far tail, against central differe
   }
   INFO("max relative difference ", worst);
   CHECK(worst <= 1e-8);
+}
+
+TEST_CASE("mvgaussian cdf: four coordinates in the far tail, against central differences of the order below" *
+          doctest::test_suite("slow")) {
+  // the log route with the cumulants of the tensor rule over three coordinates;
+  // the recursion lost 7.6e-4 (K = 3, A = 2), 3.7e-3 (A = 6) and 2.8e-2 (K = 2,
+  // A = 4) at this point
+  const D1 g(S(4));
+  double th[10];
+  for (int q = 0; q < 10; ++q) th[q] = 0.1 * ((q * 7) % 5) - 0.2;
+  double y[4] = {-10.0, -9.7, -9.4, -9.1}, b[4] = {0, 0, 0, 0}, mu[4] = {0, 0, 0, 0};
+  const int idx[3] = {1, 1, 2};
+  const double e[] = {diff_theta<D1, 3, 2>(g, lower, th, y, b, mu, idx), diff_mu<D1, 2, 4>(g, lower, th, y, b, mu, idx),
+                      diff_mu<D1, 0, 6>(g, lower, th, y, b, mu, idx)};
+  for (double v : e) {
+    INFO("relative difference ", v);
+    CHECK(v <= 1e-8);
+  }
 }
 
 TEST_CASE("mvgaussian cdf: values against log_mvn_rect, and y against the location") {

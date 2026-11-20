@@ -192,7 +192,7 @@ LAPLACE_HD double gaussian_laplace_log_integral(int k, const double* m, const do
  * \param lam Non-negative finite rates, as in gaussian_laplace_log_integral().
  * \param mean Output array receiving \f$k\f$ mean coordinates (filled with quiet NaN on invalid input).
  * \param w Workspace of at least `gaussian_laplace_scratch(k, 1)` doubles.
- * \param n_lattice Lattice size passed to log_mvn_trunc_cumulants() for \f$k \ge 4\f$ (default
+ * \param n_lattice Lattice size passed to log_mvn_trunc_cumulants() for \f$k \ge 5\f$ (default
  *        `mvn_trunc_default_lattice`, 65521).
  * \return \f$\log I\f$, or quiet NaN under the conditions of gaussian_laplace_log_integral().
  *
@@ -223,7 +223,7 @@ LAPLACE_HD double gaussian_laplace_mean(int k, const double* m, const double* S,
  * \param cov Output array receiving \f$k(k+1)/2\f$ packed lower-triangular entries (filled with
  *        quiet NaN on invalid input).
  * \param w Workspace of at least `gaussian_laplace_scratch(k, 2)` doubles.
- * \param n_lattice Lattice size passed to log_mvn_trunc_cumulants() for \f$k \ge 4\f$ (default
+ * \param n_lattice Lattice size passed to log_mvn_trunc_cumulants() for \f$k \ge 5\f$ (default
  *        `mvn_trunc_default_lattice`, 65521).
  * \return \f$\log I\f$, or quiet NaN under the conditions of gaussian_laplace_log_integral().
  *

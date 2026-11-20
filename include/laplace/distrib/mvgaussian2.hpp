@@ -435,6 +435,23 @@ struct mvgaussian2_distrib<S> {
     return detail_mvgaussian_cdf::log_dy_dk<true, detail_mvgaussian_cdf::region::upper, J, K, detail_mv::dense_order<A...>()>(
         structure, st, y, mu, idx, out, w);
   }
+  /// \brief Doubles of `w` needed by `log_rect_prob_dab_dk` of orders `Ja` in \f$a\f$, `Jb` in \f$b\f$, `K` in \f$\theta\f$ and `A` in \f$\mu\f$.
+  LAPLACE_HD int cdf_dab_scratch_size(int Ja, int Jb, int K, int A = 0) const {
+    return detail_mvgaussian_cdf::dab_scratch(structure, Ja + Jb, K, A);
+  }
+  /**
+   * \brief Derivatives of \f$\log\Pr(a < Y \le b)\f$ of orders `Ja` in \f$a\f$, `Jb` in \f$b\f$, `K` in \f$\theta\f$ along `idx` and `A` in \f$\mu\f$.
+   *
+   * The output is the Kronecker product of the packed tensors of orders `Ja`, `Jb` and `A`
+   * (the \f$a\f$ factor outermost, then \f$b\f$), each in the layout of `logpdf_dk`.
+   * \f$Ja + Jb + K + A \le 6\f$. `w` has `cdf_dab_scratch_size(Ja, Jb, K, A)` doubles.
+   */
+  template <int Ja, int Jb, int K, int... A>
+  LAPLACE_HD bool log_rect_prob_dab_dk(const mvgaussian2_state& st, const double* a, const double* b, const double* mu, const int* idx,
+                                       double* out, double* w) const {
+    return detail_mvgaussian_cdf::log_dab_dk<true, Ja, Jb, K, detail_mv::dense_order<A...>()>(structure, st, a, b, mu, idx, out,
+                                                                                         w);
+  }
   ///@}
 };
 
@@ -854,6 +871,16 @@ struct mvgaussian2_distrib<S> {
   bool log_ccdf_dy_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const int*, double* out,
                       double*) const {
     return fill_nan_(sym_tensor_size(structure.dim, J) * sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()), out);
+  }
+  /// \brief 0: the members below use no workspace.
+  int cdf_dab_scratch_size(int Ja, int Jb, int K, int A = 0) const { return (void)Ja, (void)Jb, (void)K, (void)A, 0; }
+  /// \brief Every component quiet NaN (layout of `log_rect_prob_dab_dk`); returns true.
+  template <int Ja, int Jb, int K, int... A>
+  bool log_rect_prob_dab_dk(const mvgaussian_rank_deficient_state&, const double*, const double*, const double*, const int*,
+                            double* out, double*) const {
+    return fill_nan_(sym_tensor_size(structure.dim, Ja) * sym_tensor_size(structure.dim, Jb) *
+                         sym_tensor_size(structure.dim, detail_mv::dense_order<A...>()),
+                     out);
   }
   ///@}
 

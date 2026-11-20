@@ -116,7 +116,7 @@ TEST_CASE("gaussian_laplace: log integral, mean and covariance against mpmath, k
                                    {5.5e-14, 5.5e-14, 2.1e-14, 7.5e-14},
                                    {9.7e-14, 8.3e-14, 3.2e-13, 2.1e-13},
                                    {1.7e-13, 1.7e-13, 2.1e-12, 6.8e-12},
-                                   {5.0e-6, 5.0e-6, 1.4e-4, 2.7e-3},
+                                   {5.0e-6, 6.1e-11, 5.9e-9, 4.8e-8},
                                    {8.7e-6, 8.7e-6, 1.2e-4, 1.8e-3}};
   for (int k = 1; k <= KM; ++k) {
     INFO("k = ", k, ": log I ", worst[k][0], ", log I (moments) ", worst[k][1], ", mean ", worst[k][2], ", cov ",
