@@ -149,6 +149,12 @@ TEST_CASE("distrib: derivatives in y and mixed (y, theta) against differences") 
   const ld::gamma1_distrib g{2.0, 0.3};
   CHECK(g.logpdf_dy_dk<0, 0>(1.3)[0] == g.logpdf(1.3));
   CHECK(g.logpdf_dy_dk<0, 3>(1.3)[2] == g.logpdf_d3(1.3)[2]);
+  // at shape 1 (phi = 1) l' = -1/mu for every y: no cancellation of two 1/y terms near y = 0
+  const ld::gamma1_distrib e{1.5, 1.0};
+  for (double y : {1e-8, 1e-12, 1e-16, 1e-20, 1e-300}) {
+    CHECK(e.logpdf_dy_dk<1, 0>(y)[0] == doctest::Approx(-1.0 / 1.5).epsilon(1e-15));
+    CHECK(e.logpdf_dy_dk<2, 0>(y)[0] == 0.0);
+  }
   for (double y : {-3.0, 0.2, 1.7, 9.0}) check_y_derivs<ld::gaussian1_distrib>({0.4, 1.3}, y, 1e-3, 1e-8);
   for (double y : {-3.0, 0.2, 1.7, 9.0}) check_y_derivs<ld::laplace1_distrib>({0.4, 1.3}, y, 1e-3, 1e-8);
   for (double phi : {0.02, 0.3, 4.0})

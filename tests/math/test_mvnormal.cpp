@@ -203,7 +203,7 @@ TEST_CASE("mvnormal: one-factor rectangles and orthants against mpmath, k = 3..8
   for (int k = 5; k <= 8; ++k) check_logp("mvn_factor", sub, y, 31, 0, k, {1.8e-5, 7.1e-5, 4.3e-5, 1.4e-5, 1.9e-9});
 }
 
-TEST_CASE("mvnormal: the orthants of the lasso LAML against mpmath, k = 2..6") {
+TEST_CASE("mvnormal: the orthants of the lasso LAML against mpmath, k = 2..6" * doctest::test_suite("slow")) {
   const auto rows = read_rows("mvn_laml");
   const auto y = mvnormal_run_factor<10>(to_device(rows), lm::mvn_default_lattice);
   for (int k = 2; k <= 4; ++k) check_logp("mvn_laml", rows, y, 31, 0, k, {7.8e-15, 1.7e-14, 6.6e-14, 3.7e-13, 1e-14});

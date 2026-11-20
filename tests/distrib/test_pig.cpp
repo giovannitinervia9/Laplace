@@ -389,7 +389,7 @@ TEST_CASE("distrib pig: I_alpha_alpha against the mpmath reference") { check_pig
 
 // The two routes of I_alpha_alpha where both are defined: the generic sweep is forced by asking it
 // directly, and must agree with the member wherever it converges honestly.
-TEST_CASE("distrib pig: the two routes of I_alpha_alpha agree") {
+TEST_CASE("distrib pig: the two routes of I_alpha_alpha agree" * doctest::test_suite("slow")) {
   for (double mu : {0.5, 1.0, 10.0, 100.0})
     for (double alpha : {0.1, 0.3, 1.0, 3.0}) {
       const ld::pig_distrib d{mu, alpha};

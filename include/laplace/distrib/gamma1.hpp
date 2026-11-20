@@ -216,6 +216,9 @@ struct gamma1_distrib {
     } else {
       using detail_gamma1::fact;
       const double s = 1.0 / phi;
+      // s - 1 written as (1 - phi) / phi, exact at phi = 1 (1 - phi is exact near 1); as 1/phi - 1,
+      // and in l' as s (mu - y)/(mu y) - 1/y, two terms of size 1/y cancelled near y = 0 at shape 1
+      const double cs = (1.0 - phi) / phi;
       double g[K + 1];
       if constexpr (K >= 1) detail_gamma1::reciprocal_derivs<K>(s, g);
       g[0] = s;
@@ -224,7 +227,7 @@ struct gamma1_distrib {
         double v = 0.0;
         if constexpr (J == 1) {
           if (a == 0) {
-            v = g[b] * (mu - y) / (mu * y) - (b == 0 ? 1.0 / y : 0.0);
+            v = b == 0 ? cs / y - s / mu : g[b] * (mu - y) / (mu * y);
           } else {
             double im = 1.0 / mu;  // mu^-(a+1)
             for (int i = 0; i < a; ++i) im /= mu;
@@ -233,8 +236,9 @@ struct gamma1_distrib {
         } else if (a == 0) {
           double iy = 1.0;
           for (int i = 0; i < J; ++i) iy /= y;
-          const double cb = b == 0 ? s - 1.0 : g[b];
-          v = cb * ((J % 2 == 1) ? 1.0 : -1.0) * fact(J - 1) * iy;
+          const double cb = b == 0 ? cs : g[b];
+          // an exact zero (shape 1) stays zero where 1/y^J overflows
+          v = cb == 0.0 ? 0.0 : cb * ((J % 2 == 1) ? 1.0 : -1.0) * fact(J - 1) * iy;
         }
         t[b] = v;
       }

@@ -85,7 +85,7 @@ Kokkos::View<double**, Kokkos::LayoutRight, Kokkos::HostSpace> gaussian_laplace_
   return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), y);
 }
 
-TEST_CASE("gaussian_laplace: log integral, mean and covariance against mpmath, k = 1..5") {
+TEST_CASE("gaussian_laplace: log integral, mean and covariance against mpmath, k = 1..5" * doctest::test_suite("slow")) {
   const auto rows = read_gl_rows();
   const auto y = gaussian_laplace_run(rows);
   // worst by k: log I (value function), log I (moment functions), mean, covariance

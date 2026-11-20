@@ -199,7 +199,7 @@ void check_fit(const wave2_reference::dataset& d, const ncvreg_fit& ref, const s
 
 }  // namespace nonconvex_fit_test
 
-TEST_CASE("nonconvex fits: MCP and SCAD against the frozen ncvreg references") {
+TEST_CASE("nonconvex fits: MCP and SCAD against the frozen ncvreg references" * doctest::test_suite("slow")) {
   using namespace nonconvex_fit_test;
   const std::string dir = LAPLACE_REFERENCE_DIR "/optimizers/wave2";
   const auto fits = read_ncvreg_fits(dir);

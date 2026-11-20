@@ -585,6 +585,6 @@ TEST_CASE("primal_dual: trend filtering and enet on differences, optimality cond
 TEST_CASE("primal_dual: Laplace log-scale likelihood") { primal_dual_test::laplace_scale_cases(); }
 TEST_CASE("primal_dual: statuses") { primal_dual_test::status_cases(); }
 TEST_CASE("primal_dual: the same status with a sequential and a parallel sum") { primal_dual_test::rounding_case(); }
-TEST_CASE("primal_dual: genlasso references (fused, trend filtering, enet on differences)") {
+TEST_CASE("primal_dual: genlasso references (fused, trend filtering, enet on differences)" * doctest::test_suite("slow")) {
   primal_dual_test::genlasso_cases();
 }

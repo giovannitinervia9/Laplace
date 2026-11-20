@@ -233,6 +233,6 @@ void fit_distrib_laws_cases() {
   }
 }
 
-TEST_CASE("fit_distrib bench: 17 laws added after the first bench against R's MLE and statmodels7") {
+TEST_CASE("fit_distrib bench: 17 laws added after the first bench against R's MLE and statmodels7" * doctest::test_suite("slow")) {
   fit_distrib_laws_cases();
 }

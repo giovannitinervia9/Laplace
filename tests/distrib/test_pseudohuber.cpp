@@ -442,7 +442,7 @@ double check_generic_info_derivs(const std::vector<double>& th, int K) {
 
 }  // namespace
 
-TEST_CASE("pseudohuber: derivatives of the expected information (generic route, both forms) against differences") {
+TEST_CASE("pseudohuber: derivatives of the expected information (generic route, both forms) against differences" * doctest::test_suite("slow")) {
   double worst[2][5] = {};
   for (const std::vector<double>& th : {std::vector<double>{0.4, 1.3, 2.5}, std::vector<double>{-2.0, 0.25, 0.3}})
     for (int K = 1; K <= (th[2] > 1.0 ? 4 : 3); ++K) {
