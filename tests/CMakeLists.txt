@@ -112,6 +112,7 @@ set(LAPLACE_TEST_SOURCES
   dense/test_dense.cpp
   optimizers/test_optimizers.cpp
   optimizers/test_quasi_newton.cpp
+  optimizers/test_conjugate_gradient.cpp
   optimizers/test_multistart.cpp
   optimizers/test_fit_distrib.cpp
   optimizers/test_fit_distrib_laws.cpp
@@ -125,6 +126,7 @@ set(LAPLACE_TEST_SOURCES
   optimizers/test_primal_dual.cpp
   optimizers/test_linear_map_fits.cpp
   optimizers/test_nonconvex_fits.cpp
+  optimizers/test_first_order.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

@@ -1,0 +1,161 @@
+/**
+\addtogroup optimizers_first_order
+
+This page documents first-order methods for unconstrained minimization in namespace `laplace::optimizers`: gradient descent (`<laplace/optimizers/gradient_descent.hpp>`), Barzilai-Borwein (`<laplace/optimizers/barzilai_borwein.hpp>`), Adam (`<laplace/optimizers/adam.hpp>`), and the nonmonotone line search (`<laplace/optimizers/line_search.hpp>`), for objectives with a gradient and many parameters. They are header-only templates running on the host only; nothing is marked `LAPLACE_HD` and no library is linked. A run starts with `minimize(optimizer, f, x0)`, using the objectives, report, statuses, and stopping rules of \ref optimizers "the optimizers page". Conjugate gradient is in its own section below.
+
+## Gradient descent
+
+The class template \ref laplace::optimizers::gradient_descent_optimizer "gradient_descent_optimizer" (`gradient_descent_optimizer<Rule, LineSearch>`) minimizes an objective modeling \ref laplace::optimizers::gradient_objective "gradient_objective" in \f$\mathbb{R}^n\f$, defaulting to \ref laplace::optimizers::decrement_stop_rule "decrement_stop_rule" and \ref laplace::optimizers::armijo_line_search "armijo_line_search". `Rule` may be any rule with needs within \ref laplace::optimizers::first_order_provides "first_order_provides" (gradient, decrement, previous). Both `gradient_descent_optimizer` and `barzilai_borwein_optimizer` accept any of the three line searches (`armijo_line_search`, `nonmonotone_line_search`, and `wolfe_line_search`); with `wolfe_line_search` the gradient comes from the search, and otherwise the optimizer makes one more `value_gradient()` call at the accepted point.
+
+Gradient descent and Barzilai-Borwein share one loop. Each iteration searches from step \f$1\f$ along \f$d_k = -\alpha_k g_k\f$, where \f$g_k = \nabla f(x_k)\f$, so the step along \f$-g_k\f$ is \f$t_k = \alpha_k\f$ times the accepted step of the search. Scaling \f$d_k\f$ rather than the initial step keeps the slope \f$g_k^\top d_k\f$ finite where \f$\lVert g_k \rVert_2^2\f$ overflows, as at the start \f$x_i = 700\f$ of \f$\sum_i \cosh x_i\f$, where \f$-g_k^\top g_k\f$ overflows to \f$-\infty\f$.
+
+Gradient descent starts at \f$\alpha_0 = \min\bigl(1,\, 1 / \lVert g_0 \rVert_\infty\bigr)\f$, and after an accepted step \f$t_k\f$ sets
+\f[
+\alpha_{k+1} = t_k \frac{g_k^\top g_k}{g_{k+1}^\top g_{k+1}}
+\f]
+(Nocedal and Wright, 2006, section 3.5), keeping \f$t_k\f$ when that ratio is not finite or not positive.
+
+For both gradient descent and Barzilai-Borwein, the stationarity decrement at iteration \f$k\f$ is
+\f[
+\delta_k = \frac{1}{2} \max(b_k, \gamma_{\max})\, g_k^\top g_k,
+\f]
+where \f$b_k\f$ is the last step \f$t_{k-1}\f$ for gradient descent (\f$\alpha_0\f$ before any step) and the next \f$\alpha_k\f$ for Barzilai-Borwein, and \f$\gamma_{\max}\f$ is the largest \f$s^\top s / s^\top y\f$ over accepted pairs \f$(s, y)\f$ satisfying \f$s^\top y > \tau \lVert s \rVert_2 \lVert y \rVert_2\f$ (\f$0\f$ before any pair), with \f$\tau\f$ equal to `curvature_tolerance` (default \f$10^{-10}\f$). First-order steps sample mostly the stiff directions, and with \f$s^\top y / y^\top y\f$ Barzilai-Borwein declared convergence on a quadratic with \f$\kappa = 10^6\f$ with \f$f - f^*\f$ equal to \f$2000\f$ times the measure; with \f$s^\top s / s^\top y\f$, every converged run measured has \f$f - f^* \le 2\delta\f$.
+
+A convergence verdict must hold at two consecutive iterations, and a pending verdict stands when the confirming search finds no acceptable step, following the same rule as \ref optimizers_quasi_newton "the quasi-Newton methods". Public settings are `stop_rule`, `line_search`, `max_iterations` (\f$10000\f$), `max_evaluations` (\f$10^6\f$, checked before each search), `curvature_tolerance` (\f$10^{-10}\f$), and `trace`. Statuses match \ref optimizers_quasi_newton "BFGS" without a stall reset: `stalled` on `step_below_rounding` or `below_resolution`, `line_search_failed` on any other search failure or a non-finite gradient at an accepted point, `iteration_budget`, `evaluation_budget`, and `start_not_admissible`.
+
+## The nonmonotone line search
+
+\ref laplace::optimizers::nonmonotone_reference "nonmonotone_reference" and \ref laplace::optimizers::nonmonotone_line_search "nonmonotone_line_search" (`<laplace/optimizers/line_search.hpp>`) implement Zhang and Hager's nonmonotone search (Zhang and Hager, 2004). `nonmonotone_reference` stores `value` (\f$C_k\f$, quiet NaN by default) and `weight` (\f$Q_k\f$, default \f$1\f$); `start(f)` sets \f$C_0 = f_0\f$ and \f$Q_0 = 1\f$, and `accept(f, averaging)` updates
+\f[
+Q_{k+1} = \eta Q_k + 1, \qquad C_{k+1} = \frac{\eta Q_k C_k + f_{k+1}}{Q_{k+1}},
+\f]
+with \f$\eta\f$ equal to `averaging`. Because \f$C_k\f$ lies between \f$f_k\f$ and \f$C_{k-1}\f$, \f$C_k \ge f_k\f$ (Zhang and Hager, 2004).
+
+`nonmonotone_line_search::search(objective, x, value, reference, g, d, initial_step, x_trial)` accepts a step \f$s\f$ when \f$\phi(s) - \max(f(x), C_k) \le c_1 s \phi'(0)\f$, where \f$\phi(s) = f(x + s d)\f$ and \f$\phi'(0) = g^\top d < 0\f$; a step that raises \f$f\f$ is accepted while it stays below \f$C_k\f$. Its backtracking (interpolation through \f$\phi(0) = f(x)\f$, refused points, step below rounding, resolution test, and outcomes) is that of \ref laplace::optimizers::armijo_line_search "armijo_line_search" on \ref optimizers "the optimizers page". Defaults are `sufficient_decrease` \f$10^{-4}\f$, `averaging` \f$0.85\f$ (Zhang and Hager's value), `min_shrink` \f$0.1\f$, `max_shrink` \f$0.5\f$, `max_evaluations` \f$60\f$, and `resolution` \f$0\f$. Setting `averaging` to \f$0\f$ gives \f$C_k = f_k\f$, matching `armijo_line_search` in outcome, step, value, and evaluations; \f$1\f$ gives the mean of all values. Callers keep `nonmonotone_reference` via `start()` at \f$x_0\f$ and `accept()` at each new point, as gradient descent and Barzilai-Borwein do.
+
+## Barzilai-Borwein steps
+
+The class template \ref laplace::optimizers::barzilai_borwein_optimizer "barzilai_borwein_optimizer" (`barzilai_borwein_optimizer<Rule, LineSearch>`) defaults to `decrement_stop_rule` and `nonmonotone_line_search` (Raydan, 1997), sharing the loop, stationarity rule, confirmation, and statuses of `gradient_descent_optimizer`. It starts from \f$\alpha_0 = \min\bigl(1,\, 1 / \lVert g_0 \rVert_\infty\bigr)\f$, clamped to [`alpha_min`, `alpha_max`] (defaults \f$10^{-10}\f$ and \f$10^{10}\f$). After an accepted step with \f$s^\top y > \tau \lVert s \rVert_2 \lVert y \rVert_2\f$, `step` (enum \ref laplace::optimizers::barzilai_borwein_step "barzilai_borwein_step", Barzilai and Borwein, 1988) selects `long_step` (\f$s^\top s / s^\top y\f$), `short_step` (\f$s^\top y / y^\top y\f$), or the default `alternating` (long at odd iterations, short at even ones), clamped to [`alpha_min`, `alpha_max`].
+
+When the curvature pair is refused, \f$\alpha_{k+1}\f$ resets to \f$\min\bigl(1,\, 1 / \lVert g_{k+1} \rVert_\infty\bigr)\f$ (clamped), never keeping the previous \f$\alpha_k\f$: on Rosenbrock with `short_step`, keeping the previous scale held \f$\alpha = 9.3 \times 10^{-4}\f$ for \f$650\f$ iterations (\f$759\f$ in all) against \f$88\f$ with the reset. Alongside the settings shared with `gradient_descent_optimizer`, it adds `step` (`alternating`), `alpha_min` (\f$10^{-10}\f$), and `alpha_max` (\f$10^{10}\f$).
+
+## Adam
+
+The class template \ref laplace::optimizers::adam_optimizer "adam_optimizer" (`adam_optimizer<Rule>`) implements deterministic Adam on the full gradient (Kingma and Ba, 2015), with `Rule` defaulting to `decrement_stop_rule` within `first_order_provides`. At \f$x_k\f$, starting from \f$m_0 = v_0 = 0\f$, it updates elementwise
+\f[
+m_k = \beta_1 m_{k-1} + (1 - \beta_1) g_k, \qquad v_k = \beta_2 v_{k-1} + (1 - \beta_2) g_k^2,
+\f]
+forms \f$\hat m = m_k / (1 - \beta_1^k)\f$ and \f$\hat v = v_k / (1 - \beta_2^k)\f$ when `bias_correction` is `true`, and proposes \f$u = -B \hat m\f$ with \f$B = \operatorname{diag}\bigl(\ell / (\sqrt{\hat v} + \epsilon)\bigr)\f$, where \f$\ell\f$, \f$\beta_1\f$, \f$\beta_2\f$ and \f$\epsilon\f$ are `learning_rate`, `beta1`, `beta2` and `epsilon`, and \f$g_k^2\f$ and the square root act elementwise. Defaults are `learning_rate` \f$10^{-3}\f$, `beta1` \f$0.9\f$, `beta2` \f$0.999\f$, `epsilon` \f$10^{-8}\f$, `bias_correction` `true`, `max_iterations` \f$10^5\f$, `max_evaluations` \f$10^6\f$, `max_refusals` \f$60\f$, `curvature_tolerance` \f$10^{-10}\f$, `trace`, and `stop_rule`.
+
+There is no line search: \f$x + u\f$ is accepted whenever \f$f\f$ and \f$g\f$ are finite there, whether or not \f$f\f$ fell. A non-finite value or gradient is a refused point (never clamped, as on \ref optimizers "the optimizers page"): the step is halved up to `max_refusals` times without updating the moments again, then returns `line_search_failed`. A trial point equal to \f$x\f$ ends `stalled`, or confirms a pending verdict.
+
+The stationarity decrement is \f$\delta = \frac{1}{2} \max\bigl(g^\top B g,\ \gamma_{\max}\, g^\top g\bigr)\f$, where \f$B\f$ is the diagonal of the step about to be taken and \f$\gamma_{\max}\f$ is the largest \f$s^\top y / y^\top y\f$ over steps with \f$s^\top y > \tau \lVert s \rVert_2 \lVert y \rVert_2\f$. When \f$g^\top g\f$ overflows, \f$\delta\f$ is \f$+\infty\f$, because otherwise \f$B = 0\f$ there and the measure would read \f$0\f$ at the start of \f$\sum_i \cosh x_i\f$ from \f$700\f$. Every converged run measured satisfies \f$f - f^* \le 1.52\,\delta\f$. Convergence uses the same two-iteration confirmation as \ref optimizers_quasi_newton "the quasi-Newton methods".
+
+## Conjugate gradient
+
+The class template \ref laplace::optimizers::conjugate_gradient_optimizer "conjugate_gradient_optimizer" (`conjugate_gradient_optimizer<Rule, LineSearch>`, `<laplace/optimizers/conjugate_gradient.hpp>`) minimizes an unconstrained objective modeling \ref laplace::optimizers::gradient_objective "gradient_objective" in \f$\mathbb{R}^n\f$ on the host only, with \f$O(n)\f$ work per iteration and three \f$n\f$-vectors of state. A run starts with `minimize(conjugate_gradient_optimizer<>{}, f, x0)`, where `Rule` defaults to \ref laplace::optimizers::decrement_stop_rule "decrement_stop_rule" (checked against \ref laplace::optimizers::quasi_newton_provides "quasi_newton_provides") and `LineSearch` defaults to \ref laplace::optimizers::wolfe_line_search "wolfe_line_search" (Nocedal and Wright, 2006, Algorithms 3.5 and 3.6) with `curvature` set to \f$0.1\f$.
+
+At step \f$k\f$ with gradient \f$g_k = \nabla f(x_k)\f$ and gradient difference \f$y = g_k - g_{k-1}\f$, the conjugate direction is \f$p_k = -g_k + \beta_k p_{k-1}\f$ (Nocedal and Wright, 2006, section 5.2). The enum \ref laplace::optimizers::conjugate_gradient_beta "conjugate_gradient_beta" provides five formulas for \f$\beta_k\f$: `fletcher_reeves` uses \f$\beta = g_k^\top g_k / g_{k-1}^\top g_{k-1}\f$ (Fletcher and Reeves, 1964); `polak_ribiere_plus` uses \f$\beta = \max(0,\, g_k^\top y / g_{k-1}^\top g_{k-1})\f$ (Polak and Ribière, 1969; clamped at zero as in Nocedal and Wright, 2006, eq. (5.45)); `hestenes_stiefel` uses \f$\beta = g_k^\top y / p_{k-1}^\top y\f$ (Hestenes and Stiefel, 1952); `dai_yuan` uses \f$\beta = g_k^\top g_k / p_{k-1}^\top y\f$ (Dai and Yuan, 1999); and the default `hager_zhang` uses \f$\beta = \max(\beta^N, \eta_k)\f$ with \f$\beta^N = \bigl(y - 2 p_{k-1} \lVert y\rVert^2 / p_{k-1}^\top y\bigr)^\top g_k / p_{k-1}^\top y\f$ and \f$\eta_k = -1 / \bigl(\lVert p_{k-1}\rVert \min(0.01,\, \lVert g_{k-1}\rVert)\bigr)\f$ (Hager and Zhang, 2005), where \f$\lVert \cdot \rVert\f$ is the Euclidean norm.
+
+Restarts set \f$\beta = 0\f$ so that \f$p_k = -g_k\f$. A restart occurs on Powell's test \f$|g_k^\top g_{k-1}| \ge c\, g_k^\top g_k\f$ with \f$c\f$ equal to `powell_restart` (default \f$0.2\f$; infinity disables it) (Powell, 1977), every `restart_interval` directions (default \f$0\f$, meaning \f$n\f$), and for `hestenes_stiefel`, `dai_yuan`, and `hager_zhang` whenever \f$p_{k-1}^\top y \le 0\f$. A non-descent direction or a step failing the curvature test \f$s^\top y > \mathrm{tol}\,\lVert s\rVert \lVert y\rVert\f$ (\f$\mathrm{tol} = 10^{-10}\f$, which a strong Wolfe step along a descent direction always passes) restarts along the scaled steepest descent \f$d = -\min\bigl(1,\, 1/\lVert g\rVert_\infty\bigr) g\f$ of \ref laplace::optimizers::bfgs_optimizer "bfgs_optimizer". After a restart \f$p = -g\f$ stays unscaled, because `fletcher_reeves` and `polak_ribiere_plus` are not invariant to the scale of \f$p_{k-1}\f$.
+
+Each line search starts at step \f$1\f$ along \f$d_k = a_k p_k\f$ with \f$a_k = \tau_{k-1} g_{k-1}^\top p_{k-1} / g_k^\top p_k\f$ (Nocedal and Wright, 2006, equation (3.60)), where \f$\tau_{k-1}\f$ is the step accepted along \f$p_{k-1}\f$, so the first trial predicts the first-order decrease of the previous step. The default strong Wolfe curvature constant \f$c_2 = 0.1\f$ gave \f$160833\f$ total value evaluations across all five formulas over the test battery, compared with \f$211886\f$ at \f$c_2 = 0.4\f$ and \f$756169\f$ at \f$c_2 = 0.9\f$.
+
+The stationarity decrement is \f$\delta_k = \frac{1}{2} \max\bigl(|g_k^\top d_k|,\, \gamma_{\max}\, g_k^\top g_k\bigr)\f$ as in \ref laplace::optimizers::bfgs_optimizer "bfgs_optimizer", with \f$\gamma_{\max}\f$ equal to the largest \f$s^\top s / s^\top y\f$ over the accepted steps instead of BFGS's \f$s^\top y / y^\top y\f$ (both are Barzilai and Borwein's inverse curvatures, Barzilai and Borwein, 1988, and the first is the larger). With BFGS's floor, every formula was declared converged up to \f$8.8 \times 10^{-3}\f$ above \f$f^*\f$ on quadratics with \f$\kappa = 10^6\f$ (\f$n = 100\f$) and \f$\kappa = 10^8\f$ (\f$n = 10\f$); with this floor no run was, and the largest \f$f - f^*\f$ of a converged run was \f$7.2 \times 10^{-7}\f$. Confirmation and termination statuses follow \ref laplace::optimizers::bfgs_optimizer "bfgs_optimizer". On Rosenbrock with \f$n = 100\f$, `hager_zhang` takes \f$47.7\f$ microseconds (\f$31\f$ iterations, \f$93\f$ evaluations) against \f$82.3\f$ microseconds (\f$36\f$ iterations, \f$43\f$ evaluations) for \ref laplace::optimizers::lbfgs_optimizer "lbfgs_optimizer", spending about three evaluations per iteration against \f$1.2\f$.
+
+| Problem class | Measured outcome |
+|---|---|
+| Moré-Garbow-Hillstrom problems (\f$f^* = 0, 1, 10^3, 10^6\f$), except Brown badly scaled (\f$f^* \ne 0\f$) | Converged |
+| Brown badly scaled (\f$f^* \ne 0\f$) | `stalled` or `line_search_failed` within \f$2 \times 10^{-5}\f$ of \f$x^*\f$ for most formulas (`fletcher_reeves` and `dai_yuan` at \f$f^* = 1\f$ and `hager_zhang` at \f$f^* = 1, 10^3\f$ converge) |
+| Quadratics up to \f$\kappa = 10^8\f$ (\f$n = 10\f$) and \f$\kappa = 10^6\f$ (\f$n = 100\f$) | Converged |
+| Quadratics at \f$\kappa = 10^{10}\f$ and \f$10^{12}\f$ (\f$n = 10\f$) | `stalled` or `line_search_failed` |
+| Saddle problem from \f$(1, 0)\f$ vs \f$(1, 10^{-3})\f$ | `converged` on the saddle \f$(0, 0)\f$ from \f$(1, 0)\f$; minimum from \f$(1, 10^{-3})\f$ |
+| Exact line searches on quadratics (no restarts) | Matches linear CG and ends in \f$n\f$ steps for \f$n = 5\f$, \f$\kappa = 10^3\f$ and \f$n = 10\f$, \f$\kappa = 10\f$; two extra steps at \f$n = 10\f$, \f$\kappa = 10^3\f$ |
+| \f$\sum_i |x_i|\f$ and noisy objective | Never converged |
+
+See \ref laplace::optimizers::conjugate_gradient_optimizer "conjugate_gradient_optimizer" for the settings table, member defaults, and example.
+
+## Measurements
+
+The table below gives iterations and value evaluations (written as iterations / value evaluations, or iterations alone for Adam on the quadratics) measured with gcc on one thread from the standard starting points with \f$f^* = 0\f$, default settings, and decrement tolerance \f$10^{-6}\f$. Entries marked `sad.` stop at the stationary point near Wood's saddle at \f$f = 7.877\f$, where L-BFGS also stops; entries marked `budget` reach the method's iteration budget (\f$10000\f$ for gradient descent and Barzilai-Borwein, \f$10^5\f$ for Adam).
+
+| Problem | GD Armijo | GD nonmonotone | BB alternating | BB long | BB short | Adam |
+|---|---|---|---|---|---|---|
+| Rosenbrock (\f$n = 2\f$) | 6596/13224 | 5481/10979 | 53/110 | 38/87 | 88/189 | 11241/11242 |
+| Rosenbrock (\f$n = 100\f$) | 8114/16265 | 7050/14119 | 53/110 | 39/89 | 94/201 | 11772/11773 |
+| Powell singular | 6425/12881 | 5260/10535 | 85/179 | 135/290 | 98/201 | 18061/18062 |
+| Beale | 230/477 | 232/475 | 26/54 | 39/82 | 27/55 | 7740/7741 |
+| Helical valley | 1377/2782 | 1305/2625 | 68/139 | 81/173 | 115/233 | 15324/15325 |
+| Wood | 1617/3261 | 3911/7839 | 22/45 sad. | 99/207 | 22/45 sad. | 12775 sad. |
+| Brown badly scaled | budget | budget | budget | budget | budget | budget |
+| Quadratic, \f$\kappa = 10^2\f$ | 197/417 | 172/355 | 62/125 | 55/113 | 62/125 | 18105 |
+| Quadratic, \f$\kappa = 10^4\f$ | budget | budget | 662/1361 | 1047/2477 | 454/923 | 25056 |
+| Quadratic, \f$\kappa = 10^6\f$ | budget | budget | 5484/11378 | budget | 5185/10445 | 74762 |
+| Quadratic, \f$\kappa = 10^8, 10^{10}\f$ | budget | budget | budget | budget | budget | budget |
+
+Every converged run has \f$f - f^* \le 2.8 \times 10^{-6}\f$ (nonmonotone gradient descent on Powell singular). Brown badly scaled reaches every method's iteration budget. On the shifted Moré-Garbow-Hillstrom problems at \f$f^* = 10^6\f$, gradient descent on Rosenbrock ends `stalled` with \f$f - f^* = 6 \times 10^{-8}\f$, because its stationarity measure is \f$3 \times 10^{-6}\f$ while its predicted decreases fall below the rounding of \f$f\f$ (\f$2.2 \times 10^{-10}\f$).
+
+On the negative test cases (`tests/optimizers/test_first_order.cpp`), none of the methods converges on the noisy objective (`stalled` for gradient descent, `line_search_failed` for Barzilai-Borwein, `iteration_budget` for Adam), the quadratics at \f$\kappa = 10^8\f$ and \f$10^{10}\f$ (`iteration_budget`), or the exploded start \f$\sum_i \cosh x_i\f$ from \f$700\f$. On \f$\sum_i |x_i|\f$ from integer starts, Barzilai-Borwein lands exactly on \f$0\f$ (where the subgradient returned is \f$0\f$), while gradient descent and Adam do not converge. On the saddle problem started at \f$(1, 0)\f$ where \f$g_2 = 0\f$, every method reaches the stationary saddle point \f$(0, 0)\f$. The tests check that converged runs satisfy \f$f - f^* \le 10^{-5}\f$, `decrement` \f$\le 10^{-6}\f$, `curvature_evaluations` \f$= 0\f$, and \f$\max_i |x_i - x^*_i| \le 5 \times 10^{-3}\f$ (\f$5 \times 10^{-2}\f$ on Powell singular); see `docs/numerics.md`.
+
+## Example
+
+The example minimizes the Rosenbrock function \f$f(x) = 100 (x_2 - x_1^2)^2 + (1 - x_1)^2\f$ from \f$x_0 = (-1.2, 1)\f$ with `barzilai_borwein_optimizer<>`, after `Kokkos::initialize`.
+
+```cpp
+#include <laplace/optimizers/barzilai_borwein.hpp>
+#include <laplace/optimizers/minimize.hpp>
+
+struct rosenbrock_objective {
+  double value(const laplace::optimizers::optimizer_point& x) const {
+    const double t1 = x(1) - x(0) * x(0);
+    const double t2 = 1.0 - x(0);
+    return 100.0 * t1 * t1 + t2 * t2;
+  }
+  double value_gradient(const laplace::optimizers::optimizer_point& x,
+                        const laplace::optimizers::optimizer_vector& g) const {
+    const double t1 = x(1) - x(0) * x(0);
+    const double t2 = 1.0 - x(0);
+    g(0) = -400.0 * x(0) * t1 - 2.0 * t2;
+    g(1) = 200.0 * t1;
+    return 100.0 * t1 * t1 + t2 * t2;
+  }
+};
+
+bool rosenbrock_example() {
+  laplace::optimizers::optimizer_vector x0("x0", 2);
+  x0(0) = -1.2;
+  x0(1) = 1.0;
+  rosenbrock_objective f;
+  laplace::optimizers::barzilai_borwein_optimizer<> opt;
+  const laplace::optimizers::optimizer_report report = laplace::optimizers::minimize(opt, f, x0);
+  return laplace::optimizers::optimizer_succeeded(report.status);
+}
+```
+
+## Module types and functions
+
+In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::gradient_descent_optimizer "gradient_descent_optimizer"
+- \ref laplace::optimizers::barzilai_borwein_optimizer "barzilai_borwein_optimizer"
+- \ref laplace::optimizers::barzilai_borwein_step "barzilai_borwein_step"
+- \ref laplace::optimizers::adam_optimizer "adam_optimizer"
+- \ref laplace::optimizers::first_order_provides "first_order_provides"
+- \ref laplace::optimizers::nonmonotone_line_search "nonmonotone_line_search"
+- \ref laplace::optimizers::nonmonotone_reference "nonmonotone_reference"
+- \ref laplace::optimizers::conjugate_gradient_optimizer "conjugate_gradient_optimizer"
+- \ref laplace::optimizers::conjugate_gradient_beta "conjugate_gradient_beta"
+
+## References
+
+- J. Barzilai and J. M. Borwein (1988), Two-point step size gradient methods, IMA Journal of Numerical Analysis, 8(1), 141–148. https://doi.org/10.1093/imanum/8.1.141
+- Y. H. Dai and Y. Yuan (1999), A nonlinear conjugate gradient method with a strong global convergence property, SIAM Journal on Optimization, 10(1), 177–182. https://doi.org/10.1137/S1052623497318992
+- R. Fletcher and C. M. Reeves (1964), Function minimization by conjugate gradients, The Computer Journal, 7(2), 149–154. https://doi.org/10.1093/comjnl/7.2.149
+- W. W. Hager and H. Zhang (2005), A new conjugate gradient method with guaranteed descent and an efficient line search, SIAM Journal on Optimization, 16(1), 170–192. https://doi.org/10.1137/030601880
+- M. R. Hestenes and E. Stiefel (1952), Methods of conjugate gradients for solving linear systems, Journal of Research of the National Bureau of Standards, 49(6), 409–436. https://doi.org/10.6028/jres.049.044
+- D. P. Kingma and J. Ba (2015), Adam: A method for stochastic optimization, 3rd International Conference on Learning Representations (ICLR 2015), arXiv:1412.6980. https://doi.org/10.48550/arXiv.1412.6980
+- J. Nocedal and S. J. Wright (2006), Numerical Optimization, 2nd edition, Springer. https://doi.org/10.1007/978-0-387-40065-5
+- E. Polak and G. Ribière (1969), Note sur la convergence de méthodes de directions conjuguées, Revue française d'informatique et de recherche opérationnelle, Série rouge, 3(16), 35–43. https://doi.org/10.1051/m2an/196903R100351
+- M. J. D. Powell (1977), Restart procedures for the conjugate gradient method, Mathematical Programming, 12(1), 241–254. https://doi.org/10.1007/BF01593790
+- M. Raydan (1997), The Barzilai and Borwein gradient method for the large scale unconstrained minimization problem, SIAM Journal on Optimization, 7(1), 26–33. https://doi.org/10.1137/S1052623494266365
+- H. Zhang and W. W. Hager (2004), A nonmonotone line search technique and its application to unconstrained optimization, SIAM Journal on Optimization, 14(4), 1043–1056. https://doi.org/10.1137/S1052623403428208
+*/

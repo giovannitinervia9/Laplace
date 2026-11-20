@@ -69,6 +69,16 @@ inline double max_abs(const optimizer_point& v) {
   return m;
 }
 
+// The inverse curvature that an accepted secant pair (s, y) contributes to the
+// floor gamma_max of the first-order stationarity measure
+// (1/2) max(g'Bg, gamma_max g'g): s's / s'y, the inverse Rayleigh quotient of
+// the average Hessian along s (at most 1 / lambda_min on a quadratic). Shared by
+// gradient descent, Barzilai-Borwein and conjugate gradient. BFGS's s'y / y'y,
+// which first-order steps keep near 1 / lambda_max, let these methods declare
+// convergence with f - f* up to 4800 times the measure (docs/numerics.md,
+// wave 3).
+inline double secant_floor(double sy, double ss, double /*yy*/) { return ss / sy; }
+
 }  // namespace detail
 
 /**

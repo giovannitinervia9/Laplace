@@ -157,6 +157,73 @@ inline double quadratic_minimizer(double a, double fa, double da, double b, doub
   return a - da * w * w / (2.0 * (fb - fa - da * w));
 }
 
+// The backtracking of armijo_line_search and nonmonotone_line_search: a step
+// is accepted when phi(s) - reference <= c1 s phi'(0), with reference = phi(0)
+// for Armijo and the moving average C_k for the nonmonotone search; the
+// interpolation is always through phi(0) = value.
+template <value_objective O>
+line_search_result backtracking_search(O& objective, const optimizer_point& x, double value, double reference,
+                                       const optimizer_point& g, const optimizer_point& d, double initial_step,
+                                       const optimizer_vector& x_trial, double sufficient_decrease, double min_shrink,
+                                       double max_shrink, int max_evaluations, double resolution) {
+  line_search_result r;
+  const double slope = detail::dot(g, d);
+  if (!(slope < 0.0) || !std::isfinite(slope)) {
+    r.outcome = line_search_outcome::not_descent_direction;
+    return r;
+  }
+  if (resolution > 0.0 && initial_step * std::abs(slope) < resolution) {
+    r.outcome = line_search_outcome::below_resolution;
+    return r;
+  }
+  double s = initial_step, s_prev = 0.0, f_prev = 0.0;
+  bool have_prev = false;
+  while (r.value_evaluations < max_evaluations) {
+    r.step = s;
+    if (!detail::trial_point(x, d, s, x_trial)) {
+      r.outcome = line_search_outcome::step_below_rounding;
+      return r;
+    }
+    const double ft = objective.value(optimizer_point(x_trial));
+    ++r.value_evaluations;
+    if (std::isfinite(ft) && ft - reference <= sufficient_decrease * s * slope) {
+      r.outcome = line_search_outcome::accepted;
+      r.value = ft;
+      return r;
+    }
+    double s_new;
+    if (!std::isfinite(ft)) {
+      ++r.refused_evaluations;
+      s_new = max_shrink * s;
+      have_prev = false;  // nothing to interpolate through
+    } else {
+      const double r1 = ft - value - slope * s;  // > 0: the curvature seen at s
+      if (!have_prev) {
+        s_new = -slope * s * s / (2.0 * r1);
+      } else {
+        const double r2 = f_prev - value - slope * s_prev;
+        const double a = (r1 / (s * s) - r2 / (s_prev * s_prev)) / (s - s_prev);
+        const double b = (-s_prev * r1 / (s * s) + s * r2 / (s_prev * s_prev)) / (s - s_prev);
+        const double disc = b * b - 3.0 * a * slope;
+        if (a == 0.0)
+          s_new = -slope / (2.0 * b);
+        else if (disc < 0.0)
+          s_new = max_shrink * s;
+        else if (b <= 0.0)
+          s_new = (-b + std::sqrt(disc)) / (3.0 * a);
+        else
+          s_new = -slope / (b + std::sqrt(disc));  // the same root, without cancellation
+      }
+      s_prev = s;
+      f_prev = ft;
+      have_prev = true;
+    }
+    s = std::isnan(s_new) ? max_shrink * s : std::clamp(s_new, min_shrink * s, max_shrink * s);
+  }
+  r.outcome = line_search_outcome::evaluation_budget;
+  return r;
+}
+
 }  // namespace detail
 
 /**
@@ -316,62 +383,8 @@ struct armijo_line_search {
   template <value_objective O>
   line_search_result search(O& objective, const optimizer_point& x, double value, const optimizer_point& g,
                             const optimizer_point& d, double initial_step, const optimizer_vector& x_trial) const {
-    line_search_result r;
-    const double slope = detail::dot(g, d);
-    if (!(slope < 0.0) || !std::isfinite(slope)) {
-      r.outcome = line_search_outcome::not_descent_direction;
-      return r;
-    }
-    if (resolution > 0.0 && initial_step * std::abs(slope) < resolution) {
-      r.outcome = line_search_outcome::below_resolution;
-      return r;
-    }
-    double s = initial_step, s_prev = 0.0, f_prev = 0.0;
-    bool have_prev = false;
-    while (r.value_evaluations < max_evaluations) {
-      r.step = s;
-      if (!detail::trial_point(x, d, s, x_trial)) {
-        r.outcome = line_search_outcome::step_below_rounding;
-        return r;
-      }
-      const double ft = objective.value(optimizer_point(x_trial));
-      ++r.value_evaluations;
-      if (std::isfinite(ft) && ft - value <= sufficient_decrease * s * slope) {
-        r.outcome = line_search_outcome::accepted;
-        r.value = ft;
-        return r;
-      }
-      double s_new;
-      if (!std::isfinite(ft)) {
-        ++r.refused_evaluations;
-        s_new = max_shrink * s;
-        have_prev = false;  // nothing to interpolate through
-      } else {
-        const double r1 = ft - value - slope * s;  // > 0: the curvature seen at s
-        if (!have_prev) {
-          s_new = -slope * s * s / (2.0 * r1);
-        } else {
-          const double r2 = f_prev - value - slope * s_prev;
-          const double a = (r1 / (s * s) - r2 / (s_prev * s_prev)) / (s - s_prev);
-          const double b = (-s_prev * r1 / (s * s) + s * r2 / (s_prev * s_prev)) / (s - s_prev);
-          const double disc = b * b - 3.0 * a * slope;
-          if (a == 0.0)
-            s_new = -slope / (2.0 * b);
-          else if (disc < 0.0)
-            s_new = max_shrink * s;
-          else if (b <= 0.0)
-            s_new = (-b + std::sqrt(disc)) / (3.0 * a);
-          else
-            s_new = -slope / (b + std::sqrt(disc));  // the same root, without cancellation
-        }
-        s_prev = s;
-        f_prev = ft;
-        have_prev = true;
-      }
-      s = std::isnan(s_new) ? max_shrink * s : std::clamp(s_new, min_shrink * s, max_shrink * s);
-    }
-    r.outcome = line_search_outcome::evaluation_budget;
-    return r;
+    return detail::backtracking_search(objective, x, value, value, g, d, initial_step, x_trial, sufficient_decrease,
+                                       min_shrink, max_shrink, max_evaluations, resolution);
   }
 };
 
@@ -625,6 +638,176 @@ struct wolfe_line_search {
       s = s_new;
     }
     return fail(line_search_outcome::evaluation_budget);
+  }
+};
+
+/**
+ * \ingroup optimizers_first_order
+ * \brief Moving-average reference value maintained by callers of `nonmonotone_line_search`.
+ *
+ * Stores the weighted average \f$C_k\f$ and cumulative weight \f$Q_k\f$ of
+ * Zhang and Hager's nonmonotone line search (Zhang and Hager, 2004). Calling
+ * `start(f)` at \f$x_0\f$ sets \f$C_0 = f_0\f$ and \f$Q_0 = 1\f$; after an
+ * accepted point with value \f$f_{k+1}\f$, `accept(f, averaging)` applies
+ * \f$Q_{k+1} = \eta Q_k + 1\f$ and
+ * \f$C_{k+1} = (\eta Q_k C_k + f_{k+1}) / Q_{k+1}\f$, where \f$\eta\f$ is
+ * `averaging`. \f$C_k\f$ lies between \f$f_k\f$ and \f$C_{k-1}\f$, so
+ * \f$C_k \ge f_k\f$.
+ *
+ * \see \ref optimizers_first_order, nonmonotone_line_search
+ */
+// The reference value of nonmonotone_line_search (Zhang and Hager 2004): the
+// weighted average C_k of the values f_0, ..., f_k accepted so far, with
+// weight Q_k. start(f_0) gives C_0 = f_0, Q_0 = 1; after an accepted f_{k+1},
+// Q_{k+1} = eta Q_k + 1 and C_{k+1} = (eta Q_k C_k + f_{k+1}) / Q_{k+1}. C_k
+// lies between f_k and C_{k-1}, so C_k >= f_k.
+struct nonmonotone_reference {
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Current moving-average reference value \f$C_k\f$ (default quiet NaN).
+   */
+  double value = std::numeric_limits<double>::quiet_NaN();  // C_k
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Cumulative weight \f$Q_k\f$ (default \f$1\f$).
+   */
+  double weight = 1.0;                                      // Q_k
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Initializes the reference at \f$x_0\f$ with \f$C_0 = f\f$ and \f$Q_0 = 1\f$.
+   *
+   * \param f Initial objective value \f$f(x_0)\f$.
+   */
+  void start(double f) { value = f, weight = 1.0; }
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Updates \f$Q_k\f$ and \f$C_k\f$ after accepting a step with value `f`.
+   *
+   * \param f Accepted objective value \f$f_{k+1}\f$.
+   * \param averaging Averaging factor \f$\eta \in [0, 1]\f$ (`0` gives \f$C_{k+1} = f_{k+1}\f$).
+   */
+  void accept(double f, double averaging) {
+    const double q = averaging * weight + 1.0;
+    value = (averaging * weight * value + f) / q;
+    weight = q;
+  }
+};
+
+/**
+ * \ingroup optimizers_first_order
+ * \brief Zhang and Hager's nonmonotone backtracking line search.
+ *
+ * Searches along a descent direction \f$d\f$ from \f$x\f$ for a step
+ * \f$s > 0\f$ satisfying \f$\phi(s) - R_k \le c_1 s \phi'(0)\f$, where
+ * \f$\phi(s) = f(x + s d)\f$, \f$\phi'(0) = g^\top d < 0\f$, \f$c_1\f$ is
+ * `sufficient_decrease`, and \f$R_k = \max(f(x), C_k)\f$ uses the moving
+ * average \f$C_k\f$ in `nonmonotone_reference` (Zhang and Hager, 2004). A step
+ * that raises \f$f\f$ is accepted while it stays below \f$C_k\f$.
+ *
+ * The backtracking algorithm (quadratic then cubic interpolation through
+ * \f$\phi(0) = f(x)\f$, refused points, the `step_below_rounding` check, the
+ * optional `resolution` test, and all `line_search_outcome` values) is
+ * identical to `armijo_line_search`. Setting `averaging` to \f$0\f$ gives
+ * \f$C_k = f_k\f$, reducing to `armijo_line_search`; setting `averaging` to
+ * \f$1\f$ gives the unweighted mean of all accepted values.
+ *
+ * The caller maintains the `nonmonotone_reference` (`start()` at \f$x_0\f$ and
+ * `accept()` at each new point); `gradient_descent_optimizer` and
+ * `barzilai_borwein_optimizer` do this automatically, with
+ * `nonmonotone_line_search` as the default of `barzilai_borwein_optimizer`.
+ *
+ * ### Settings
+ *
+ * | Member | Default | Effect |
+ * |---|---|---|
+ * | `sufficient_decrease` | \f$10^{-4}\f$ | Sufficient-decrease constant \f$c_1\f$ in \f$\phi(s) - R_k \le c_1 s \phi'(0)\f$ |
+ * | `averaging` | \f$0.85\f$ | Averaging weight \f$\eta \in [0, 1]\f$ passed to `nonmonotone_reference::accept()` (Zhang and Hager's value) |
+ * | `min_shrink` | \f$0.1\f$ | Lower safeguard factor \f$\beta_{\min}\f$ on each backtrack |
+ * | `max_shrink` | \f$0.5\f$ | Upper safeguard factor \f$\beta_{\max}\f$, and shrink factor after a refused point |
+ * | `max_evaluations` | \f$60\f$ | Maximum number of trial `value()` evaluations |
+ * | `resolution` | \f$0\f$ | Optional threshold; when positive, fails with `below_resolution` if \f$s_0 \lvert \phi'(0)\rvert <\f$ `resolution` |
+ *
+ * ### Example
+ *
+ * With `objective`, `x`, `fx`, `g`, `d`, `x_trial` as in the
+ * `armijo_line_search` example:
+ *
+ * \code
+ * laplace::optimizers::nonmonotone_reference ref;
+ * ref.start(fx);
+ * const laplace::optimizers::nonmonotone_line_search search;
+ * const laplace::optimizers::line_search_result r =
+ *     search.search(objective, x, fx, ref, g, d, 1.0, x_trial);
+ * if (r.accepted()) ref.accept(r.value, search.averaging);
+ * \endcode
+ *
+ * \see \ref optimizers_first_order, nonmonotone_reference, armijo_line_search, line_search_result, line_search_outcome
+ */
+// Zhang and Hager's (2004) nonmonotone line search: a step s is accepted when
+// phi(s) - C_k <= c1 s phi'(0), C_k the moving average of nonmonotone_reference;
+// the backtracking (interpolation through phi(0), refused points, rounding) is
+// that of armijo_line_search. averaging = eta in [0, 1]: eta = 0 gives
+// C_k = f_k, the monotone Armijo search; eta = 1 the plain mean of all values.
+// The caller keeps the reference: start() at x_0, accept() at each new point.
+struct nonmonotone_line_search {
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Sufficient-decrease constant \f$c_1\f$ (default \f$10^{-4}\f$).
+   */
+  double sufficient_decrease = 1e-4;  // c1
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Moving-average decay factor \f$\eta \in [0, 1]\f$ (default \f$0.85\f$).
+   */
+  double averaging = 0.85;            // eta (Zhang and Hager's value)
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Lower safeguard factor \f$\beta_{\min}\f$ on each backtracking shrink (default \f$0.1\f$).
+   */
+  double min_shrink = 0.1;
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Upper safeguard factor \f$\beta_{\max}\f$, also used after a refused trial point (default \f$0.5\f$).
+   */
+  double max_shrink = 0.5;
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Maximum number of trial value evaluations (default \f$60\f$).
+   */
+  int max_evaluations = 60;
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Optional resolution threshold; when positive, fails with `line_search_outcome::below_resolution` before evaluating if \f$s_0 |\phi'(0)|\f$ is less than `resolution` (default \f$0\f$).
+   */
+  double resolution = 0.0;  // 0: no resolution test
+
+  /**
+   * \ingroup optimizers_first_order
+   * \brief Searches from `x` along `d` starting at `initial_step` against `reference`.
+   *
+   * On acceptance, `x_trial` holds \f$x + s d\f$ for the accepted step \f$s\f$
+   * and `result.value` holds \f$f(x + s d)\f$; the caller updates `reference`
+   * with `reference.accept(result.value, averaging)`.
+   *
+   * \tparam O Objective type satisfying `value_objective`.
+   * \param objective Objective to evaluate at trial points.
+   * \param x Current point \f$x\f$ (\f$n\f$ entries).
+   * \param value Objective value \f$f(x)\f$ at `x`.
+   * \param reference Moving-average reference state \f$(C_k, Q_k)\f$.
+   * \param g Gradient \f$g\f$ at `x` (\f$n\f$ entries).
+   * \param d Search direction \f$d\f$ (\f$n\f$ entries).
+   * \param initial_step Initial trial step length \f$s_0 > 0\f$.
+   * \param x_trial Output buffer of \f$n\f$ entries receiving trial points \f$x + s d\f$.
+   * \return A `line_search_result` recording the outcome, step, value, and evaluation counts.
+   */
+  // On acceptance x_trial holds x + step d.
+  template <value_objective O>
+  line_search_result search(O& objective, const optimizer_point& x, double value, const nonmonotone_reference& reference,
+                            const optimizer_point& g, const optimizer_point& d, double initial_step,
+                            const optimizer_vector& x_trial) const {
+    return detail::backtracking_search(objective, x, value, std::max(value, reference.value), g, d, initial_step,
+                                       x_trial, sufficient_decrease, min_shrink, max_shrink, max_evaluations,
+                                       resolution);
   }
 };
 

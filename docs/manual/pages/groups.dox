@@ -331,6 +331,9 @@ parent here, in tree order; the module pages define their groups without
 /** \defgroup optimizers_derivative_free Nelder-Mead and compass search
 \ingroup optimizers
 \brief Derivative-free minimization in several variables by Nelder-Mead and compass search. */
+/** \defgroup optimizers_first_order First-order methods
+\ingroup optimizers
+\brief Gradient descent, Barzilai-Borwein steps with a nonmonotone line search, Adam and conjugate gradient, for objectives with a gradient and many parameters. */
 
 /** \defgroup optimizers_proximal Proximal methods
 \ingroup optimizers

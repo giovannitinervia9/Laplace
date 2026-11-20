@@ -14576,6 +14576,261 @@ degrees of freedom of the Student tail are weakly identified when only the tail
 informs them, so in practice they will often be held with `fixed_distrib`; the
 law admits them as a free parameter and nothing stops a fit from estimating them.
 
+## The nonlinear conjugate gradient: five betas and the floor of its stationarity measure (2026-11-20)
+
+**What.** `conjugate_gradient_optimizer` (include/laplace/optimizers/conjugate_gradient.hpp)
+minimizes a C1 objective with p_k = -g_k + beta_k p_{k-1}, y = g_k - g_{k-1}, and
+beta chosen by a member: Fletcher-Reeves g_k'g_k / g_{k-1}'g_{k-1}; Polak-Ribiere+
+max(0, g_k'y / g_{k-1}'g_{k-1}); Hestenes-Stiefel g_k'y / p_{k-1}'y; Dai-Yuan
+g_k'g_k / p_{k-1}'y; and Hager-Zhang (the default),
+beta = max(beta_N, eta_k) with beta_N = (y - 2 p_{k-1} |y|^2 / p_{k-1}'y)'g_k / p_{k-1}'y
+(Hager and Zhang 2005) and eta_k = -1 / (|p_{k-1}| min(0.01, |g_{k-1}|)) (Hager and
+Zhang 2006). beta is set to 0 (a restart along -g_k) by Powell's test
+|g_k'g_{k-1}| >= 0.2 g_k'g_k, every n directions, and whenever p_{k-1}'y <= 0 for
+the betas that divide by it. CG enters the loop of BFGS and L-BFGS
+(detail::quasi_newton_run) as a model of the direction: the strong Wolfe search,
+the two-iteration confirmation of a convergence verdict and the statuses are
+theirs; a direction that is not a descent direction restarts the model, and so
+does a secant pair that fails the curvature test (which a strong Wolfe step along
+a descent direction always passes). The loop searches from step 1, so the model
+returns d_k = a_k p_k with the initial step of Nocedal and Wright (3.60),
+a_k = tau_{k-1} g_{k-1}'p_{k-1} / g_k'p_k, tau_{k-1} the step accepted along
+p_{k-1}; after a restart d = -min(1, 1/|g|_inf) g as in BFGS, with p = -g
+unscaled (FR and PR+ are not invariant to the scale of p_{k-1}; a first version
+stored the scaled direction and their recursions were wrong).
+
+**The curvature constant of the Wolfe search.** Total value evaluations over the
+battery below, all five betas: 160833 at c2 = 0.1, 211886 at 0.4, 756169 at 0.9.
+The default is 0.1.
+
+**The stationarity measure.** CG has no model B of the inverse curvature; with d
+the next direction (scaled as above), three candidates were run along every
+trajectory of the battery (the seven More-Garbow-Hillstrom problems at
+f* = 0, 1, 1e3, 1e6; quadratics n = 10 with kappa 1e2 to 1e12 and n = 100 with
+kappa 1e6; tolerance 1e-6 and the two-pass confirmation):
+
+| measure | false successes (converged with f - f* > 1e-5) |
+|---|---|
+| (1/2) max(\|g'd\|, gamma g'g), gamma = max s'y/y'y (BFGS's) | every beta: kappa 1e8, n = 10, f - f* 3.4e-5 to 3.9e-3; kappa 1e6, n = 100, 1.1e-3 to 8.8e-3; FR, DY, HZ at kappa 1e6, n = 10, 2.0e-5 to 2.9e-5 |
+| (1/2) tau g'g, tau the last step along p (the line-search step, as for B = I) | from kappa 1e4, up to 0.18 at kappa 1e8 |
+| (1/2) max(\|g'd\|, gamma g'g), gamma = max s's/s'y | none; the largest f - f* of a converged run 7.2e-7 (HS, n = 100, kappa 1e6) |
+
+s'y/y'y and s's/s'y are the inverse curvatures of Barzilai and Borwein's two
+steps; on a quadratic both lie in [1/lambda_max, 1/lambda_min] and
+s's/s'y >= s'y/y'y. The bound (1/2) g'g / lambda_min on f - f* is approached by
+the larger one. The third measure is chosen (decided by Giovanni on 2026-11-20; the same
+comparison was measured for gradient descent and BB). Its cost
+on the More-Garbow-Hillstrom problems, evaluations summed over the four values of
+f*, first measure against third: HZ 2344 and 2381, PR+ 2304 and 2605, HS 2426
+and 2564, DY 2509 and 2671, FR 2746 and 2902. The quadratics take longer, because
+the first measure stopped them early (HZ, kappa 1e8, n = 10: 1300 iterations at
+f - f* 3.9e-3 against 3393 at 9.6e-8). It enters the loop through a declaration
+of the model (floor_from_step); BFGS and L-BFGS keep s'y/y'y.
+
+**Where it does not converge.** At kappa 1e10 and 1e12 (n = 10) every beta ends
+stalled or line search failed, 1e2 to 1.5e4 above f*. Brown's badly scaled
+function with f* = 1, 1e3, 1e6 ends stalled or line search failed within 2e-5 of
+x* for most betas: its condition number is about 1e12, the attainable gradient at
+x* is about sqrt(2 lambda_max eps |f|), and the measure, whose floor carries
+1/lambda_min, stays near kappa eps |f|, above 1e-6 (FR and DY at f* = 1 and HZ at
+f* = 1 and 1e3 converge). From the saddle start (1, 0) of x1^2 + x2^4/4 - x2^2/2
+the gradient's second component is 0 on the whole line x2 = 0, so every beta lands
+on the saddle (0, 0), a stationary point, in one step and reports converged; from
+(1, 1e-3) every beta reaches a minimum.
+
+**Linear CG as a check of the formulas.** With an exact line search on a
+quadratic, no Powell restart and no periodic restart, every beta reduces to
+linear CG; the values along the run agree with a textbook linear CG (step
+r'r / d'Ad, beta = r_k'r_k / r_{k-1}'r_{k-1}) to a relative 1e-9 and f - f* is
+below 1e-13 of its start after n steps (n = 5 at kappa 1e3, n = 10 at kappa 10).
+At n = 10 and kappa 1e3 neither the textbook routine nor these betas terminate at
+step n: both stall near f - f* = 1.6e-3 at steps 9 and 10 and end two steps later,
+a loss of conjugacy in rounding.
+
+**Against optimizers7 0.22.0.** Its cg() with the betas fr, pr, hs, dy (strong
+Wolfe c2 = 0.1, step 1 first, no Powell restart), default settings, frozen on the
+battery by tools/reference/optimizers_optimizers7_cg.R into
+tests/data/reference/optimizers/optimizers7_cg_counts.csv (212 runs). On the 40
+rows per beta that are More-Garbow-Hillstrom problems or the quadratics at
+kappa 1e2 and 1e6, optimizers7 reaches f - f* <= 1e-5 with converged = TRUE in 21
+(FR) and 24 (PR, HS, DY); the same beta here reaches it in 38, 37, 37 and 38 (the
+rest are Brown with f* > 0), including every row where optimizers7 did. On the
+rows where both succeed, value evaluations here against optimizers7: FR 1707 and
+13950, PR+ 2054 and 8403, HS 2017 and 10762, DY 4072 and 54823; the difference
+is mostly the initial step (3.60) against optimizers7's step 1.
+
+**Cost.** O(n) work and 3n doubles of state per iteration; each Wolfe trial is
+one value and gradient evaluation. Extended Rosenbrock with n = 100 from the
+standard start, gcc 14.2 -O3, one thread, best of 50: FR 46.0 us (30 iterations,
+88 evaluations), PR+ 50.0 (33, 94), HS 45.1 (29, 88), DY 48.5 (32, 92), HZ 47.7
+(31, 93); L-BFGS with 10 pairs 82.3 us (36, 43). CG spends about three
+evaluations per iteration at c2 = 0.1 against L-BFGS's 1.2 at c2 = 0.9: where an
+evaluation dominates the cost (a large reduction on a GPU), L-BFGS needs about
+half the evaluations on this problem.
+
+## Gradient descent, Barzilai-Borwein, Adam and the nonmonotone line search (2026-11-20)
+
+What: the first-order methods of wave 3 other than conjugate gradient
+(note/optimizers.md, section 13): `gradient_descent_optimizer`
+(`gradient_descent.hpp`), `barzilai_borwein_optimizer` (`barzilai_borwein.hpp`),
+`adam_optimizer` (`adam.hpp`), and `nonmonotone_line_search` with
+`nonmonotone_reference` in `line_search.hpp`. Tests:
+`tests/optimizers/test_first_order.cpp`. References frozen from optimizers7
+0.22.0: `tools/reference/optimizers_optimizers7_gd_bb.R` ->
+`tests/data/reference/optimizers/optimizers7_gd_bb_counts.csv` (212 runs: gd()
+and bb() with its three variants, the battery at f* = 0, 1, 1e3, 1e6).
+
+### How
+
+- The nonmonotone search (Zhang and Hager 2004) accepts a step s when
+  f(x + s d) - C_k <= c1 s g'd, with C_0 = f_0, Q_0 = 1, and after each accepted
+  f_{k+1}: Q_{k+1} = eta Q_k + 1, C_{k+1} = (eta Q_k C_k + f_{k+1}) / Q_{k+1}
+  (eta = 0.85). Its backtracking is Armijo's: the body of `armijo_line_search`
+  became `detail::backtracking_search`, which tests against a reference value;
+  Armijo passes f(x) and is unchanged (a test checks that eta = 0 gives the same
+  outcome, step, value and evaluations as Armijo, bit for bit).
+- Gradient descent and Barzilai-Borwein share one loop (`detail::first_order_run`):
+  d = -alpha_k g, searched from step 1. Scaling d rather than the initial step
+  keeps the slope g'd finite where |g|^2 overflows: with d = -g and the step
+  alpha_k, the start of cosh at 700 gave g'd = -inf and the run ended
+  `line_search_failed` at iteration 0. Gradient descent: alpha_0 = min(1, 1/|g|_inf),
+  then alpha_{k+1} = t_k g_k'g_k / g_{k+1}'g_{k+1} (Nocedal and Wright 2006,
+  section 3.5), t_k the accepted step along -g. Barzilai-Borwein: BB1 = s's/s'y,
+  BB2 = s'y/y'y or the two alternating, clipped to [1e-10, 1e10].
+- Adam (Kingma and Ba 2015), deterministic: m, v, bias correction, the step
+  u = -B m_hat with B = diag(lr / (sqrt(v_hat) + eps)). No line search: a
+  trial point with a non-finite value or gradient is refused and the step
+  halved, up to 60 times, then `line_search_failed` (decision 3, never a clamp).
+- Stationarity (decision 5): (1/2) max(b, gamma_max) g'g, with b the last
+  accepted step for gradient descent and the next alpha for Barzilai-Borwein;
+  (1/2) max(g'Bg, gamma_max g'g) for Adam. A convergence verdict must hold at
+  two consecutive iterations (V3).
+
+### The floor gamma_max: s'y/y'y declares false successes, s's/s'y does not
+
+Decision 5 takes gamma_max as the largest s'y/y'y over the accepted pairs.
+First-order steps are dominated by the stiff directions, so s'y/y'y stays
+near 1/lambda_max and the weak directions are never seen. Converged runs with
+s'y/y'y, tolerance 1e-6, gcc, one thread:
+
+| method | problem | f - f* | decrement | ratio |
+|---|---|---|---|---|
+| BB alternating | quadratic n = 10, kappa 1e6 | 1.15e-3 | 5.7e-7 | 2000 |
+| BB alternating | quadratic n = 20, kappa 1e6 | 4.7e-3 | 9.8e-7 | 4800 |
+| BB alternating | quadratic n = 50, kappa 1e4 | 9.1e-5 | 9.9e-7 | 92 |
+| BB alternating | Rosenbrock n = 100 | 6.3e-5 | 4.0e-7 | 160 |
+| gradient descent | Wood | 1.0e-4 | 9.1e-7 | 110 |
+| gradient descent | Powell singular | 2.1e-5 | 9.2e-7 | 23 |
+
+With gamma_max the largest s's/s'y (the BB1 step, the inverse Rayleigh
+quotient of the average Hessian along s, at most 1/lambda_min on a quadratic),
+every converged run of gradient descent (Armijo and nonmonotone) and of the
+three BB variants, on the More-Garbow-Hillstrom problems at f* = 0, 1e3, 1e6
+and the quadratics n = 10 to 100, kappa 1e2 to 1e10, has f - f* <= 2.0 times
+the decrement (worst: Powell singular, 1.97). The cost: gradient descent needs
+1.3 to 4 times more iterations (Wood 403 -> 1617, Powell singular 2137 -> 6425,
+Rosenbrock n = 2 4842 -> 6596), and on Rosenbrock with f* = 1e6 it ends
+`stalled` (decrement 3e-6, f - f* 6e-8, its predicted decreases below the
+rounding of f, 2.2e-10) instead of converged. The same finding holds for
+conjugate gradient (the section above). The floor is one function,
+`detail::secant_floor` in `objective.hpp`, used by these methods and by
+conjugate gradient (decided by Giovanni on 2026-11-20). Adam keeps
+s'y/y'y: with it every converged run has f - f* <= 1.5 times the decrement
+(Powell singular 1.52), no false success.
+
+### Barzilai-Borwein after a refused pair: reset, not the previous alpha
+
+When s'y <= 1e-10 |s| |y|, keeping the previous alpha is an absorbing state: a
+short step samples the curvature over a short interval, on a valley floor that
+curvature is not positive, and the next pair is refused too. Measured on
+Rosenbrock (n = 2, f* = 0): BB2 held alpha = 9.3e-4 for 650 iterations, 759 in
+all. Resetting alpha to min(1, 1/|g|_inf) gives 88 (alternating 253 -> 53,
+BB1 80 -> 38); no other problem of the battery got worse. optimizers7's notes
+record the same trap and the same remedy.
+
+### Adam: an overflowing g^2 made the measure 0
+
+At cosh(700) g_i^2 overflows, v_i = inf, B_ii = 0, so g'Bg = 0, and with
+gamma_max = 0 the measure read 0: the run ended `converged` at the start. The
+measure is now infinite whenever g'g is not finite; the run then ends
+`stalled` (the step u is 0).
+
+### The battery (gcc, one thread, f* = 0, defaults, tolerance 1e-6)
+
+Iterations / value evaluations; "sad." is the stationary point near Wood's
+saddle at f = 7.877, where L-BFGS also stops; "budget" the iteration budget.
+
+| problem | GD Armijo | GD nonmonotone | BB alternating | BB1 | BB2 | Adam lr 1e-3 |
+|---|---|---|---|---|---|---|
+| Rosenbrock n = 2 | 6596/13224 | 5481/10979 | 53/110 | 38/87 | 88/189 | 11241/11242 |
+| Rosenbrock n = 100 | 8114/16265 | 7050/14119 | 53/110 | 39/89 | 94/201 | 11772/11773 |
+| Powell singular | 6425/12881 | 5260/10535 | 85/179 | 135/290 | 98/201 | 18061/18062 |
+| Beale | 230/477 | 232/475 | 26/54 | 39/82 | 27/55 | 7740/7741 |
+| helical valley | 1377/2782 | 1305/2625 | 68/139 | 81/173 | 115/233 | 15324/15325 |
+| Wood | 1617/3261 | 3911/7839 | 22/45 sad. | 99/207 | 22/45 sad. | 12775 sad. |
+| Brown badly scaled | budget | budget | budget | budget | budget | budget |
+| quadratic kappa 1e2 | 197/417 | 172/355 | 62/125 | 55/113 | 62/125 | 18105 |
+| quadratic kappa 1e4 | budget | budget | 662/1361 | 1047/2477 | 454/923 | 25056 |
+| quadratic kappa 1e6 | budget | budget | 5484/11378 | budget | 5185/10445 | 74762 |
+| quadratic kappa 1e8, 1e10 | budget | budget | budget | budget | budget | budget |
+
+Every converged run has f - f* <= 2.8e-6 (gradient descent, nonmonotone, on Powell singular). The budgets are 1e4 iterations
+(gradient descent, BB) and 1e5 (Adam). Against optimizers7 0.22.0: its gd()
+(step 1 offered at every iteration, 500 iterations) converged on 12 of 53
+runs; its bb() takes 51-58 iterations on Rosenbrock and reaches Wood's minimum
+(its alpha_0 = 0.01 and Grippo-Lampariello-Lucidi memory 10), where the
+alternating and BB2 runs here stop at the stationary point at 7.877. Its
+successes are mostly change rules (|df| < 1e-10); the test requires that
+wherever its gd() or bb() reached the minimum, the same method here succeeds
+with f - f* <= 1e-5 (Wood excepted as above).
+
+### Negative cases
+
+No false success on the noisy objective (gradient descent stalled, BB
+`line_search_failed`, Adam at its budget), on the quadratics at kappa 1e8
+and 1e10 (budget), on the exploded start (not converged). On sum |x_i| from
+integer starts BB lands exactly on 0 (f = 0, the minimum, a subgradient 0
+there); gradient descent and Adam do not converge. On the saddle problem from
+(1, 0), where g_2 = 0 exactly, every method reaches the saddle (0, 0), a
+stationary point (Adam to within 2e-3, its measure 9.8e-7).
+
+### The host vectors against a Kokkos gradient (benchmarks/optimizers_first_order_vectors.cpp)
+
+Microseconds per call or per iteration. The objective is
+f(x) = sum_i log cosh(x_i - c_i), with one row per coordinate; its value and
+gradient are one parallel_reduce, and x goes down and g comes back at every
+call. "host GD" is the host work of one gradient descent or Barzilai-Borwein
+iteration on one thread (8 passes over p: the direction, the trial point, four
+sums, three copies). "host Adam" is the same for Adam. "dev GD" is the same
+work as host GD written as Kokkos kernels, with no copy between spaces. The
+last three columns are a full iteration of the optimizer (30 iterations), with
+the value evaluations per iteration in brackets. gcc 14.2 with OpenMP, -O3;
+CUDA 13.1 on an RTX 4070 SUPER.
+
+| backend | p | value | val+grad | host GD | host Adam | dev GD | GD it | BB it | Adam it |
+|---|---|---|---|---|---|---|---|---|---|
+| OpenMP, 1 thread | 1e4 | 627 | 661 | 14 | 48 | 21 | 2235 [5.3] | 1008 [2.2] | 727 [1.0] |
+| OpenMP, 1 thread | 1e5 | 6291 | 7249 | 144 | 492 | 163 | 20516 [5.0] | 9904 [2.2] | 7261 [1.0] |
+| OpenMP, 1 thread | 1e6 | 61659 | 70378 | 2158 | 5504 | 2221 | 197356 [4.7] | 102158 [2.2] | 73563 [1.0] |
+| OpenMP, 16 threads | 1e4 | 111 | 119 | 15 | 49 | 104 | 654 [5.6] | 269 [2.2] | 192 [1.0] |
+| OpenMP, 16 threads | 1e5 | 585 | 769 | 275 | 653 | 386 | 3211 [4.9] | 1813 [2.2] | 1548 [1.0] |
+| OpenMP, 16 threads | 1e6 | 4719 | 6147 | 2481 | 5757 | 1722 | 21227 [4.0] | 14206 [2.2] | 13741 [1.0] |
+| CUDA | 1e4 | 37 | 54 | 20 | 50 | 64 | 321 [6.3] | 136 [2.2] | 125 [1.0] |
+| CUDA | 1e5 | 97 | 186 | 193 | 495 | 72 | 1111 [4.4] | 740 [2.2] | 868 [1.0] |
+| CUDA | 1e6 | 619 | 1194 | 2697 | 5651 | 129 | 10047 [5.2] | 6714 [2.2] | 8629 [1.0] |
+
+What it says. On one thread the host vectors cost 3 to 8 per cent of a
+gradient, so they do not matter. With 16 OpenMP threads at p = 1e6 they cost
+40 per cent of a gradient (GD, BB) and 94 per cent (Adam). On CUDA they
+dominate from p = 1e5: at p = 1e6 one GD or BB iteration spends 2.7 ms on the
+host against 1.2 ms for the gradient with its copies (2.3 times), and Adam
+5.7 ms (4.7 times). The same work as kernels on the GPU takes 0.13 ms, 21
+times less than on the host, and it would also remove the two copies per
+evaluation. Below p = 1e4 the kernel launches cost more than the host loops
+(dev GD 64 us on CUDA and 104 us with 16 threads, against 20 and 15 us on the
+host). The state moves into Kokkos Views (decided by Giovanni on
+2026-11-20 on this measurement).
+
 ## The prox of the MCP and SCAD laws, over the three properizing tails (2026-11-20)
 
 **What it is.** `prox_y(v, t)` is the minimizer of `-log f(y) + (y - v)^2/(2t)`, which with

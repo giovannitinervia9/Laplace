@@ -1,7 +1,7 @@
 /**
 \addtogroup optimizers
 
-The `laplace::optimizers` module provides the pieces of unconstrained minimization on the host: the objective concepts (`<laplace/optimizers/objective.hpp>`), the report of a run (`report.hpp`), the stopping rules (`stop_rules.hpp`), two line searches (`line_search.hpp`), the dense curvature solver (`dense_curvature_solver.hpp`) and `minimize()` (`minimize.hpp`), all in the same directory. They are header-only templates that run on the host; none is marked `LAPLACE_HD`. A program that uses `dense_curvature_solver` links `Laplace::dense`. On the standard test problems the line searches accept a step within 13 evaluations along \f$-g\f$ and within one along a Newton direction. Newton's method and the trust region are on \ref optimizers_second_order "Newton and trust region"; BFGS and L-BFGS are on \ref optimizers_quasi_newton "Quasi-Newton methods"; the multistart wrapper is on \ref optimizers_multistart "Multiple starts"; Brent's method and block alternation are on \ref optimizers_block_coordinate "Brent and block alternation"; Nelder-Mead and compass search are on \ref optimizers_derivative_free "Nelder-Mead and compass search"; the proximal methods are on \ref optimizers_proximal "Proximal methods"; the proximal bundle method is on \ref optimizers_bundle "Proximal bundle method"; the primal-dual method is on \ref optimizers_primal_dual "Primal-dual method".
+The `laplace::optimizers` module provides the pieces of unconstrained minimization on the host: the objective concepts (`<laplace/optimizers/objective.hpp>`), the report of a run (`report.hpp`), the stopping rules (`stop_rules.hpp`), three line searches (`line_search.hpp`), the dense curvature solver (`dense_curvature_solver.hpp`) and `minimize()` (`minimize.hpp`), all in the same directory. They are header-only templates that run on the host; none is marked `LAPLACE_HD`. A program that uses `dense_curvature_solver` links `Laplace::dense`. On the standard test problems the line searches accept a step within 13 evaluations along \f$-g\f$ and within one along a Newton direction. Newton's method and the trust region are on \ref optimizers_second_order "Newton and trust region"; BFGS and L-BFGS are on \ref optimizers_quasi_newton "Quasi-Newton methods"; the multistart wrapper is on \ref optimizers_multistart "Multiple starts"; Brent's method and block alternation are on \ref optimizers_block_coordinate "Brent and block alternation"; Nelder-Mead and compass search are on \ref optimizers_derivative_free "Nelder-Mead and compass search"; gradient descent, Barzilai-Borwein, Adam and the nonlinear conjugate gradient are on \ref optimizers_first_order "First-order methods"; the proximal methods are on \ref optimizers_proximal "Proximal methods"; the proximal bundle method is on \ref optimizers_bundle "Proximal bundle method"; the primal-dual method is on \ref optimizers_primal_dual "Primal-dual method".
 
 ## Objectives
 
@@ -23,6 +23,8 @@ The table lists what each optimizer requires, and also serves as the list of wha
 | \ref laplace::optimizers::newton_optimizer "newton_optimizer" | `curvature_objective` | \ref optimizers_second_order "Newton and trust region" |
 | \ref laplace::optimizers::trust_region_optimizer "trust_region_optimizer" | `curvature_objective` with `curvature_type` equal to `dense_curvature_matrix` | \ref optimizers_second_order "Newton and trust region" |
 | \ref laplace::optimizers::bfgs_optimizer "bfgs_optimizer", \ref laplace::optimizers::lbfgs_optimizer "lbfgs_optimizer" | `gradient_objective` | \ref optimizers_quasi_newton "Quasi-Newton methods" |
+| \ref laplace::optimizers::gradient_descent_optimizer "gradient_descent_optimizer", \ref laplace::optimizers::barzilai_borwein_optimizer "barzilai_borwein_optimizer", \ref laplace::optimizers::adam_optimizer "adam_optimizer" | `gradient_objective` | \ref optimizers_first_order "First-order methods" |
+| \ref laplace::optimizers::conjugate_gradient_optimizer "conjugate_gradient_optimizer" | `gradient_objective` | \ref optimizers_first_order "First-order methods" |
 | \ref laplace::optimizers::proximal_gradient_optimizer "proximal_gradient_optimizer" | `composite_objective` | \ref optimizers_proximal "Proximal methods" |
 | \ref laplace::optimizers::proximal_newton_optimizer "proximal_newton_optimizer" | `composite_objective` and `curvature_objective` with `dense_curvature_matrix` | \ref optimizers_proximal "Proximal methods" |
 | \ref laplace::optimizers::bundle_optimizer "bundle_optimizer" | `gradient_objective` (a subgradient is enough) | \ref optimizers_bundle "Proximal bundle method" |
@@ -66,6 +68,8 @@ The table lists what each method passes to its rule. Block alternation (\ref opt
 |---|---|---|---|---|
 | Newton, trust region | Newton decrement \f$\frac{1}{2} g^\top H^{-1} g\f$ where \f$H\f$ has a Cholesky factor, quiet NaN elsewhere | `decrement` | `decrement_stop_rule` | gradient, decrement, previous |
 | BFGS, L-BFGS | \f$\frac{1}{2}\max(\lvert g^\top d\rvert , \gamma_{\max} g^\top g)\f$, \f$d\f$ next direction (\ref optimizers_quasi_newton "Quasi-Newton methods") | `decrement` | `decrement_stop_rule` | gradient, decrement, previous |
+| Gradient descent, Barzilai-Borwein, Adam | \f$\frac{1}{2}\max(b, \gamma_{\max}) g^\top g\f$, \f$b\f$ the step scale (GD, BB), or \f$\frac{1}{2}\max(g^\top B g, \gamma_{\max} g^\top g)\f$ (Adam) (\ref optimizers_first_order "First-order methods") | `decrement` | `decrement_stop_rule` | gradient, decrement, previous |
+| Conjugate gradient | \f$\frac{1}{2}\max(\lvert g^\top d\rvert , \gamma_{\max} g^\top g)\f$, \f$d\f$ next direction, \f$\gamma_{\max}\f$ the largest \f$s^\top s / s^\top y\f$ (\ref optimizers_first_order "First-order methods") | `decrement` | `decrement_stop_rule` | gradient, decrement, previous |
 | Proximal gradient | \f$\frac{1}{2}\max(t, \gamma_{\max})\lVert G_t\rVert^2\f$, proximal gradient mapping measure (\ref optimizers_proximal "Proximal methods") | `prox_mapping` (also in `decrement`) | `prox_mapping_stop_rule` | prox mapping, previous |
 | Proximal Newton | Proximal Newton decrement \f$\frac{1}{2} d^\top H d\f$ with its fallback (\ref optimizers_proximal "Proximal methods") | `decrement` | `decrement_stop_rule` | decrement, previous |
 | Proximal bundle | Model's predicted decrease at a large proximity (\ref optimizers_bundle "Proximal bundle method") | `decrement` | `decrement_stop_rule` | decrement, previous |
@@ -110,6 +114,8 @@ The table gives evaluations measured with gcc on one thread from the standard st
 | Quadratic, \f$\kappa_2 = 10^6\f$ | \f$-g\f$ | 7 | 7 |
 | Quadratic, \f$\kappa_2 = 10^{12}\f$ | \f$-g\f$ | 13 | 13 |
 | Positive-definite start | \f$-H(x_0)^{-1} g\f$ | 1 | 1 |
+
+A third search, \ref laplace::optimizers::nonmonotone_line_search "nonmonotone_line_search", is described on \ref optimizers_first_order "First-order methods".
 
 ## Dense curvature solver
 
@@ -164,6 +170,8 @@ In namespace `laplace::optimizers`:
 - \ref laplace::optimizers::line_search_result "line_search_result"
 - \ref laplace::optimizers::armijo_line_search "armijo_line_search"
 - \ref laplace::optimizers::wolfe_line_search "wolfe_line_search"
+- \ref laplace::optimizers::nonmonotone_line_search "nonmonotone_line_search"
+- \ref laplace::optimizers::nonmonotone_reference "nonmonotone_reference"
 - \ref laplace::optimizers::dense_curvature_solver "dense_curvature_solver"
 - \ref laplace::optimizers::curvature_solver_for "curvature_solver_for"
 - \ref laplace::optimizers::optimizer_for "optimizer_for"

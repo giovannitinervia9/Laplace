@@ -238,7 +238,12 @@ optimizer_report quasi_newton_run(Model& model, const Rule& stop_rule, const Lin
 
     if (std::isfinite(sy) && sy > curvature_tolerance * std::sqrt(ss) * std::sqrt(yy)) {
       model.update(s, y, sy);
-      gamma_max = std::max(gamma_max, sy / yy);
+      // the floor's inverse curvature: s'y / y'y, or secant_floor (s's / s'y)
+      // for a model that declares floor_from_step (conjugate_gradient.hpp)
+      if constexpr (requires { Model::floor_from_step; })
+        gamma_max = std::max(gamma_max, secant_floor(sy, ss, yy));
+      else
+        gamma_max = std::max(gamma_max, sy / yy);
       skipped = 0;
     } else if (++skipped >= max_skipped_updates) {
       model.reset();

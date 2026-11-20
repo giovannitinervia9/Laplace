@@ -4,12 +4,16 @@
 
 #include <doctest/doctest.h>
 
+#include <laplace/optimizers/adam.hpp>
+#include <laplace/optimizers/barzilai_borwein.hpp>
 #include <laplace/optimizers/bfgs.hpp>
 #include <laplace/optimizers/block_coordinate.hpp>
 #include <laplace/optimizers/brent.hpp>
 #include <laplace/optimizers/bundle.hpp>
 #include <laplace/optimizers/compass.hpp>
+#include <laplace/optimizers/conjugate_gradient.hpp>
 #include <laplace/optimizers/dense_curvature_solver.hpp>
+#include <laplace/optimizers/gradient_descent.hpp>
 #include <laplace/optimizers/lbfgs.hpp>
 #include <laplace/optimizers/line_search.hpp>
 #include <laplace/optimizers/minimize.hpp>
