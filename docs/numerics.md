@@ -14937,3 +14937,108 @@ quadrature. What is not derived is the tail's second moments, `int (d_t H)^2 e^-
 their relatives, which reduce to `int Psi^2 e^-H`, `int Psi z Psi' e^-H` and
 `int (z Psi')^2 e^-H`, closed in each tail. Two identities come free:
 `int (H')^2 e^-H = J` and `int d_t H e^-H = -d_t T`.
+
+## The generic prox in y of the continuous univariate laws (2026-11-20)
+
+What. A proximal operator in y for every continuous univariate distrib that has
+no closed form of its own (note/penalties.md section 5h), in
+include/laplace/distrib/generic_prox.hpp:
+
+  x*(v, t) = argmin_y  -t log f(y) + (y - v)^2/2,   t >= 0,
+
+prox_y_by_newton(d, v, t), with distrib_prox_y(d, v, t) taking the member
+prox_y where a law has one (laplace1/2, enet, powerexp, mcp, scad) and this
+route otherwise. It needs log f to be C^2 in y and the law's weak-convexity
+constant rho = max(0, sup_y l''(y)), l = log f, which
+include/laplace/distrib/weak_convexity.hpp declares per law (0 for the
+log-concave ones; finite for Student, Cauchy, lognormal, inverse Gaussian,
+mcp and scad; infinite for gamma, Weibull, chi-square and beta with a shape
+below 1 and for powerexp with p < 1). fixed_distrib and truncated_distrib read
+their parent's rho; skewt, vonmises and transformed_distrib declare none and
+have no prox. univariate_as_multivariate offers prox_y through
+distrib_prox_y, so the independent product and distrib_penalty have it for
+every such law; the penalty's prox descriptor is closed_form.
+
+How. x* is the root of g(y) = y - v - t l'(y), g' = 1 - t l''. For
+t rho < 1, g' >= c = 1 - t rho > 0: one root, at most |g(x)|/c from any point
+x, so one evaluation at v brackets it without the mode; at t rho = 1 the
+bracket comes from doubling steps; t rho > 1 returns NaN (several local
+minima are possible; MFISTA and proximal Newton keep t rho < 1). The bracket
+is clipped to the support: at a finite end the point used is the nearest one
+at least the least normal number inside (next to 0 a subnormal y turns
+(k - 1)/y into inf - inf), and when g has the interior's sign there the end
+itself is the minimizer (the objective is convex on the closed support). A
+density unbounded at an end has rho = infinity, hence NaN: the objective goes
+to -infinity there. Inside the bracket Newton's step is taken unless it
+leaves the bracket or fails to halve the step of two iterations before
+(rtsafe), else the bracket is bisected, geometrically towards a finite end
+when it is four times nearer to it. An infinite g' (l'' overflowing next to
+an end) counts as no Newton step. A step below 4 eps |y| is accepted only
+when g changes sign within one more such step: next to a singular end (beta
+at y -> 1, where g' reaches 1e36) Newton crawls by steps of an ulp far from
+the root, and the plain test stopped at 1 - 2.2e-16 where the root was 0.25.
+
+Measured before writing (Python against a 200-bit minimization, 13 cases,
+note/penalties.md 5h): within 2.1 ulp of the condition, 2.4 to 10.5
+evaluations of g on average.
+
+References. tools/reference/generic_prox.py, mpmath: log f from the definition
+of each law in Laplace's parametrization (constants dropped), phi' by mpmath's
+numerical differentiation, a bracket widened from v (or closed at an end of
+the support, which is the minimizer when phi' keeps its sign up to it), then
+mpmath's Anderson-Bjorck root finder, or bisection to the working precision
+where that fails (phi' grows like exp(e^-z) in the left tail of the Gumbel
+law); at 200 and 260 bits, kept when they agree to 2^-120 (every point did).
+2400 rows: 20 cases (student_t1, student_t2, cauchy, two pseudohuber, logistic,
+gumbel, two skewnormal, gaussian1, two gamma1, two weibull, lognormal1,
+invgauss, beta, truncated student_t1 on [-1, 2], truncated gaussian1 on
+[0.5, 3], exponential), 120 points each, v = c + s 10^U(-4, 4) with either
+sign and below the support for one in ten, t = s^2 10^U(-6, 6) capped at
+U(0, 0.999)/rho.
+
+Error measure. ulps of x* over the condition number of the problem,
+kappa = (|x*| + |v| + t |l'(x*)|)/(|x*| g'(x*)): rounding the terms of g at
+their own size moves x* by kappa ulps. The optimality residual |g(x)| is
+read in units of eps (|x| + |v| + t |l'(x)| + g'(x) |x|), the rounding of its
+terms plus the change of g over one ulp of x, which dominates next to a
+singular end (beta at x = 1 - 1.4e-9: 2.2e7 units of the terms alone).
+
+**Tests** (tests/distrib/test_generic_prox.cpp, kernels on gcc and CUDA):
+
+| check | gcc | CUDA | bound |
+|---|---|---|---|
+| x* against mpmath, ulp / max(1, kappa) | 5.53 | 3.45 | 8 |
+| x* against mpmath, plain ulp (printed) | 19.4 | 18.4 | - |
+| points at an end of the support equal to the reference's end | exact | exact | exact |
+| optimality residual, units above | 11.9 | 7.92 | 18 |
+| sign of g next to a returned end | right | right | exact |
+
+Per case (ulp/kappa, gcc): Student, Cauchy, pseudo-Huber, logistic, gaussian,
+lognormal, inverse Gaussian, beta and the truncated laws 0.25-1.5; Gumbel 2.24,
+skew normal 3.17, Weibull 3.73, gamma1 with shape 1.25 5.53 (its l' carries
+the partial cancellation of (s - 1)/y against s/y near 0). t = 0 projects v on
+the support, t rho = 1.01 and rho = infinity (gamma, Weibull, beta with a shape
+below 1) give NaN, NaN v and negative t give NaN; fixed_distrib gives its
+parent's prox bit for bit; univariate_as_multivariate gives the member prox_y
+bit for bit where it exists (laplace1) and prox_y_by_newton bit for bit
+otherwise (student_t1).
+
+Cost (C++ -O3, one thread, 4000 points per law, same ranges): evaluations of
+g mean / max, ns per call. gaussian1 3.2 / 11, 31; exponential 2.2 / 3, 39;
+student_t1 4.2 / 40, 1540; cauchy 4.1 / 43, 820; logistic 5.4 / 39, 1230;
+gumbel 12.2 / 104, 630; skewnormal 6.0-6.5 / 13-87, 3200-3500; gamma1 9.6-14.5 /
+51-73, 150-200; weibull 8.4-14.1 / 55-72, 900-1470; lognormal1 10.8 / 49, 310;
+invgauss 11.5 / 58, 190; beta 12.9 / 54, 190; pseudohuber 6.3-7.5 / 50-53,
+3500-27000. The cost of one evaluation is the law's logpdf_dy_dk<1, 0> and
+<2, 0>: pseudo-Huber recomputes its Bessel ratio at every call.
+
+Found on the way. gamma1_distrib::logpdf_dy_dk<1, 0> near y = 0 at shape
+s = 1/phi = 1 forms s (mu - y)/(mu y) - 1/y, two terms of size 1/y that cancel:
+at mu = 1.5, phi = 1, where l' = -2/3 exactly, it gives 0 at y = 1e-16 and
+16384 at y = 1e-20. Reported to the distributions' owners; the test uses
+gamma1(1.5, 0.8) meanwhile, end clipping being covered by exponential and the
+truncated laws.
+
+Open. A prox for t rho > 1 (the global minimizer among several stationary
+points, which needs the mode and the shape of l''), and declarations of rho
+for skewt and transformed_distrib, if a consumer asks.

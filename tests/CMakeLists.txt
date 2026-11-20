@@ -75,6 +75,7 @@ set(LAPLACE_TEST_SOURCES
   distrib/test_generic_atoms.cpp
   distrib/test_transformed.cpp
   distrib/test_fixed.cpp
+  distrib/test_generic_prox.cpp
   distrib/test_mcp_scad.cpp
   distrib/test_mcp_scad_tails.cpp
   distrib/test_powerexp.cpp

@@ -23,6 +23,7 @@
 #include <laplace/distrib/laplace1.hpp>
 #include <laplace/distrib/laplace2.hpp>
 #include <laplace/distrib/pseudohuber.hpp>
+#include <laplace/distrib/skewt.hpp>
 #include <laplace/distrib/student_t1.hpp>
 #include <laplace/distrib/student_t2.hpp>
 #include <laplace/distrib/univariate_as_multivariate.hpp>
@@ -49,10 +50,13 @@ static_assert(lpen::distrib_penalty<product<uam<ld::laplace2_distrib>>>::scale_m
               lpen::penalty_scale_mixture::exponential_variance);
 static_assert(lasso_pen::prox == lpen::penalty_prox_kind::closed_form &&
               mixed_pen::prox == lpen::penalty_prox_kind::closed_form);
-static_assert(lpen::distrib_penalty<uam<ld::gaussian1_distrib>>::prox == lpen::penalty_prox_kind::none &&
-              lpen::distrib_penalty<product<uam<ld::pseudohuber_distrib>>>::prox == lpen::penalty_prox_kind::none &&
+// the smooth laws through the generic route of distrib/generic_prox.hpp (note/penalties.md 5h); a law
+// without a declared weak-convexity constant has none
+static_assert(lpen::distrib_penalty<uam<ld::gaussian1_distrib>>::prox == lpen::penalty_prox_kind::closed_form &&
+              lpen::distrib_penalty<product<uam<ld::pseudohuber_distrib>>>::prox == lpen::penalty_prox_kind::closed_form &&
               lpen::distrib_penalty<product<uam<ld::laplace1_distrib>, uam<ld::student_t1_distrib>>>::prox ==
-                  lpen::penalty_prox_kind::none);
+                  lpen::penalty_prox_kind::closed_form &&
+              lpen::distrib_penalty<uam<ld::skewt_distrib>>::prox == lpen::penalty_prox_kind::none);
 
 // the soft-threshold weight k of each law: the kink term of -log f is k |y - mu|
 KOKKOS_INLINE_FUNCTION double kink_weight(const ld::laplace1_distrib& d) { return 1.0 / d.sigma; }

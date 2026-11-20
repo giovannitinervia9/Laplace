@@ -98,6 +98,79 @@ The table below reports the measured accuracy in `tests/distrib/test_generic_ato
 
 A gamma with shape \f$2\f$ and rate \f$1\f$ carrying mass \f$0.3\f$ at zero, truncated to \f$[0, 3]\f$, has a cumulative distribution function at zero of \f$0.34859553994375395\f$, where an atom-blind route returns zero.
 
+## Proximal operator in the observation
+
+The generic proximal operator in the observation \f$y\f$ and the weak-convexity readings of continuous univariate laws live in `<laplace/distrib/generic_prox.hpp>` and `<laplace/distrib/weak_convexity.hpp>` (`laplace::distrib`).
+
+### Definition and dispatch
+
+For a continuous univariate `distrib` \f$d\f$ with log-density \f$l(y) = \log f(y)\f$, a point \f$v \in \mathbb{R}\f$, and a step \f$t \ge 0\f$, the proximal operator in \f$y\f$ is
+\f[
+x^*(v, t) = \operatorname*{arg\,min}_{y} \left\{ -t\,l(y) + \frac{(y - v)^2}{2} \right\},
+\f]
+minimized over the closed support of \f$d\f$. The function \ref laplace::distrib::prox_y_by_newton "prox_y_by_newton(d, v, t)" computes \f$x^*(v, t)\f$. The dispatcher \ref laplace::distrib::distrib_prox_y "distrib_prox_y(d, v, t)" calls the law's member `prox_y(v, t)` when `D` provides one (the closed-form implementations in `laplace1`, `laplace2`, `enet`, `powerexp`, `mcp`, and `scad`) and calls `prox_y_by_newton(d, v, t)` otherwise. Concept `has_distrib_prox_y<D>` is `true` when either route exists. The generic route requires `D::kind` to be `distrib_kind::continuous`, `D::y_regularity >= 2` (excluding laws with a kink in \f$y\f$), and a declared weak-convexity constant.
+
+### Weak-convexity constant
+
+The weak-convexity constant \f$\rho = \max\bigl(0, \sup_y l''(y)\bigr)\f$ is the least constant for which \f$-l(y) + \rho y^2 / 2\f$ is convex. The trait \ref laplace::distrib::distrib_weak_convexity_reading "distrib_weak_convexity_reading\<D\>::value(d)" declares \f$\rho\f$ at the parameters held by `d`, and \ref laplace::distrib::distrib_weak_convexity "distrib_weak_convexity(d)" reads it. Every log-concave law has \f$\rho = 0\f$. The table lists every declared reading; the formulas match `weak_convexity.hpp`.
+
+| Law | Weak-convexity constant \f$\rho\f$ |
+|---|---|
+| `gaussian1`, `gaussian2`, `gaussian3`, `laplace1`, `laplace2`, `enet`, `logistic`, `gumbel`, `skewnormal`, `pseudohuber`, `exponential` | \f$0\f$ |
+| `gamma1`, `gamma2`, `chisq`, `weibull`, `beta` | \f$0\f$ when every shape is at least \f$1\f$, \f$+\infty\f$ otherwise |
+| `powerexp` | \f$0\f$ for \f$p \ge 1\f$, \f$+\infty\f$ for \f$p < 1\f$ |
+| `student_t1` | \f$(\nu + 1) / (8\nu\sigma^2)\f$ |
+| `student_t2` | \f$(\nu + 1) / (8(\nu - 2)\sigma^2)\f$ |
+| `cauchy` | \f$1 / (4\sigma^2)\f$ |
+| `lognormal1` (mean \f$\mu\f$ and variance \f$v\f$ of \f$\log Y\f$) | \f$\exp(2v - 2\mu - 3) / (2v)\f$ |
+| `lognormal2` (mean \f$m\f$, variance \f$v\f$, \f$v_1 = \log(1 + v/m^2)\f$) | \f$\exp(3v_1 - 3) / (2 m^2 v_1)\f$ |
+| `invgauss` (dispersion \f$\phi\f$) | \f$\phi^2 / 2\f$ |
+| `mcp` | \f$\max(1/\gamma, \rho_{\mathrm{tail}})\f$ |
+| `scad` | \f$\max(1/(a - 1), \rho_{\mathrm{tail}})\f$ |
+| `fixed_distrib`, `truncated_distrib` | The parent's \f$\rho\f$ |
+
+For `mcp` and `scad`, \f$\rho_{\mathrm{tail}}\f$ is \f$(\nu + 1) / (8\nu s_{\mathrm{tail}}^2)\f$ for the Student tail with scale \f$s_{\mathrm{tail}}\f$ and degrees of freedom \f$\nu\f$, and \f$0\f$ for the Gaussian and logistic tails. For `truncated_distrib`, the supremum of \f$l''\f$ over the truncated interval is at most the parent's supremum, so the parent's constant is a valid bound. The laws `skewt`, `vonmises`, and `transformed_distrib` declare no \f$\rho\f$ and have no generic prox: \f$\sup l''\f$ has no closed form for `skewt`, `vonmises` is circular, and a transformed law's constant depends on its bijector.
+
+### Algorithm and support ends
+
+The minimizer \f$x^*\f$ is the root of \f$g(y) = y - v - t\,l'(y)\f$, with derivative \f$g'(y) = 1 - t\,l''(y)\f$, evaluated from `logpdf_dy_dk<1, 0>` and `logpdf_dy_dk<2, 0>` of the law. When \f$t < 0\f$, when any argument or \f$\rho\f$ is NaN, or when \f$t\rho > 1\f$ (where the objective may have several local minima), `prox_y_by_newton()` returns quiet NaN. At \f$t = 0\f$, it returns \f$v\f$ projected onto the support.
+
+When \f$t\rho < 1\f$, \f$g'(y) \ge c = 1 - t\rho > 0\f$ holds throughout the interior, so \f$g\f$ strictly increases, the root is unique, and it lies at most \f$|g(x)|/c\f$ from any interior point \f$x\f$. A single evaluation at \f$v\f$ (or at the nearest interior point when \f$v\f$ lies at or outside a finite end) therefore brackets the root without needing the mode. At \f$t\rho = 1\f$, the bound \f$|g(x)|/c\f$ is infinite and the bracket is found by doubling steps.
+
+Brackets are clipped to the support. At a finite end \f$e\f$, \f$g\f$ is evaluated at the nearest interior point at least the least normal number (\f$2^{-1022}\f$) away from \f$e\f$; next to \f$0\f$, a subnormal \f$y\f$ would turn terms such as \f$(k - 1)/y\f$ into \f$\infty - \infty\f$. For \f$t\rho \le 1\f$, the objective is convex on the closed support, so if \f$g\f$ at that interior point has the sign it carries in the interior on the side of \f$e\f$ (\f$g \ge 0\f$ next to a lower end, \f$g \le 0\f$ next to an upper end), the end \f$e\f$ itself is returned as the minimizer (for example, in the exponential law or a law truncated to \f$[a, b]\f$). A density unbounded at an end (such as gamma with shape below \f$1\f$) sends the objective to \f$-\infty\f$ there and has no minimizer; such a law has \f$\rho = +\infty\f$, so the \f$t\rho > 1\f$ rule already returns quiet NaN without a special case.
+
+Inside the bracket, Newton's step on \f$g\f$ is taken unless it leaves the bracket or fails to halve the step from two iterations earlier (the `rtsafe` safeguard; Press et al., Numerical Recipes, section 9.4). In those cases the bracket is bisected: geometrically towards a finite end of the support when the bracket is more than four times nearer to that end, and arithmetically otherwise. An infinite \f$g'\f$ (from \f$l''\f$ overflowing next to an end) counts as no Newton step so the loop does not stop on a zero step. A Newton step smaller than \f$4\varepsilon |y|\f$ (with \f$\varepsilon = 2^{-53}\f$) is accepted only when \f$g\f$ changes sign within one further step of that size; next to a singular end, Newton otherwise crawls by single-ulp steps far from the root. In the measured case of a beta law with mean \f$0.3\f$ and precision \f$10\f$ (shapes \f$3\f$ and \f$7\f$), \f$v = 1.73\f$, and \f$t = 15814\f$, the plain step test stopped at \f$1 - 2.2 \times 10^{-16}\f$ whereas the root is \f$0.2500022\f$. Because the iteration always ends at rounding and reports no convergence flag, as the power exponential solver does, the penalty descriptor on \ref penalty_prox "the proximal operators page" is `penalty_prox_kind::closed_form`.
+
+### Accuracy and speed
+
+Reference values in `tests/data/reference/generic_prox.csv` are generated by `tools/reference/generic_prox.py` using mpmath (The mpmath development team, 2023). For each law, \f$l = \log f\f$ is written from its definition in Laplace's parametrization (dropping additive constants), and \f$g\f$ uses mpmath's numerical differentiation. The root is found by mpmath's Anderson–Björck solver inside a bracket widened from \f$v\f$, or by bisection to working precision where that solver fails. Each point is evaluated at \f$200\f$ and \f$260\f$ bits and kept when both agree to \f$2^{-120}\f$; every point agreed. The dataset has \f$2400\f$ rows across \f$20\f$ cases of \f$120\f$ points each: `student_t1`, `student_t2`, `cauchy`, `pseudohuber` at \f$\nu = 1\f$ and \f$0.01\f$, `logistic`, `gumbel`, two `skewnormal` cases, `gaussian1`, `gamma1` at shapes \f$3\f$ and \f$1.25\f$, `weibull` at shapes \f$2\f$ and \f$1.3\f$, `lognormal1`, `invgauss`, `beta`, `student_t1` truncated to \f$[-1, 2]\f$, `gaussian1` truncated to \f$[0.5, 3]\f$, and `exponential`. For each law with location \f$m_0\f$ and spread \f$s_0\f$, the grid samples \f$v = m_0 \pm s_0 \cdot 10^U\f$, with either sign and \f$U\f$ uniform in \f$(-4, 4)\f$ (placing \f$v\f$ below the support for one point in ten on a half-line or an interval) and \f$t = s_0^2 \cdot 10^U\f$ with \f$U\f$ uniform in \f$(-6, 6)\f$, capped at \f$U(0, 0.999)/\rho\f$ when \f$\rho > 0\f$.
+
+Error is measured in ulps of \f$x^*\f$ divided by \f$\max(1, \kappa)\f$, where
+\f[
+\kappa = \frac{|x^*| + |v| + t\,|l'(x^*)|}{|x^*|\,g'(x^*)}
+\f]
+is the condition number of the problem (see \ref accuracy_conditioned "conditioned error"): rounding the terms of \f$g\f$ at their own size shifts \f$x^*\f$ by \f$\kappa\f$ ulps. Automated checks in `tests/distrib/test_generic_prox.cpp` run inside a Kokkos kernel on both the gcc and CUDA builds. Against mpmath, \f$\mathrm{ulp} / \max(1, \kappa)\f$ is at most \f$5.53\f$ on gcc and \f$3.45\f$ on CUDA against a test bound of \f$8\f$, while the plain ulp error reaches \f$19.4\f$ on gcc and \f$18.4\f$ on CUDA. Every point whose reference sits at a support end matches that end exactly. At computed interior points, \f$|g(x)|\f$ is at most \f$11.9\f$ on gcc and \f$7.92\f$ on CUDA in units of \f$\varepsilon(|x| + |v| + t|l'(x)| + g'(x)|x|)\f$ against a test bound of \f$18\f$, where that unit combines the rounding of the terms of \f$g\f$ with the change of \f$g\f$ over one ulp of \f$x\f$ (dominant next to a singular end). Next to a returned support end, \f$g\f$ has the right sign. Additional checks verify that \f$t = 0\f$ projects onto the support, that \f$t\rho = 1.01\f$, \f$\rho = +\infty\f$, a NaN \f$v\f$, and a negative \f$t\f$ return NaN, that `fixed_distrib` reproduces its parent's prox bit for bit, and that `univariate_as_multivariate` matches the member `prox_y` bit for bit for `laplace1` and `prox_y_by_newton()` bit for bit for `student_t1`.
+
+By law on gcc, \f$\mathrm{ulp}/\kappa\f$ is \f$0.25\f$ to \f$1.5\f$ for Student, Cauchy, pseudo-Huber, logistic, `gaussian1`, `lognormal1`, `invgauss`, `beta`, the truncated laws, and `exponential`; \f$2.24\f$ for `gumbel`; \f$3.17\f$ for `skewnormal`; \f$3.73\f$ for `weibull`; and \f$5.53\f$ for `gamma1` with shape \f$1.25\f$.
+
+The table below reports single-thread C++ `-O3` speed over \f$4000\f$ points per law across the same parameter ranges. The cost of one evaluation is that of the law's own `logpdf_dy_dk<1, 0>` and `logpdf_dy_dk<2, 0>`, which is why call times vary widely across laws.
+
+| Law | Evaluations of \f$g\f$ (mean / max) | Time per call (ns) |
+|---|---|---|
+| `gaussian1` | 3.2 / 11 | 31 |
+| `exponential` | 2.2 / 3 | 39 |
+| `student_t1` | 4.2 / 40 | 1540 |
+| `cauchy` | 4.1 / 43 | 820 |
+| `logistic` | 5.4 / 39 | 1230 |
+| `gumbel` | 12.2 / 104 | 630 |
+| `skewnormal` | 6.0–6.5 / 13–87 | 3200–3500 |
+| `gamma1` | 9.6–14.5 / 51–73 | 150–200 |
+| `weibull` | 8.4–14.1 / 55–72 | 900–1470 |
+| `lognormal1` | 10.8 / 49 | 310 |
+| `invgauss` | 11.5 / 58 | 190 |
+| `beta` | 12.9 / 54 | 190 |
+| `pseudohuber` | 6.3–7.5 / 50–53 | 3500–27000 |
+
 ## Example
 
 Random draws and expected information in a Kokkos kernel:
@@ -128,11 +201,15 @@ Quantile routes are \ref laplace::distrib::quantile_by_root "quantile_by_root()"
 
 Random variates use \ref laplace::distrib::counter_uniform_source "counter_uniform_source", \ref laplace::distrib::open_unit_uniform "open_unit_uniform()", \ref laplace::distrib::rng_by_inversion(const D&, Gen&) "rng_by_inversion(d, gen)", \ref laplace::distrib::rng_by_inversion(const D&, std::uint64_t, std::uint64_t) "rng_by_inversion(d, seed, index)", \ref laplace::distrib::standard_normal_by_inversion "standard_normal_by_inversion()", and \ref laplace::distrib::standard_gamma_by_inversion "standard_gamma_by_inversion()".
 
+The proximal operator in \f$y\f$ uses \ref laplace::distrib::distrib_weak_convexity_reading "distrib_weak_convexity_reading", \ref laplace::distrib::distrib_weak_convexity "distrib_weak_convexity()", \ref laplace::distrib::has_distrib_prox_y "has_distrib_prox_y", \ref laplace::distrib::prox_y_by_newton "prox_y_by_newton()", and \ref laplace::distrib::distrib_prox_y "distrib_prox_y()".
+
 ## References
 
 - M. Bagnoli and T. Bergstrom (2005), Log-concave probability and its applications, Economic Theory, 26(2), 445–469. https://doi.org/10.1007/s00199-004-0514-4
 - E. T. Bell (1934), Exponential Polynomials, The Annals of Mathematics, 35(2), 258. https://doi.org/10.2307/1968431
 - J. E. Dennis and R. B. Schnabel (1996), Numerical Methods for Unconstrained Optimization and Nonlinear Equations. https://doi.org/10.1137/1.9781611971200
 - E. L. Lehmann and G. Casella (1998), Theory of Point Estimation, 2nd edition, Springer. https://doi.org/10.1007/b98854
+- W. H. Press, S. A. Teukolsky, W. T. Vetterling and B. P. Flannery (2007), Numerical Recipes: The Art of Scientific Computing, 3rd edition, Cambridge University Press.
+- The mpmath development team (2023), mpmath: a Python library for arbitrary-precision floating-point arithmetic, version 1.3.0, https://mpmath.org
 - G. L. Steele, D. Lea and C. H. Flood (2014), Fast splittable pseudorandom number generators, Proceedings of the 2014 ACM International Conference on Object Oriented Programming Systems Languages &amp; Applications, 453–472. https://doi.org/10.1145/2660193.2660195
 */

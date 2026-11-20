@@ -21,6 +21,7 @@
 
 #include <laplace/distrib/core.hpp>
 #include <laplace/distrib/multivariate_core.hpp>
+#include <laplace/distrib/weak_convexity.hpp>
 
 #include <cstring>
 #include <type_traits>
@@ -56,10 +57,11 @@ inline constexpr param_table<D> params_of = make_param_table<D>();
 // requires-expression written inline in a member's constraint
 template <class D>
 concept has_logpdf_dy_dk = requires(const D d, double v) { d.template logpdf_dy_dk<1, 0>(v); };
-// whether D has the optional prox_y(v, t) (note/penalties.md section 5c); a named concept,
-// since nvcc rejects the requires-expression written inline in a member's constraint
+// whether D has a prox in y: its optional prox_y(v, t) or the generic route of generic_prox.hpp
+// (note/penalties.md sections 5c and 5h); a named concept, since nvcc rejects the
+// requires-expression written inline in a member's constraint
 template <class D>
-concept has_prox_y = requires(const D d, double a) { d.prox_y(a, a); };
+concept has_prox_y = has_distrib_prox_y<D>;
 }  // namespace detail_uam
 
 /**
@@ -247,7 +249,7 @@ struct univariate_as_multivariate {
   }
 
   /**
-   * \brief Proximal operator in \f$y\f$, `D::prox_y` at location \f$x_0\f$; present when `D` has it.
+   * \brief Proximal operator in \f$y\f$, `distrib_prox_y` of `D` at location \f$x_0\f$ (its member `prox_y`, or the generic route of `generic_prox.hpp`); present when either exists.
    * \param st State from `theta_state()`.
    * \param v Point, length 1.
    * \param x Location, length 1.
@@ -260,11 +262,11 @@ struct univariate_as_multivariate {
     requires detail_uam::has_prox_y<D>
   {
     (void)w;
-    out[0] = law(x[0], st.theta).prox_y(v[0], t);
+    out[0] = distrib_prox_y(law(x[0], st.theta), v[0], t);
   }
 
   /**
-   * \brief Proximal operator in \f$y\f$ with a step per coordinate, `D::prox_y` at step `t[0]`; present when `D` has it.
+   * \brief Proximal operator in \f$y\f$ with a step per coordinate, `distrib_prox_y` of `D` at step `t[0]`; present when it exists.
    * \param st State from `theta_state()`.
    * \param v Point, length 1.
    * \param x Location, length 1.
@@ -277,7 +279,7 @@ struct univariate_as_multivariate {
     requires detail_uam::has_prox_y<D>
   {
     (void)w;
-    out[0] = law(x[0], st.theta).prox_y(v[0], t[0]);
+    out[0] = distrib_prox_y(law(x[0], st.theta), v[0], t[0]);
   }
 
  private:

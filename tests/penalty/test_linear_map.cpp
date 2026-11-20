@@ -78,10 +78,10 @@ static_assert(diff_pen<lasso_pen, 1>::structure == lpen::penalty_structure::coup
 static_assert(diff_pen<lasso_pen, 1>::prox == lpen::penalty_prox_kind::closed_form &&
               diff_pen<lasso2_pen, 1>::prox == lpen::penalty_prox_kind::closed_form &&
               diag_pen<lasso_pen>::prox == lpen::penalty_prox_kind::closed_form &&
-              diag_pen<enet_pen>::prox == lpen::penalty_prox_kind::closed_form);
+              diag_pen<enet_pen>::prox == lpen::penalty_prox_kind::closed_form &&
+              diag_pen<gauss_pen>::prox == lpen::penalty_prox_kind::closed_form);  // the generic route
 static_assert(diff_pen<lasso_pen, 2>::prox == lpen::penalty_prox_kind::none &&
               diff_pen<enet_pen, 1>::prox == lpen::penalty_prox_kind::none &&
-              diag_pen<gauss_pen>::prox == lpen::penalty_prox_kind::none &&
               diff_pen<gauss_pen, 1>::prox == lpen::penalty_prox_kind::none);
 static_assert(diag_pen<lasso_pen>::scale_mixture == lpen::penalty_scale_mixture::exponential_variance);
 

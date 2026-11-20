@@ -9,9 +9,10 @@
 // The descriptors of univariate_as_multivariate<D> follow from D: the
 // regularity in beta is D::y_regularity, a kink (y_regularity finite) sits on
 // each coordinate, the regularity in theta is the least of D's scalar
-// parameters. What D's declarations do not say, the scale-mixture
-// representation and the weak-convexity constant rho = sup(-pen''), is written
-// per law in univariate_penalty_reading<D>; a law without one does not compile.
+// parameters. The weak-convexity constant rho = sup(-pen'') is the law's own
+// (distrib/weak_convexity.hpp); the scale-mixture representation, which D's
+// declarations do not say, is written per law in univariate_penalty_reading<D>
+// (none by default).
 #pragma once
 
 #include <laplace/distrib/enet.hpp>
@@ -27,8 +28,10 @@
 #include <laplace/distrib/student_t1.hpp>
 #include <laplace/distrib/student_t2.hpp>
 #include <laplace/distrib/univariate_as_multivariate.hpp>
+#include <laplace/distrib/weak_convexity.hpp>
 #include <laplace/penalty/distrib_penalty.hpp>
 
+#include <cstring>
 #include <initializer_list>
 #include <type_traits>
 
@@ -36,16 +39,19 @@ namespace laplace::penalty {
 
 /**
  * \ingroup distrib_independent_product
- * \brief What the declarations of a univariate law `D` do not say about its penalty: scale mixture and \f$\rho\f$.
+ * \brief What the declarations of a univariate law `D` do not say about its penalty: the scale mixture.
  *
- * Undefined for a general `D`; specialized for laplace1, laplace2, enet, student_t1,
- * student_t2, pseudohuber, gaussian1, gaussian2 and powerexp. `weak_convexity(theta)`
- * reads the parameters of `D` after the location, in their order.
+ * None for a general `D`; specialized for laplace1, laplace2, enet, student_t1, student_t2,
+ * pseudohuber, gaussian1, gaussian2 and powerexp. The weak-convexity constant \f$\rho\f$ is the
+ * law's own, `distrib::distrib_weak_convexity_reading<D>` (distrib/weak_convexity.hpp).
  *
  * \tparam D Univariate distribution.
  */
 template <class D>
-struct univariate_penalty_reading;
+struct univariate_penalty_reading {
+  /// None declared.
+  static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::none;
+};
 
 /// \ingroup distrib_independent_product
 /// \brief Lasso, \f$|\beta - \mu| / \sigma\f$: convex, an exponential mixture of normal variances.
@@ -53,8 +59,6 @@ template <>
 struct univariate_penalty_reading<distrib::laplace1_distrib> {
   /// Exponential law of the variance.
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::exponential_variance;
-  /// \return 0, convex.
-  LAPLACE_HD static double weak_convexity(const double*) { return 0.0; }
   /// \return The rate \f$1/\sigma\f$ of the kink term \f$|\beta - \mu|/\sigma\f$.
   LAPLACE_HD static double l1_rate(const double* theta) { return 1.0 / theta[0]; }
 };
@@ -65,8 +69,6 @@ template <>
 struct univariate_penalty_reading<distrib::laplace2_distrib> {
   /// Exponential law of the variance.
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::exponential_variance;
-  /// \return 0, convex.
-  LAPLACE_HD static double weak_convexity(const double*) { return 0.0; }
   /// \return The rate \f$\lambda\f$ of the kink term \f$\lambda |\beta - \mu|\f$.
   LAPLACE_HD static double l1_rate(const double* theta) { return theta[0]; }
 };
@@ -77,8 +79,6 @@ template <>
 struct univariate_penalty_reading<distrib::enet_distrib> {
   /// None declared.
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::none;
-  /// \return 0, convex.
-  LAPLACE_HD static double weak_convexity(const double*) { return 0.0; }
 };
 
 /// \ingroup distrib_independent_product
@@ -87,8 +87,6 @@ template <>
 struct univariate_penalty_reading<distrib::pseudohuber_distrib> {
   /// None declared.
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::none;
-  /// \return 0, convex.
-  LAPLACE_HD static double weak_convexity(const double*) { return 0.0; }
 };
 
 /// \ingroup distrib_independent_product
@@ -97,8 +95,6 @@ template <>
 struct univariate_penalty_reading<distrib::gaussian1_distrib> {
   /// None declared (a normal is its own mixture).
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::none;
-  /// \return 0, convex.
-  LAPLACE_HD static double weak_convexity(const double*) { return 0.0; }
 };
 
 /// \ingroup distrib_independent_product
@@ -107,8 +103,6 @@ template <>
 struct univariate_penalty_reading<distrib::gaussian2_distrib> {
   /// None declared (a normal is its own mixture).
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::none;
-  /// \return 0, convex.
-  LAPLACE_HD static double weak_convexity(const double*) { return 0.0; }
 };
 
 /**
@@ -123,10 +117,6 @@ template <>
 struct univariate_penalty_reading<distrib::student_t1_distrib> {
   /// Inverse-gamma law of the variance.
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::inverse_gamma_variance;
-  /// \param theta \f$(\sigma, \nu)\f$. \return \f$(\nu + 1)/(8 \nu \sigma^2)\f$.
-  LAPLACE_HD static double weak_convexity(const double* theta) {
-    return (theta[1] + 1.0) / (8.0 * theta[1] * theta[0] * theta[0]);
-  }
 };
 
 /**
@@ -140,10 +130,6 @@ template <>
 struct univariate_penalty_reading<distrib::student_t2_distrib> {
   /// Inverse-gamma law of the variance.
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::inverse_gamma_variance;
-  /// \param theta \f$(\sigma, \nu)\f$. \return \f$(\nu + 1)/(8 (\nu - 2) \sigma^2)\f$.
-  LAPLACE_HD static double weak_convexity(const double* theta) {
-    return (theta[1] + 1.0) / (8.0 * (theta[1] - 2.0) * theta[0] * theta[0]);
-  }
 };
 
 /**
@@ -156,10 +142,6 @@ template <>
 struct univariate_penalty_reading<distrib::powerexp_distrib> {
   /// None declared.
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::none;
-  /// \param theta \f$(\sigma, p)\f$. \return 0 for \f$p \ge 1\f$, \f$+\infty\f$ otherwise.
-  LAPLACE_HD static double weak_convexity(const double* theta) {
-    return theta[1] >= 1.0 ? 0.0 : distrib::distrib_infinity;
-  }
 };
 
 namespace detail_penalty {
@@ -175,7 +157,7 @@ constexpr int least_theta_regularity() {
 /**
  * \ingroup distrib_independent_product
  * \brief Descriptors of the penalty of a univariate law `D` read as a multivariate law of dimension 1.
- * \tparam D Univariate distribution with a `univariate_penalty_reading`.
+ * \tparam D Univariate distribution.
  */
 template <class D>
 struct distrib_penalty_traits<distrib::univariate_as_multivariate<D>> {
@@ -192,8 +174,21 @@ struct distrib_penalty_traits<distrib::univariate_as_multivariate<D>> {
   static constexpr bool q_linear_in_theta = false;
   /// Scale mixture, from `univariate_penalty_reading<D>`.
   static constexpr penalty_scale_mixture scale_mixture = univariate_penalty_reading<D>::scale_mixture;
-  /// \param theta Parameters of `D` after the location. \return \f$\rho\f$ from `univariate_penalty_reading<D>`.
-  LAPLACE_HD static double weak_convexity(const double* theta) { return univariate_penalty_reading<D>::weak_convexity(theta); }
+  /**
+   * \param m The law, whose prototype holds what is not a parameter.
+   * \param theta Parameters of `D` after the location.
+   * \return \f$\rho\f$ of `D` at \f$\theta\f$, from `distrib::distrib_weak_convexity_reading<D>` (it does not depend on the location).
+   */
+  LAPLACE_HD static double weak_convexity(const distrib::univariate_as_multivariate<D>& m, const double* theta)
+    requires distrib::has_weak_convexity_reading<D>
+  {
+    double p[D::n_params];
+    p[0] = 0.0;
+    for (int j = 1; j < D::n_params; ++j) p[j] = theta[j - 1];
+    D d = m.prototype;
+    std::memcpy(static_cast<void*>(&d), p, sizeof p);
+    return distrib::distrib_weak_convexity(d);
+  }
 };
 
 namespace detail_penalty {
