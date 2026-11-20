@@ -17,6 +17,8 @@
 #include <laplace/distrib/generic_start.hpp>
 #include <laplace/distrib/laplace1.hpp>
 #include <laplace/distrib/logistic.hpp>
+#include <laplace/distrib/mcp.hpp>
+#include <laplace/distrib/scad.hpp>
 #include <laplace/distrib/cauchy.hpp>
 #include <laplace/distrib/poisson.hpp>
 
@@ -563,4 +565,130 @@ TEST_CASE("distrib generic: the start value from the sample, by either route") {
   const circular_start_probe p = ld::distrib_start_value(circular_start_probe{}, y);
   CHECK(p.mean_cos == want_cos / n);
   CHECK(p.mu == std::atan2(want_sin / n, want_cos / n));
+}
+
+namespace {
+
+// The validity rule of the generic information when a kink moves with several
+// parameters at once. On mcp and scad the knots y = mu +- gamma lambda (and
+// mu +- a lambda) move with mu, lambda and the shape, and l is C^1 there: the
+// counts are summed over the parameters of finite regularity, so a component with
+// two derivatives in C among lambda and the shape and one more index of them in
+// (a, b) is NaN, while each parameter counted alone would have admitted it.
+template <class D>
+D moving_make(const double* t) {
+  if constexpr (D::n_params == 4) return D{t[0], t[1], t[2], t[3]};
+  else return D{t[0], t[1], t[2], t[3], t[4]};
+}
+
+// the rule as it read with each parameter counted alone, for the laws where the two agree
+template <class D, int K>
+bool rule_one_parameter(int a, int b, const int* c, ld::info_form form) {
+  for (int j = 0; j < D::n_params; ++j) {
+    const int r = D::params[j].regularity;
+    if (r >= ld::infinitely_smooth) continue;
+    const int na = a == j, nb = b == j;
+    int nc = 0;
+    for (int i = 0; i < K; ++i) nc += c[i] == j;
+    if (form == ld::info_form::hessian) {
+      if (na + nb + nc > r + 1) return false;
+    } else if (nc > 0 && (na > nb ? na : nb) + nc > r + 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <class D, int K>
+int rule_unchanged_count() {
+  constexpr int P = D::n_params;
+  int n = 0;
+  for (int a = 0; a < P; ++a)
+    for (int b = a; b < P; ++b) {
+      int c[K > 0 ? K : 1] = {};
+      for (int q = 0; q < ld::sym_tensor_size(P, K); ++q) {
+        for (const auto form : {ld::info_form::hessian, ld::info_form::score}) {
+          CHECK(ld::detail_generic::info_component_valid<D, K>(a, b, c, form) ==
+                rule_one_parameter<D, K>(a, b, c, form));
+          ++n;
+        }
+        int i = K - 1;
+        while (i >= 0 && c[i] == P - 1) --i;
+        if (i >= 0) {
+          ++c[i];
+          for (int j = i + 1; j < K; ++j) c[j] = c[i];
+        }
+      }
+    }
+  return n;
+}
+
+// The order-2 generic score-form components on a law whose knots move with lambda and
+// the shape (indices 1 and 2): NaN exactly where the summed counts exceed r + 1 = 2, and
+// every finite one equal to central differences of the order-1 generic route, which
+// is valid at every component that carries a derivative in the knot's parameters.
+template <class D>
+void moving_knot_case(const double* th, double& worst, int& n_nan, int& n_finite) {
+  constexpr int P = D::n_params;
+  const D d = moving_make<D>(th);
+  const auto g2 = ld::expected_info_by_integral<2, ld::info_form::score>(d);
+  for (int a = 0; a < P; ++a)
+    for (int b = a; b < P; ++b) {
+      const int ab[2] = {a, b};
+      const int p = ld::sym_tensor_position<P, 2>(ab);
+      for (int c0 = 0; c0 < P; ++c0)
+        for (int c1 = c0; c1 < P; ++c1) {
+          const int c[2] = {c0, c1};
+          const double v = g2.pair[p][ld::sym_tensor_position<P, 2>(c)];
+          // the groups: {mu} of regularity 0 (the kink at y = mu), {mu, lambda, shape} of 1
+          const auto group_ok = [&](int last, int r) {
+            const auto in = [&](int j) { return j <= last; };
+            const int na = in(a), nb = in(b), nc = in(c0) + in(c1);
+            return nc == 0 || (na > nb ? na : nb) + nc <= r + 1;
+          };
+          const bool valid = group_ok(0, 0) && group_ok(2, 1);
+          INFO("pair (" << a << ", " << b << "), C = (" << c0 << ", " << c1 << ")");
+          CHECK(std::isnan(v) == !valid);
+          if (!valid) {
+            ++n_nan;
+            continue;
+          }
+          // d/dtheta_c0 of the order-1 component d_c1 I_ab, by a five-point difference
+          const double h = 1e-3 * std::fmax(std::fabs(th[c0]), 1.0);
+          double t[5], f[4];
+          const double steps[4] = {-2.0, -1.0, 1.0, 2.0};
+          for (int s = 0; s < 4; ++s) {
+            for (int k = 0; k < P; ++k) t[k] = th[k];
+            t[c0] += steps[s] * h;
+            f[s] = ld::expected_info_by_integral<1, ld::info_form::score>(moving_make<D>(t)).pair[p][c1];
+          }
+          const double fd = (f[0] - 8.0 * f[1] + 8.0 * f[2] - f[3]) / (12.0 * h);
+          if (!std::isfinite(fd)) continue;  // the order-1 component is NaN itself
+          const double e = std::fabs(v - fd) / std::fmax(std::fabs(fd), 1.0);
+          worst = std::fmax(worst, e);
+          ++n_finite;
+          CHECK(e <= 1e-6);
+        }
+    }
+}
+
+}  // namespace
+
+TEST_CASE("distrib generic: the information rule sums the counts over the parameters that move a kink") {
+  // one parameter of finite regularity: the rule is the one-parameter rule exactly
+  int n = rule_unchanged_count<ld::laplace1_distrib, 0>() + rule_unchanged_count<ld::laplace1_distrib, 1>() +
+          rule_unchanged_count<ld::laplace1_distrib, 2>() + rule_unchanged_count<ld::laplace1_distrib, 3>() +
+          rule_unchanged_count<ld::laplace1_distrib, 4>();
+  CHECK(n > 0);
+
+  // mcp and scad with the Student tail, at the point where the one-parameter rule had
+  // given d^2 I_lambda_lambda / dgamma^2 at 2.32 times its value
+  double worst = 0.0;
+  int n_nan = 0, n_finite = 0;
+  const double th_m[5] = {0.3, 1.3, 3.0, 0.9, 3.5}, th_s[5] = {0.3, 1.1, 3.7, 0.9, 3.5};
+  moving_knot_case<ld::mcp_distrib<ld::student_tail>>(th_m, worst, n_nan, n_finite);
+  moving_knot_case<ld::scad_distrib<ld::student_tail>>(th_s, worst, n_nan, n_finite);
+  std::printf("generic info, moving knots: %d components NaN by the rule, %d finite, worst %.3g relative "
+              "against differences of order one\n", n_nan, n_finite, worst);
+  CHECK(n_finite > 0);
 }

@@ -22,10 +22,19 @@
 // in y that moves with it; an a.e. derivative of l of order above r_j + 1 in
 // theta_j misses a point mass there, and differentiating an integrand that jumps
 // at the kink misses a boundary term. A component is computed only when neither
-// happens, and is NaN otherwise:
-//   hessian form: n_a + n_b + n_C <= r_j + 1 for every such j,
-//   score form:   n_C = 0, or max(n_a, n_b) + n_C <= r_j + 1,
-// with n_a, n_b, n_C the multiplicities of j in a, b and C. On the Laplace (r_mu
+// happens, and is NaN otherwise. A kink may move with several parameters at
+// once (the knots y = mu +- gamma lambda of the MCP move with mu, lambda and
+// gamma), and then a derivative in any of them moves it: the counts are summed
+// over every parameter that may move the kink. Every parameter that moves a kink
+// of order k has r_j <= k, so for each finite order r among the parameters the
+// group M_r = {j : r_j <= r} holds every parameter that moves a kink of order r
+// or less, and the rule asks, for every such r,
+//   hessian form: n_a + n_b + n_C <= r + 1,
+//   score form:   n_C = 0, or max(n_a, n_b) + n_C <= r + 1,
+// with n_a, n_b, n_C the numbers of indices of a, b and C that lie in M_r. With
+// one parameter of finite regularity this is the rule for that parameter alone;
+// with several it can refuse a component that a kink moved by fewer of them
+// would allow (NaN where a number exists, never a wrong number). On the Laplace (r_mu
 // = 0) the score form gives I and every derivative with at most one index mu in C
 // and none in (a, b) when there is one in C; the hessian form gives the
 // components with at most one index mu in (a, b) and C together. A component whose quadrature or sum did not converge is
@@ -178,12 +187,13 @@ LAPLACE_HD constexpr regularity_orders<D> regularities_of() {
 template <class D, int K>
 LAPLACE_HD bool info_component_valid(int a, int b, const int* c, info_form form) {
   constexpr regularity_orders<D> R = regularities_of<D>();
-  for (int j = 0; j < D::n_params; ++j) {
-    const int r = R.r[j];
+  for (int g = 0; g < D::n_params; ++g) {  // the group M_r with r = r_g
+    const int r = R.r[g];
     if (r >= infinitely_smooth) continue;
-    const int na = a == j, nb = b == j;
+    const auto in = [&](int j) { return R.r[j] <= r; };
+    const int na = in(a), nb = in(b);
     int nc = 0;
-    for (int i = 0; i < K; ++i) nc += c[i] == j;
+    for (int i = 0; i < K; ++i) nc += in(c[i]);
     if (form == info_form::hessian) {
       if (na + nb + nc > r + 1) return false;
     } else if (nc > 0 && (na > nb ? na : nb) + nc > r + 1) {
@@ -250,8 +260,10 @@ using expected_info_result = std::conditional_t<K == 0, sym_tensor<P, 2>, expect
  *
  * \par Domain and special values
  * - Returns quiet NaN for components where quadrature or summation fails to converge.
- * - Returns quiet NaN for components violating the finite-regularity kink condition:
- *   hessian form when \f$n_a + n_b + n_C > r_j + 1\f$; score form when \f$n_C > 0\f$ and \f$\max(n_a, n_b) + n_C > r_j + 1\f$.
+ * - Returns quiet NaN for components violating the finite-regularity kink condition, for some finite
+ *   regularity \f$r\f$ among the parameters, with \f$n_a, n_b, n_C\f$ the numbers of indices of \f$a\f$,
+ *   \f$b\f$ and \f$C\f$ whose parameter has regularity at most \f$r\f$: hessian form when
+ *   \f$n_a + n_b + n_C > r + 1\f$; score form when \f$n_C > 0\f$ and \f$\max(n_a, n_b) + n_C > r + 1\f$.
  *
  * \par Measured accuracy
  * Worst error in eps of the largest component:

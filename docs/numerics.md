@@ -2301,6 +2301,30 @@ has one.
   On the Laplace this leaves NaN every derivative with two indices mu in C, or
   with mu in C and in (a, b); statmodels7 had left the same components wrong
   (derivate.md, 2026-10-05).
+  Amended 2026-11-20: a kink can move with several parameters at once (the
+  knots y = mu +- gamma lambda of mcp, mu +- lambda and mu +- a lambda of scad,
+  C^1 in y), and then the counts of j alone admit components whose integrand
+  jumps after one derivative in lambda and one in the shape. The generic second
+  derivative of I_lambda_lambda in gamma came out 2.32 times the closed one on
+  mcp with the Student tail at (0.3, 1.3, 3, 0.9, 3.5). Every parameter that
+  moves a kink of order k has r_j <= k, so the rule now sums the counts over
+  M_r = {j : r_j <= r} for each finite r among the parameters and asks the same
+  inequalities with r + 1. With one parameter of finite regularity (laplace1,
+  laplace2, enet, powerexp) the rule is the old one, checked component by
+  component to order four; with several it can return NaN where a value exists
+  and never a wrong value. Measured at order two, score form, on mcp and scad
+  with the Student tail: 170 components NaN by the rule, the other 280 finite
+  ones equal to five-point differences of the order-one route within 2.4e-11
+  relative.
+  The rule is conservative when several parameters move a kink. Against the
+  closed forms at the settings of test_mcp_scad_info.cpp (order two, score
+  form): 27 components that the one-parameter rule had admitted with a wrong
+  value are now NaN (13 on mcp, up to 2.32 of the tensor's scale; 14 on scad,
+  up to 1.52), and 28 components with C = (mu, lambda) or (mu, shape) are
+  refused although they are exactly 0, the information of a location law over
+  the whole line not depending on mu (the one-parameter rule had them within
+  2.3e-15). Decided with Giovanni: NaN is kept there, with no descriptor flag
+  for a pure location parameter.
 - `generic_rng.hpp`: `rng_by_inversion(d, gen)` = `distrib_quantile(d, u)` with
   u = (n + 1/2) 2^-53 from the top 53 bits of `gen.urand64()`, in
   [2^-54, 1 - 2^-54]; gen is a Kokkos pool state (XorShift64, XorShift1024) or
