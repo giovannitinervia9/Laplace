@@ -401,14 +401,24 @@ LAPLACE_HD void dawson_moments(double lambda, double p, double* N) {
 // of A and B in Z = 2 [A + B T], T the tail's constant: T carries every derivative in
 // the tail's own parameters, so the table over all of them is assembled from A, B and
 // the mixed partials of T, and the logarithm follows by log3 or log4.
+// The derivatives of T in the tail's own parameters are built once here, by the tail's
+// const_table, and read from that table: const_mixed returns one component at a time and
+// rebuilds everything behind it, which for the Student tail is the derivatives of G and
+// with them one value of the half-step log-gamma ratio an order. Over the multi-indices of
+// a table of order K that was the whole cost of the call (measured 2026-11-20: the
+// expected information of mcp with the Student tail went from 1179 to 7258 ns a call when
+// the ratio replaced a difference of two log-gammas, and back to 3272 with the table
+// built once).
 template <int K, class Tail>
 LAPLACE_HD void log_z_table(const double* A, const double* B, const Tail& tail, double* out) {
+  double Tt[tab2_size(K)];
+  tail.const_table(K, Tt);  // written at the packing of idx2<K>
   if constexpr (Tail::n_tail_params == 1) {
     double Z[tab3_size(K)];
     for (int i = 0; i <= K; ++i)
       for (int m = 0; i + m <= K; ++m)
         for (int n = 0; i + m + n <= K; ++n) {
-          double v = 2.0 * B[idx2<K>(i, m)] * tail.const_mixed(n, 0);
+          double v = 2.0 * B[idx2<K>(i, m)] * Tt[idx2<K>(n, 0)];
           if (n == 0) v += 2.0 * A[idx2<K>(i, m)];
           Z[idx3(i, m, n)] = v;
         }
@@ -419,7 +429,7 @@ LAPLACE_HD void log_z_table(const double* A, const double* B, const Tail& tail, 
       for (int m = 0; i + m <= K; ++m)
         for (int n = 0; i + m + n <= K; ++n)
           for (int o = 0; i + m + n + o <= K; ++o) {
-            double v = 2.0 * B[idx2<K>(i, m)] * tail.const_mixed(n, o);
+            double v = 2.0 * B[idx2<K>(i, m)] * Tt[idx2<K>(n, o)];
             if (n == 0 && o == 0) v += 2.0 * A[idx2<K>(i, m)];
             Z[idx4(i, m, n, o)] = v;
           }

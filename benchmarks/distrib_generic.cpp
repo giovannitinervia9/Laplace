@@ -147,6 +147,17 @@ void info_lines(const char* name, M make, double t0) {
   time_line(what, "score", info_f<M, K>{make, 2}, t);
 }
 
+// the member alone, for the orders where the generic route costs seconds a call
+template <class M, int K>
+void info_member_line(const char* name, M make, double t0) {
+  std::mt19937_64 g(20261112);
+  std::uniform_real_distribution<double> u(0.0, 1.0);
+  const auto t = bench::make_time_args(1 << 8, [&] { return t0 * (0.9 + 0.2 * u(g)); });
+  char what[64];
+  std::snprintf(what, sizeof what, "info d%d %s", K, name);
+  time_line(what, "member", info_f<M, K>{make, 0}, t);
+}
+
 template <class M>
 void info_all(const char* name, M make, double t0) {
   info_lines<M, 0>(name, make, t0);
@@ -221,9 +232,19 @@ int main(int argc, char** argv) {
     info_all("gamma1(2, 0.3)", make_gamma{}, 0.3);
     info_all("poisson(3.5)", make_poisson{}, 3.5);
     info_lines<make_laplace, 0>("laplace(0.4, 1.3)", make_laplace{}, 1.3);
+    // the two properized laws have closed members at every order; the generic route is
+    // asked to orders zero to two only, costing seconds a call beyond that
     info_lines<make_mcp_student, 0>("mcp student(1.3, 3)", make_mcp_student{}, 1.3);
     info_lines<make_mcp_gaussian, 0>("mcp gaussian(1.3, 3)", make_mcp_gaussian{}, 1.3);
     info_lines<make_scad_student, 0>("scad student(1.3, 3.7)", make_scad_student{}, 1.3);
+    info_lines<make_mcp_student, 1>("mcp student(1.3, 3)", make_mcp_student{}, 1.3);
+    info_lines<make_mcp_gaussian, 1>("mcp gaussian(1.3, 3)", make_mcp_gaussian{}, 1.3);
+    info_lines<make_scad_student, 1>("scad student(1.3, 3.7)", make_scad_student{}, 1.3);
+    info_lines<make_mcp_student, 2>("mcp student(1.3, 3)", make_mcp_student{}, 1.3);
+    info_member_line<make_mcp_student, 3>("mcp student(1.3, 3)", make_mcp_student{}, 1.3);
+    info_member_line<make_mcp_student, 4>("mcp student(1.3, 3)", make_mcp_student{}, 1.3);
+    info_member_line<make_scad_student, 4>("scad student(1.3, 3.7)", make_scad_student{}, 1.3);
+    info_member_line<make_mcp_gaussian, 4>("mcp gaussian(1.3, 3)", make_mcp_gaussian{}, 1.3);
     {
       std::mt19937_64 g(20261112);
       std::uniform_real_distribution<double> u(0.0, 1.0);

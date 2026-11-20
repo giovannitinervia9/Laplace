@@ -74,6 +74,7 @@
 
 #include <laplace/core/config.hpp>
 #include <laplace/distrib/core.hpp>
+#include <laplace/distrib/detail/properized_info.hpp>
 #include <laplace/distrib/detail/properized_nonconvex.hpp>
 #include <laplace/distrib/properizing_tail.hpp>
 #include <laplace/math/dawson.hpp>
@@ -265,6 +266,123 @@ constexpr std::array<distrib_param_info, N> param_list() {
   for (int j = 0; j < Tail::n_tail_params; ++j) p[3 + j] = Tail::tail_params[j];
   return p;
 }
+
+// The tables the derivatives of the expected information read, built as mcp_distrib's are
+// (detail/properized_info.hpp says why they are outer products). The moments of the middle
+// piece are those at p = c = a - 1, and dc/da = 1, so their table in (lambda, a) is their
+// table in (lambda, c) with no factor to carry. With e1 = e^(-lambda^2), E =
+// e^(-(a+1)lambda^2/2) and the tail's four quantities as on the MCP law, the integrals of
+// the second derivatives of q are
+//
+//   lambda lambda   -e1 N_0/c + E ((a+1) T + a^2 J)
+//   lambda a        -e1 N_1/c^2 + E (lambda T - 1 + a lambda J)
+//   a a             -e1 N_2/c^3 + E lambda^2 J
+//   lambda theta_j  -a E B_j
+//   a theta_j       -lambda E B_j
+//   theta_i theta_j  E C_ij
+//
+// and the numerator of I_mu_mu is lambda - e1 N_0/c + E J. The first piece, where q is
+// linear, contributes to none of them.
+template <int K, class Tail>
+struct info_builder {
+  static constexpr int NT = Tail::n_tail_params;
+  static constexpr int TS = tab2_size(K);
+  double lambda, a;
+  double e[TS], ae[TS], a2e[TS], le[TS], ale[TS], l2e[TS], a1e[TS];
+  double n0c[TS], n1c2[TS], n2c3[TS], lam[TS];
+  double T[TS], J[TS], B[2][TS], C[3][TS], one[TS];
+
+  LAPLACE_HD void prepare(const Tail& tail) {
+    using namespace detail_properized_info;
+    const double c = a - 1.0;
+    double N0[TS], N1[TS], N2[TS], mon[TS], e1[TS], phi[TS];
+    moment_tables<K>(lambda, c, N0, N1, N2);
+    // E = e^(-(a+1) lambda^2/2), the table z_tables builds as its B
+    zero2<K>(phi);
+    phi[idx2<K>(0, 0)] = -0.5 * (a + 1.0) * lambda * lambda;
+    if constexpr (K >= 1) {
+      phi[idx2<K>(1, 0)] = -(a + 1.0) * lambda;
+      phi[idx2<K>(0, 1)] = -0.5 * lambda * lambda;
+    }
+    if constexpr (K >= 2) {
+      phi[idx2<K>(2, 0)] = -(a + 1.0);
+      phi[idx2<K>(1, 1)] = -lambda;
+    }
+    if constexpr (K >= 3) phi[idx2<K>(2, 1)] = -1.0;
+    exp2<K>(phi, e);
+    // e1 = e^(-lambda^2)
+    zero2<K>(phi);
+    phi[idx2<K>(0, 0)] = -lambda * lambda;
+    if constexpr (K >= 1) phi[idx2<K>(1, 0)] = -2.0 * lambda;
+    if constexpr (K >= 2) phi[idx2<K>(2, 0)] = -2.0;
+    exp2<K>(phi, e1);
+    monomial2<K>(lambda, a, 0, 1, mon), mul2<K>(mon, e, ae);
+    monomial2<K>(lambda, a, 0, 2, mon), mul2<K>(mon, e, a2e);
+    monomial2<K>(lambda, a, 1, 0, mon), mul2<K>(mon, e, le);
+    monomial2<K>(lambda, a, 1, 1, mon), mul2<K>(mon, e, ale);
+    monomial2<K>(lambda, a, 2, 0, mon), mul2<K>(mon, e, l2e);
+    zero2<K>(mon);  // a + 1, whose table in a is the monomial a plus one
+    monomial2<K>(lambda, a, 0, 1, mon);
+    mon[idx2<K>(0, 0)] += 1.0;
+    mul2<K>(mon, e, a1e);
+    // the moments over the middle piece carry e1 and a negative power of c, whose
+    // derivatives in a are those in c
+    double cm[TS], t[TS];
+    monomial2<K>(lambda, c, 0, -1, cm), mul2<K>(cm, N0, t), mul2<K>(t, e1, n0c);
+    monomial2<K>(lambda, c, 0, -2, cm), mul2<K>(cm, N1, t), mul2<K>(t, e1, n1c2);
+    monomial2<K>(lambda, c, 0, -3, cm), mul2<K>(cm, N2, t), mul2<K>(t, e1, n2c3);
+    monomial2<K>(lambda, a, 1, 0, lam);
+    zero2<K>(one);
+    one[idx2<K>(0, 0)] = 1.0;
+    double Tc[TS];
+    tail.const_table(K, Tc);  // once, not once per multi-index
+    for (int n = 0; n <= K; ++n)
+      for (int o = 0; n + o <= K; ++o) {
+        if (NT == 1 && o > 0) continue;
+        T[idx2<K>(n, o)] = Tc[idx2<K>(n, o)];
+        J[idx2<K>(n, o)] = tail.info_xx_mixed(n, o);
+        for (int j = 0; j < NT; ++j) B[j][idx2<K>(n, o)] = tail.info_xt_mixed(j, n, o);
+        int q = 0;
+        for (int i = 0; i < NT; ++i)
+          for (int b = i; b < NT; ++b, ++q) C[q][idx2<K>(n, o)] = tail.info_tt_mixed(i, b, n, o);
+      }
+  }
+
+  LAPLACE_HD void build_imm(double* num) const {
+    using namespace detail_properized_info;
+    st_zero<K, NT>(num);
+    st_add_lp<K, NT>(num, 1.0, lam);
+    st_add_lp<K, NT>(num, -1.0, n0c);
+    st_add_outer<K, NT>(num, 1.0, e, J);
+  }
+
+  LAPLACE_HD void build_num(int i, int j, double* num) const {
+    using namespace detail_properized_info;
+    st_zero<K, NT>(num);
+    if (i == 0 && j == 0) {
+      st_add_lp<K, NT>(num, -1.0, n0c);
+      st_add_outer<K, NT>(num, 1.0, a1e, T);
+      st_add_outer<K, NT>(num, 1.0, a2e, J);
+    } else if (i == 0 && j == 1) {
+      st_add_lp<K, NT>(num, -1.0, n1c2);
+      st_add_outer<K, NT>(num, 1.0, le, T);
+      st_add_outer<K, NT>(num, -1.0, e, one);
+      st_add_outer<K, NT>(num, 1.0, ale, J);
+    } else if (i == 1 && j == 1) {
+      st_add_lp<K, NT>(num, -1.0, n2c3);
+      st_add_outer<K, NT>(num, 1.0, l2e, J);
+    } else if (i == 0) {
+      st_add_outer<K, NT>(num, -1.0, ae, B[j - 2]);
+    } else if (i == 1) {
+      st_add_outer<K, NT>(num, -1.0, le, B[j - 2]);
+    } else {
+      int q = 0;
+      for (int x = 0; x < NT; ++x)
+        for (int y = x; y < NT; ++y, ++q)
+          if (x == i - 2 && y == j - 2) st_add_outer<K, NT>(num, 1.0, e, C[q]);
+    }
+  }
+};
 
 }  // namespace detail_scad
 
@@ -469,6 +587,64 @@ struct scad_distrib {
       }
     return t;
   }
+
+  /**
+   * \brief Parameter derivatives of order \f$K\f$ of the expected information.
+   *
+   * Assembled as on \ref distrib_mcp "the Properized MCP page": the information does not
+   * depend on the location, so every component whose multi-index carries \f$\mu\f$ is an
+   * exact zero, and the rest is a table over \f$(\lambda, a, \theta_t)\f$ per pair,
+   * divided by \f$Z/2\f$ and completed by the order-\f$(K+2)\f$ table of \f$\log Z\f$.
+   * \tparam K Derivative order (\f$1 \le K \le 4\f$).
+   * \return \c expected_info_tensor<n_params, K>.
+   * \see distrib_scad, expected_info()
+   */
+  template <int K>
+  LAPLACE_HD expected_info_tensor<n_params, K> expected_info_dk() const {
+    using namespace detail_properized;
+    using namespace detail_properized_info;
+    constexpr int nt = Tail::n_tail_params;
+    double A[tab2_size(K + 2)], B2[tab2_size(K + 2)], LZ[z_tab_size(K + 2, nt)];
+    detail_scad::z_tables<K + 2>(lambda, a, A, B2);
+    log_z_table<K + 2>(A, B2, tail, LZ);
+    double z2[st_size<K, nt>()], invz[st_size<K, nt>()];
+    {
+      double Ak[tab2_size(K)], Bk[tab2_size(K)], Tt[tab2_size(K)], one[tab2_size(K)];
+      detail_scad::z_tables<K>(lambda, a, Ak, Bk);
+      zero2<K>(one);
+      one[idx2<K>(0, 0)] = 1.0;
+      double Tc[tab2_size(K)];
+      tail.const_table(K, Tc);
+      for (int n = 0; n <= K; ++n)
+        for (int o = 0; n + o <= K; ++o) {
+          if (nt == 1 && o > 0) continue;
+          Tt[idx2<K>(n, o)] = Tc[idx2<K>(n, o)];
+        }
+      st_zero<K, nt>(z2);
+      st_add_outer<K, nt>(z2, 1.0, Ak, one);
+      st_add_outer<K, nt>(z2, 1.0, Bk, Tt);
+      st_recip<K, nt>(z2, invz);
+    }
+    detail_scad::info_builder<K, Tail> b;
+    b.lambda = lambda, b.a = a;
+    b.prepare(tail);
+    expected_info_tensor<n_params, K> out;
+    assemble_info_dk<K, scad_distrib<Tail>, Tail>(b, invz, LZ, out);
+    return out;
+  }
+  /**
+   * \name Derivatives of the expected information
+   * @{
+   */
+  /// First-order derivatives of the expected information.
+  LAPLACE_HD expected_info_tensor<n_params, 1> expected_info_d1() const { return expected_info_dk<1>(); }
+  /// Second-order derivatives of the expected information.
+  LAPLACE_HD expected_info_tensor<n_params, 2> expected_info_d2() const { return expected_info_dk<2>(); }
+  /// Third-order derivatives of the expected information.
+  LAPLACE_HD expected_info_tensor<n_params, 3> expected_info_d3() const { return expected_info_dk<3>(); }
+  /// Fourth-order derivatives of the expected information.
+  LAPLACE_HD expected_info_tensor<n_params, 4> expected_info_d4() const { return expected_info_dk<4>(); }
+  /** @} */
 
   /// The cumulative distribution function \f$F(y)\f$.
   LAPLACE_HD double cdf(double y) const {

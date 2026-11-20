@@ -15413,3 +15413,107 @@ differencing two log-gammas and two polygammas per order, since
 whole matrix reads the tail constant through `Z`, went from 706 to 58.7 ulp of its largest
 component over the reference grid, and the generic quadrature on the same grid from 404 to
 3.84 ulp.
+
+## The derivatives of the expected information of the MCP and SCAD laws, orders one to four (2026-11-20)
+
+**What it is.** `expected_info_dk<K>` on `mcp_distrib` and `scad_distrib`, for `K` from one
+to four, returns the derivatives of the whole matrix in closed form over every properizing
+tail, where the per-order dispatch of `distrib_expected_info<K>` sent them to the generic
+quadrature before. With the order zero of the previous section the two laws no longer use
+that route at all.
+
+**What the closed form buys first is the exact zeros.** The information of these laws does
+not depend on the location, so every derivative component whose multi-index carries `mu`
+is zero. Those are exactly the components the generic route cannot produce: the regularity
+rule of the score form refuses them and returns NaN, the location being the parameter the
+kink moves with. Of the multi-indices of a five-parameter law one in five carries `mu` at
+order one and one in two at order four. The closed form returns the zeros as zeros, and
+that, rather than speed, is the reason the orders were written.
+
+**The structure that makes it short.** Every factor of the closed form of the previous
+section depends either on `(lambda, p)`, with `p = gamma` for MCP and `a - 1` for SCAD, or
+on the tail's own parameters, and never on both. So no table over four or five variables is
+ever built: each factor carries a table over `(lambda, p)` of total order `K` or a table
+over the tail's parameters, and the product of the two is an outer product. The helpers are
+in `detail/properized_info.hpp`: `st_mul` for a product of two such split tables, `st_recip`
+for a reciprocal, `st_add_outer` for a term that is a product of one of each, and
+`st_add_lp` for a term that only moves with `(lambda, p)`. The reciprocal over all the
+indices is needed once per entry, for the division by `Z`, and `assemble_info_dk` does the
+rest with products and sums.
+
+**The tables the factors need.** `monomial2` builds the table of `lambda^beta p^alpha` for
+real `beta` and `alpha`, the falling factorials cancelling every slot past a whole exponent
+on their own, so the same function serves the monomials of the numerators and the negative
+powers of `p` that the matrix divides by. `moment_tables` builds the tables of the three
+inner moments `N_0`, `N_1` and `N_2`, by the composition `dawson_term` already uses above
+`w = 1` and term by term from the double series below it, where the series is a polynomial
+in `lambda` and `p` and its table is therefore exact. The tail's three integrals are
+tabulated by the new `const_table` on each tail; for the Gaussian and the logistic tails
+their `P_k` are constants, so those tables are monomials in the tail's own parameter.
+
+**Measured, three independent ways.** Each order against five-point differences of the
+order below, which checks the whole chain down to the 200-bit references of order zero; the
+generic quadrature at orders one and two, which is a second opinion on the values and not
+only on their consistency; and mpmath differentiating the 40-digit quadrature on the
+components where the two routes disagreed.
+
+| what | figure |
+|---|---|
+| orders one to four against five-point differences | 3.15e-11, 2.02e-10, 6.99e-10, 1.29e-09 relative |
+| orders one and two against the generic quadrature | 1.05e-15 relative over 474 components |
+| the tables of the inner moments against differences | 9.6e-10 relative |
+| host against device at order four | 0 ulp (OpenMP), 6.69 ulp (CUDA) |
+
+The components the generic route is not asked for are of two kinds. The ones carrying `mu`
+it returns as NaN and the closed form as exact zeros, checked as zeros against the
+differences. The other kind found a defect in the generic route's own regularity rule: it
+asked for the counts of one parameter at a time, so it allowed two derivatives in a
+parameter of regularity one, while the knots of these laws move with `mu`, with `lambda`
+and with `p` together. The first derivative of such an integral carries no boundary term,
+the integrand being continuous at the knot, but the second one does, the first derivative
+of the integrand jumping there. Measured on MCP with the Student tail at
+`(lambda, gamma, s, nu) = (1.3, 3, 0.9, 3.5)`: the generic second derivative of
+`I_lambda_lambda` in `gamma` was 2.32 times the closed one, while the first derivatives of
+the two routes agree, the five-point differences confirm the closed second, and mpmath
+differentiating the whole 40-digit quadrature agrees with the closed one to 0.0. The rule
+now sums the counts over every parameter that may move the same kink, so the route refuses
+those 28 components itself.
+
+**Speed.** `benchmarks/distrib_generic.cpp`, ns per call on one Serial thread of the gcc
+build, both lock slots held. The generic route is not timed past order two, where it already
+costs 25 milliseconds a call; at order four it integrates 1050 components of a
+five-parameter law at once and costs seconds.
+
+| law and tail | order | member | generic, score form |
+|---|---|---|---|
+| mcp, Student | 0 | 3272 | 2898241 |
+| mcp, Student | 1 | 7805 | 7568466 |
+| mcp, Student | 2 | 21021 | 25199750 |
+| mcp, Student | 3 | 48240 | not timed |
+| mcp, Student | 4 | 107501 | not timed |
+| mcp, Gaussian | 0 | 373 | 691606 |
+| mcp, Gaussian | 1 | 1485 | 1591708 |
+| mcp, Gaussian | 4 | 18283 | not timed |
+| scad, Student | 0 | 3390 | 3116954 |
+| scad, Student | 1 | 8668 | 8182121 |
+| scad, Student | 4 | 107547 | not timed |
+
+so the ratio grows with the order, 886 times at zero, 970 at one and 1199 at two for the
+Student tail, the member's cost growing by a factor of about two and a half an order while
+the quadrature's grows by three.
+
+**The repair of the half-step ratio's cost.** The order-zero figures above are not the ones
+first measured. The half-step log-gamma ratio that fixed the Student tail's constant cost
+the member call 1179 to 7258 ns, 6.2 times, because `const_mixed` returns one component of
+the tail's derivative table at a time and rebuilds everything behind it, which for the
+Student tail is the derivatives of `G` and with them one value of the ratio an order. Over
+the multi-indices of a table of order `K` that was the whole cost of the call. Each tail now
+builds that table once, in `const_table`, and `log_z_table` reads it: 7258 back to 3272 ns
+for the Student tail and 471 back to 373 for the Gaussian one, which is the figure the
+difference of log-gammas had. Every printed figure of every check is unchanged by the
+repair. What is left between 3272 and the 1179 of the difference of log-gammas is the
+ratio's own cost, about 300 ns a call, asked three or four times per `const_table`.
+Building the array of `R` and its derivatives in one pass would recover part of it,
+and it does not fall out of the present route, the derivatives of Stirling's error
+being a separate function per order. Decided by Giovanni on 2026-11-20 not to do it:
+the ratio stays as one function per order, and the 2 microseconds stay where they are.

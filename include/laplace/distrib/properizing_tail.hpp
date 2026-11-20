@@ -170,6 +170,52 @@ LAPLACE_HD double h_mixed(const Tail& tail, int r, int n1, int n2, double x) {
   return s;
 }
 
+// ---------------------------------------------------------------------------
+// one-variable derivative arrays, for the tails' own tables
+// ---------------------------------------------------------------------------
+// The three integrals a tail supplies to the expected information are closed in its
+// parameters, so their derivatives are those of a product of elementary factors: a power,
+// a few reciprocals of shifted arguments, and for the Student tail the constant G(nu),
+// whose derivatives log_g_derivs gives. These four helpers build and multiply the arrays.
+
+// d^n of c x^(-alpha), n = 0..K, alpha a whole number or a half
+LAPLACE_HD void power_derivs(int K, double c, double alpha, double x, double* out) {
+  double f = c, v = Kokkos::pow(x, -alpha);
+  for (int n = 0; n <= K; ++n) {
+    out[n] = f * v;
+    f *= -(alpha + double(n));  // d/dx x^(-alpha-n) = -(alpha+n) x^(-alpha-n-1)
+    v /= x;
+  }
+}
+
+// d^n of c (x + k)^(-m), m >= 1 a whole number
+LAPLACE_HD void shift_derivs(int K, double c, double k, int m, double x, double* out) {
+  double v = 1.0;
+  for (int t = 0; t < m; ++t) v /= (x + k);
+  double f = c;
+  for (int n = 0; n <= K; ++n) {
+    out[n] = f * v;
+    f *= -double(m + n);
+    v /= (x + k);
+  }
+}
+
+// h = f g, the Leibniz rule over one variable
+LAPLACE_HD void mul1(int K, const double* f, const double* g, double* h) {
+  for (int n = K; n >= 0; --n) {
+    double s = 0.0;
+    for (int b = 0; b <= n; ++b) s += double(binomial_coef(n, b)) * f[b] * g[n - b];
+    h[n] = s;
+  }
+}
+
+// d^n of c (x + k), the one factor that is not a reciprocal
+LAPLACE_HD void affine_derivs(int K, double c, double k, double x, double* out) {
+  out[0] = c * (x + k);
+  if (K >= 1) out[1] = c;
+  for (int n = 2; n <= K; ++n) out[n] = 0.0;
+}
+
 // R^(k)(a) = d^k/da^k [log Gamma(a + 1/2) - log Gamma(a)] at a run-time order k, which
 // math/stirling.hpp supplies one function per order. The Student tail reads it at every
 // order of its own table of the tail constant.
@@ -242,6 +288,43 @@ struct gaussian_tail {
   /// \f$\sqrt{\pi/2}\f$, \f$1\f$ and \f$\sqrt{\pi/2}\f$, since \f$\Psi'' = 1\f$.
   LAPLACE_HD double psi_curvature_moment(int k) const {
     return k == 1 ? 1.0 : 1.25331413731550025121;
+  }
+  /**
+   * \name The tail's three integrals and their derivatives
+   * \f$\partial_V^n\f$ of the three integrals of a second derivative of \f$H\f$ against
+   * \f$e^{-H}\f$ that the expected information reads (\c info_xx, \c info_xt, \c info_tt).
+   * With \f$\varsigma = \sqrt{V}\f$, \f$\kappa = 1\f$ and \f$S_0 = \sqrt{\pi/2}\f$ the
+   * three are \f$\sqrt{\pi/2}\,V^{-1/2}\f$, \f$-V^{-1}\f$ and \f$\sqrt{\pi/2}\,V^{-3/2}\f$,
+   * so each is a power of \f$V\f$ and \c power_derivs gives every order.
+   * @{
+   */
+  LAPLACE_HD double info_xx_mixed(int n1, int n2) const {
+    if (n2 > 0) return 0.0;
+    double d[detail_tail::tail_max_order + 1];
+    detail_tail::power_derivs(n1, 1.25331413731550025121, 0.5, tail_sigma2, d);
+    return d[n1];
+  }
+  LAPLACE_HD double info_xt_mixed(int j, int n1, int n2) const {
+    if (j != 0 || n2 > 0) return 0.0;
+    double d[detail_tail::tail_max_order + 1];
+    detail_tail::power_derivs(n1, -1.0, 1.0, tail_sigma2, d);
+    return d[n1];
+  }
+  LAPLACE_HD double info_tt_mixed(int i, int j, int n1, int n2) const {
+    if (i != 0 || j != 0 || n2 > 0) return 0.0;
+    double d[detail_tail::tail_max_order + 1];
+    detail_tail::power_derivs(n1, 1.25331413731550025121, 1.5, tail_sigma2, d);
+    return d[n1];
+  }
+  /** @} */
+  /// Every \f$\partial_V^{n}T\f$ of total order at most \f$K\f$ in one pass, written at
+  /// \f$n(K+1) + o\f$, the packing of the two-variable tables; \f$T = \sqrt{\pi V/2}\f$ is
+  /// a power of \f$V\f$, so one call of \c power_derivs fills the column.
+  LAPLACE_HD void const_table(int K, double* T) const {
+    for (int q = 0; q < (K + 1) * (K + 1); ++q) T[q] = 0.0;
+    double d[detail_tail::tail_max_order + 1];
+    detail_tail::power_derivs(K, 1.25331413731550025121, -0.5, tail_sigma2, d);
+    for (int n = 0; n <= K; ++n) T[n * (K + 1)] = d[n];
   }
   /// \f$T = \int_0^\infty e^{-H} = \sqrt{\pi V/2}\f$.
   LAPLACE_HD double tail_const() const { return 1.25331413731550025121 * Kokkos::sqrt(tail_sigma2); }
@@ -399,6 +482,126 @@ struct student_tail {
     if (k == 1) return 2.0 * (nu - 1.0) / d;
     const double s0 = tail_const() / varsigma();
     return k == 0 ? 2.0 * nu * s0 / (nu + 3.0) : 2.0 * (nu - 3.0) * s0 / d;
+  }
+
+  // The derivatives in nu of G, T = s G(nu) being the tail constant
+  LAPLACE_HD void g_derivs(int K, double* G) const {
+    double g[detail_tail::tail_max_order + 1];
+    log_g_derivs(K, g);
+    detail_tail::exp_from_log(K, g, G);
+  }
+
+  /**
+   * \name The tail's three integrals and their derivatives
+   * \f$\partial_s^{n_1}\partial_\nu^{n_2}\f$ of the three integrals of a second derivative
+   * of \f$H\f$ against \f$e^{-H}\f$ that the expected information reads.
+   *
+   * With \f$\varsigma = s\sqrt{\nu}\f$, \f$\kappa = (\nu+1)/2\f$, \f$T = s\,G(\nu)\f$ and
+   * the three curvature moments of \c psi_curvature_moment, the integrals reduce to
+   * \f[
+   * \begin{aligned}
+   *   \int H''e^{-H} &= \frac{(\nu+1)G(\nu)}{s(\nu+3)}, &
+   *   \int \partial_x\partial_s H\,e^{-H} &= -\frac{2(\nu+1)}{s(\nu+3)}, \\
+   *   \int \partial_x\partial_\nu H\,e^{-H} &= \frac{1}{\nu+1} - \frac{\nu+1}{\nu(\nu+3)}, &
+   *   \int \partial_s^2 H\,e^{-H} &= \frac{3(\nu+1)G(\nu)}{s(\nu+3)}, \\
+   *   \int \partial_s\partial_\nu H\,e^{-H} &= -\frac{2G(\nu)}{(\nu+1)(\nu+3)}, &
+   *   \int \partial_\nu^2 H\,e^{-H} &= s\,G(\nu)\left[\frac{1}{2\nu^2} +
+   *      \frac{1}{2\nu(\nu+3)} - \frac{1}{\nu(\nu+1)}\right]
+   * \end{aligned}
+   * \f]
+   * each one a power of \f$s\f$ times a product of elementary factors in \f$\nu\f$, so
+   * every order follows from \c power_derivs, \c shift_derivs, \c affine_derivs and
+   * \c mul1 with the derivatives of \f$G\f$.
+   * @{
+   */
+  LAPLACE_HD double info_xx_mixed(int n1, int n2) const {
+    constexpr int M = detail_tail::tail_max_order + 1;
+    double a[M], b[M], c[M], t[M], u[M];
+    detail_tail::affine_derivs(n2, 1.0, 1.0, tail_df, a);      // nu + 1
+    g_derivs(n2, b);                                           // G(nu)
+    detail_tail::shift_derivs(n2, 1.0, 3.0, 1, tail_df, c);    // 1/(nu + 3)
+    detail_tail::mul1(n2, a, b, t);
+    detail_tail::mul1(n2, t, c, u);
+    double s[M];
+    detail_tail::power_derivs(n1, 1.0, 1.0, tail_scale, s);    // 1/s
+    return s[n1] * u[n2];
+  }
+
+  LAPLACE_HD double info_xt_mixed(int j, int n1, int n2) const {
+    constexpr int M = detail_tail::tail_max_order + 1;
+    double a[M], c[M], t[M], s[M];
+    if (j == 0) {  // -2 (nu + 1) / (s (nu + 3))
+      detail_tail::affine_derivs(n2, -2.0, 1.0, tail_df, a);
+      detail_tail::shift_derivs(n2, 1.0, 3.0, 1, tail_df, c);
+      detail_tail::mul1(n2, a, c, t);
+      detail_tail::power_derivs(n1, 1.0, 1.0, tail_scale, s);
+      return s[n1] * t[n2];
+    }
+    if (n1 > 0) return 0.0;  // no s in it
+    double d[M], e[M], f[M];
+    detail_tail::shift_derivs(n2, 1.0, 1.0, 1, tail_df, d);    // 1/(nu + 1)
+    detail_tail::affine_derivs(n2, -1.0, 1.0, tail_df, a);     // -(nu + 1)
+    detail_tail::shift_derivs(n2, 1.0, 0.0, 1, tail_df, e);    // 1/nu
+    detail_tail::shift_derivs(n2, 1.0, 3.0, 1, tail_df, c);    // 1/(nu + 3)
+    detail_tail::mul1(n2, a, e, f);
+    detail_tail::mul1(n2, f, c, t);
+    return d[n2] + t[n2];
+  }
+
+  LAPLACE_HD double info_tt_mixed(int i, int j, int n1, int n2) const {
+    constexpr int M = detail_tail::tail_max_order + 1;
+    double a[M], b[M], c[M], t[M], u[M], s[M];
+    g_derivs(n2, b);
+    if (i == 0 && j == 0) {  // 3 (nu + 1) G / (s (nu + 3))
+      detail_tail::affine_derivs(n2, 3.0, 1.0, tail_df, a);
+      detail_tail::shift_derivs(n2, 1.0, 3.0, 1, tail_df, c);
+      detail_tail::mul1(n2, a, b, t);
+      detail_tail::mul1(n2, t, c, u);
+      detail_tail::power_derivs(n1, 1.0, 1.0, tail_scale, s);
+      return s[n1] * u[n2];
+    }
+    if (i == 0 && j == 1) {  // -2 G / ((nu + 1)(nu + 3))
+      if (n1 > 0) return 0.0;
+      detail_tail::shift_derivs(n2, -2.0, 1.0, 1, tail_df, a);
+      detail_tail::shift_derivs(n2, 1.0, 3.0, 1, tail_df, c);
+      detail_tail::mul1(n2, a, b, t);
+      detail_tail::mul1(n2, t, c, u);
+      return u[n2];
+    }
+    // s G [1/(2 nu^2) + 1/(2 nu (nu + 3)) - 1/(nu (nu + 1))]
+    if (n1 > 1) return 0.0;
+    double r[M], e[M], f[M];
+    detail_tail::shift_derivs(n2, 0.5, 0.0, 2, tail_df, r);    // 1/(2 nu^2)
+    detail_tail::shift_derivs(n2, 0.5, 0.0, 1, tail_df, e);
+    detail_tail::shift_derivs(n2, 1.0, 3.0, 1, tail_df, c);
+    detail_tail::mul1(n2, e, c, f);                            // 1/(2 nu (nu + 3))
+    detail_tail::shift_derivs(n2, -1.0, 0.0, 1, tail_df, a);
+    detail_tail::shift_derivs(n2, 1.0, 1.0, 1, tail_df, c);
+    detail_tail::mul1(n2, a, c, t);                            // -1/(nu (nu + 1))
+    for (int n = 0; n <= n2; ++n) r[n] += f[n] + t[n];
+    detail_tail::mul1(n2, r, b, u);
+    detail_tail::affine_derivs(n1, 1.0, 0.0, tail_scale, s);   // s
+    return s[n1] * u[n2];
+  }
+  /** @} */
+  /**
+   * \brief Every \f$\partial_s^{n_1}\partial_\nu^{n_2}T\f$ of total order at most \f$K\f$
+   * in one pass, written at \f$n_1(K+1) + n_2\f$, the packing of the two-variable tables.
+   *
+   * \f$T = s\,G(\nu)\f$, so the table is the column of \f$G\f$'s derivatives and, at
+   * \f$n_1 = 1\f$, the same column once; one call of \c log_g_derivs and one of
+   * \c exp_from_log fill it. Called once per table of \f$\log Z\f$, where \c const_mixed
+   * would rebuild the derivatives of \f$G\f$, and with them one value of the half-step
+   * log-gamma ratio an order, for every multi-index.
+   */
+  LAPLACE_HD void const_table(int K, double* T) const {
+    for (int q = 0; q < (K + 1) * (K + 1); ++q) T[q] = 0.0;
+    double G[detail_tail::tail_max_order + 1];
+    g_derivs(K, G);
+    for (int n = 0; n <= K; ++n) {
+      T[n] = tail_scale * G[n];
+      if (K >= 1 && n <= K - 1) T[(K + 1) + n] = G[n];
+    }
   }
   /// \f$T = \int_0^\infty e^{-H} = \frac{s}{2}\sqrt{\pi\nu}\,\Gamma(\nu/2)/\Gamma(\frac{\nu+1}{2})\f$.
   LAPLACE_HD double tail_const() const { return math::exp(log_tail_const()); }
@@ -604,6 +807,39 @@ struct logistic_tail {
   LAPLACE_HD double psi_curvature_moment(int k) const {
     return k == 0 ? 1.33333333333333333333
                   : (k == 1 ? 0.59086290741326041256 : 0.42995604456548429098);
+  }
+  /**
+   * \name The tail's three integrals and their derivatives
+   * \f$\partial_s^n\f$ of the three integrals the expected information reads. With
+   * \f$\varsigma = s\f$, \f$\kappa = 1\f$ and \f$S_0 = 1\f$ they are \f$P_0/s\f$,
+   * \f$-(P_1 + 1)/s\f$ and \f$(2 + P_2)/s\f$, one reciprocal of \f$s\f$ each.
+   * @{
+   */
+  LAPLACE_HD double info_xx_mixed(int n1, int n2) const {
+    if (n2 > 0) return 0.0;
+    double d[detail_tail::tail_max_order + 1];
+    detail_tail::power_derivs(n1, psi_curvature_moment(0), 1.0, tail_scale, d);
+    return d[n1];
+  }
+  LAPLACE_HD double info_xt_mixed(int j, int n1, int n2) const {
+    if (j != 0 || n2 > 0) return 0.0;
+    double d[detail_tail::tail_max_order + 1];
+    detail_tail::power_derivs(n1, -(psi_curvature_moment(1) + 1.0), 1.0, tail_scale, d);
+    return d[n1];
+  }
+  LAPLACE_HD double info_tt_mixed(int i, int j, int n1, int n2) const {
+    if (i != 0 || j != 0 || n2 > 0) return 0.0;
+    double d[detail_tail::tail_max_order + 1];
+    detail_tail::power_derivs(n1, 2.0 + psi_curvature_moment(2), 1.0, tail_scale, d);
+    return d[n1];
+  }
+  /** @} */
+  /// Every \f$\partial_s^{n}T\f$ of total order at most \f$K\f$ in one pass, at
+  /// \f$n(K+1)\f$; \f$T = s\f$, so only the first two orders are not zero.
+  LAPLACE_HD void const_table(int K, double* T) const {
+    for (int q = 0; q < (K + 1) * (K + 1); ++q) T[q] = 0.0;
+    T[0] = tail_scale;
+    if (K >= 1) T[K + 1] = 1.0;
   }
   /// \f$T = \int_0^\infty e^{-H} = s\f$.
   LAPLACE_HD double tail_const() const { return tail_scale; }
