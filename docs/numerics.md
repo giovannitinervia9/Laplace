@@ -14575,3 +14575,110 @@ because `y_kinks()` declares every knot. No speed benchmark for these laws. The
 degrees of freedom of the Student tail are weakly identified when only the tail
 informs them, so in practice they will often be held with `fixed_distrib`; the
 law admits them as a free parameter and nothing stops a fit from estimating them.
+
+## The prox of the MCP and SCAD laws, over the three properizing tails (2026-11-20)
+
+**What it is.** `prox_y(v, t)` is the minimizer of `-log f(y) + (y - v)^2/(2t)`, which with
+`U = |v - mu|` and `x = |y - mu|` is
+
+    min over x >= 0 of  g(x) = t q(x) + (x - U)^2 / 2,
+
+`q` the law's properized penalty. The normalizer does not depend on y, so it does not
+enter. The minimizer carries the sign of `v - mu` and does not exceed `U` in modulus,
+since `q` does not decrease. `g` is smooth on each piece of `q` and grows at infinity, so
+its global minimum sits at `x = 0`, at a knot, or at a stationary point of one piece: the
+implementation enumerates those candidates, compares `g`, and keeps the smallest `x` of a
+tie, the rule the prox of `a|x|^p` already follows. An infinite point is its own prox,
+whatever the step, and NaN passes through.
+
+**Inside the knots** each piece is a quadratic and its stationary point is the classical
+threshold:
+
+| law, piece | curvature of g | stationary point |
+|---|---|---|
+| mcp, 0 <= x <= K = gamma lambda | 1 - t/gamma | (U - t lambda)/(1 - t/gamma), the firm threshold |
+| scad, 0 <= x <= lambda | 1 | U - t lambda, the soft threshold |
+| scad, lambda < x <= K = a lambda | 1 - t/(a - 1) | (U - t a lambda/(a-1))/(1 - t/(a-1)) |
+
+A curvature at most zero leaves no interior minimum on that piece, so only its ends
+compete; that is the nonconvex regime t >= gamma for mcp and t >= a - 1 for scad. At
+t = gamma with U = t lambda, and at the matching point of scad's middle piece, the slope
+vanishes together with the curvature and the objective is flat over the whole piece: every
+point of it minimizes, and the convention of the smallest one is what makes the returned
+value well defined. 168 of the 12243 reference rows are that case.
+
+**Beyond the last knot the tail decides.** With w = U - K and z = x - K the stationary
+equation is t H'(z) + z - w = 0, and the three tails differ in kind:
+
+| tail | equation | roots | shrinkage w - z as w grows |
+|---|---|---|---|
+| gaussian | linear, H' = z/V | one, wV/(V + t) | w t/(V + t), grows without bound |
+| student | the cubic z^3 - w z^2 + (varsigma^2 + 2 t kappa) z - w varsigma^2 | one or three, all positive | 2 t kappa / w, falls to zero |
+| logistic | (2t/s) tanh(z/s) + z - w | one | 2t/s, a constant |
+
+Each has a root with z > 0 only for w > 0. The Student tail's H' rises to kappa/varsigma
+at z = varsigma and falls back, so the objective can hold two local minima beyond the
+knot and the comparison of values is what picks between them; every real root of the cubic
+is positive by Descartes' rule, so none is discarded. The roots come from the
+trigonometric form when the discriminant is positive and from Cardano's otherwise, then a
+Newton refinement of each root on t H' + z - w, which near a root is better conditioned
+than the cubic, run until the step no longer moves the iterate. A fixed pair of steps is
+not enough: the root the trigonometric form supplies was measured 4.4e6 ulp from the
+converged one, which surfaced only once the roots were returned in ascending order and
+the caller's tie rule began to prefer that copy over the converged one.
+The logistic equation is increasing and concave, so Newton from max(0, w - 2t/s), where it
+is at most zero, rises monotonically to the single root and is stopped when the step no
+longer rises, which is rounding.
+
+That table is the prox's side of the argument that made the Student tail the default. A
+point far beyond the knot carries no information about the penalty's shape, and the
+classical MCP and SCAD prox leaves it alone, their penalty being flat there. The Gaussian
+tail pulls it back by a fixed fraction of its distance however far out it lies, the
+logistic one by a fixed amount, and the Student one by less and less: only the Student
+tail agrees with the classical operator in the limit.
+
+**The discriminant cancels far out.** The cubic's discriminant is a difference of two
+terms that both grow like w^6 and agree to leading order. Measured: at w = 1e11 its
+computed sign comes out positive where the cubic has one real root, which sends the branch
+test to the trigonometric form and fills the buffer with three numbers that are not roots.
+The root near w is therefore added whatever that test decided, by Newton from w, where the
+equation is increasing; a duplicate of a root already found costs one objective
+evaluation. A test checks the stationarity and the knot comparison out to U = 1e15. The
+Python mirror over 10080 cases out to U = 1.6e5 does not separate the two versions, so
+this is a hazard the ordinary grid does not reach.
+
+**Measured.** 12243 reference rows from `tools/reference/distrib_mcp_scad_prox.py`: two
+laws by three tails, a grid in lambda, in the second shape, in U across the knots and the
+thresholds and out to 10000 times the last knot, and in t through the convex, flat and
+concave regimes. The reference comes from the definition rather than from the closed
+candidates: at 200 bits, g' is bisected on every sign change of a scan whose nodes include
+the knots, so that no bracket straddles one, with a geometric refinement on both sides of
+each knot, since a stationary point of the tail hugs the knot whenever the point lies just
+beyond it. Each row carries the objective's gap to the runner-up.
+
+| what | figure |
+|---|---|
+| minimizer against the reference, 12075 rows with a separated minimum | 13 ulp, at scad's knot with t = 20 |
+| objective at the computed point above the reference's, every row | 3.95e-16 relative at worst |
+| first-order optimality where the minimizer is interior, 369 points | 7.01e-16 relative |
+| host against device, 24 points for each of four law-and-tail pairs | 2.28e-16 relative |
+| objective above the reference's, on the CUDA build | 5.38e-16 relative |
+| smallest positive gap in the reference | 4.13e-8 |
+
+No row has a gap between zero and 4.13e-8, so a flat optimum is never mistaken for a near
+tie, and a near tie never decides a branch by rounding.
+
+**What is open.** No expected information in closed form for these laws: `expected_info`
+goes through `generic_info.hpp`. The order-zero derivation is settled and checked at 60
+digits, and is written down where the work can be picked up: `I_mu_mu` needs the kink's
+point mass, as the elastic net's does, and equals `(2/Z)[lambda + int q'' e^-q]`, the
+integration by parts of `E[(q')^2]`; `I_mu_theta = 0` for every smooth parameter by
+symmetry; one new closed constant per tail, `J = int H'' e^-H`, is `sqrt(pi/(2V))`,
+`4/(3s)` and `(kappa/varsigma)[2 B(1/2, kappa + 3/2) - B(1/2, kappa + 1/2)]`, exact to
+3e-61 against the quadrature of its definition; the smooth block is
+`E[d2 q] + d2 log Z`, whose second term is already in the log Z table, and the inner
+moments follow from the Dawson value by a recursion per piece, within 1.85e-54 of their
+quadrature. What is not derived is the tail's second moments, `int (d_t H)^2 e^-H` and
+their relatives, which reduce to `int Psi^2 e^-H`, `int Psi z Psi' e^-H` and
+`int (z Psi')^2 e^-H`, closed in each tail. Two identities come free:
+`int (H')^2 e^-H = J` and `int d_t H e^-H = -d_t T`.

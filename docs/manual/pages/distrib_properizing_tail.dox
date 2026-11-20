@@ -2,7 +2,7 @@
 \defgroup distrib_properizing_tail Properizing tails
 \brief Properizing tails that replace the flat region beyond the last knot of the MCP and SCAD penalties so that their negative exponentials integrate to one.
 
-Defined in `<laplace/distrib/properizing_tail.hpp>` in namespace `laplace::distrib`, this module provides the three properizing tails used as the template parameter of \ref laplace::distrib::mcp_distrib "mcp_distrib" (\ref distrib_mcp "Properized MCP") and \ref laplace::distrib::scad_distrib "scad_distrib" (\ref distrib_scad "Properized SCAD"): \ref laplace::distrib::student_tail "student_tail" (their default), \ref laplace::distrib::gaussian_tail "gaussian_tail", and \ref laplace::distrib::logistic_tail "logistic_tail". Every member that evaluates a tail is marked `LAPLACE_HD`, so it runs on the host and inside Kokkos kernels; `start_value()` runs on the host only. Against SymPy (Meurer and others, 2017) and mpmath (mpmath) references, the mixed partials of the tail exponent agree within \f$8.1 \times 10^{-13}\f$, the tail constants and partial integrals agree with 40-digit quadrature within \f$1.3 \times 10^{-27}\f$, and across the MCP and SCAD distributions the worst measured error of the log-density and its derivatives to order \f$6\f$ is \f$163\f$ ulp of the scale of their order; the measures are those of \ref accuracy "How accuracy is measured", and the figures are in the section "Accuracy and limits" below.
+Defined in `<laplace/distrib/properizing_tail.hpp>` in namespace `laplace::distrib`, this module provides the three properizing tails used as the template parameter of \ref laplace::distrib::mcp_distrib "mcp_distrib" (\ref distrib_mcp "Properized MCP") and \ref laplace::distrib::scad_distrib "scad_distrib" (\ref distrib_scad "Properized SCAD"): \ref laplace::distrib::student_tail "student_tail" (their default), \ref laplace::distrib::gaussian_tail "gaussian_tail", and \ref laplace::distrib::logistic_tail "logistic_tail". Every member that evaluates a tail or its proximal roots is marked `LAPLACE_HD`, so it runs on the host and inside Kokkos kernels; `start_value()` runs on the host only. Against SymPy (Meurer and others, 2017) and mpmath (mpmath) references, the mixed partials of the tail exponent agree within \f$8.1 \times 10^{-13}\f$, the tail constants and partial integrals agree with 40-digit quadrature within \f$1.3 \times 10^{-27}\f$, and across the MCP and SCAD distributions the worst measured error of the log-density and its derivatives to order \f$6\f$ is \f$163\f$ ulp of the scale of their order; the measures are those of \ref accuracy "How accuracy is measured", and the figures are in the section "Accuracy and limits" below.
 
 ## Definition and comparison of the three tails
 
@@ -71,9 +71,45 @@ The highest order of \f$\Psi\f$ reached is \f$r + j\f$ with \f$r \le J + K\f$ an
 
 The table of \f$\log Z\f$ runs over \f$(\lambda, p, \theta_1)\f$ for a one-parameter tail and over \f$(\lambda, p, s, \nu)\f$ for `student_tail`. The four-variable case uses a four-variable logarithm recursion over a triangularly packed table, which at order \f$6\f$ holds \f$210\f$ entries against the \f$2401\f$ of the square box. For `student_tail`, the mixed partials of \f$T = s\,G(\nu)\f$ are formed through \f$\log G(\nu)\f$, whose derivatives in \f$\nu\f$ are elementary plus one polygamma difference per order, followed by the scalar exponential recursion.
 
+## Proximal roots
+
+For the proximal operator in the observation (\ref distrib_mcp "Properized MCP", \ref distrib_scad "Properized SCAD", \ref penalty_prox "Proximal operators"), each tail supplies the stationary points of the proximal objective beyond the law's last knot \f$u_0\f$ through `prox_roots(w, t, z)`. Here \f$w = U - u_0\f$ is the signed distance of \f$U = |v - \mu|\f$ beyond the knot, \f$t > 0\f$ is the step, and \f$z = |y - \mu| - u_0\f$ is the excess of the candidate beyond the knot. The stationary equation is
+\f[
+t\,H'(z) + z - w = 0, \qquad z > 0.
+\f]
+The member writes all positive roots into the output array `z`, which must hold at least four doubles, in ascending order, and returns their count. Each tail has a root with \f$z > 0\f$ only when \f$w > 0\f$, and returns \f$0\f$ otherwise. The ascending order is what lets the caller's tie rule keep the smallest minimizer: its own candidates below the knot are already in that order.
+
+| Tail | Stationary equation | Roots for \f$w > 0\f$ | Shrinkage \f$w - z\f$ as \f$w\f$ grows |
+| --- | --- | --- | --- |
+| `gaussian_tail` | \f$(t/V + 1)z - w = 0\f$ | one, \f$wV/(V + t)\f$ | \f$wt/(V + t)\f$, without bound |
+| `student_tail` | \f$z^3 - wz^2 + (\varsigma^2 + 2t\kappa)z - w\varsigma^2 = 0\f$ | one or three | \f$2t\kappa/w\f$, tending to zero |
+| `logistic_tail` | \f$(2t/s)\tanh(z/s) + z - w = 0\f$ | one | \f$2t/s\f$, tending to a constant |
+
+### Gaussian tail
+
+For `gaussian_tail`, \f$H'(z) = z/V\f$ makes the stationary equation linear. When \f$w > 0\f$, it has the single positive root \f$z = wV / (V + t)\f$, and \f$0\f$ roots otherwise. The shrinkage \f$w - z = wt / (V + t)\f$ grows linearly with \f$w\f$ without bound.
+
+### Student tail
+
+For `student_tail`, \f$H'(z) = 2\kappa z / (\varsigma^2 + z^2)\f$ rises to \f$\kappa/\varsigma\f$ at \f$z = \varsigma\f$ and falls back to zero. The proximal objective can therefore hold two local minima beyond the knot, and the caller compares the objective values at all candidates to pick between them. Clearing the denominator turns \f$t\,H'(z) + z - w = 0\f$ into the cubic
+\f[
+z^3 - wz^2 + (\varsigma^2 + 2t\kappa)z - w\varsigma^2 = 0.
+\f]
+When \f$w > 0\f$, its coefficients alternate in sign, so by Descartes' rule of signs it has one or three positive roots, and the polynomial in \f$-z\f$ has no sign change at all, so it has no negative root: every real root is positive and none is discarded. The roots come from the trigonometric form when the discriminant of the depressed cubic is positive and from Cardano's formula otherwise, and each is then refined by Newton's method on \f$t\,H'(z) + z - w\f$, which near a root is better conditioned than the cubic, until the step no longer moves the iterate. The refinement is not cosmetic: the root the trigonometric form supplies can sit \f$4.4 \times 10^{6}\f$ ulp from the converged one.
+
+The discriminant of this cubic is a difference of two terms of size \f$w^6\f$ that agree to leading order, so its computed sign is not to be trusted for a large \f$w\f$: at \f$w = 10^{11}\f$ it comes out positive where the cubic has one real root, which would send the branch test to the trigonometric form and fill the output with three numbers that are not roots. Whenever \f$w > \varsigma\f$, Newton's method therefore also runs from \f$w\f$ in the region \f$z > \varsigma\f$, where the left-hand side increases, and adds the root near \f$w\f$ regardless of the branch test. A test checks the stationarity out to \f$U = 10^{15}\f$. As \f$w\f$ grows, the shrinkage \f$w - z\f$ behaves like \f$2t\kappa/w\f$ and falls to zero.
+
+### Logistic tail
+
+For `logistic_tail`, \f$H'(z) = (2/s)\tanh(z/s)\f$, so \f$t\,H'(z) + z - w\f$ is increasing and concave on \f$z > 0\f$ and has a single root when \f$w > 0\f$. Newton's method starts from \f$\max(0, w - 2t/s)\f$, where \f$t\,H'(z) + z - w \le 0\f$, rises monotonically to the root, and stops once the step no longer increases the iterate, which is at rounding level. As \f$w\f$ grows, the shrinkage \f$w - z\f$ settles at the constant \f$2t/s\f$.
+
+### Tail choice for the proximal operator
+
+A point far beyond the last knot carries no information about the penalty's shape, and the proximal operator of the classical MCP and SCAD penalties leaves it alone because those penalties are flat there. Of the three properizing tails, only `student_tail` agrees with that behaviour in the limit because its pull \f$w - z\f$ falls to zero, whereas `logistic_tail` shifts distant points by the constant \f$2t/s\f$ and `gaussian_tail` shrinks them without bound.
+
 ## Tail structure
 
-Each tail is an aggregate holding its own parameters (`tail_sigma2` for `gaussian_tail`, `tail_scale` and `tail_df` for `student_tail`, and `tail_scale` for `logistic_tail`), `n_tail_params`, and `tail_params`. It supplies \f$\Psi^{(k)}\f$ at a runtime order via `psi_deriv()`, the exponents of its parameters in \f$\varsigma\f$ via `exponent()`, its \f$\kappa\f$ via `kappa()` (affine in one parameter at most), the constant \f$T\f$ with its mixed partials and its logarithm (`tail_const()`, `const_mixed()`, `log_tail_const()`), the partial integral \f$\int_x^\infty e^{-H(v; \theta)}\,\mathrm{d}v\f$ with its logarithm (`upper()`, `log_upper()`), a rough spread for quadratures (`scale_hint()`), and a starting value from a sample summary (`start_value()`).
+Each tail is an aggregate holding its own parameters (`tail_sigma2` for `gaussian_tail`, `tail_scale` and `tail_df` for `student_tail`, and `tail_scale` for `logistic_tail`), `n_tail_params`, and `tail_params`. It supplies \f$\Psi^{(k)}\f$ at a runtime order via `psi_deriv()`, the exponents of its parameters in \f$\varsigma\f$ via `exponent()`, its \f$\kappa\f$ via `kappa()` (affine in one parameter at most), the constant \f$T\f$ with its mixed partials and its logarithm (`tail_const()`, `const_mixed()`, `log_tail_const()`), the partial integral \f$\int_x^\infty e^{-H(v; \theta)}\,\mathrm{d}v\f$ with its logarithm (`upper()`, `log_upper()`), the positive stationary points beyond the knot via `prox_roots()`, a rough spread for quadratures (`scale_hint()`), and a starting value from a sample summary (`start_value()`).
 
 ## Accuracy and limits
 
@@ -95,7 +131,7 @@ Against mpmath references computed at 300 and 400 bits (`tools/reference/distrib
 | \f$\log F\f$ and \f$\log(1 - F)\f$ | \f$2\f$ ulp | \f$4\f$ ulp | \f$2.46\f$ ulp | \f$4\f$ ulp |
 | Normalizing constant \f$Z\f$ | \f$2\f$ ulp | \f$3\f$ ulp | \f$1.33\f$ ulp | \f$2\f$ ulp |
 
-In the limit, \f$\gamma \to 0\f$ for the MCP and \f$\lambda \to 0\f$ for the SCAD leave no inner region and give \f$e^{-H}/(2T)\f$, while sending the last knot to infinity makes the tail's mass vanish and gives the Laplace distribution of rate \f$\lambda\f$. Neither law has a closed expected information or a proximal operator with any tail: the \ref distrib_generic "generic routes" serve them. The degrees of freedom \f$\nu\f$ of `student_tail` are weakly identified when only the tail informs them, so they will often be held fixed; the law admits them as a free parameter.
+In the limit, \f$\gamma \to 0\f$ for the MCP and \f$\lambda \to 0\f$ for the SCAD leave no inner region and give \f$e^{-H}/(2T)\f$, while sending the last knot to infinity makes the tail's mass vanish and gives the Laplace distribution of rate \f$\lambda\f$. Neither law has a closed expected information or a closed quantile with any tail: the \ref distrib_generic "generic routes" serve them. For `prox_y()`, the tests in `tests/distrib/test_mcp_scad_tails.cpp` verify the far-tail shrinkage across all three tails at \f$U \in \{10^2, 10^3, 10^4, 10^5\}\f$ and check the stationarity condition \f$t\,q'(x) + x - U = 0\f$ of `student_tail` out to \f$U = 10^{15}\f$ within \f$10^{-10} U\f$. They also compare all three tails against \f$12243\f$ reference rows from mpmath (mpmath), as reported on \ref distrib_mcp "the Properized MCP page". Inside a Kokkos kernel the host and the device agree on `prox_y()` within \f$2.28 \times 10^{-16}\f$ relative over \f$24\f$ points for each of four law and tail pairs: the Newton refinements stop on an exact comparison of successive iterates, and the device's fused multiply-add moves the last iterate by no more than that. The degrees of freedom \f$\nu\f$ of `student_tail` are weakly identified when only the tail informs them, so they will often be held fixed; the law admits them as a free parameter.
 
 For the full measurement record, see `docs/numerics.md`.
 

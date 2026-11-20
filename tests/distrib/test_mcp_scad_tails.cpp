@@ -61,6 +61,7 @@ using mcp_l = ld::mcp_distrib<ld::logistic_tail>;
 using mcp_g = ld::mcp_distrib<ld::gaussian_tail>;
 using scad_s = ld::scad_distrib<ld::student_tail>;
 using scad_l = ld::scad_distrib<ld::logistic_tail>;
+using scad_g = ld::scad_distrib<ld::gaussian_tail>;
 namespace lp = laplace::penalty;
 
 // --------------------------------------------------------- the y-derivatives over P parameters
@@ -195,6 +196,12 @@ const std::vector<std::array<double, 4>> CASES_L = {{0.5, 1.3, 3.0, 1.1},
 const double BOUND_LOGPDF[7] = {4.0, 10.0, 10.0, 16.0, 16.0, 40.0, 250.0};
 const double BOUND_CDF = 4.0;
 const double BOUND_Z = 3.0;
+// The bound of the prox against mpmath, in ulp of the minimizer. Measured on 2026-11-20
+// over 12075 rows with a well separated minimum: 13 ulp, at the scad knot with a step of
+// 20, where the minimizer is the knot's neighbourhood and the candidates' objectives
+// differ in their last digits. The 168 rows whose objective is flat over a whole piece
+// are checked on the objective instead, as is every row, against the reference's point.
+const double BOUND_PROX = 20.0;
 
 }  // namespace
 
@@ -667,6 +674,233 @@ TEST_CASE("mcp and scad tails: the log-density, the cumulative functions and Z a
   }
 }
 
+// ---------------------------------------------------------------- the prox in y
+// The prox of all three tails is here, the Gaussian one included, because what the
+// choice of tail changes is the shrinkage far from the location, which only a comparison
+// of the three shows.
+
+struct prox_row {
+  int law, tail;
+  double lam, p, t1, t2, U, t, hi, lo, gap;
+};
+constexpr int PROX_FIELDS = 11;
+
+std::vector<prox_row> read_prox_reference() {
+  std::vector<prox_row> rows;
+  const std::string path = std::string(LAPLACE_REFERENCE_DIR) + "/distrib_mcp_scad_prox.csv";
+  std::FILE* f = std::fopen(path.c_str(), "r");
+  REQUIRE(f != nullptr);
+  char line[512];
+  std::fgets(line, sizeof line, f);
+  while (std::fgets(line, sizeof line, f)) {
+    const auto s = split_csv(line);
+    if ((int)s.size() != PROX_FIELDS) continue;
+    auto num = [&](int i) { return std::strtod(s[i].c_str(), nullptr); };
+    prox_row r;
+    r.law = std::atoi(s[0].c_str()), r.tail = std::atoi(s[1].c_str());
+    r.lam = num(2), r.p = num(3), r.t1 = num(4), r.t2 = num(5), r.U = num(6), r.t = num(7);
+    r.hi = num(8), r.lo = num(9), r.gap = num(10);
+    rows.push_back(r);
+  }
+  std::fclose(f);
+  return rows;
+}
+
+// t q(x) + (x - U)^2/2 up to the constant t log Z, which every candidate carries
+template <class D>
+double prox_objective(const D& d, double x, double U, double t) {
+  const double e = x - U;
+  return -t * d.logpdf(d.mu + x) + 0.5 * e * e;
+}
+
+TEST_CASE("mcp and scad prox: the conventions") {
+  for (const auto& c : CASES_S) {
+    const double mu = c[0], lam = c[1], p = c[2];
+    const mcp_s m{mu, lam, p, c[3], c[4]};
+    const scad_s s{mu, lam, p, c[3], c[4]};
+    const mcp_l ml{mu, lam, p, c[3]};
+    const mcp_g mg{mu, lam, p, c[3]};
+    for (const double t : {0.01, 0.5, 1.0, 10.0}) {
+      // the location is its own prox, and the sign and the bound hold
+      CHECK(m.prox_y(mu, t) == mu);
+      CHECK(s.prox_y(mu, t) == mu);
+      CHECK(ml.prox_y(mu, t) == mu);
+      CHECK(mg.prox_y(mu, t) == mu);
+      // an infinite point is its own prox however large the step, and NaN passes through
+      const double inf = std::numeric_limits<double>::infinity();
+      CHECK(m.prox_y(inf, t) == inf);
+      CHECK(s.prox_y(-inf, t) == -inf);
+      CHECK(ml.prox_y(inf, t) == inf);
+      CHECK(mg.prox_y(-inf, t) == -inf);
+      CHECK(std::isnan(m.prox_y(std::numeric_limits<double>::quiet_NaN(), t)));
+      CHECK(std::isnan(s.prox_y(std::numeric_limits<double>::quiet_NaN(), t)));
+      for (const double U : {1e-6, 0.1, 1.0, 3.0, 50.0, 1e6}) {
+        for (int which = 0; which < 4; ++which) {
+          const double x = which == 0 ? m.prox_y(mu + U, t) - mu
+                                      : (which == 1 ? s.prox_y(mu + U, t) - mu
+                                                    : (which == 2 ? ml.prox_y(mu + U, t) - mu
+                                                                  : mg.prox_y(mu + U, t) - mu));
+          INFO("which " << which << " U " << U << " t " << t);
+          CHECK(x >= 0.0);
+          CHECK(x <= U * (1.0 + 1e-15));
+          // odd about the location: the two prox values sum to twice it, the statement
+          // that survives the rounding of mu + x when mu is not zero
+          const double lo = which == 0 ? m.prox_y(mu - U, t)
+                                       : (which == 1 ? s.prox_y(mu - U, t)
+                                                     : (which == 2 ? ml.prox_y(mu - U, t)
+                                                                   : mg.prox_y(mu - U, t)));
+          const double up = which == 0 ? m.prox_y(mu + U, t)
+                                       : (which == 1 ? s.prox_y(mu + U, t)
+                                                     : (which == 2 ? ml.prox_y(mu + U, t)
+                                                                   : mg.prox_y(mu + U, t)));
+          CHECK(std::fabs(lo + up - 2.0 * mu) <= 4.0 * ulp_of(std::fmax(std::fabs(mu), U)));
+        }
+      }
+    }
+  }
+}
+
+// Where the prox lands strictly inside a piece, the objective's derivative
+// t q'(x) + x - U vanishes there, with q'(x) = -d_y log f at mu + x. A named function
+// rather than a generic lambda: MSVC ends nvcc's host pass with an internal compiler
+// error on a generic lambda instantiated over these laws inside a doctest TEST_CASE,
+// which is a static function (met on 2026-11-20; the file already keeps its templated
+// bodies in named functions for the related trap of 2026-11-13).
+template <class D>
+void prox_optimality_one(const D& d, double lam, double p, bool scad, double& worst, int& checked) {
+  const double knot = p * lam;
+  for (const double t : {0.01, 0.3, 1.0, 4.0})
+    for (const double U : {0.05 * knot, 0.6 * knot, 1.3 * knot, 5.0 * knot, 500.0 * knot}) {
+      const double x = d.prox_y(U, t);
+      if (!(x > 1e-12) || std::fabs(x - knot) < 1e-9 * knot) continue;
+      if (scad && std::fabs(x - lam) < 1e-9 * lam) continue;  // at the first knot
+      const double qp = -d.template logpdf_dy_dk<1, 0>(x)[0];
+      const double g = t * qp + x - U;
+      const double sc = std::fmax(std::fabs(t * qp), std::fabs(U));
+      INFO("U " << U << " t " << t << " x " << x);
+      CHECK(std::fabs(g) <= 1e-12 * std::fmax(sc, 1.0));
+      worst = std::fmax(worst, std::fabs(g) / std::fmax(sc, 1.0));
+      ++checked;
+    }
+}
+
+TEST_CASE("mcp and scad prox: first-order optimality where the minimizer is interior") {
+  double worst = 0.0;
+  int checked = 0;
+  for (const auto& c : CASES_S) {
+    const double lam = c[1], p = c[2], t1 = c[3], t2 = c[4];
+    prox_optimality_one(mcp_g{0.0, lam, p, t1}, lam, p, false, worst, checked);
+    prox_optimality_one(mcp_s{0.0, lam, p, t1, t2}, lam, p, false, worst, checked);
+    prox_optimality_one(mcp_l{0.0, lam, p, t1}, lam, p, false, worst, checked);
+    prox_optimality_one(scad_g{0.0, lam, p, t1}, lam, p, true, worst, checked);
+    prox_optimality_one(scad_s{0.0, lam, p, t1, t2}, lam, p, true, worst, checked);
+    prox_optimality_one(scad_l{0.0, lam, p, t1}, lam, p, true, worst, checked);
+  }
+  std::printf("mcp/scad prox: first-order optimality worst %.3g relative, %d points\n", worst, checked);
+}
+
+TEST_CASE("mcp and scad prox: the shrinkage far out separates the three tails") {
+  // what the properizing tail decides: how much the prox still pulls a point that lies
+  // far beyond the last knot. U - x* grows with U for the Gaussian tail, settles at
+  // 2t/s for the logistic one and falls to zero for the Student one.
+  const double lam = 1.3, p = 3.0, t = 0.7, s = 1.1, nu = 5.0;
+  const mcp_g g{0.0, lam, p, s * s};
+  const mcp_l l{0.0, lam, p, s};
+  const mcp_s st{0.0, lam, p, s, nu};
+  double prev_g = 0.0;
+  for (const double U : {1e2, 1e3, 1e4, 1e5}) {
+    const double sg = U - g.prox_y(U, t), sl = U - l.prox_y(U, t), ss = U - st.prox_y(U, t);
+    INFO("U " << U);
+    CHECK(sg > prev_g);                       // the Gaussian tail keeps pulling harder
+    CHECK(std::fabs(sl - 2.0 * t / s) < 1e-9 * (2.0 * t / s));  // the logistic settles
+    CHECK(ss < 2.0 * t / s);                   // the Student pulls less than that
+    CHECK(ss * U < 1.5 * t * (nu + 1.0));      // and its pull falls like t(nu + 1)/U
+    CHECK(ss * U > 0.5 * t * (nu + 1.0));
+    prev_g = sg;
+  }
+  // beyond the knot the Gaussian tail's shrinkage is exactly (U - K) t/(V + t)
+  const double U = 1e4, V = s * s, w = U - p * lam;
+  CHECK(std::fabs((U - g.prox_y(U, t)) - w * t / (V + t)) <= 1e-9 * w * t / (V + t));
+}
+
+TEST_CASE("mcp and scad prox: the Student tail where the cubic's discriminant cancels") {
+  // Beyond w of about 1e11 the discriminant of the stationary cubic is a difference of
+  // two terms of size w^6 and its computed sign goes wrong, so the root near w is added
+  // by prox_roots on its own account. Here the returned point must still be stationary
+  // and must beat the knot, which is what would be returned if no root were found.
+  const double lam = 1.3, p = 3.0, s = 1.1, nu = 5.0, kap = 0.5 * (nu + 1.0);
+  for (const double t : {0.5, 7.0}) {
+    for (const double U : {1e9, 1e11, 1e13, 1e15}) {
+      const mcp_s d{0.0, lam, p, s, nu};
+      const double x = d.prox_y(U, t), knot = p * lam;
+      INFO("U " << U << " t " << t << " x " << x);
+      CHECK(x > knot);
+      // t q'(x) + x - U = 0, with q' read from the law's own y-derivative
+      const double qp = -d.template logpdf_dy_dk<1, 0>(x)[0];
+      CHECK(std::fabs(t * qp + x - U) <= 1e-10 * U);
+      // and its objective is below the knot's
+      CHECK(prox_objective(d, x, U, t) < prox_objective(d, knot, U, t));
+      // the pull is t (nu + 1) / w, so the point is all but U itself
+      CHECK(U - x < 4.0 * t * kap / (U - knot) + 1e-9 * U);
+    }
+  }
+}
+
+// one reference row against the law it names; see prox_optimality_one on why this is a
+// named function and not a lambda
+struct prox_ref_state {
+  double worst = 0.0, worst_obj = 0.0;
+  int checked = 0, flat = 0;
+  std::tuple<double, double, double, int, int> where{};
+};
+
+template <class D>
+void prox_reference_one(const D& d, const prox_row& r, prox_ref_state& st) {
+  const double x = d.prox_y(r.U, r.t), ref = r.hi + r.lo;
+  // the objective at the computed point never exceeds the reference's: this holds
+  // whether or not the two agree on which branch wins
+  const double go = prox_objective(d, x, r.U, r.t), gr = prox_objective(d, ref, r.U, r.t);
+  const double sc = std::fmax(std::fabs(gr), 1.0);
+  INFO("law " << r.law << " tail " << r.tail << " lam " << r.lam << " p " << r.p << " U " << r.U
+              << " t " << r.t << " x " << x << " ref " << ref << " gap " << r.gap);
+  CHECK(go - gr <= 64.0 * ulp_of(sc));
+  st.worst_obj = std::fmax(st.worst_obj, (go - gr) / sc);
+  if (r.gap == 0.0) {  // the objective is flat: every point of a piece minimizes
+    ++st.flat;
+    return;
+  }
+  const double e = std::fabs(x - ref) / ulp_of(std::fmax(std::fabs(ref), 1e-300));
+  CHECK(e <= BOUND_PROX);
+  if (e > st.worst) st.worst = e, st.where = {r.U, r.t, r.lam, r.law, r.tail};
+  ++st.checked;
+}
+
+void prox_reference_row(const prox_row& r, prox_ref_state& st) {
+  if (r.law == 0) {
+    if (r.tail == 0) prox_reference_one(mcp_g{0.0, r.lam, r.p, r.t1}, r, st);
+    else if (r.tail == 1) prox_reference_one(mcp_s{0.0, r.lam, r.p, r.t1, r.t2}, r, st);
+    else prox_reference_one(mcp_l{0.0, r.lam, r.p, r.t1}, r, st);
+  } else {
+    if (r.tail == 0) prox_reference_one(scad_g{0.0, r.lam, r.p, r.t1}, r, st);
+    else if (r.tail == 1) prox_reference_one(scad_s{0.0, r.lam, r.p, r.t1, r.t2}, r, st);
+    else prox_reference_one(scad_l{0.0, r.lam, r.p, r.t1}, r, st);
+  }
+}
+
+TEST_CASE("mcp and scad prox: against mpmath") {
+  const auto rows = read_prox_reference();
+  REQUIRE(rows.size() > 10000);
+  prox_ref_state st;
+  for (const auto& r : rows) prox_reference_row(r, st);
+  const double worst = st.worst, worst_obj = st.worst_obj;
+  const int checked = st.checked, flat = st.flat;
+  const auto where = st.where;
+  std::printf("mcp/scad prox: worst %.3g ulp at U = %g t = %g lambda = %g law %d tail %d; "
+              "objective never above the reference's by more than %.3g relative; %d values, %d flat\n",
+              worst, std::get<0>(where), std::get<1>(where), std::get<2>(where), std::get<3>(where),
+              std::get<4>(where), worst_obj, checked, flat);
+}
+
 // --------------------------------------------------------------- the kernels
 // An extended device lambda must not live in a function with internal linkage, which a
 // doctest TEST_CASE body is, so every kernel is launched from a named function with
@@ -750,3 +984,43 @@ void tails_kernel_case() {
 }
 
 TEST_CASE("mcp and scad tails: every order inside a kernel") { tails_kernel_case(); }
+
+// the prox inside a kernel: the device must reach the same branch, which for the Student
+// tail means the same root of the cubic
+template <class D>
+void prox_kernel_one(const double* th, int n_points) {
+  const D d = build<D>(th[0], th[1], th[2], th[3], th[4]);
+  const double t = 0.7;
+  std::vector<double> expect(n_points);
+  for (int i = 0; i < n_points; ++i)
+    expect[i] = d.prox_y(th[0] + std::pow(2.0, double(i - n_points / 2)) * th[1] * th[2], t);
+  Kokkos::View<double*> out("prox", n_points);
+  const double t0 = th[0], t1 = th[1], t2 = th[2], t3 = th[3], t4 = th[4];
+  const int np = n_points;
+  Kokkos::parallel_for(
+      "mcp_scad_prox", n_points, KOKKOS_LAMBDA(int i) {
+        const auto dd = build<D>(t0, t1, t2, t3, t4);
+        out(i) = dd.prox_y(t0 + Kokkos::pow(2.0, double(i - np / 2)) * t1 * t2, t);
+      });
+  auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+  double worst = 0.0;
+  for (int i = 0; i < n_points; ++i) {
+    INFO("point " << i << " host " << expect[i] << " device " << h(i));
+    const double sc = std::fmax(std::fabs(expect[i]), 1.0);
+    CHECK(std::fabs(h(i) - expect[i]) <= 1e-13 * sc);
+    worst = std::fmax(worst, std::fabs(h(i) - expect[i]) / sc);
+  }
+  std::printf("mcp/scad prox in a kernel: host against device worst %.3g relative over %d points\n",
+              worst, n_points);
+}
+
+void prox_kernel_case() {
+  const double ts[5] = {0.4, 1.3, 3.0, 1.1, 5.0};
+  const double tl[5] = {0.4, 1.3, 3.0, 1.1, 1.0};
+  prox_kernel_one<mcp_s>(ts, 24);
+  prox_kernel_one<scad_s>(ts, 24);
+  prox_kernel_one<mcp_l>(tl, 24);
+  prox_kernel_one<scad_g>(tl, 24);
+}
+
+TEST_CASE("mcp and scad prox: inside a kernel") { prox_kernel_case(); }

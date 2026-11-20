@@ -239,6 +239,22 @@ struct gaussian_tail {
   /// Rough spread of the tail, for the quadratures.
   LAPLACE_HD double scale_hint() const { return Kokkos::sqrt(tail_sigma2); }
 
+  /**
+   * \brief Stationary points \f$z > 0\f$ of \f$t H'(z) + z - w\f$, for the prox.
+   *
+   * \f$H' = z/V\f$ is linear, so there is the single root \f$wV/(V + t)\f$, present
+   * for \f$w > 0\f$. The shrinkage \f$w - z = wt/(V + t)\f$ grows with \f$w\f$.
+   * \param w Distance \f$|v - \mu| - K\f$ of the point beyond the law's last knot.
+   * \param t Step \f$t > 0\f$.
+   * \param z Buffer of at least four doubles, written with the roots.
+   * \return Number of roots written (0 or 1).
+   */
+  LAPLACE_HD int prox_roots(double w, double t, double* z) const {
+    if (!(w > 0.0)) return 0;
+    z[0] = w * tail_sigma2 / (tail_sigma2 + t);
+    return z[0] > 0.0 ? 1 : 0;
+  }
+
   /// Starting value from a sample summary.
   gaussian_tail start_value(const distrib_sample_summary& s) const {
     return {start_inside(s.variance, tail_params[0])};
@@ -376,6 +392,88 @@ struct student_tail {
   /// Rough spread of the tail, for the quadratures.
   LAPLACE_HD double scale_hint() const { return tail_scale; }
 
+  /**
+   * \brief Stationary points \f$z > 0\f$ of \f$t H'(z) + z - w\f$, for the prox.
+   *
+   * \f$H'(z) = 2\kappa z/(\varsigma^2 + z^2)\f$ rises to \f$\kappa/\varsigma\f$ at
+   * \f$z = \varsigma\f$ and falls back to zero, so the stationary equation is the cubic
+   * \f$z^3 - w z^2 + (\varsigma^2 + 2t\kappa) z - w\varsigma^2 = 0\f$, whose real roots
+   * are all positive (Descartes) and number one or three: the objective can have two
+   * local minima in the tail, and the caller compares their values. The roots come from
+   * the trigonometric form when the discriminant is positive and from Cardano's otherwise,
+   * then two Newton steps on \f$t H' + z - w\f$, which is better conditioned near a root
+   * than the cubic. The shrinkage \f$w - z \to 2t\kappa/w\f$ vanishes as \f$w\f$ grows.
+   * \param w Distance \f$|v - \mu| - K\f$ of the point beyond the law's last knot.
+   * \param t Step \f$t > 0\f$.
+   * \param z Buffer of at least four doubles, written with the roots.
+   * \return Number of roots written (0 to 4).
+   */
+  LAPLACE_HD int prox_roots(double w, double t, double* z) const {
+    if (!(w > 0.0)) return 0;
+    const double vs = varsigma(), v2 = vs * vs, k = 0.5 * (tail_df + 1.0);
+    const double b = -w, c = v2 + 2.0 * t * k, d = -w * v2;
+    // the depressed cubic y^3 + p y + q with z = y + sh
+    const double sh = -b / 3.0, p = c - b * b / 3.0;
+    const double q = d + b * (2.0 * b * b - 9.0 * c) / 27.0;
+    int n = 0;
+    if (p < 0.0 && -4.0 * p * p * p - 27.0 * q * q > 0.0) {
+      const double m = 2.0 * Kokkos::sqrt(-p / 3.0);
+      const double arg = Kokkos::fmax(-1.0, Kokkos::fmin(1.0, 3.0 * q / (p * m)));
+      const double th = Kokkos::acos(arg) / 3.0;
+      for (int j = 0; j < 3; ++j)
+        z[n++] = sh + m * Kokkos::cos(th - 2.09439510239319549231 * double(j));
+    } else {
+      const double r = Kokkos::sqrt(Kokkos::fmax(0.0, 0.25 * q * q + p * p * p / 27.0));
+      z[n++] = sh + Kokkos::cbrt(-0.5 * q + r) + Kokkos::cbrt(-0.5 * q - r);
+    }
+    // The discriminant is a difference of two terms that both grow like w^6 and cancel
+    // to leading order, so its computed sign is not to be trusted for a large w: at
+    // w = 1e11 it comes out positive where the cubic has one real root, which sends the
+    // branch above to the trigonometric form and fills z with three numbers that are not
+    // roots. Whenever the root near w exists it is therefore added here on its own
+    // account, whatever the branch returned: beyond z = varsigma the equation is
+    // increasing, so Newton from w reaches it. A duplicate of a root already found costs
+    // the caller one objective evaluation.
+    if (w > vs) {
+      double x = w;
+      for (int it = 0; it < 60; ++it) {
+        const double s = v2 + x * x, f = 2.0 * t * k * x / s + x - w;
+        const double fp = 2.0 * t * k * (v2 - x * x) / (s * s) + 1.0;
+        if (!(fp > 0.0)) break;
+        const double xn = x - f / fp;
+        if (!(xn < x) || !(xn > vs)) break;
+        x = xn;
+      }
+      if (x > 0.0) z[n++] = x;
+    }
+    int out = 0;
+    for (int j = 0; j < n; ++j) {
+      double x = z[j];
+      // Newton to rounding on t H' + z - w, which near a root is better conditioned than
+      // the cubic. Two steps are not enough: measured on 2026-11-20, the root the
+      // trigonometric form supplies was still 4.4e6 ulp from the converged one, which
+      // showed up as a disagreement with the reference where two copies of one root
+      // competed. The iteration is stopped when the step no longer moves x.
+      for (int it = 0; it < 60 && x > 0.0; ++it) {
+        const double s = v2 + x * x, f = 2.0 * t * k * x / s + x - w;
+        const double fp = 2.0 * t * k * (v2 - x * x) / (s * s) + 1.0;
+        if (fp == 0.0) break;
+        const double xn = x - f / fp;
+        if (xn == x || !Kokkos::isfinite(xn)) break;
+        x = xn;
+      }
+      if (x > 0.0) z[out++] = x;
+    }
+    // ascending, since the caller's tie rule keeps the first candidate of equal value
+    // and its own candidates below the knot are already in that order
+    for (int i = 1; i < out; ++i)
+      for (int j = i; j > 0 && z[j] < z[j - 1]; --j) {
+        const double tmp = z[j];
+        z[j] = z[j - 1], z[j - 1] = tmp;
+      }
+    return out;
+  }
+
   /// Starting value from a sample summary; \f$\nu = 5\f$, light enough to have a variance.
   student_tail start_value(const distrib_sample_summary& s) const {
     return {start_inside(Kokkos::sqrt(s.variance), tail_params[0]), start_inside(5.0, tail_params[1])};
@@ -477,6 +575,36 @@ struct logistic_tail {
   }
   /// Rough spread of the tail, for the quadratures.
   LAPLACE_HD double scale_hint() const { return tail_scale; }
+
+  /**
+   * \brief Stationary points \f$z > 0\f$ of \f$t H'(z) + z - w\f$, for the prox.
+   *
+   * \f$H'(z) = (2/s)\tanh(z/s)\f$ increases to \f$2/s\f$, so \f$t H' + z - w\f$ is
+   * increasing and concave on \f$z > 0\f$ and has the single root, present for
+   * \f$w > 0\f$. Newton from \f$\max(0, w - 2t/s)\f$, where the function is at most zero,
+   * rises monotonically to it and is stopped when the step no longer rises, which is
+   * rounding. The shrinkage \f$w - z \to 2t/s\f$, a constant.
+   * \param w Distance \f$|v - \mu| - K\f$ of the point beyond the law's last knot.
+   * \param t Step \f$t > 0\f$.
+   * \param z Buffer of at least four doubles, written with the root.
+   * \return Number of roots written (0 or 1).
+   */
+  LAPLACE_HD int prox_roots(double w, double t, double* z) const {
+    if (!(w > 0.0)) return 0;
+    const double hmax = 2.0 * t / tail_scale;
+    double x = Kokkos::fmax(0.0, w - hmax);
+    // ponytail: cap of 100 steps, the monotone test stops it at rounding well before
+    for (int it = 0; it < 100; ++it) {
+      const double th = Kokkos::tanh(x / tail_scale);
+      const double f = hmax * th + x - w;
+      const double fp = hmax * (1.0 - th * th) / tail_scale + 1.0;
+      const double xn = x - f / fp;
+      if (!(xn > x)) break;
+      x = xn;
+    }
+    z[0] = x;
+    return x > 0.0 ? 1 : 0;
+  }
 
   /// Starting value from a sample summary; \f$s\f$ from the standard deviation.
   logistic_tail start_value(const distrib_sample_summary& s) const {

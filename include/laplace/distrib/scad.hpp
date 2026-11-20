@@ -307,6 +307,52 @@ struct scad_distrib {
            detail_scad::log_z(lambda, a, tail);
   }
 
+  /**
+   * \brief Proximal operator in \f$y\f$: \f$\arg\min_y \{-\log f(y) + (y - v)^2/(2t)\}\f$.
+   *
+   * With \f$U = |v - \mu|\f$ the problem is \f$\min_{x \ge 0} t\,q(x) + (x - U)^2/2\f$, and
+   * the minimizer has the sign of \f$v - \mu\f$ with \f$|x| \le U\f$, since \f$q\f$ does not
+   * decrease. The objective is smooth on each of the three pieces of \f$q\f$ and grows at
+   * infinity, so its global minimum is at \f$x = 0\f$, at one of the knots \f$\lambda\f$ and
+   * \f$K = a\lambda\f$, or at a stationary point of one piece. On the first piece the
+   * objective is convex with the soft threshold \f$U - t\lambda\f$ as its stationary point;
+   * on the second its curvature is \f$1 - t/(a - 1)\f$, with the SCAD threshold
+   * \f$(U - ta\lambda/(a-1))/(1 - t/(a-1))\f$ when that curvature is positive and no interior
+   * minimum otherwise; beyond \f$K\f$ the stationary points come from the tail
+   * (\c prox_roots(), up to three with the Student tail). The candidates are compared on
+   * the objective, the smallest \f$x\f$ winning a tie, as in the prox of \f$a|x|^p\f$.
+   * \param v Point \f$v\f$.
+   * \param t Step \f$t > 0\f$.
+   * \return The minimizer.
+   * \see penalty_prox, properizing_tail
+   */
+  LAPLACE_HD double prox_y(double v, double t) const {
+    const double u = v - mu, U = Kokkos::fabs(u);
+    // the location itself passes through, and so do NaN and an infinite point,
+    // the last of them being its own prox however large the step
+    if (!(U > 0.0) || !Kokkos::isfinite(U)) return v;
+    const double knot = a * lambda;
+    double xb = 0.0, gb = 0.5 * U * U;  // x = 0, where q vanishes
+    auto offer = [&](double x) {
+      const double e = x - U;
+      const double g = t * detail_scad::q_value(x, lambda, a, tail) + 0.5 * e * e;
+      if (g < gb) gb = g, xb = x;
+    };
+    const double soft = U - t * lambda;  // the first piece, always convex
+    if (soft > 0.0 && soft < lambda) offer(soft);
+    offer(lambda);
+    const double curv = 1.0 - t / (a - 1.0);
+    if (curv > 0.0) {
+      const double x = (U - t * a * lambda / (a - 1.0)) / curv;
+      if (x > lambda && x < knot) offer(x);
+    }
+    offer(knot);
+    double z[4];
+    const int n = tail.prox_roots(U - knot, t, z);
+    for (int j = 0; j < n; ++j) offer(knot + z[j]);
+    return mu + (u < 0.0 ? -xb : xb);
+  }
+
   /// Derivatives of order \f$K\f$ of the log-density in \f$(\mu, \lambda, a, \theta_t)\f$.
   template <int K>
   LAPLACE_HD sym_tensor<n_params, K> logpdf_dk(double y) const {
