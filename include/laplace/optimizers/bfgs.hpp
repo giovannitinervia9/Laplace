@@ -84,6 +84,7 @@ struct bfgs_inverse_model {
 
   explicit bfgs_inverse_model(int size) : n(size), b(size * size, 0.0), by(size) {}
   void reset() { has_pair = false; }
+  bool has_pairs() const { return has_pair; }
   void direction(const optimizer_point& g, const optimizer_vector& d) const {
     if (!has_pair) return scaled_steepest_descent(g, d);
     for (int i = 0; i < n; ++i) d(i) = 0.0;
@@ -117,12 +118,18 @@ struct bfgs_inverse_model {
 };
 
 // The loop of BFGS and L-BFGS. Model: reset(), direction(g, d) writing -B g,
-// update(s, y, s'y) for an accepted pair.
+// update(s, y, s'y) for an accepted pair, has_pairs(). With reset_on_stall, a
+// search that ends below rounding or resolution while the model holds pairs
+// resets the model once (gamma_max is kept) and searches again along the
+// scaled steepest descent: a model blind along a direction its pairs never
+// sampled takes steps whose decrease is under the rounding of f there (BFGS on
+// a quadratic with kappa = 1e10). A second such search without an accepted step
+// in between ends stalled.
 template <class Model, class Rule, class LineSearch, gradient_objective O>
 optimizer_report quasi_newton_run(Model& model, const Rule& stop_rule, const LineSearch& line_search,
                                   int max_iterations, long max_evaluations, double curvature_tolerance,
                                   int max_skipped_updates, const optimizer_trace& trace, O& objective,
-                                  const optimizer_point& x0) {
+                                  const optimizer_point& x0, bool reset_on_stall) {
   const auto start = std::chrono::steady_clock::now();
   const int n = static_cast<int>(x0.extent(0));
   optimizer_report report;
@@ -180,6 +187,7 @@ optimizer_report quasi_newton_run(Model& model, const Rule& stop_rule, const Lin
     if (v != stop_verdict::none) return finish(verdict_status(v));
   }
   int skipped = 0;
+  bool reset_tried = false;  // a reset on stall since the last accepted step
   for (int k = 1; k <= max_iterations; ++k) {
     if (report.value_evaluations >= max_evaluations) return finish(optimizer_status::evaluation_budget);
     line_search_result r;
@@ -200,6 +208,14 @@ optimizer_report quasi_newton_run(Model& model, const Rule& stop_rule, const Lin
          r.outcome == line_search_outcome::not_descent_direction ||
          r.outcome == line_search_outcome::evaluation_budget))
       return finish(verdict_status(pending));
+    const bool below_rounding =
+        r.outcome == line_search_outcome::step_below_rounding || r.outcome == line_search_outcome::below_resolution;
+    if (!r.accepted() && below_rounding && reset_on_stall && !reset_tried && model.has_pairs()) {
+      model.reset();
+      reset_tried = true;
+      next_direction();
+      continue;
+    }
     if (!r.accepted())
       return finish(r.outcome == line_search_outcome::step_below_rounding ||
                             r.outcome == line_search_outcome::below_resolution
@@ -218,6 +234,7 @@ optimizer_report quasi_newton_run(Model& model, const Rule& stop_rule, const Lin
     const double f_previous = f;
     f = f_new;
     report.iterations = k;
+    reset_tried = false;
 
     if (std::isfinite(sy) && sy > curvature_tolerance * std::sqrt(ss) * std::sqrt(yy)) {
       model.update(s, y, sy);
@@ -286,6 +303,17 @@ optimizer_report quasi_newton_run(Model& model, const Rule& stop_rule, const Lin
  * satisfies \f$g^\top d \ge 0\f$, \f$B\f$ is reset and \f$d\f$ is recomputed
  * from the reset model.
  *
+ * Outside confirmation, when the line search ends with
+ * `line_search_outcome::step_below_rounding` or
+ * `line_search_outcome::below_resolution` while the model holds at least one
+ * curvature pair and no stall reset has occurred since the last accepted step,
+ * \f$B\f$ is reset to the scaled steepest-descent start model,
+ * \f$\gamma_{\max}\f$ is kept, and the search is repeated. A second such search
+ * without an accepted step in between ends `optimizer_status::stalled`. A
+ * model whose pairs never sampled a direction is far too small along it, so its
+ * steps there have a predicted decrease below the rounding of \f$f\f$ and the
+ * search cannot accept them.
+ *
  * Each iteration searches along \f$d_k\f$ from \f$t = 1\f$ using `LineSearch`,
  * which defaults to wolfe_line_search (see \ref optimizers "the optimizers page").
  * When armijo_line_search (Dennis and Schnabel, 1996) is used instead, the
@@ -335,7 +363,7 @@ optimizer_report quasi_newton_run(Model& model, const Rule& stop_rule, const Lin
  *
  * - `optimizer_status::converged` and `optimizer_status::converged_at_resolution` are returned when the stopping rule's convergence verdict is confirmed.
  * - `optimizer_status::stopped_on_change` is returned immediately when a change rule issues `stop_verdict::stopped_on_change`.
- * - `optimizer_status::stalled` is returned when the line search fails with `line_search_outcome::step_below_rounding` or `line_search_outcome::below_resolution` outside confirmation.
+ * - `optimizer_status::stalled` is returned outside confirmation when the line search fails with `line_search_outcome::step_below_rounding` or `line_search_outcome::below_resolution` with no pairs in the model or after a stall reset without an accepted step in between.
  * - `optimizer_status::line_search_failed` is returned on any other line search failure, such as its evaluation budget or a non-descent direction after a reset.
  * - `optimizer_status::iteration_budget` is returned when `max_iterations` iterations complete without stopping.
  * - `optimizer_status::evaluation_budget` is returned when `value_evaluations` reaches `max_evaluations` before a line search.
@@ -355,8 +383,18 @@ optimizer_report quasi_newton_run(Model& model, const Rule& stop_rule, const Lin
  * all standard test problems (with \f$f^*\f$ shifted by \f$0\f$, \f$1\f$,
  * \f$10^3\f$, and \f$10^6\f$) with \f$f - f^* \le 6.3 \times 10^{-8}\f$, and on
  * \f$10\f$-dimensional quadratics up to condition number \f$\kappa = 10^8\f$
- * (with \f$f - f^* \le 4.7 \times 10^{-9}\f$); at \f$\kappa = 10^{10}\f$ and
- * \f$10^{12}\f$ it ends `optimizer_status::stalled`. It does not converge on a
+ * (with \f$f - f^* \le 4.7 \times 10^{-9}\f$). At \f$\kappa = 10^{10}\f$, it
+ * converges for \f$n = 10\f$ (\f$169\f$ iterations, \f$f - f^* = 9.2 \times 10^{-7}\f$),
+ * \f$n = 20\f$ (\f$485\f$ iterations, \f$2.3 \times 10^{-12}\f$), and
+ * \f$n = 50\f$ (\f$722\f$ iterations, \f$2.3 \times 10^{-9}\f$); at \f$n = 50\f$,
+ * it also converges at \f$\kappa = 10^{11}\f$ (\f$1.2 \times 10^{-11}\f$) and
+ * \f$10^{12}\f$ (\f$1.2 \times 10^{-18}\f$). Elsewhere at \f$\kappa = 10^{11}\f$
+ * and \f$10^{12}\f$ with `wolfe_line_search`, it ends
+ * `optimizer_status::stalled`, `optimizer_status::line_search_failed`, or
+ * `optimizer_status::iteration_budget`. As a measured limit, at \f$n = 10\f$ and
+ * \f$\kappa = 10^{11}\f$ with `armijo_line_search`, the run is declared
+ * converged at \f$f - f^* = 2.1 \times 10^{-5}\f$ with a decrement of
+ * \f$6.3 \times 10^{-7}\f$ (a false success). It does not converge on a
  * non-smooth objective such as \f$\sum_i |x_i|\f$ (tested for \f$n = 2, 4, 10\f$
  * under both line searches).
  *
@@ -430,7 +468,7 @@ struct bfgs_optimizer {
   optimizer_report run(O& objective, const optimizer_point& x0) const {
     detail::bfgs_inverse_model model(static_cast<int>(x0.extent(0)));
     return detail::quasi_newton_run(model, stop_rule, line_search, max_iterations, max_evaluations,
-                                    curvature_tolerance, max_skipped_updates, trace, objective, x0);
+                                    curvature_tolerance, max_skipped_updates, trace, objective, x0, true);
   }
 };
 

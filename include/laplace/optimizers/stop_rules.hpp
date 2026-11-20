@@ -115,6 +115,7 @@ enum class stop_verdict { none, stopped_on_change, converged_at_resolution, conv
  * | `prox_mapping` | `double` | quiet NaN | Proximal gradient mapping measure in the objective's units, or quiet NaN |
  * | `search_size` | `double` | quiet NaN | Derivative-free search region size in the units of \f$x\f$, or quiet NaN |
  * | `primal_dual` | `double` | quiet NaN | Primal-dual stationarity measure in the objective's units, or quiet NaN |
+ * | `primal_dual_floor` | `double` | quiet NaN | Rounding floor of `primal_dual` in the objective's units, or quiet NaN |
  * | `has_previous` | `bool` | `false` | Whether `previous_value` and `previous_point` are populated |
  * | `previous_value` | `double` | quiet NaN | Objective value from the preceding iteration |
  * | `previous_point` | `Kokkos::View<const double*, Kokkos::HostSpace>` | empty | Point from the preceding iteration |
@@ -184,6 +185,16 @@ struct stop_rule_input {
   // linearization error g(D x) - g(u') - y'(D x - u') >= 0 (primal_dual.hpp).
   // NaN when the method does not provide it.
   double primal_dual = std::numeric_limits<double>::quiet_NaN();
+  /**
+   * \ingroup optimizers
+   * \brief Rounding floor of `primal_dual` in the objective's units, or quiet NaN when not provided (default quiet NaN).
+   *
+   * Used by `primal_dual_stop_rule` in its resolution check, where a NaN floor counts as \f$0\f$. `primal_dual_optimizer` sets it to \f$2\varepsilon\,\lVert y\rVert_\infty \sqrt{B}\,\lVert x\rVert_1\f$, where \f$\varepsilon = 2^{-52}\f$, \f$x\f$ is the primal iterate, \f$y\f$ is the dual iterate, and \f$B\f$ is `map_norm_squared_bound()`; see \ref optimizers_primal_dual "Primal-dual method".
+   */
+  // The rounding floor of primal_dual, in the objective's units: 2 eps
+  // |y|_inf sqrt(B) |x|_1, B >= |D|_2^2 (primal_dual.hpp). NaN when the method
+  // does not provide it.
+  double primal_dual_floor = std::numeric_limits<double>::quiet_NaN();
   /**
    * \ingroup optimizers
    * \brief Whether `previous_value` and `previous_point` hold data from the preceding iteration (default `false`).
@@ -431,23 +442,26 @@ struct search_size_stop_rule {
  * \brief Stationarity rule testing the primal-dual measure of a smooth plus linear-map composite objective.
  *
  * Tests `in.primal_dual` (in the objective's units, independent of dimension
- * \f$n\f$) with the same rules as `decrement_stop_rule`. Default rule for
- * `primal_dual_optimizer` (\ref optimizers_primal_dual).
+ * \f$n\f$) against `tolerance` and the larger of the objective and measure
+ * rounding floors. Default rule for `primal_dual_optimizer`
+ * (\ref optimizers_primal_dual).
  *
- * Let \f$v\f$ be `in.primal_dual`, \f$f\f$ be `in.value`, \f$\tau\f$ be
+ * Let \f$v\f$ be `in.primal_dual`, \f$f\f$ be `in.value`, \f$r\f$ be
+ * `in.primal_dual_floor` (a NaN floor counts as \f$0\f$), \f$\tau\f$ be
  * `tolerance`, \f$m\f$ be `resolution_multiple`, and \f$\varepsilon = 2^{-52}\f$.
  * `verdict()` returns `stop_verdict::converged` when \f$v \le \tau\f$, else
- * `stop_verdict::converged_at_resolution` when \f$v \le m\,\varepsilon\,|f|\f$,
- * and `stop_verdict::none` otherwise (including when \f$v\f$ is NaN).
+ * `stop_verdict::converged_at_resolution` when
+ * \f$v \le m\,\max(\varepsilon\,|f|,\, r)\f$, and `stop_verdict::none`
+ * otherwise (including when \f$v\f$ is NaN).
  *
  * ### Settings
  *
  * | Member | Default | Effect |
  * |---|---|---|
  * | `tolerance` | \f$10^{-6}\f$ | Convergence threshold \f$\tau\f$ on `primal_dual` in the objective's units |
- * | `resolution_multiple` | \f$1\f$ | Multiplier \f$m\f$ on \f$\varepsilon \lvert f\rvert \f$ for `converged_at_resolution` |
+ * | `resolution_multiple` | \f$1\f$ | Multiplier \f$m\f$ on the larger of \f$\varepsilon \lvert f\rvert\f$ and `primal_dual_floor` for `converged_at_resolution` |
  *
- * \see \ref optimizers, \ref optimizers_primal_dual, decrement_stop_rule, stop_rule_input::primal_dual, stop_verdict
+ * \see \ref optimizers, \ref optimizers_primal_dual, decrement_stop_rule, stop_rule_input::primal_dual, stop_rule_input::primal_dual_floor, stop_verdict
  */
 // The decrement rule read on the primal-dual measure (primal_dual.hpp), an
 // upper bound on f(x) - f* for convex s and g up to the distance to x*.
@@ -464,20 +478,29 @@ struct primal_dual_stop_rule {
   double tolerance = 1e-6;
   /**
    * \ingroup optimizers
-   * \brief Multiplier \f$m\f$ on \f$\varepsilon |f|\f$ for the resolution check (default \f$1\f$).
+   * \brief Multiplier \f$m\f$ on the larger of \f$\varepsilon |f|\f$ and `primal_dual_floor` for the resolution check (default \f$1\f$).
    */
   double resolution_multiple = 1.0;
   /**
    * \ingroup optimizers
    * \brief Evaluates the stopping rule on `in`.
    *
-   * \param in Current iteration quantities (`value` and `primal_dual`).
+   * Returns `stop_verdict::converged` when `in.primal_dual` is at most
+   * `tolerance`, `stop_verdict::converged_at_resolution` when it is at most
+   * `resolution_multiple` times the larger of \f$\varepsilon |f|\f$ (with
+   * \f$f\f$ equal to `in.value` and \f$\varepsilon = 2^{-52}\f$) and
+   * `in.primal_dual_floor` (a NaN floor counts as \f$0\f$), and
+   * `stop_verdict::none` otherwise.
+   *
+   * \param in Current iteration quantities (`value`, `primal_dual`, and `primal_dual_floor`).
    * \return `stop_verdict::converged`, `stop_verdict::converged_at_resolution`, or `stop_verdict::none`.
    */
   stop_verdict verdict(const stop_rule_input& in) const {
     if (in.primal_dual <= tolerance) return stop_verdict::converged;
-    if (in.primal_dual <= resolution_multiple * std::numeric_limits<double>::epsilon() * std::abs(in.value))
-      return stop_verdict::converged_at_resolution;
+    // the resolution of f, or the rounding floor of the measure itself when it is higher
+    const double floor = std::isnan(in.primal_dual_floor) ? 0.0 : in.primal_dual_floor;
+    const double resolution = std::max(std::numeric_limits<double>::epsilon() * std::abs(in.value), floor);
+    if (in.primal_dual <= resolution_multiple * resolution) return stop_verdict::converged_at_resolution;
     return stop_verdict::none;
   }
 };

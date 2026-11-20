@@ -527,11 +527,16 @@ void genlasso_cases() {
     const double f_reference =
         ref.objective_laplace + (d.p - ref.order) * ref.penalty_constant_per_row - 0.5 * ref.log_det_ddt;
     const double tolerance = std::max(1e-8, 1e3 * std::numeric_limits<double>::epsilon() * std::abs(f_reference));
-    // f2 (n = 1000, p = 200) needs more than 1e5 iterations on 5 of its 9 fits
-    // (measured: trend at fraction 0.01 ends at f - f* = 1.8 after 1e5); there
-    // the run is capped and only the honesty of the status is checked
+    // f2 (n = 1000, p = 200): trend filtering at 0.1 and 0.01 needs 164753 and
+    // 830586 iterations (measured), so those runs are capped at 1e4 and only the
+    // honesty of the status is checked
     const bool small = ref.dataset == "f1_n200_p50";
-    const int budget = small ? 100000 : 10000;
+    // f2's trend filtering at 0.5 of lambda_max: V stops falling at 2.8e-8 to 4.1e-8,
+    // its rounding floor (0.69 eps |y|_inf sqrt(B) |x|_1, lambda = 1.08e6), above the
+    // tolerance 1e-8, so the run ends at the resolution of V: measured 108466
+    // iterations, coef err 1.5e-12 (it reached the 1e6 budget before the floor)
+    const bool trend_floor = !small && trend && ref.lambda_fraction == 0.5;
+    const int budget = small ? 100000 : trend_floor ? 200000 : 10000;
     lo::optimizer_report rep;
     if (ref.penalty == "fused")
       rep = genlasso_fit<1>(smooth, d.p, make_product<ld::laplace2_distrib>(d.p - 1), {ref.lambda}, tolerance, budget);
@@ -553,6 +558,9 @@ void genlasso_cases() {
     if (small) {
       CHECK(rep.status == lo::optimizer_status::converged);
       CHECK(err <= 1e-6 * scale);  // measured 3.7e-8
+    } else if (trend_floor) {
+      CHECK(rep.status == lo::optimizer_status::converged_at_resolution);
+      CHECK(err <= 1e-10 * scale);
     } else if (ref.lambda_fraction == 0.01 && !trend) {
       // fused and fused_enet at 0.01 converge since the descent-lemma test is
       // decided on gradients near the rounding of s (were the budget before):

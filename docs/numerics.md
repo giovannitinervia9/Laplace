@@ -14207,6 +14207,164 @@ Open. A prox for a general Sigma (beta >= 1/2: a secular equation in gamma,
 x = (I + gamma Sigma^-1)^-1 u; beta < 1/2: several stationary points), if a
 consumer asks.
 
+## Residues of the optimizers: BFGS's reset on a stall, the rounding floor of the primal-dual measure, the two basins of mcp and scad (2026-11-19)
+
+**BFGS at kappa 1e10, why it stalled.** On the quadratic f = (1/2)(x - x*)'A(x - x*)
+with n = 10, the eigenvalues of A log-spaced from 1 to kappa = 1e10 and x0 = 0,
+BFGS with the Wolfe search ended stalled after 130 iterations at f - f* = 1.13e-2.
+Traced per iteration: no curvature pair was skipped (cos(s, y) >= 3e-3 against
+the threshold 1e-10) and the pairs were exact (|y - A s| / |A s| from 1e-11 to
+7e-7). The error stays on the eigenvector of eigenvalue 1, |e_weak| = 0.15 from
+iteration 90 on, which is the whole of f - f* = (1/2) 0.15^2. No pair sampled
+that direction: the largest s'y/y'y seen is 1.05e-4 against its true 1, so B is
+1e-4 of the truth there, and so is the floor gamma_max |g|^2 of the decrement.
+In the last search the step had |d| = 6.5e-8 and the slope -3.7e-5 (the computed
+slope exact to three digits), a predicted decrease of 2.4e-12 against a rounding
+of f of +-2e-10: Armijo's test was decided by the rounding and the zoom ended
+below rounding. The cause is the loss of curvature information along the weak
+direction, then the resolution of f. Armijo's backtracking converged at n = 10
+along a different path, not at n = 20.
+
+**The repair.** When the search ends below rounding or below resolution while the
+model holds pairs, B is reset once to the scaled steepest descent (gamma_max is
+kept) and the search is repeated; a second such search without an accepted step
+in between ends stalled, as before. Measured on the whole quasi-Newton battery
+(the seven More-Garbow-Hillstrom problems at f* = 0, 1, 1e3, 1e6 under both
+searches, the quadratics n = 10, 20, 50, 100 with kappa from 1e2 to 1e12, and
+the negative cases):
+
+| quadratic | before | with the reset |
+|---|---|---|
+| n = 10, kappa 1e10, Wolfe | stalled, 130 it, f - f* 1.1e-2 | converged, 169 it, 9.2e-7 |
+| n = 20, kappa 1e10, Wolfe | stalled, 228 it, 1.2e2 | converged, 485 it, 2.3e-12 |
+| n = 50, kappa 1e10, Wolfe | stalled, 543 it, 1.9e3 | converged, 722 it, 2.3e-9 |
+| n = 50, kappa 1e11 / 1e12, Wolfe | stalled | converged, 1.2e-11 / 1.2e-18 |
+| n = 10, kappa 1e11, Armijo | stalled, f - f* 1.9e2 | converged, f - f* 2.1e-5, decrement 6.3e-7 |
+
+Every row where no stall occurred is unchanged (all of kappa <= 1e9 and the
+More-Garbow-Hillstrom problems); the other rows at kappa 1e11 and 1e12 still end
+stalled, line search failed or at the budget; no negative case converges (abs_sum
+with n = 4 under Wolfe goes from stalled to line search failed). Keeping gamma_max
+matters: clearing it with B gave f - f* = 3.7e-6 at n = 10, kappa 1e10, a false
+success at the tolerance 1e-6. The last row of the table is a false success that
+the reset creates: a limit, documented and not tested.
+
+L-BFGS with the same reset, measured and not applied: at memories 5, 10 and 20 it
+changes no status and no f - f* except at kappa 1e11 and 1e12 with n = 10 and 20
+(stalled becomes line search failed, or the same status with more evaluations)
+and Brown's badly scaled function under Armijo (stalled either way). Its false
+successes at kappa 1e8 to 1e10 (converged 1e-2 above f*) come with no stall, so
+a reset cannot reach them.
+
+**The rounding floor of the primal-dual measure.** On the genlasso dataset f2
+(n = 1000, p = 200), trend filtering at 0.5 of lambda_max (lambda = 1.08e6) ran to
+1e6 iterations without converging at the tolerance 1e-8, while its coefficients
+were within 7.5e-13 of the reference: V reached 3.1e-8 at iteration 2e5 and
+then wandered between 2.8e-8 and 3.5e-8, with f changing by 6e-12 (about eps |f|,
+f = 18877.4). Each of the 18 genlasso fits was run past its convergence with the
+tolerance set to 0, and the measure recorded over the second half of the extra
+iterations (as many as the run took to converge, at least 2e4). The floor is
+entirely in e_d (the primal part was below 3e-18). Its scale is the rounding of
+D x: lambda |D x|_1 is not it (V/(eps lambda |D x|_1) ran from 0 to 2.1e4), while
+against S = |y|_inf sqrt(B) |x|_1, with B >= |D|_2^2 (sqrt(B) = 2^K bounds the
+absolute row sums of D_K) and |y|_inf = lambda at the optimum, the largest
+V/(eps S) over the 18 fits is 0.69 (f2 trend 0.5; 0.26 and 0.22 at 0.1 and 0.01,
+0.28 on f1, at most 0.07 on f2's fused and elastic-net fits). The optimizer now
+passes the floor 2 eps |y|_inf sqrt(B) |x|_1 to the stop rule, and
+primal_dual_stop_rule declares converged at resolution when V is at most
+resolution_multiple times the larger of eps |f| and that floor. f2's fits at a
+budget of 1e6 (gcc, 4 threads):
+
+| fit | before | with the floor |
+|---|---|---|
+| trend 0.5 | budget, 1e6 it, V 3.1e-8, coef err 7.5e-13 | at resolution, 108466 it, V 1.2e-7, f - f* 1.3e-8, 1.5e-12 |
+| trend 0.1 | converged, 170807 it | at resolution, 164753 it, coef err 6.0e-11 |
+| trend 0.01 | converged, 830577 it | converged, 830586 it |
+| fused and fused_enet, 0.5, 0.1, 0.01 | converged, 2473 to 5564 it | the same |
+
+On f1 (n = 200, p = 50) the floor is 2e-12 to 3e-10, below the tolerance, and no
+status changes.
+
+**Trend filtering by ADMM, for later.** A prototype (NumPy, one thread) of the
+ADMM of Ramdas and Tibshirani (2016) on f2's three trend fits: the split
+alpha = D_1 beta, the beta step a solve with the cached Cholesky factor of
+X'X + rho D_1'D_1, the alpha step the fused-lasso prox of D_1 (Condat's algorithm,
+checked on 300 random cases against the optimality conditions), stopped when
+f - f* <= 1e-8 against the reference. The plain ADMM on z = D_2 beta is given for
+comparison.
+
+| rho / lambda | specialized, trend 0.5 / 0.1 / 0.01 | plain ADMM, the same |
+|---|---|---|
+| 1e-2 | 2100 / 5965 / not within 2e4 | |
+| 1e-1 | 540 / 600 / 8280 | |
+| 1 | 3590 / 3290 / 825 | 23050 / 40485 / not within 1e5 |
+| 10 | not within 2e4 / not within 2e4 / 2995 | 59610 / 66095 / 73785 |
+
+The specialized ADMM needs 100 to 1500 times fewer iterations than primal_dual
+(108466, 164753, 830586), and each costs one pair of triangular solves of order p
+and the O(p) prox, against a pass over X. Its costs are the choice of rho (a
+factor of 10 away from the best costs 5 to 10 times the iterations, or does not
+converge), a factorization for each rho (banded only when X = I), and a
+certificate: the framework declares success only on a measure that bounds
+f - f*, and ADMM's primal and dual residuals do not, so a duality gap would be
+built from its dual variable. Not implemented; the route if trend filtering
+becomes a model term.
+
+**mcp and scad from the worsened start.** From the +1 start (every free
+coordinate of the library start moved by 1) every single method tried ends in the
+far basin of mcp, the Laplace limit at gamma -> infinity (section "Starting values
+and the fit_distrib bench on the laws added after it"). A multistart over the
+bench's Fisher scoring (step capped at 1), with starts by Latin hypercube within
+3 spread max(1, |u0_j|) of the +1 start:
+
+| law, n | 5 starts, spread 0.5 | 5, 1 | 10, 0.5 | 10, 1 | 20, 0.5 | 20, 1 |
+|---|---|---|---|---|---|---|
+| mcp 1e3: -l above R's | 6.5e-7 | 1.7e-5 | 9.7e-6 | 1.7e-5 | 1.5e-6 | 2.0e-5 |
+| mcp 1e3: f evaluations | 1685 | 1538 | 6189 | 3778 | 8560 | 7826 |
+| mcp 1e5: -l above R's | -2e-9 | boundary (4.2e3) | 1.7e-7 | 5.7e-7 | | |
+| scad 1e3: -l above R's | 3.2e-7 | 3.2e-7 | 3.2e-7 | 3.2e-7 | | |
+| scad 1e5: -l above R's | 1.1e-6 | 1.1e-6 | 1.1e-6 | 1.1e-6 | | |
+
+With 10 starts and spread 0.5 the best of the runs is at R's maximum for both laws
+at both sizes, within the kink bounds of the bench (6.3e-5 at n = 1e3, 2.7e-6 at
+n = 1e5). 1 to 4 of the 10 runs reach the maximum, and the others reach the
+boundary. Under the selection rule of the time, where a converged run beat a
+non-converged one, the BFGS multistart kept a boundary run in 15 of the 18 mcp
+and scad settings tried, although up to 5 of its runs reached the maximum. Those
+runs ended stalled on the kink in mu, while the boundary runs ended converged.
+The alternation (Brent on mu, Newton capped at 1) reaches the maximum in every
+setting, at 1.6e4 to 4.1e5 evaluations of f.
+
+**The multistart's selection rule: values first.** The old rule failed in the
+same way under Fisher scoring once the gaussian_tail derivatives of mcp and scad
+moved by a few ulp (a different route through the same formulas, on 2026-11-19).
+At n = 1e3, one boundary run of the ten then ended converged (-l 2186.84 for mcp,
+2033.30 for scad), and the multistart kept it over the three stalled runs at R's
+maximum (-l 2106.98 and 1985.93). Three rules were compared, with each start's
+report logged:
+
+- R0, the old rule: a converged run beats a non-converged one; between runs of
+  the same kind, a later run replaces the kept one only when its value is lower
+  by more than distinct_tolerance.
+- R1: values first. A later run replaces the kept one when its value is lower by
+  more than distinct_tolerance, whatever the statuses, or when its value is within
+  the tolerance, it converged, and the kept run did not.
+- R4: R1 applied only to the runs that ended on their own (converged, stalled, or
+  failed line search), so that a run cut by a budget is skipped.
+
+The settings were the 17 laws of the bench at n = 1e3, from the library start and
+from the +1 start, plus mcp and scad at n = 1e5, each with a multistart of 10
+starts at spread 0.5 over Fisher scoring and over BFGS: 76 multistarts in all.
+R1 and R4 keep the same run in all 76, and that run is at R's maximum in all 76.
+R0 keeps the same run as R1 in 67. In the other 9, all mcp or scad, R0 keeps a
+converged boundary run at -l 2157.03 to 2186.84 for mcp at n = 1e3 (R's 2106.98),
+2027.60 to 2033.30 for scad (R's 1985.93), and 215022.96 for mcp at n = 1e5
+(R's 210796.13). The Styblinski-Tang bench and the 30 nonconvex fits keep the same
+run under all three rules. R1 was chosen (Giovanni, 2026-11-19): it equals R4
+wherever it was measured, and it needs no fallback for the case where no run ended
+on its own. The test asserts both the best run and the kept run at R's maximum
+and off the boundary.
+
 ## The properizing tails of the MCP and SCAD laws: Student, Gaussian and logistic (2026-11-19)
 
 **What.** `mcp_distrib` and `scad_distrib` take the tail that makes them proper

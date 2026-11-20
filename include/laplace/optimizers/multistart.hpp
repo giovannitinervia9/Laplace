@@ -11,11 +11,12 @@
 // platform and compiler). x is in free R^n (decision 3), so no start can fall
 // outside the domain of a constrained parameter.
 //
-// Selection: a run with a non-finite value
-// is never kept; a converged run beats a non-converged one; between two runs
-// of the same kind a later one replaces the kept one only when its value is
-// lower by more than distinct_tolerance. The kept run is the best, never the
-// last.
+// Selection (values first): a run with a non-finite value is never kept; a
+// later run replaces the kept one when its value is lower by more than
+// distinct_tolerance, whatever the two statuses, or when it is within
+// distinct_tolerance, succeeded, and the kept one did not. A converged run on
+// a boundary or in a worse basin therefore never displaces a lower run that
+// stalled at a kink. The kept run is the best, never the last.
 //
 // The report is the kept run's, with the counts of evaluations and
 // iterations and the time summed over every start. run_multistart() adds the
@@ -92,7 +93,7 @@ struct multistart_report {
  * \f[ x_{0,j} - h_j + \frac{2 h_j (\pi_j(i) + u_{ij})}{m}, \f]
  * where \f$\pi_j\f$ is a random permutation of \f$0, \dots, m - 1\f$ (by Fisher-Yates shuffle) and \f$u_{ij}\f$ is uniform in \f$[0, 1)\f$, so every stratum of every coordinate is used once. Both \f$\pi_j\f$ and \f$u_{ij}\f$ come from a 64-bit linear congruential generator seeded with `seed` (taking the top 53 bits of the state for each uniform), producing identical starts across platforms and compilers. Because points lie in the free parametrization of the objective, no start can fall outside a constrained parameter's domain when the objective maps constraints away.
  *
- * Runs are compared in execution order to select the kept run: a run whose value is not finite is never kept while a finite one exists; a converged run (`optimizer_succeeded()` true) beats a non-converged run regardless of value; between two runs of the same convergence kind, a later run replaces the kept run only when its value is lower by more than `distinct_tolerance`. The kept run is the best under this rule, never merely the last; if every run has a non-finite value, the first run is kept.
+ * Runs are compared in execution order to select the kept run. A run whose value is not finite is never kept while a finite one exists; if every run has a non-finite value, the first run is kept. A later run replaces the kept run when its value is lower by more than `distinct_tolerance`, whatever the statuses of the two runs. It also replaces the kept run when its value is within `distinct_tolerance` of the kept value, it succeeded (`optimizer_succeeded()` returns `true`), and the kept run did not. So success only breaks a tie within the tolerance; the kept run is the best under this rule, never merely the last.
  *
  * `run()` returns the kept run's `optimizer_report` (preserving its `status`, `point`, `value`, `gradient`, `decrement`, and `final_factorization`), with `iterations`, `value_evaluations`, `gradient_evaluations`, `curvature_evaluations`, and `elapsed_seconds` replaced by their sums across all starts. `run_multistart()` returns a `multistart_report` containing that aggregated report as `best`, `start_count`, `converged_count`, `distinct_optimum_count`, `best_found_count`, and `runs`.
  *
@@ -208,7 +209,10 @@ struct multistart_optimizer {
       }
       const optimizer_report& b = out.runs[kept];
       const bool c_ok = optimizer_succeeded(c.status), b_ok = optimizer_succeeded(b.status);
-      if (c_ok != b_ok ? c_ok : c.value < b.value - distinct_tolerance) kept = index;
+      // values first: a lower value by more than distinct_tolerance wins whatever the statuses;
+      // within it, a succeeded run beats one that did not succeed
+      if (c.value < b.value - distinct_tolerance || (c.value <= b.value + distinct_tolerance && c_ok && !b_ok))
+        kept = index;
     }
     out.start_count = static_cast<int>(points.size());
     out.best = out.runs[kept < 0 ? 0 : kept];

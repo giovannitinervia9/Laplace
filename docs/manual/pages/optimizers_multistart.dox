@@ -9,7 +9,9 @@ The wrapper takes its starting points either from caller-supplied vectors or fro
 
 ## Run selection
 
-Starts are executed one after the other and compared in execution order so that the wrapper keeps the best run rather than the last. A run whose objective value is not finite is never kept while a finite run exists; if every run produces a non-finite value, the first run is reported. A converged run, for which \ref laplace::optimizers::optimizer_succeeded "optimizer_succeeded()" returns `true`, always beats a non-converged run regardless of their objective values. Between two runs of the same convergence kind, a later run replaces the kept run only when its objective value is lower by more than `distinct_tolerance`.
+Starts are executed one after the other and compared in execution order. A run whose objective value is not finite is never kept while a finite run exists; if every run produces a non-finite value, the first run is kept. A later run replaces the kept run when its objective value is lower by more than `distinct_tolerance`, whatever the statuses of the two runs. It also replaces the kept run when its objective value is within `distinct_tolerance` of the kept value, it succeeded (\ref laplace::optimizers::optimizer_succeeded "optimizer_succeeded()" returns `true`), and the kept run did not. So success only breaks a tie within the tolerance, and the kept run is the best under this rule, never merely the last.
+
+A run can stall short of convergence at a minimum with a kink while a run in a worse basin or on a boundary of the domain ends converged. On the `fit_distrib` bench, always preferring a converged run kept a boundary run on the `mcp` and `scad` laws in \f$9\f$ of \f$76\f$ multistarts, while comparing values first keeps the maximum of the likelihood in all \f$76\f$.
 
 ## Report and counts
 
@@ -33,7 +35,7 @@ from \f$x_0 = (2.5, \dots, 2.5)\f$, which lies in the basin of the worst of its 
 | 4 | 10 | 10 | 3 | no | 193 | 0.12 |
 | 4 | 40 | 40 | 5 | yes | 805 | 0.49 |
 
-The tests check the selection rule on scripted runs (converged against non-converged in both orders, the tolerance, non-finite values, and keeping the best rather than the last), the optimum counts on a scripted list, the generated starts (\f$x_0\f$ first, each stratum visited once on every coordinate, determinism for the same seed and distinct points for another seed), caller-given starts, and the global minimum of Styblinski-Tang for \f$n = 2\f$ and \f$n = 4\f$ with \f$40\f$ starts within \f$10^{-5}\f$ in value. See `docs/numerics.md` for details of the measurements.
+The tests check the selection rule on scripted runs (a lower non-converged run against a converged one in both orders, a converged run within the tolerance against a non-converged one in both orders, a non-converged run just outside the tolerance, the tolerance, non-finite values, and keeping the best rather than the last), the optimum counts on a scripted list, the generated starts (\f$x_0\f$ first, each stratum visited once on every coordinate, determinism for the same seed and distinct points for another seed), caller-given starts, and the global minimum of Styblinski-Tang for \f$n = 2\f$ and \f$n = 4\f$ with \f$40\f$ starts within \f$10^{-5}\f$ in value. See `docs/numerics.md` for details of the measurements.
 
 The runtime cost is the sum of the inner runs plus negligible start generation, and memory holds the starts and one report per start, each \f$O(n)\f$ in the parameter dimension. Starts run sequentially on one thread; generated starts cover only the box around `x0`, so a minimum outside it is found only if an inner run walks there; selection and counts compare values, so two minima within `distinct_tolerance` count as one optimum; and whether the kept run is a minimum is as good as the inner optimizer's own verdict.
 

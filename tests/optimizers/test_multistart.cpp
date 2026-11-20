@@ -76,9 +76,14 @@ constexpr double not_a_number = std::numeric_limits<double>::quiet_NaN();
 }  // namespace
 
 TEST_CASE("optimizers: multistart selection rule") {
-  // a converged run beats a lower non-converged one, in either order
-  CHECK(kept_index({{budget, -10.0}, {converged, -5.0}}) == 1);
-  CHECK(kept_index({{converged, -5.0}, {budget, -10.0}}) == 0);
+  // values first: a lower value by more than the tolerance wins over a converged run, in either order
+  CHECK(kept_index({{budget, -10.0}, {converged, -5.0}}) == 0);
+  CHECK(kept_index({{converged, -5.0}, {budget, -10.0}}) == 1);
+  // within the tolerance a converged run beats a non-converged one, in either order
+  CHECK(kept_index({{budget, -5.0 - 1e-7}, {converged, -5.0}}) == 1);
+  CHECK(kept_index({{converged, -5.0}, {budget, -5.0 - 1e-7}}) == 0);
+  // just outside the tolerance the lower non-converged run wins
+  CHECK(kept_index({{converged, -5.0}, {budget, -5.0 - 1e-5}}) == 1);
   // among converged runs the lower value; a later one only if lower by more than the tolerance
   CHECK(kept_index({{converged, -5.0}, {converged, -6.0}, {converged, -5.5}}) == 1);
   CHECK(kept_index({{converged, -5.0}, {converged, -5.0 - 1e-7}}) == 0);
@@ -95,7 +100,7 @@ TEST_CASE("optimizers: multistart selection rule") {
 
 TEST_CASE("optimizers: multistart counts of optima") {
   lo::multistart_optimizer<scripted_optimizer> ms{
-      {{{converged, -5.0}, {converged, -5.0 + 5e-7}, {budget, -50.0}, {converged, -3.0}, {converged, -5.0 - 5e-7}}}};
+      {{{converged, -5.0}, {converged, -5.0 + 5e-7}, {budget, -4.0}, {converged, -3.0}, {converged, -5.0 - 5e-7}}}};
   for (int k = 0; k < 5; ++k) ms.starts.push_back({double(k)});
   any_objective f;
   const lo::multistart_report r = ms.run_multistart(f, start_of({0.0}));

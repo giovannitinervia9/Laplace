@@ -244,7 +244,9 @@ inline constexpr unsigned primal_dual_provides = stop_needs_primal_dual | stop_n
  *
  * The iteration, the rules for the steps \f$\tau\f$ and \f$\sigma\f$, the estimate of \f$L\f$ and the
  * stationarity measure \f$V\f$, passed to `stop_rule` as `primal_dual` and returned as `decrement`, are
- * described on the page \ref optimizers_primal_dual "Primal-dual method".
+ * described on the page \ref optimizers_primal_dual "Primal-dual method". At every iteration, the optimizer
+ * sets `primal_dual_floor` to \f$2\varepsilon\,\lVert y\rVert_\infty \sqrt{B}\,\lVert x\rVert_1\f$, where
+ * \f$y\f$ is the dual iterate, \f$B\f$ is `map_norm_squared_bound()`, and \f$\varepsilon = 2^{-52}\f$.
  *
  * ### Settings
  *
@@ -484,6 +486,17 @@ struct primal_dual_optimizer {
 
       stop_rule_input in;
       in.iteration = k, in.value = f_x, in.point = x, in.primal_dual = measure;
+      // The rounding floor of the measure: e_d is a difference of terms of size
+      // |y|_inf |D x|, each entry of D x rounded by eps (|D| |x|)_i <= eps sqrt(B) |x|_i
+      // summed; measured at most 0.69 eps |y|_inf sqrt(B) |x|_1 over the 18 genlasso
+      // fits (trend filtering, f2 at 0.5 of lambda_max; lambda |D x|_1 is not the
+      // scale, its ratio ran to 2e4), taken with the factor 2
+      {
+        double y_inf = 0.0, x_1 = 0.0;
+        for (int i = 0; i < m; ++i) y_inf = std::max(y_inf, std::abs(y(i)));
+        for (int i = 0; i < n; ++i) x_1 += std::abs(x(i));
+        in.primal_dual_floor = 2.0 * eps * y_inf * std::sqrt(B) * x_1;
+      }
       in.has_previous = true, in.previous_value = f_previous, in.previous_point = x_previous;
       const stop_verdict verdict = stop_rule.verdict(in);
       if (verdict == stop_verdict::converged) return finish(optimizer_status::converged, measure);

@@ -11,6 +11,7 @@
 
 #include <laplace/optimizers/block_coordinate.hpp>
 #include <laplace/optimizers/brent.hpp>
+#include <laplace/optimizers/multistart.hpp>
 #include <laplace/optimizers/trust_region.hpp>
 
 namespace {
@@ -56,6 +57,9 @@ const std::vector<fb::laws_reference_row>& laws_reference_rows() {
 //   From the +1 start (gamma 8.2) every method tried ends in the far basin; what is asserted
 //   is that each of those fits is flagged on the boundary (poor_boundary_only). scad has the
 //   same two basins (maximum -1985.93 at a = 4, Laplace limit -2027.60, valley -2038.45 at a 10).
+//   For both, a multistart over the capped Fisher scoring from the +1 start (10 starts, spread
+//   0.5) has its best run, and the run it keeps, at R's maximum; both are asserted
+//   (poor_multistart; decided with Giovanni on 2026-11-19).
 // Runs named in poor_unasserted are printed, not asserted.
 struct laws_options {
   bool kink_at_mle = false;
@@ -63,6 +67,7 @@ struct laws_options {
   bool poor_trust_region = false;
   double alternation_cap = 1.0;
   bool poor_boundary_only = false;
+  bool poor_multistart = false;
 };
 
 // one data set of the laws added after the first bench (optimizers_fit_distrib_laws.R):
@@ -170,6 +175,32 @@ void laws_case(const std::string& name, const D& prototype, Builder b, long n, c
       if (unasserted(r)) print_run(label + " (unasserted)", r);
       else check_run(r, smooth_method, poor);
     }
+    // two basins: from the +1 start the bench's Fisher scoring (step capped at 1) is restarted
+    // from 10 Latin-hypercube starts within 1.5 max(1, |u0_j|) of the start, and the best of its
+    // runs (lowest -l) must be at R's maximum and off the boundary (measured: -l at most 9.7e-6
+    // above R's at n = 1e3, 1.1e-6 at n = 1e5, against the kink bounds 6.3e-5 and 2.7e-6; 3 of
+    // the 10 runs get there at n = 1e3, each stalled on the kink in mu). The run the multistart
+    // keeps must be there too: a boundary run can end converged under Fisher scoring (one does
+    // at n = 1e3 for both laws, -l 2186.84 for mcp and 2033.30 for scad), and the selection
+    // compares values first, so that converged run does not displace the lower stalled ones.
+    if (poor && opt.poor_multistart) {
+      lo::multistart_optimizer<lo::newton_optimizer<>> ms{fb::fisher_scoring_optimizer()};
+      ms.start_count = 10, ms.spread = 0.5;
+      lo::optimizer_vector x0("x0", P);
+      for (int j = 0; j < P; ++j) x0(j) = u0[j];
+      const auto m = ms.run_multistart(expected, x0);
+      const lo::optimizer_report* best = nullptr;
+      for (const auto& r : m.runs)
+        if (std::isfinite(r.value) && (!best || r.value < best->value)) best = &r;
+      REQUIRE(best != nullptr);
+      MESSAGE(label << ", multistart Fisher scoring, poor: kept -l " << m.best.value << " (status "
+                    << int(m.best.status) << ", boundary " << expected.on_boundary(m.best.point)
+                    << "), best run -l " << best->value << ", R's " << -ref[0].loglik_mle);
+      CHECK(!expected.on_boundary(best->point));
+      CHECK(-best->value >= ref[0].loglik_mle - kink_ll_tol);
+      CHECK(!expected.on_boundary(m.best.point));
+      CHECK(-m.best.value >= ref[0].loglik_mle - kink_ll_tol);
+    }
   }
 }
 }  // namespace
@@ -196,9 +227,9 @@ void fit_distrib_laws_cases() {
     laws_case("powerexp_p1.5", ld::powerexp_distrib{}, aggregate_builder<ld::powerexp_distrib>{}, n);
     laws_case("powerexp_p3", ld::powerexp_distrib{}, aggregate_builder<ld::powerexp_distrib>{}, n);
     laws_case("mcp", ld::mcp_distrib<ld::gaussian_tail>{}, aggregate_builder<ld::mcp_distrib<ld::gaussian_tail>>{}, n,
-              {.kink_at_mle = true, .poor_boundary_only = true});
+              {.kink_at_mle = true, .poor_boundary_only = true, .poor_multistart = true});
     laws_case("scad", ld::scad_distrib<ld::gaussian_tail>{}, aggregate_builder<ld::scad_distrib<ld::gaussian_tail>>{}, n,
-              {.kink_at_mle = true, .poor_unasserted = {"BFGS"}});
+              {.kink_at_mle = true, .poor_unasserted = {"BFGS"}, .poor_multistart = true});
   }
 }
 

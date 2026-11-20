@@ -33,6 +33,7 @@ struct lbfgs_inverse_model {
   lbfgs_inverse_model(int size, int pairs)
       : n(size), memory(pairs), s(size * pairs), y(size * pairs), rho(pairs), alpha(pairs) {}
   void reset() { count = 0, first = 0; }
+  bool has_pairs() const { return count > 0; }
   void direction(const optimizer_point& g, const optimizer_vector& d) const {
     if (count == 0) return scaled_steepest_descent(g, d);
     for (int i = 0; i < n; ++i) d(i) = g(i);  // q
@@ -248,7 +249,7 @@ struct lbfgs_optimizer {
     detail::lbfgs_inverse_model model(static_cast<int>(x0.extent(0)), memory);
     // no reset after skips: max_skipped_updates beyond the budget
     return detail::quasi_newton_run(model, stop_rule, line_search, max_iterations, max_evaluations,
-                                    curvature_tolerance, max_iterations + 1, trace, objective, x0);
+                                    curvature_tolerance, max_iterations + 1, trace, objective, x0, false);
   }
 };
 
