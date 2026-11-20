@@ -1,8 +1,8 @@
 /**
 \defgroup stirling Stirling's error
-\brief Stirling's error \f$\delta(a)\f$ and its derivatives in \f$a\f$ to order 6.
+\brief Stirling's error \f$\delta(a)\f$, the half-step log-gamma ratio \f$R(a)\f$, and their derivatives in \f$a\f$ to order 6.
 
-This module computes Stirling's error \f$\delta(a)\f$ and its derivatives in \f$a\f$ to order 6. Include `<laplace/math/stirling.hpp>` and call functions in namespace `laplace::math`, from \ref laplace::math::stirling_error "stirling_error()" through \ref laplace::math::stirling_error_d6 "stirling_error_d6()". Every function is marked `LAPLACE_HD_FORCEINLINE` for use on the host and inside Kokkos device kernels. Across all seven functions, the largest measured error is 14.8 ulp on gcc and 16.1 ulp on CUDA, within test bounds up to 22.0 ulp.
+This module computes Stirling's error \f$\delta(a)\f$, the half-step log-gamma ratio \f$R(a) = \log\Gamma(a + \frac{1}{2}) - \log\Gamma(a)\f$, and their derivatives in \f$a\f$ to order 6. Include `<laplace/math/stirling.hpp>` and call functions in namespace `laplace::math`: \ref laplace::math::stirling_error "stirling_error()" through \ref laplace::math::stirling_error_d6 "stirling_error_d6()", and \ref laplace::math::lgamma_half_ratio "lgamma_half_ratio()" through \ref laplace::math::lgamma_half_ratio_d6 "lgamma_half_ratio_d6()". Every function is marked `LAPLACE_HD_FORCEINLINE` for use on the host and inside Kokkos device kernels. For Stirling's error, the largest measured error across its seven functions is 14.8 ulp on gcc and 16.1 ulp on CUDA, within test bounds up to 22.0 ulp. For the half-step log-gamma ratio on gcc/OpenMP, the largest measured errors are 1.42 ulp1 for the value (test bound 3) and 3.96 ulp for the derivatives (test bounds up to 6).
 
 ## Definitions
 
@@ -53,9 +53,46 @@ Evaluating \f$\delta(a)\f$ or its derivatives directly from the definition cance
    \f]
    where \f$i\f$ is the product index and the empty product for \f$k = 0\f$ is 1. The 20 coefficients \f$\frac{B_{2j}}{2j(2j - 1)}\f$ in the header were computed with mpmath (2023).
 
+## Half-step log-gamma ratio
+
+The half-step log-gamma ratio is
+\f[
+R(a) = \log\Gamma\!\left(a + \frac{1}{2}\right) - \log\Gamma(a), \qquad a > 0,
+\f]
+the logarithm of \f$\Gamma(a + \frac{1}{2})/\Gamma(a)\f$. Its derivatives of order \f$k \in \{1, \dots, 6\}\f$ with respect to \f$a\f$ are
+\f[
+R^{(k)}(a) = \psi^{(k-1)}\!\left(a + \frac{1}{2}\right) - \psi^{(k-1)}(a).
+\f]
+All seven functions share the open domain \f$a \in (0, \infty)\f$ and return quiet NaN for \f$a \le 0\f$ or NaN. As \f$a \to \infty\f$, \f$R(a) \sim \frac{1}{2}\log a\f$, while as \f$a \to 0^+\f$, \f$R(a) \sim -\log a\f$. At \f$a = \frac{1}{2}\f$ and \f$a = 1\f$, \f$R(\frac{1}{2}) = -\frac{1}{2}\log\pi\f$ and \f$R(1) = \log(\sqrt{\pi}/2)\f$.
+
+Evaluating \f$R(a)\f$ as the plain difference of two log-gammas cancels severely as \f$a\f$ grows. Because each log-gamma is of size \f$a\log a\f$ while \f$R(a)\f$ is only \f$\frac{1}{2}\log a\f$, subtracting the two loses about one digit per decade of \f$a\f$. Measured against mpmath over the module's reference grid, the plain difference reaches \f$2.03 \times 10^4\f$ ulp at order 0, \f$3.59 \times 10^5\f$ ulp at order 1, and \f$8 \times 10^3\f$ to \f$2.2 \times 10^4\f$ ulp at orders 2 to 6, all at \f$a\f$ between 6000 and 10000. At \f$a = 10^8\f$, the value alone is \f$3.6 \times 10^8\f$ ulp out.
+
+Expressing \f$\log\Gamma(a)\f$ through \ref laplace::math::stirling_error "stirling_error()" (see "Definitions" above) removes the growth:
+\f[
+R(a) = \frac{1}{2}\log a + S(a) + \delta\!\left(a + \frac{1}{2}\right) - \delta(a), \qquad
+S(a) = a\log\!\left(1 + \frac{1}{2a}\right) - \frac{1}{2} = \sum_{j=1}^{\infty} c_j a^{-j},
+\f]
+where \f$c_j = \frac{(-1)^j}{(j + 1)2^{j+1}}\f$. Here \f$S(a)\f$ is the series of \f$\log(1 + t) - t\f$ at \f$t = \frac{1}{2a}\f$, summed up to a cap of 60 terms until a term is at most \f$2^{-56}\f$ times the running sum in magnitude. Differentiating term by term gives, for \f$k \in \{1, \dots, 6\}\f$,
+\f[
+S^{(k)}(a) = \sum_{j=1}^{\infty} c_j (-1)^k (j)_k a^{-j-k},
+\f]
+where \f$(j)_k = j(j + 1)\cdots(j + k - 1)\f$ is the rising factorial, and the head \f$\frac{1}{2}\log a\f$ has derivatives \f$\frac{1}{2}(-1)^{k-1}(k - 1)! a^{-k}\f$. The head carries the growth exactly, and the two values of \f$\delta\f$ are each of order \f$\frac{1}{12a}\f$ with a smaller difference still, so nothing cancels there.
+
+The series decomposition is evaluated directly for \f$a \ge 2\f$. Below \f$a = 2\f$, the upward recurrence
+\f[
+R(a) = R(a + 1) - \log\frac{a + 1/2}{a}
+\f]
+shifts the argument upward by \f$n = \lceil 2 - a \rceil\f$ unit steps into \f$[2, 3)\f$, taking at most two steps for \f$a > 0\f$. Each step term is elementary and exact, evaluated as \f$\log(1 + \frac{1}{2a})\f$ at order 0 and as \f$(-1)^{k-1}(k - 1)!((a + \frac{1}{2})^{-k} - a^{-k})\f$ for \f$k \ge 1\f$, and every term of a single sum has one sign.
+
+The threshold 2 was chosen from measurements across three candidates: 1, 2 and 10. Threshold 1 is not viable at all, because at \f$a = 1\f$ the series needs 84 terms at order 6 and the 60-term cap leaves 6027 ulp of error. Threshold 10 is attractive on paper, since at \f$a \ge 10\f$ both evaluations of \f$\delta\f$ use its asymptotic series and \f$S\f$ needs 18 terms instead of 39; measured region by region at order 0 on one Serial thread, however, the nine steps of the longer walk cost more than the twenty-one terms they save: 369 ns per call against 322 below \f$a = 0.5\f$, and 345 against 297 on \f$a \in (1, 2]\f$, the two being the same code above \f$a = 10\f$ (56 and 66.7 ns, one measurement apart). Threshold 10 also measures worse, its longer walk summing steps of total size 1.25 against \f$R(1) \approx -0.12\f$, a tenfold cancellation that takes the value to 4.88 ulp1 and the derivatives to 9.81 ulp against the 1.42 and 3.96 of threshold 2.
+
 ## Accuracy
 
-See \ref accuracy "How accuracy is measured" for error metrics, reference generation, and test bounds. Because \f$\delta(a)\f$ and its derivatives have no zeros on \f$(0, \infty)\f$, the error measure is plain relative ulp.
+See \ref accuracy "How accuracy is measured" for error metrics, reference generation, and test bounds.
+
+### Stirling's error
+
+Because \f$\delta(a)\f$ and its derivatives have no zeros on \f$(0, \infty)\f$, the error measure is plain relative ulp.
 
 | Function | Order \f$k\f$ | Measured max error gcc (ulp) | Measured max error CUDA (ulp) | Test bound (ulp) |
 |---|---|---|---|---|
@@ -67,11 +104,29 @@ See \ref accuracy "How accuracy is measured" for error metrics, reference genera
 | \ref laplace::math::stirling_error_d5 "stirling_error_d5()" | 5 | 14.8 | 14.8 | 22.0 |
 | \ref laplace::math::stirling_error_d6 "stirling_error_d6()" | 6 | 14.2 | 16.1 | 21.5 |
 
-On both gcc and CUDA (RTX 4070 SUPER), all measured maxima occur on the direct route below \f$a = 1.0\f$. Test bounds are set to approximately 1.5 times the measured gcc maxima. See `docs/numerics.md` for per-regime errors, reference sampling, and comparisons.
+On both gcc and CUDA (RTX 4070 SUPER), all measured maxima occur on the direct route below \f$a = 1.0\f$. Test bounds are set to approximately 1.5 times the measured gcc maxima.
+
+### Half-step log-gamma ratio
+
+Because \f$R(a)\f$ vanishes at \f$a = 1.21163\ldots\f$, where \f$\Gamma(a + \frac{1}{2}) = \Gamma(a)\f$ astride the minimum of \f$\Gamma\f$, a plain relative error measure says nothing near that zero. The value is therefore reported in ulp1, the absolute error in units of the ulp of \f$\max(|R(a)|, 1)\f$. Because \f$\psi^{(k)}\f$ is strictly monotone, the derivatives \f$R^{(1)}\f$ to \f$R^{(6)}\f$ have no zeros on \f$(0, \infty)\f$ and are reported in plain relative ulp.
+
+References consist of 1386 rows per order generated with mpmath at 400 and 500 bits (`tools/reference/lgamma_half_ratio.py`), keeping points where the two precisions agree to \f$2^{-100}\f$, with \f$a\f$ log-uniform in \f$[2^{-30}, 10^{12}]\f$, a uniform component in \f$[1/4, 40]\f$, and clusters around \f$a = 1/2\f$, \f$1\f$, and \f$10\f$. The functions were evaluated in a Kokkos kernel on the default execution space of the gcc/OpenMP build (`tests/math/test_stirling.cpp`).
+
+| Function | Order \f$k\f$ | Measured max error gcc/OpenMP | Test bound |
+|---|---|---|---|
+| \ref laplace::math::lgamma_half_ratio "lgamma_half_ratio()" | 0 | 1.42 ulp1 | 3 |
+| \ref laplace::math::lgamma_half_ratio_d1 "lgamma_half_ratio_d1()" | 1 | 2.16 ulp | 4 |
+| \ref laplace::math::lgamma_half_ratio_d2 "lgamma_half_ratio_d2()" | 2 | 2.75 ulp | 4.5 |
+| \ref laplace::math::lgamma_half_ratio_d3 "lgamma_half_ratio_d3()" | 3 | 3.25 ulp | 5 |
+| \ref laplace::math::lgamma_half_ratio_d4 "lgamma_half_ratio_d4()" | 4 | 3.65 ulp | 5.5 |
+| \ref laplace::math::lgamma_half_ratio_d5 "lgamma_half_ratio_d5()" | 5 | 3.96 ulp | 6 |
+| \ref laplace::math::lgamma_half_ratio_d6 "lgamma_half_ratio_d6()" | 6 | 3.41 ulp | 5.5 |
+
+On the reference row next to the zero of \f$R\f$, the 1.42 ulp1 maximum corresponds to 198 ulp of \f$R\f$ itself. For the derivatives, the worst errors sit between \f$a = 1\f$ and \f$a = 2\f$, where the recurrence step weighs most against the value. The tests also check the special values at \f$a = 1/2\f$ and \f$a = 1\f$ to \f$10^{-15}\f$, and verify that the recurrence and series routes agree across \f$a = 10\f$ within \f$10^{-13}\f$ relative to \f$\max(|R^{(k)}(10)|, 1)\f$ at every order. See `docs/numerics.md` for per-regime errors, reference sampling, and comparisons.
 
 ## Speed
 
-Timings were measured in nanoseconds per call on one gcc thread; no CUDA timings were taken for this module. Calls take 5–37 ns on the direct route (\f$a < 1.0\f$), 59–307 ns on the recurrence route (\f$1.0 \le a < 10.0\f$), and 22–44 ns on the asymptotic route (\f$a \ge 10.0\f$). On the recurrence route, cost grows with the number of unit shift steps \f$n \le 9\f$ and with the derivative order.
+For Stirling's error, timings were measured in nanoseconds per call on one gcc thread; no CUDA timings were taken for this module. Calls take 5–37 ns on the direct route (\f$a < 1.0\f$), 59–307 ns on the recurrence route (\f$1.0 \le a < 10.0\f$), and 22–44 ns on the asymptotic route (\f$a \ge 10.0\f$); on the recurrence route, cost grows with the number of unit shift steps \f$n \le 9\f$ and with the derivative order. For the half-step log-gamma ratio with threshold 10, calls cost 67–123 ns on the series route (\f$a \ge 10\f$).
 
 ## Example
 
@@ -106,6 +161,13 @@ Functions in this module are called as `laplace::math::NAME`.
 - \ref laplace::math::stirling_error_d4 "stirling_error_d4()" — Fourth derivative \f$\delta^{(4)}(a)\f$
 - \ref laplace::math::stirling_error_d5 "stirling_error_d5()" — Fifth derivative \f$\delta^{(5)}(a)\f$
 - \ref laplace::math::stirling_error_d6 "stirling_error_d6()" — Sixth derivative \f$\delta^{(6)}(a)\f$
+- \ref laplace::math::lgamma_half_ratio "lgamma_half_ratio()" — Half-step log-gamma ratio \f$R(a)\f$
+- \ref laplace::math::lgamma_half_ratio_d1 "lgamma_half_ratio_d1()" — First derivative \f$R'(a)\f$
+- \ref laplace::math::lgamma_half_ratio_d2 "lgamma_half_ratio_d2()" — Second derivative \f$R''(a)\f$
+- \ref laplace::math::lgamma_half_ratio_d3 "lgamma_half_ratio_d3()" — Third derivative \f$R^{(3)}(a)\f$
+- \ref laplace::math::lgamma_half_ratio_d4 "lgamma_half_ratio_d4()" — Fourth derivative \f$R^{(4)}(a)\f$
+- \ref laplace::math::lgamma_half_ratio_d5 "lgamma_half_ratio_d5()" — Fifth derivative \f$R^{(5)}(a)\f$
+- \ref laplace::math::lgamma_half_ratio_d6 "lgamma_half_ratio_d6()" — Sixth derivative \f$R^{(6)}(a)\f$
 
 ## References
 

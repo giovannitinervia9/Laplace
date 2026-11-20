@@ -17,7 +17,9 @@
 #include <laplace/distrib/generic_quantile.hpp>
 #include <laplace/distrib/generic_rng.hpp>
 #include <laplace/distrib/laplace1.hpp>
+#include <laplace/distrib/mcp.hpp>
 #include <laplace/distrib/poisson.hpp>
+#include <laplace/distrib/scad.hpp>
 
 #include <Kokkos_Random.hpp>
 
@@ -41,6 +43,23 @@ struct make_gamma {
 };
 struct make_poisson {
   KOKKOS_INLINE_FUNCTION ld::poisson_distrib operator()(double t) const { return {t}; }
+};
+// the two properized nonconvex penalties, whose expected information is closed at order
+// zero only: the rate is the varied parameter
+struct make_mcp_student {
+  KOKKOS_INLINE_FUNCTION ld::mcp_distrib<ld::student_tail> operator()(double t) const {
+    return {0.4, t, 3.0, 0.9, 3.5};
+  }
+};
+struct make_mcp_gaussian {
+  KOKKOS_INLINE_FUNCTION ld::mcp_distrib<ld::gaussian_tail> operator()(double t) const {
+    return {0.4, t, 3.0, 0.8};
+  }
+};
+struct make_scad_student {
+  KOKKOS_INLINE_FUNCTION ld::scad_distrib<ld::student_tail> operator()(double t) const {
+    return {0.4, t, 3.7, 0.9, 3.5};
+  }
 };
 
 // quantile at p of make(t): member (route 0) or generic (1)
@@ -202,6 +221,9 @@ int main(int argc, char** argv) {
     info_all("gamma1(2, 0.3)", make_gamma{}, 0.3);
     info_all("poisson(3.5)", make_poisson{}, 3.5);
     info_lines<make_laplace, 0>("laplace(0.4, 1.3)", make_laplace{}, 1.3);
+    info_lines<make_mcp_student, 0>("mcp student(1.3, 3)", make_mcp_student{}, 1.3);
+    info_lines<make_mcp_gaussian, 0>("mcp gaussian(1.3, 3)", make_mcp_gaussian{}, 1.3);
+    info_lines<make_scad_student, 0>("scad student(1.3, 3.7)", make_scad_student{}, 1.3);
     {
       std::mt19937_64 g(20261112);
       std::uniform_real_distribution<double> u(0.0, 1.0);

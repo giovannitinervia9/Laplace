@@ -1,6 +1,8 @@
 // Candidates for Stirling's error delta(a) and its derivatives to order 6
 // (include/laplace/math/stirling.hpp): the definition (direct), the upward
 // recurrence, the asymptotic series and the chosen routes, by order and by region of a.
+// Then the same for the half-step log-gamma ratio R(a) = log Gamma(a + 1/2) - log
+// Gamma(a): the plain difference of two log-gammas against the route through delta.
 // ns per call on one host thread (Serial) and on the default execution space;
 // errors against the mpmath references (tools/reference/stirling.py).
 //
@@ -52,6 +54,27 @@ void line(const char* fn, int k, const bench::Ref& r, F f, double lo, double hi,
   std::printf("\n");
 }
 
+// R(a) = log Gamma(a + 1/2) - log Gamma(a): the plain difference of two log-gammas
+// (route 0) against the route through Stirling's error (route 1)
+template <int K>
+struct HalfCand {
+  int route;
+  KOKKOS_INLINE_FUNCTION double operator()(double a) const {
+    if (route == 1) return ds::half_value<K>(a);
+    if constexpr (K == 0) return lm::lgamma(a + 0.5) - lm::lgamma(a);
+    else return lm::polygamma(K - 1, a + 0.5) - lm::polygamma(K - 1, a);
+  }
+};
+
+template <int K>
+void half_order(const std::string& dir) {
+  const auto r = bench::read_ref(dir + "/lgamma_half_ratio" + (K ? "_d" + std::to_string(K) : "") + ".csv");
+  const double cuts[] = {1e-9, 0.5, 1.0, 2.0, 10.0, 125.0, 1e4, 1e12};
+  const char* names[] = {"half direct", "half chosen"};
+  for (int route = 0; route < 2; ++route)
+    for (int i = 0; i + 1 < 8; ++i) line(names[route], K, r, HalfCand<K>{route}, cuts[i], cuts[i + 1], i % 2 == 0);
+}
+
 template <int K>
 void order(const std::string& dir) {
   const auto r = bench::read_ref(dir + "/stirling_error" + (K ? "_d" + std::to_string(K) : "") + ".csv");
@@ -75,6 +98,13 @@ int main(int argc, char** argv) {
     order<4>(dir);
     order<5>(dir);
     order<6>(dir);
+    half_order<0>(dir);
+    half_order<1>(dir);
+    half_order<2>(dir);
+    half_order<3>(dir);
+    half_order<4>(dir);
+    half_order<5>(dir);
+    half_order<6>(dir);
   }
   Kokkos::finalize();
 }

@@ -418,6 +418,58 @@ struct scad_distrib {
     }
   }
 
+  /**
+   * \brief The expected Fisher information in closed form.
+   *
+   * The location is handled by the score form, \f$I_{\mu\mu} = \mathbb{E}[q'(u)^2]\f$,
+   * which integration by parts turns into \f$(2/Z)[\lambda + \int_0^\infty q''e^{-q}]\f$:
+   * the boundary term \f$\lambda\f$ is the jump of \f$q'\f$ at the kink, the point mass
+   * that \f$-\mathbb{E}[l_{\mu\mu}]\f$ misses, as in enet_distrib. The first piece
+   * contributes nothing there, \f$q\f$ being linear on it. By symmetry
+   * \f$I_{\mu\theta} = 0\f$ for every other parameter, and the rest is the hessian form
+   * \f$I_{ab} = \mathbb{E}[q_{ab}] + \partial^2_{ab}\log Z\f$, with \f$\log Z\f$ from the
+   * order-two table and \f$\mathbb{E}[q_{ab}]\f$ from the moments of the middle piece
+   * (\c dawson_moments at \f$p = a - 1\f$) and the three integrals the tail supplies
+   * (\c info_xx, \c info_xt, \c info_tt).
+   * \return Packed symmetric matrix \c sym_tensor<n_params, 2>.
+   * \see distrib_scad, properizing_tail
+   */
+  LAPLACE_HD sym_tensor<n_params, 2> expected_info() const {
+    using namespace detail_properized;
+    constexpr int nt = Tail::n_tail_params, ns = 2 + nt;
+    double A[tab2_size(2)], B[tab2_size(2)], LZ[z_tab_size(2, nt)];
+    detail_scad::z_tables<2>(lambda, a, A, B);
+    log_z_table<2>(A, B, tail, LZ);
+    const double c = a - 1.0;
+    double N[3];
+    dawson_moments(lambda, c, N);
+    const double e1 = math::exp(-lambda * lambda);
+    const double E = B[idx2<2>(0, 0)], T = tail.tail_const();
+    const double Z2 = A[idx2<2>(0, 0)] + E * T, J = detail_tail::info_xx(tail);
+    sym_tensor<n_params, 2> t;
+    int idx[2] = {0, 0};
+    t[sym_tensor_position<n_params, 2>(idx)] = (lambda - e1 * N[0] / c + E * J) / Z2;
+    for (int b = 1; b < n_params; ++b) {
+      idx[0] = 0, idx[1] = b;
+      t[sym_tensor_position<n_params, 2>(idx)] = 0.0;
+    }
+    for (int i = 0; i < ns; ++i)
+      for (int j = i; j < ns; ++j) {
+        double v;  // int_0^inf q_ij e^-q du
+        if (i == 0 && j == 0) v = -e1 * N[0] / c + E * ((a + 1.0) * T + a * a * J);
+        else if (i == 0 && j == 1) v = -e1 * N[1] / (c * c) + E * (lambda * T - 1.0 + a * lambda * J);
+        else if (i == 1 && j == 1) v = -e1 * N[2] / (c * c * c) + E * lambda * lambda * J;
+        else if (i == 0) v = -a * E * detail_tail::info_xt(tail, j - 2);
+        else if (i == 1) v = -lambda * E * detail_tail::info_xt(tail, j - 2);
+        else v = E * detail_tail::info_tt(tail, i - 2, j - 2);
+        idx[0] = i + 1, idx[1] = j + 1;
+        t[sym_tensor_position<n_params, 2>(idx)] =
+            v / Z2 + LZ[z_tab_index<Tail>(int(i == 0) + int(j == 0), int(i == 1) + int(j == 1),
+                                          int(i == 2) + int(j == 2), int(i == 3) + int(j == 3))];
+      }
+    return t;
+  }
+
   /// The cumulative distribution function \f$F(y)\f$.
   LAPLACE_HD double cdf(double y) const {
     const double r = detail_scad::upper_integral(Kokkos::fabs(y - mu), lambda, a, tail) /

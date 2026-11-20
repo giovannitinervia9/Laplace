@@ -22,6 +22,18 @@
 //   delta^(k)(a) = (-1)^k int_0^inf t^(k-1) (1/(e^t - 1) - 1/t + 1/2) e^(-a t) dt
 // by the exp-sinh rule, accurate (3-7 ulp) but 7-11 microseconds per call.
 // a <= 0 or NaN gives NaN; delta(inf) and its derivatives are 0.
+//
+// The same header carries the half-step log-gamma ratio, which delta makes free of
+// cancellation:
+//
+//   R(a) = log Gamma(a + 1/2) - log Gamma(a),   a > 0,
+//
+//   lgamma_half_ratio(a)      R(a)
+//   lgamma_half_ratio_dk(a)   R^(k)(a) = psi^(k-1)(a + 1/2) - psi^(k-1)(a), k = 1..6
+//
+// Every law whose shape enters through Gamma((nu + 1)/2)/Gamma(nu/2) reads it; the
+// plain difference of two log-gammas there loses one digit per decade of a. The route
+// is in the comment above half_series below.
 #pragma once
 
 #include <laplace/core/config.hpp>
@@ -119,6 +131,102 @@ LAPLACE_HD double value(double a) {
   if (a < 1.0) return direct<K>(a);
   if (a < 10.0) return recurrence<K>(a);
   return asymptotic<K>(a);
+}
+
+// ---------------------------------------------------------------------------
+// R(a) = log Gamma(a + 1/2) - log Gamma(a), the half-step log-gamma ratio
+// ---------------------------------------------------------------------------
+// Through delta the elementary part of the difference is free of cancellation:
+//
+//   R(a) = (1/2) log a + S(a) + delta(a + 1/2) - delta(a),
+//   S(a) = a log(1 + 1/(2a)) - 1/2 = sum_(j >= 1) c_j a^-j,
+//   c_j = (-1)^j / ((j + 1) 2^(j+1)),
+//
+// the series being the one of log(1 + u) - u at u = 1/(2a). The two deltas are each
+// of order 1/(12 a) and their difference is smaller still, so nothing cancels there.
+// The series is summed at a >= 2 and the recurrence
+// R(a) = R(a + 1) - [log(a + 1/2) - log a] brings a smaller argument up, every term of a
+// step being elementary and exact and every term of one sum having one sign.
+//
+// Where to stop the recurrence was measured against mpmath, at three thresholds. One is
+// not available at all: at a = 1 the series needs 84 terms at order six, and the cap of 60
+// left 6027 ulp there, which is how the cap was found. Ten looked attractive, since at
+// a >= 10 both deltas are in their own asymptotic series and the series needs 18 terms
+// instead of 39, but the measurement says the nine steps of the recurrence cost more than
+// the twenty-one terms they save: region by region, 369 ns a call against 322 below
+// a = 0.5 and 345 against 297 on (1, 2], the same above a = 10. So two it is, which also
+// measures better, 1.42 ulp1 for the value and at most 3.96 ulp for the derivatives
+// against 4.88 and 9.81, the sum of the steps of a longer walk weighing against a value
+// that is small near its own zero.
+//
+// The direct difference of two log-gammas loses one digit per decade of a, since
+// each of them is of size a log a while R is only (log a)/2: measured against
+// mpmath, 210 ulp at a = 125 and 3.6e8 ulp at a = 1e8, against at most 2 ulp
+// here (docs/numerics.md, 2026-11-20).
+
+// d^K/da^K of S(a), the series summed until a term cannot move the sum
+template <int K>
+LAPLACE_HD double half_series(double a) {
+  const double ia = 1.0 / a;
+  double p = ia;  // a^-(j + K) at j = 1
+  for (int i = 0; i < K; ++i) p *= ia;
+  double h = 0.25;  // 2^-(j + 1) at j = 1
+  double sum = 0.0;
+  for (int j = 1; j <= 60; ++j) {
+    double r = 1.0;  // (j)_K = j (j + 1) ... (j + K - 1)
+    for (int i = 0; i < K; ++i) r *= double(j + i);
+    const double t = ((j % 2) ? -1.0 : 1.0) * h * r * p / double(j + 1);
+    sum += t;
+    if (Kokkos::fabs(t) <= 0x1p-56 * Kokkos::fabs(sum)) break;
+    h *= 0.5;
+    p *= ia;
+  }
+  return sign_k<K>() * sum;
+}
+
+// (K - 1)!
+template <int K>
+LAPLACE_HD_FORCEINLINE constexpr double fact_km1() {
+  double f = 1.0;
+  for (int i = 2; i < K; ++i) f *= double(i);
+  return f;
+}
+
+// R(a) and its derivatives for a >= 1
+template <int K>
+LAPLACE_HD double half_core(double a) {
+  double head;
+  if constexpr (K == 0) {
+    head = 0.5 * math::log(a);
+  } else {
+    double ak = a;
+    for (int i = 1; i < K; ++i) ak *= a;
+    head = 0.5 * (K % 2 == 1 ? 1.0 : -1.0) * fact_km1<K>() / ak;
+  }
+  return head + half_series<K>(a) + (value<K>(a + 0.5) - value<K>(a));
+}
+
+// d^K/da^K [log(a + 1/2) - log a], exact
+template <int K>
+LAPLACE_HD double half_step(double a) {
+  if constexpr (K == 0) {
+    return Kokkos::log1p(0.5 / a);
+  } else {
+    double u = a + 0.5, v = a;
+    for (int i = 1; i < K; ++i) u *= (a + 0.5), v *= a;
+    return (K % 2 == 1 ? 1.0 : -1.0) * fact_km1<K>() * (1.0 / u - 1.0 / v);
+  }
+}
+
+template <int K>
+LAPLACE_HD double half_value(double a) {
+  if (!(a > 0.0)) return math::detail::quiet_nan();
+  double b = a, sum = 0.0;  // at most two steps, since a > 0
+  while (b < 2.0) {
+    sum += half_step<K>(b);
+    b += 1.0;
+  }
+  return half_core<K>(b) - sum;
 }
 
 }  // namespace detail_stirling
@@ -248,5 +356,96 @@ LAPLACE_HD_FORCEINLINE double stirling_error_d5(double a) { return detail_stirli
  * \see stirling, stirling_error(), stirling_error_d5()
  */
 LAPLACE_HD_FORCEINLINE double stirling_error_d6(double a) { return detail_stirling::value<6>(a); }
+
+// R(a) = log Gamma(a + 1/2) - log Gamma(a) and its derivatives R^(k)(a), k = 1..6
+/**
+ * \ingroup stirling
+ * \brief The half-step log-gamma ratio
+ * \f$R(a) = \log\Gamma(a + \tfrac{1}{2}) - \log\Gamma(a)\f$.
+ *
+ * Computes the logarithm of \f$\Gamma(a + \tfrac{1}{2})/\Gamma(a)\f$, with
+ * \f$R(a) \sim \tfrac{1}{2}\log a\f$ as \f$a \to \infty\f$ and
+ * \f$R(a) \sim -\log a\f$ as \f$a \to 0^+\f$. It is written through Stirling's error as
+ * \f[
+ * R(a) = \tfrac{1}{2}\log a + S(a) + \delta(a + \tfrac{1}{2}) - \delta(a), \qquad
+ * S(a) = a\log\!\left(1 + \frac{1}{2a}\right) - \frac{1}{2},
+ * \f]
+ * with \f$S\f$ summed as the series of \f$\log(1 + u) - u\f$ at \f$u = 1/(2a)\f$ and one
+ * step of the recurrence \f$R(a) = R(a + 1) - \log\frac{a + 1/2}{a}\f$ below \f$a = 1\f$.
+ * The direct difference of two log-gammas instead loses a digit per decade of \f$a\f$,
+ * each of them being of size \f$a\log a\f$ where \f$R\f$ is only \f$(\log a)/2\f$.
+ *
+ * \param a Positive argument \f$a \in (0, \infty)\f$.
+ * \return The value of \f$R(a)\f$.
+ *
+ * Returns quiet NaN for \f$a \le 0\f$ or NaN, and \f$+\infty\f$ at \f$a = +\infty\f$
+ * (shared by all functions of this family).
+ *
+ * \par Accuracy
+ * \f$R\f$ vanishes at \f$a = 1.21163\ldots\f$, where \f$\Gamma(a + \tfrac{1}{2}) =
+ * \Gamma(a)\f$ astride the minimum of \f$\Gamma\f$, so the value is measured in ulp1,
+ * the absolute error in units of the ulp of \f$\max(|R|, 1)\f$: maximum 1.42 ulp1 (test
+ * bound 3), which is 198 ulp of \f$R\f$ itself on the reference row next to that zero.
+ * The derivatives have no zero in \f$a > 0\f$ and reach 2.16 to 3.96 ulp (test bounds 4
+ * to 6). The CUDA build measures 1.97 ulp1 for the value and the same figures for the
+ * derivatives.
+ *
+ * \see stirling, stirling_error(), lgamma_half_ratio_d1()
+ */
+LAPLACE_HD_FORCEINLINE double lgamma_half_ratio(double a) { return detail_stirling::half_value<0>(a); }
+/**
+ * \ingroup stirling
+ * \brief First derivative \f$R'(a) = \psi(a + \tfrac{1}{2}) - \psi(a)\f$ of the
+ * half-step log-gamma ratio.
+ * \param a Positive argument \f$a \in (0, \infty)\f$.
+ * \return The value of \f$R'(a)\f$.
+ * \see stirling, lgamma_half_ratio(), lgamma_half_ratio_d2()
+ */
+LAPLACE_HD_FORCEINLINE double lgamma_half_ratio_d1(double a) { return detail_stirling::half_value<1>(a); }
+/**
+ * \ingroup stirling
+ * \brief Second derivative \f$R''(a) = \psi'(a + \tfrac{1}{2}) - \psi'(a)\f$ of the
+ * half-step log-gamma ratio.
+ * \param a Positive argument \f$a \in (0, \infty)\f$.
+ * \return The value of \f$R''(a)\f$.
+ * \see stirling, lgamma_half_ratio_d1(), lgamma_half_ratio_d3()
+ */
+LAPLACE_HD_FORCEINLINE double lgamma_half_ratio_d2(double a) { return detail_stirling::half_value<2>(a); }
+/**
+ * \ingroup stirling
+ * \brief Third derivative \f$R^{(3)}(a) = \psi''(a + \tfrac{1}{2}) - \psi''(a)\f$ of the
+ * half-step log-gamma ratio.
+ * \param a Positive argument \f$a \in (0, \infty)\f$.
+ * \return The value of \f$R^{(3)}(a)\f$.
+ * \see stirling, lgamma_half_ratio_d2(), lgamma_half_ratio_d4()
+ */
+LAPLACE_HD_FORCEINLINE double lgamma_half_ratio_d3(double a) { return detail_stirling::half_value<3>(a); }
+/**
+ * \ingroup stirling
+ * \brief Fourth derivative of the half-step log-gamma ratio,
+ * \f$R^{(4)}(a) = \psi^{(3)}(a + \tfrac{1}{2}) - \psi^{(3)}(a)\f$.
+ * \param a Positive argument \f$a \in (0, \infty)\f$.
+ * \return The value of \f$R^{(4)}(a)\f$.
+ * \see stirling, lgamma_half_ratio_d3(), lgamma_half_ratio_d5()
+ */
+LAPLACE_HD_FORCEINLINE double lgamma_half_ratio_d4(double a) { return detail_stirling::half_value<4>(a); }
+/**
+ * \ingroup stirling
+ * \brief Fifth derivative of the half-step log-gamma ratio,
+ * \f$R^{(5)}(a) = \psi^{(4)}(a + \tfrac{1}{2}) - \psi^{(4)}(a)\f$.
+ * \param a Positive argument \f$a \in (0, \infty)\f$.
+ * \return The value of \f$R^{(5)}(a)\f$.
+ * \see stirling, lgamma_half_ratio_d4(), lgamma_half_ratio_d6()
+ */
+LAPLACE_HD_FORCEINLINE double lgamma_half_ratio_d5(double a) { return detail_stirling::half_value<5>(a); }
+/**
+ * \ingroup stirling
+ * \brief Sixth derivative of the half-step log-gamma ratio,
+ * \f$R^{(6)}(a) = \psi^{(5)}(a + \tfrac{1}{2}) - \psi^{(5)}(a)\f$.
+ * \param a Positive argument \f$a \in (0, \infty)\f$.
+ * \return The value of \f$R^{(6)}(a)\f$.
+ * \see stirling, lgamma_half_ratio_d5()
+ */
+LAPLACE_HD_FORCEINLINE double lgamma_half_ratio_d6(double a) { return detail_stirling::half_value<6>(a); }
 
 }  // namespace laplace::math

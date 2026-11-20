@@ -15042,3 +15042,244 @@ truncated laws.
 Open. A prox for t rho > 1 (the global minimizer among several stationary
 points, which needs the mode and the shape of l''), and declarations of rho
 for skewt and transformed_distrib, if a consumer asks.
+
+## The expected information of the MCP and SCAD laws at order zero, in closed form (2026-11-20)
+
+**What it is.** `mcp_distrib::expected_info()` and `scad_distrib::expected_info()` return
+the whole matrix \(I(\theta)\) in closed form, for every properizing tail, where the two
+laws went through `generic_info.hpp` before. The dispatch of `distrib_expected_info<K>`
+is per derivative order, so order zero is replaced and the orders one to four still go
+through the quadrature.
+
+**The location needs the kink's point mass.** `-E[l_mu_mu]` misses it, so the location's
+row comes from the score form, and one integration by parts turns it into an integral of
+the a.e. second derivative plus a boundary term:
+
+    I_mu_mu = E[(q')^2] = (2/Z) [ lambda + int_0^inf q'' e^-q du ],
+
+the boundary term `lambda` being the jump of `q'` at the location, as `enet_distrib`
+already does. `I_mu_theta = 0` for every other parameter, by the symmetry of the law in
+`y - mu`, and is returned as an exact zero. The rest of the matrix is the hessian form,
+
+    I_ab = E[q_ab] + d2_ab log Z,
+
+with `log Z` from the order-two table the laws already build for their log-density and
+`E[q_ab]` from the pieces below.
+
+**What the inner pieces contribute.** Both laws have one quadratic piece, in `u` for MCP
+and in `u - lambda` for SCAD, whose exponent's derivative vanishes at its upper end, so
+the moments
+
+    N_k = int_0^(p lambda) t^k exp(-lambda t + t^2/(2p)) dt,   k = 0, 1, 2,
+
+with `p = gamma` or `a - 1`, carry every inner contribution. `N_0` is the Dawson value the
+normalizing constant already holds. `N_1` and `N_2` follow by differentiating `N_0` in
+`lambda`, whose upper end moves with it: with `x = lambda sqrt(p/2)`, `w = p lambda^2`
+and `E = e^(-w/2)`,
+
+    N_1 = p [E - F'(x)],   N_2 = 2 p^2 lambda E + p sqrt(p/2) F''(x).
+
+Every term is positive, so nothing cancels however large `w` is, while the plain forms
+`lambda p N_0 - p(1 - E)` and `(p^2 lambda^2 - p) N_0 + p^2 lambda (2E - 1)` lose about a
+digit per decade of `w`: 7.2e-5 relative at `w = 1e6`, measured against mpmath. Below
+`w = 1` both forms cancel the other way, by eps/w, and the double series in `w` serves
+instead,
+
+    N_k = (p lambda)^(k+1) sum_(m,n) (w/2)^m (-w)^n / [m! n! (k + 2m + n + 1)],
+
+from expanding both exponentials on `t = p lambda s`. The three evaluations measured
+against mpmath over `w` from 1e-6 to 1e6:
+
+| w | plain | Dawson form | series |
+|---|---|---|---|
+| 1e-6 | 4.9e-10 | 1.5e-09 | 1.0e-16 |
+| 1e-3 | 5.3e-13 | 5.3e-13 | 3.0e-16 |
+| 0.1 | 4.8e-15 | 4.8e-15 | 2.5e-16 |
+| 1 | 7.4e-16 | 6.5e-16 | 4.7e-16 |
+| 5 | 4.7e-16 | 2.7e-16 | 8.2e-07 |
+| 30 | 2.8e-14 | 3.8e-16 | 1.3e+20 |
+| 1e3 | 1.1e-10 | 3.2e-16 | 1.3e+93 |
+| 1e6 | 7.2e-05 | 2.9e-16 | 1.2e+240 |
+
+so the implementation takes the series below `w = 1` and the Dawson form above it.
+
+**What the tail contributes.** Beyond the last knot every second derivative of `q` is a
+combination of `1`, `H'`, `H''` and the derivatives of `H` in the tail's own parameters,
+so the tail supplies three integrals against its own weight,
+
+    info_xx         = int_0^inf H''                   e^-H dx
+    info_xt(j)      = int_0^inf d_x d_theta_j H       e^-H dx
+    info_tt(i, j)   = int_0^inf d_theta_i d_theta_j H e^-H dx,
+
+and the two identities `int H' e^-H = 1` and `int Psi' e^(-kappa Psi) dz = 1/kappa`
+follow from `H(0) = 0`. Writing `H = kappa Psi(x/varsigma)` with `varsigma` a monomial,
+every one of the three reduces to `T`, to `S_0 = T/varsigma` and to the three moments
+
+    P_k = int_0^inf z^k Psi''(z) e^(-kappa Psi(z)) dz,   k = 0, 1, 2,
+
+which is the tail's new `psi_curvature_moment`. No integral of `Psi` itself appears,
+because `kappa` is affine in its parameter and its second derivative vanishes. The three
+tails have them in elementary form:
+
+| tail | P_0 | P_1 | P_2 |
+|---|---|---|---|
+| gaussian | sqrt(pi/2) | 1 | sqrt(pi/2) |
+| logistic | 4/3 | (4 log 2 - 1)/3 | pi^2/9 - 2/3 |
+| student | 2 nu S_0/(nu + 3) | 2(nu - 1)/[(nu+1)(nu+3)] | 2(nu - 3) S_0/[(nu+1)(nu+3)] |
+
+the Student tail's being Beta integrals reduced to `S_0` times a rational function of
+`nu`, so that no new special function is evaluated anywhere in the matrix: the whole
+closed form reads Dawson's integral and its first two derivatives, the tail's own
+constant, and rational arithmetic. The constants `4 log 2 - 1` and `pi^2/9 - 2/3` were
+identified from 50-digit quadrature with mpmath's `identify` and confirmed to 1.3e-51.
+
+**Measured.** The references are 1200 values over 100 settings, two laws by three tails
+by five pairs `(lambda, p)` by three or four tail settings, from
+`tools/reference/distrib_mcp_scad_info.py` at 200 bits. The reference comes from the
+definition rather than from the closed forms: `I_mu_mu` is the quadrature of
+`E[(q')^2]`, the arrangement that carries the point mass, and the smooth block is the
+quadrature of `E[q_a q_b]` minus the product of the first derivatives of `log Z`. Against
+that reference the closed assembly of the formulas, evaluated at 200 bits, agrees to
+2.0e-41, so the derivation is settled before any rounding enters.
+
+| what | figure |
+|---|---|
+| closed assembly against the reference, both at 200 bits | 2.0e-41 |
+| the matrix in double | 58.7 ulp of the largest component |
+| the generic score-form route against the same reference | 3.84 ulp, 4.14 on CUDA |
+| the two routes against each other | 1.3e-14 relative |
+| the two branches of the moments across w = 1, 5 crossings | 2.46e-15 relative |
+| host against device, 6 law-and-tail pairs | 0 ulp (OpenMP), 1.65 ulp (CUDA) |
+
+**What the closed form buys is speed and not accuracy.** The quadrature it replaces is
+the more accurate of the two on this grid, 3.84 ulp against 58.7: a sum of a dozen closed
+terms carries its own roundings, where an adaptive quadrature of one integrand accumulates
+less, and the score form the generic route uses is besides self-consistent in the
+normalizing constant, since the identity `E[q_a] = -d_a log Z` holds with an inaccurate
+`Z` as well, so an error there enters twice with opposite signs. Both figures are below
+1e-14 relative, so neither decides anything statistical; the figure that does decide is
+the one in "Speed" below. The 58.7 ulp sit at scad with the logistic tail at
+`lambda = 0.2`, `a = 1.4`, `s = 6`, where the assembly's condition number, the sum of the
+moduli of its terms over the modulus of the result, is 7.4; that number stays between 1
+and 9 over every setting of the grid and is the same for the three tails, so no single
+term cancels and what is left is the rounding of the terms themselves, amplified by it.
+
+**The first measurement was 706 ulp and the cause was not the assembly.** The Student
+tail's own constant carried it: `log T` was a difference of two log-gammas of size
+`nu/2`, hence an absolute error of about `nu eps/2`, which is 468 ulp of `T` at
+`nu = 250`, and every component reads `T` through `Z`. That is why the two routes then
+agreed with each other to the same order at which both left the reference, 1.84e-13: they
+shared the constant. It is now evaluated through the half-step log-gamma ratio of
+`math/stirling.hpp` (the next section), which took the whole matrix to the figures above
+and the generic quadrature from 404 to 3.84 ulp.
+
+**Speed.** `benchmarks/distrib_generic.cpp`, ns per call on one Serial thread of the gcc
+build, both lock slots held:
+
+| law and tail | member | generic, score form | generic, hessian form |
+|---|---|---|---|
+| mcp, Student (lambda = 1.3, gamma = 3, s = 0.9, nu = 3.5) | 1179 | 1392550 | 7068537 |
+| mcp, Gaussian (lambda = 1.3, gamma = 3, V = 0.8) | 370 | 664464 | 2304021 |
+| scad, Student (lambda = 1.3, a = 3.7, s = 0.9, nu = 3.5) | 1252 | 1671959 | 8467176 |
+
+so the closed form is 1181, 1796 and 1335 times faster than the route it replaces, which
+is the score form. For scale, `gaussian1`'s generic information costs 92 microseconds
+against these 1.4 to 1.7 milliseconds: a kinked density with a heavy tail is where the
+quadrature is most expensive, since the panels have to resolve the kink at the location
+and the two knots, and the tail integrates slowly. The OpenMP column is not the
+comparison to read, its member figures being 539 to 887 ns against 1.6 ns on one thread:
+at this cost per call the launch is the whole measurement.
+
+**What is open.** The derivatives of the information, orders one to four, still go through
+the generic quadrature, which the per-order dispatch of `distrib_expected_info<K>` allows.
+There the generic route has a gap that order zero has not: `I` does not depend on the
+location, so every derivative component carrying `mu` is zero, and those are exactly the
+components the generic route returns as NaN, the regularity rule of the score form
+excluding them. A closed form would return the zeros, and that, rather than speed or
+accuracy, is the argument for writing it. The route is short: the same independence of
+`mu` kills those components outright, and every factor of the closed form depends either
+on `(lambda, p)` or on the tail's parameters and never on both, so the derivative tables
+are outer products of two small ones instead of one table over four variables. What it
+needs that is not there yet is a reciprocal over four indices and the tables of the
+tail's three integrals, which for the Gaussian and the logistic tails are monomials, their
+`P_k` being constants.
+
+## The half-step log-gamma ratio: math/stirling.hpp (2026-11-20)
+
+**What it is.** `lgamma_half_ratio(a)` and its derivatives to order six are
+
+    R(a) = log Gamma(a + 1/2) - log Gamma(a),   a > 0,
+    R^(k)(a) = psi^(k-1)(a + 1/2) - psi^(k-1)(a),
+
+which every law whose shape enters through `Gamma((nu + 1)/2)/Gamma(nu/2)` reads. The
+plain difference of the two log-gammas loses one digit per decade of `a`, each of them
+being of size `a log a` where `R` is only `(log a)/2`: measured against mpmath, 0.5 ulp at
+`a = 0.15`, 28 at `a = 8`, 210 at `a = 125`, 3.6e8 at `a = 1e8` and 2.3e12 at the top of
+the reference grid. The Student
+properizing tail carried exactly that, 468 ulp of its own constant `T` at `nu = 250`, and
+through `Z` it set the accuracy of the whole law.
+
+**The route.** Stirling's error `delta`, which the same header already evaluates for every
+`a > 0` with its derivatives to order six, takes the growth out:
+
+    R(a) = (1/2) log a + S(a) + delta(a + 1/2) - delta(a),
+    S(a) = a log(1 + 1/(2a)) - 1/2 = sum_(j >= 1) c_j a^-j,  c_j = (-1)^j/((j+1) 2^(j+1)),
+
+the series being the one of `log(1 + u) - u` at `u = 1/(2a)`, differentiated term by term.
+The two deltas are each of order `1/(12a)` and their difference smaller still, so nothing
+cancels there; the head `(1/2) log a` carries the growth exactly.
+
+Below the threshold the recurrence `R(a) = R(a + 1) - log((a + 1/2)/a)` brings the
+argument up, every term of a step being elementary and exact and every term of one sum
+having one sign. Where to put that threshold was the one choice here, and three were
+measured. One is not available at all: at `a = 1` the series needs 84 terms at order six,
+and the cap of 60 it is summed with left 6027 ulp there (476 at order five), which is how
+the cap was found. Ten looked attractive, since at `a >= 10` both deltas are in their own
+asymptotic series and the series needs 18 terms instead of 39, and the first comparison
+seemed to favour it by a wide margin. That comparison was wrong: it put the cost of one
+threshold in one region against the cost of the other in another region. Region by region,
+on one Serial thread at order zero,
+
+| region of a | threshold 2 | threshold 10 |
+|---|---|---|
+| (1e-9, 0.5] | 322 ns | 369 ns |
+| (1, 2] | 297 ns | 345 ns |
+| (10, 125] | 66.7 ns | 56.0 ns |
+
+so the nine steps of the longer walk cost more than the twenty-one series terms they save,
+and above the thresholds the two are the same code. The threshold is therefore 2, which
+also measures better: 1.42 ulp1 for the value and at most 3.96 ulp for the derivatives,
+against 4.88 and 9.81 at ten, where the sum of a longer walk, 1.25 against
+`R(1) = -0.12`, weighs against a value that is small near its own zero. A variant that
+used the plain difference below `a = 1` instead of the recurrence was measured and
+rejected as well: 13 ulp at `a = 0.75` against 0.6.
+
+**Measured.** 1386 reference rows per order at 400 and 500 bits
+(`tools/reference/lgamma_half_ratio.py`, kept only where the two precisions agree to
+2^-100), `a` log-uniform in [2^-30, 1e12] with a uniform part in [1/4, 40] and clusters at
+the thresholds:
+
+| order | this route | the plain difference |
+|---|---|---|
+| 0 | 1.42 ulp1, which is 198 ulp beside the zero | 2.3e12 ulp at a = 9.9e11 |
+| 1 | 2.16 ulp | 2.6e13 ulp at a = 9.9e11 |
+| 2 | 2.75 ulp | 1.6e12 ulp at a = 8.3e11 |
+| 3 | 3.25 ulp | 1.0e12 ulp at a = 9.9e11 |
+| 4 | 3.65 ulp | 1.2e12 ulp at a = 8.3e11 |
+| 5 | 3.96 ulp | 1.3e12 ulp at a = 8.3e11 |
+| 6 | 3.41 ulp | 1.2e12 ulp at a = 8.3e11 |
+
+The CUDA build measures 1.97 ulp1 for the value, the 198 ulp beside the zero and the
+derivatives being the same to the digits printed.
+
+`R` vanishes at `a = 1.21163...`, where `Gamma(a + 1/2) = Gamma(a)` astride the minimum of
+`Gamma`, so the value is reported in ulp1, the absolute error in units of the ulp of
+`max(|R|, 1)`; the derivatives have no zero in `a > 0` and are reported in ulp.
+
+**What it changed.** `student_tail::log_g_derivs` now reads `R` at `a = nu/2` instead of
+differencing two log-gammas and two polygammas per order, since
+`log Gamma(nu/2) - log Gamma((nu+1)/2) = -R(nu/2)` and the `k`-th derivative of it in
+`nu` is `-2^-k R^(k)(nu/2)`. The expected information of the two properized laws, whose
+whole matrix reads the tail constant through `Z`, went from 706 to 58.7 ulp of its largest
+component over the reference grid, and the generic quadrature on the same grid from 404 to
+3.84 ulp.

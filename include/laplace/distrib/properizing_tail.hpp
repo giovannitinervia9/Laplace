@@ -66,6 +66,7 @@
 #include <laplace/math/normal.hpp>
 #include <laplace/math/polygamma.hpp>
 #include <laplace/math/special.hpp>
+#include <laplace/math/stirling.hpp>
 
 #include <Kokkos_Core.hpp>
 
@@ -169,6 +170,21 @@ LAPLACE_HD double h_mixed(const Tail& tail, int r, int n1, int n2, double x) {
   return s;
 }
 
+// R^(k)(a) = d^k/da^k [log Gamma(a + 1/2) - log Gamma(a)] at a run-time order k, which
+// math/stirling.hpp supplies one function per order. The Student tail reads it at every
+// order of its own table of the tail constant.
+LAPLACE_HD double half_ratio_at(int k, double a) {
+  switch (k) {
+    case 0: return math::lgamma_half_ratio(a);
+    case 1: return math::lgamma_half_ratio_d1(a);
+    case 2: return math::lgamma_half_ratio_d2(a);
+    case 3: return math::lgamma_half_ratio_d3(a);
+    case 4: return math::lgamma_half_ratio_d4(a);
+    case 5: return math::lgamma_half_ratio_d5(a);
+    default: return math::lgamma_half_ratio_d6(a);
+  }
+}
+
 // G = exp(g) from the derivatives of g, the scalar exponential recursion
 LAPLACE_HD void exp_from_log(int K, const double* g, double* G) {
   G[0] = math::exp(g[0]);
@@ -221,6 +237,11 @@ struct gaussian_tail {
     double v = Kokkos::sqrt(tail_sigma2);
     for (int t = 0; t < n1; ++t) v /= tail_sigma2;
     return c * v;
+  }
+  /// \f$\int_0^\infty z^k\Psi''(z)\,e^{-\kappa\Psi(z)}dz\f$ for \f$k = 0, 1, 2\f$:
+  /// \f$\sqrt{\pi/2}\f$, \f$1\f$ and \f$\sqrt{\pi/2}\f$, since \f$\Psi'' = 1\f$.
+  LAPLACE_HD double psi_curvature_moment(int k) const {
+    return k == 1 ? 1.0 : 1.25331413731550025121;
   }
   /// \f$T = \int_0^\infty e^{-H} = \sqrt{\pi V/2}\f$.
   LAPLACE_HD double tail_const() const { return 1.25331413731550025121 * Kokkos::sqrt(tail_sigma2); }
@@ -336,15 +357,19 @@ struct student_tail {
   }
 
   // log G, G = sqrt(pi nu) Gamma(nu/2) / (2 Gamma((nu+1)/2)), and its derivatives in nu:
-  // elementary plus one polygamma difference per order
+  // one elementary term per order and one value of the half-step log-gamma ratio
+  // R(a) = log Gamma(a + 1/2) - log Gamma(a) at a = nu/2, since
+  // log Gamma(nu/2) - log Gamma((nu+1)/2) = -R(nu/2), whose k-th derivative in nu is
+  // -2^-k R^(k)(nu/2). The plain difference of the two log-gammas, which this took
+  // before, loses one digit per decade of nu: it carried 468 ulp of G at nu = 250
+  // against the 2 ulp of the route of math/stirling.hpp (docs/numerics.md, 2026-11-20).
   LAPLACE_HD void log_g_derivs(int K, double* g) const {
-    const double nu = tail_df;
-    g[0] = 0.5 * math::log(3.14159265358979323846 * nu) + math::lgamma(0.5 * nu) -
-           math::lgamma(0.5 * (nu + 1.0)) - 0.69314718055994530942;
+    const double nu = tail_df, a = 0.5 * nu;
+    g[0] = 0.5 * math::log(3.14159265358979323846 * nu) - 0.69314718055994530942 -
+           math::lgamma_half_ratio(a);
     double f = 1.0, p = nu, h = 0.5;
     for (int k = 1; k <= K; ++k) {
-      g[k] = 0.5 * ((k % 2 == 1) ? 1.0 : -1.0) * f / p +
-             h * (math::polygamma(k - 1, 0.5 * nu) - math::polygamma(k - 1, 0.5 * (nu + 1.0)));
+      g[k] = 0.5 * ((k % 2 == 1) ? 1.0 : -1.0) * f / p - h * detail_tail::half_ratio_at(k, a);
       f *= double(k);
       p *= nu;
       h *= 0.5;
@@ -358,6 +383,22 @@ struct student_tail {
     log_g_derivs(n2, g);
     detail_tail::exp_from_log(n2, g, G);
     return (n1 == 0 ? tail_scale : 1.0) * G[n2];
+  }
+  /**
+   * \brief \f$\int_0^\infty z^k\Psi''(z)\,e^{-\kappa\Psi(z)}dz\f$ for \f$k = 0, 1, 2\f$.
+   *
+   * \f$\Psi'' = 2(1 - z^2)/(1 + z^2)^2\f$, so each one is a difference of two Beta
+   * integrals \f$\int_0^\infty z^{2m}(1 + z^2)^{-a}dz = \frac{1}{2}B(m + \frac{1}{2},
+   * a - m - \frac{1}{2})\f$, which reduce to \f$S_0 = \int_0^\infty e^{-\kappa\Psi}dz =
+   * T/\varsigma\f$ times a rational function of \f$\nu\f$:
+   * \f$2\nu S_0/(\nu + 3)\f$, \f$2(\nu - 1)/[(\nu + 1)(\nu + 3)]\f$ (free of \f$S_0\f$,
+   * the odd power making it rational) and \f$2(\nu - 3)S_0/[(\nu + 1)(\nu + 3)]\f$.
+   */
+  LAPLACE_HD double psi_curvature_moment(int k) const {
+    const double nu = tail_df, d = (nu + 1.0) * (nu + 3.0);
+    if (k == 1) return 2.0 * (nu - 1.0) / d;
+    const double s0 = tail_const() / varsigma();
+    return k == 0 ? 2.0 * nu * s0 / (nu + 3.0) : 2.0 * (nu - 3.0) * s0 / d;
   }
   /// \f$T = \int_0^\infty e^{-H} = \frac{s}{2}\sqrt{\pi\nu}\,\Gamma(\nu/2)/\Gamma(\frac{\nu+1}{2})\f$.
   LAPLACE_HD double tail_const() const { return math::exp(log_tail_const()); }
@@ -557,6 +598,13 @@ struct logistic_tail {
     if (n2 > 0) return 0.0;
     return n1 == 0 ? tail_scale : (n1 == 1 ? 1.0 : 0.0);
   }
+  /// \f$\int_0^\infty z^k\Psi''(z)\,e^{-\kappa\Psi(z)}dz\f$ for \f$k = 0, 1, 2\f$:
+  /// \f$4/3\f$, \f$(4\log 2 - 1)/3\f$ and \f$\pi^2/9 - 2/3\f$, from
+  /// \f$\Psi''e^{-\Psi} = 2\operatorname{sech}^4 z\f$.
+  LAPLACE_HD double psi_curvature_moment(int k) const {
+    return k == 0 ? 1.33333333333333333333
+                  : (k == 1 ? 0.59086290741326041256 : 0.42995604456548429098);
+  }
   /// \f$T = \int_0^\infty e^{-H} = s\f$.
   LAPLACE_HD double tail_const() const { return tail_scale; }
   /// \f$\log T\f$.
@@ -611,5 +659,56 @@ struct logistic_tail {
     return {start_inside(Kokkos::sqrt(s.variance), tail_params[0])};
   }
 };
+
+namespace detail_tail {
+
+// The three integrals of a second derivative of H against the tail's own weight that
+// the expected information of mcp_distrib and scad_distrib reads from the tail,
+//
+//   info_xx         = int_0^inf H''                e^-H dx
+//   info_xt(j)      = int_0^inf d_x d_theta_j H    e^-H dx
+//   info_tt(i, j)   = int_0^inf d_theta_i d_theta_j H e^-H dx.
+//
+// With z = x/varsigma, omega_j = e_j/theta_j (varsigma being a monomial, so
+// theta_j d/dtheta_j = e_j D with D = varsigma d/dvarsigma), S_0 = T/varsigma the
+// integral of the weight in z and P_k = int_0^inf z^k Psi'' e^(-kappa Psi) dz the
+// tail's psi_curvature_moment,
+//
+//   info_xx       = (kappa/varsigma) P_0
+//   info_xt(j)    = kappa_j/kappa - omega_j (kappa P_1 + 1)
+//   info_tt(i, j) = varsigma [ -(kappa_i omega_j + kappa_j omega_i) S_0/kappa
+//                              + [i = j] omega_i S_0/theta_i
+//                              + omega_i omega_j (S_0 + kappa P_2) ],
+//
+// the two integrals int Psi' e^(-kappa Psi) = 1/kappa and int z Psi' e^(-kappa Psi)
+// = S_0/kappa following by parts from Psi(0) = 0 and from the weight falling faster
+// than 1/z in all three tails. kappa is affine in the second parameter, so kappa_j is
+// kappa(1) for j = 1 and zero otherwise and its second derivatives vanish, which is
+// why no integral of Psi itself appears. Checked against the quadrature of the
+// definitions in tools/reference/distrib_mcp_scad_info.py.
+template <class Tail>
+LAPLACE_HD double info_xx(const Tail& tail) {
+  return tail.kappa(0) / tail.varsigma() * tail.psi_curvature_moment(0);
+}
+
+template <class Tail>
+LAPLACE_HD double info_xt(const Tail& tail, int j) {
+  const double k = tail.kappa(0), w = tail.exponent(j) / tail.param(j);
+  const double kj = (j == 1) ? tail.kappa(1) : 0.0;
+  return kj / k - w * (k * tail.psi_curvature_moment(1) + 1.0);
+}
+
+template <class Tail>
+LAPLACE_HD double info_tt(const Tail& tail, int i, int j) {
+  const double vs = tail.varsigma(), k = tail.kappa(0);
+  const double s0 = tail.tail_const() / vs;
+  const double wi = tail.exponent(i) / tail.param(i), wj = tail.exponent(j) / tail.param(j);
+  const double ki = (i == 1) ? tail.kappa(1) : 0.0, kj = (j == 1) ? tail.kappa(1) : 0.0;
+  double v = -(ki * wj + kj * wi) * s0 / k + wi * wj * (s0 + k * tail.psi_curvature_moment(2));
+  if (i == j) v += wi * s0 / tail.param(i);
+  return vs * v;
+}
+
+}  // namespace detail_tail
 
 }  // namespace laplace::distrib

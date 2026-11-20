@@ -328,6 +328,57 @@ struct mcp_distrib {
     }
   }
 
+  /**
+   * \brief The expected Fisher information in closed form.
+   *
+   * The location is handled by the score form, \f$I_{\mu\mu} = \mathbb{E}[q'(u)^2]\f$,
+   * which integration by parts turns into \f$(2/Z)[\lambda + \int_0^\infty q''e^{-q}]\f$:
+   * the boundary term \f$\lambda\f$ is the jump of \f$q'\f$ at the kink, the point mass
+   * that \f$-\mathbb{E}[l_{\mu\mu}]\f$ misses, as in enet_distrib. By symmetry
+   * \f$I_{\mu\theta} = 0\f$ for every other parameter. The rest is the hessian form
+   * \f$I_{ab} = \mathbb{E}[q_{ab}] + \partial^2_{ab}\log Z\f$, with \f$\log Z\f$ from the
+   * order-two table and \f$\mathbb{E}[q_{ab}]\f$ from the moments of the inner piece
+   * (\c dawson_moments) and the three integrals the tail supplies (\c info_xx,
+   * \c info_xt, \c info_tt). Nothing beyond Dawson's integral and its first two
+   * derivatives, the tail's own constant and one rational function of the tail's
+   * parameters is evaluated.
+   * \return Packed symmetric matrix \c sym_tensor<n_params, 2>.
+   * \see distrib_mcp, properizing_tail
+   */
+  LAPLACE_HD sym_tensor<n_params, 2> expected_info() const {
+    using namespace detail_properized;
+    constexpr int nt = Tail::n_tail_params, ns = 2 + nt;
+    double A[tab2_size(2)], B[tab2_size(2)], LZ[z_tab_size(2, nt)];
+    detail_mcp::z_tables<2>(lambda, gamma, A, B);
+    log_z_table<2>(A, B, tail, LZ);
+    double N[3];
+    dawson_moments(lambda, gamma, N);
+    const double E = B[idx2<2>(0, 0)], T = tail.tail_const();
+    const double Z2 = N[0] + E * T, J = detail_tail::info_xx(tail);
+    sym_tensor<n_params, 2> t;
+    int idx[2] = {0, 0};
+    t[sym_tensor_position<n_params, 2>(idx)] = (lambda - N[0] / gamma + E * J) / Z2;
+    for (int b = 1; b < n_params; ++b) {
+      idx[0] = 0, idx[1] = b;
+      t[sym_tensor_position<n_params, 2>(idx)] = 0.0;
+    }
+    for (int a = 0; a < ns; ++a)
+      for (int b = a; b < ns; ++b) {
+        double v;  // int_0^inf q_ab e^-q du
+        if (a == 0 && b == 0) v = E * gamma * (T + gamma * J);
+        else if (a == 0 && b == 1) v = E * (lambda * T - 1.0 + gamma * lambda * J);
+        else if (a == 1 && b == 1) v = -N[2] / (gamma * gamma * gamma) + E * lambda * lambda * J;
+        else if (a == 0) v = -gamma * E * detail_tail::info_xt(tail, b - 2);
+        else if (a == 1) v = -lambda * E * detail_tail::info_xt(tail, b - 2);
+        else v = E * detail_tail::info_tt(tail, a - 2, b - 2);
+        idx[0] = a + 1, idx[1] = b + 1;
+        t[sym_tensor_position<n_params, 2>(idx)] =
+            v / Z2 + LZ[z_tab_index<Tail>(int(a == 0) + int(b == 0), int(a == 1) + int(b == 1),
+                                          int(a == 2) + int(b == 2), int(a == 3) + int(b == 3))];
+      }
+    return t;
+  }
+
   /// The cumulative distribution function \f$F(y)\f$.
   LAPLACE_HD double cdf(double y) const {
     const double r = detail_mcp::upper_integral(Kokkos::fabs(y - mu), lambda, gamma, tail) /

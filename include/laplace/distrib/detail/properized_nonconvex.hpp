@@ -350,6 +350,53 @@ LAPLACE_HD void dawson_term(double lambda, double r, double* out) {
   mul2<K>(sq, g, out);
 }
 
+// N_k = int_0^(p lambda) t^k exp(-lambda t + t^2/(2 p)) dt for k = 0, 1, 2: the moments
+// of the law's quadratic piece in the distance from its upper end, where the exponent's
+// derivative vanishes (p = gamma for MCP, a - 1 for SCAD). With x = lambda sqrt(p/2),
+// w = p lambda^2 = 2 x^2 and E = e^(-w/2),
+//
+//   N_0 = sqrt(2 p) F(x),  N_1 = p [E - F'(x)],  N_2 = 2 p^2 lambda E + p sqrt(p/2) F''(x),
+//
+// the last two by differentiating N_0 in lambda, whose upper end moves with it. Every
+// term there is positive, so nothing cancels however large w grows, while the plain
+// forms lambda p N_0 - p (1 - E) and (p^2 lambda^2 - p) N_0 + p^2 lambda (2 E - 1) lose
+// about one digit per decade of w (7e-5 relative at w = 1e6, measured). Below w = 1
+// those forms cancel the other way, by eps/w, and the double series in w serves instead:
+//
+//   N_k = (p lambda)^(k+1) sum_(m, n) (w/2)^m (-w)^n / [m! n! (k + 2m + n + 1)],
+//
+// from expanding exp(t^2/2p) and exp(-lambda t) on t = p lambda s with s in (0, 1).
+// Measured against mpmath: 1e-16 to 5e-16 below w = 1, 1e-16 to 1.6e-15 above.
+LAPLACE_HD void dawson_moments(double lambda, double p, double* N) {
+  const double w = p * lambda * lambda, root = Kokkos::sqrt(0.5 * p);
+  const double x = lambda * root;
+  N[0] = 1.41421356237309504880 * Kokkos::sqrt(p) * math::dawson(x);
+  if (w >= 1.0) {
+    const double E = math::exp(-0.5 * w);
+    N[1] = p * (E - math::dawson_d1(x));
+    N[2] = 2.0 * p * p * lambda * E + p * root * math::dawson_d2(x);
+    return;
+  }
+  const double knot = p * lambda;
+  for (int k = 1; k <= 2; ++k) {
+    double s = 0.0, tm = 1.0;
+    for (int m = 0; m < 24; ++m) {
+      double inner = 0.0, tn = 1.0;
+      for (int n = 0; n < 24; ++n) {
+        inner += tn / double(k + 2 * m + n + 1);
+        tn *= -w / double(n + 1);
+        if (Kokkos::fabs(tn) < 1.0e-22) break;
+      }
+      s += tm * inner;
+      tm *= 0.5 * w / double(m + 1);
+      if (Kokkos::fabs(tm) < 1.0e-22) break;
+    }
+    double kk = knot;
+    for (int t = 0; t < k; ++t) kk *= knot;
+    N[k] = s * kk;
+  }
+}
+
 // The table over (lambda, p, theta_t...) of log Z from the two tables over (lambda, p)
 // of A and B in Z = 2 [A + B T], T the tail's constant: T carries every derivative in
 // the tail's own parameters, so the table over all of them is assembled from A, B and
