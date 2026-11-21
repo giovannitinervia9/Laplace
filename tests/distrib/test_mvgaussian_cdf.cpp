@@ -21,6 +21,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace mvgaussian_cdf_test {
@@ -139,7 +140,7 @@ struct DeviceRows {
   }
 };
 
-// log_rect_prob_dab_dk against mpmath (mvn_limit_derivs): one thread per row,
+// log_rect_prob_dab_dk against mpmath (mvn_limit_derivs): one thread per row and split,
 // every split Ja + Jb = 1..3 of the derivatives of log P in a and b, written in
 // the reference's layout (orders 1..3, then the sorted tuples over (a, b))
 using Dab = ld::mvgaussian1_distrib<S>;
@@ -167,23 +168,28 @@ struct DabRows {
       } while (ld::detail_mv::next_block_tuple(k, Jb, ub));
     } while (ld::detail_mv::next_block_tuple(k, Ja, ua));
   }
-  KOKKOS_INLINE_FUNCTION void operator()(int i) const {
+  // one team of one thread per (row, split): on CUDA each is its own block, so
+  // the rows' divergent routes do not run one after another inside a warp
+  KOKKOS_INLINE_FUNCTION void operator()(const Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Dynamic>>::member_type& m) const {
+    const int l = m.league_rank(), i = l / 9;
     const int k = int(in(i, 0));
     const double* a = &in(i, 1);
     const double* b = &in(i, 5);
     const double* th = &in(i, 9);
     const Dab& g = k == 2 ? g2 : k == 3 ? g3 : g4;
     double* o = &out(i, 0);
-    double* ws = &w(i, 0);
-    split<1, 0>(g, k, th, a, b, o, ws);
-    split<0, 1>(g, k, th, a, b, o, ws);
-    split<2, 0>(g, k, th, a, b, o, ws);
-    split<1, 1>(g, k, th, a, b, o, ws);
-    split<0, 2>(g, k, th, a, b, o, ws);
-    split<3, 0>(g, k, th, a, b, o, ws);
-    split<2, 1>(g, k, th, a, b, o, ws);
-    split<1, 2>(g, k, th, a, b, o, ws);
-    split<0, 3>(g, k, th, a, b, o, ws);
+    double* ws = &w(l, 0);
+    switch (l % 9) {
+      case 0: split<1, 0>(g, k, th, a, b, o, ws); break;
+      case 1: split<0, 1>(g, k, th, a, b, o, ws); break;
+      case 2: split<2, 0>(g, k, th, a, b, o, ws); break;
+      case 3: split<1, 1>(g, k, th, a, b, o, ws); break;
+      case 4: split<0, 2>(g, k, th, a, b, o, ws); break;
+      case 5: split<3, 0>(g, k, th, a, b, o, ws); break;
+      case 6: split<2, 1>(g, k, th, a, b, o, ws); break;
+      case 7: split<1, 2>(g, k, th, a, b, o, ws); break;
+      default: split<0, 3>(g, k, th, a, b, o, ws);
+    }
   }
 };
 
@@ -216,8 +222,8 @@ Kokkos::View<double**, Kokkos::LayoutRight, Kokkos::HostSpace> mvgaussian_cdf_da
   const Dab g2{S(2)}, g3{S(3)}, g4{S(4)};
   int sc = 0;
   for (int J = 1; J <= 3; ++J) sc = std::max(sc, g4.cdf_dab_scratch_size(J, 0, 0));
-  Kokkos::View<double**, Kokkos::LayoutRight> w("w", n, g4.state_size() + g4.scratch_size() + sc);
-  Kokkos::parallel_for("mvgaussian_cdf_dab", Kokkos::RangePolicy<Kokkos::Schedule<Kokkos::Dynamic>>(0, n),
+  Kokkos::View<double**, Kokkos::LayoutRight> w("w", 9 * n, g4.state_size() + g4.scratch_size() + sc);
+  Kokkos::parallel_for("mvgaussian_cdf_dab", Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Dynamic>>(9 * n, 1),
                        DabRows{g2, g3, g4, in, out, w});
   return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
 }
@@ -236,6 +242,16 @@ TEST_CASE("mvgaussian cdf: derivatives in the lower and upper limits against mpm
     if (!x.empty()) rows.push_back(x);
   }
   REQUIRE(rows.size() == 56);
+  // On a device build the kernel runs 13 of the 56 rows (one GPU thread per row
+  // in double precision took 3209 s for all of them); the host build checks every row.
+  // Kept: far tail with both ends finite (0, 21, 42), with one infinite end
+  // (1, 22, 43, 47), mixed (2, 23), and the bulk (14, 35, 52, 53); k = 2, 3, 4
+  // each, every order and split in every row.
+  if (!std::is_same_v<Kokkos::DefaultExecutionSpace::memory_space, Kokkos::HostSpace>) {
+    std::vector<std::vector<double>> sub;
+    for (int i : {0, 1, 2, 14, 21, 22, 23, 35, 42, 43, 47, 52, 53}) sub.push_back(rows[i]);
+    rows.swap(sub);
+  }
   const auto y = mvgaussian_cdf_dab_rows(rows);
   // worst relative error by order: rows with log P above -23; below it, the
   // entries in the limits of coordinates with one infinite end (the log route)

@@ -3,7 +3,7 @@
 // tools/reference/gaussian_laplace.py (one-factor Sigma, k = 1..5, t = lam sd to
 // about 26, the mode at the kink, random, or off the kink on half the
 // coordinates), evaluated in a Kokkos kernel on the default execution space, one
-// thread per row, the moments on the lattice of N = 16381 (the value's default)
+// thread per row and function, the moments on the lattice of N = 16381 (the value's default)
 // to keep the case short. The error of log I is absolute; the mean is read in units of
 // the law's standard deviations, the covariance in units of their products.
 // Bounds: the errors measured on the gcc/OpenMP and CUDA builds
@@ -20,6 +20,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #ifndef LAPLACE_REFERENCE_DIR
@@ -55,7 +56,10 @@ std::vector<std::vector<double>> read_gl_rows() {
 // y: log I (value), log I and mean, log I and covariance
 struct GaussianLaplace {
   Rows x, y, w;
-  KOKKOS_INLINE_FUNCTION void operator()(int i) const {
+  // one team of one thread per (row, function): on CUDA each is its own block, so
+  // the rows' divergent routes do not run one after another inside a warp
+  KOKKOS_INLINE_FUNCTION void operator()(const Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Dynamic>>::member_type& t) const {
+    const int l = t.league_rank(), i = l / 3, f = l % 3;
     const int k = int(x(i, 0));
     double m[KM], lam[KM], S[NC];
     for (int p = 0; p < k; ++p) {
@@ -64,9 +68,9 @@ struct GaussianLaplace {
       for (int q = 0; q <= p; ++q)
         S[p * (p + 1) / 2 + q] = x(i, c_sd + p) * x(i, c_sd + q) * (p == q ? 1.0 : x(i, c_l + p) * x(i, c_l + q));
     }
-    y(i, 0) = lm::gaussian_laplace_log_integral(k, m, S, lam, &w(i, 0));
-    y(i, 1) = lm::gaussian_laplace_mean(k, m, S, lam, &y(i, 3), &w(i, 0), lm::mvn_default_lattice);
-    y(i, 2) = lm::gaussian_laplace_cov(k, m, S, lam, &y(i, 3 + KM), &w(i, 0), lm::mvn_default_lattice);
+    if (f == 0) y(i, 0) = lm::gaussian_laplace_log_integral(k, m, S, lam, &w(l, 0));
+    if (f == 1) y(i, 1) = lm::gaussian_laplace_mean(k, m, S, lam, &y(i, 3), &w(l, 0), lm::mvn_default_lattice);
+    if (f == 2) y(i, 2) = lm::gaussian_laplace_cov(k, m, S, lam, &y(i, 3 + KM), &w(l, 0), lm::mvn_default_lattice);
   }
 };
 
@@ -80,13 +84,28 @@ Kokkos::View<double**, Kokkos::LayoutRight, Kokkos::HostSpace> gaussian_laplace_
   for (std::size_t i = 0; i < v.size(); ++i)
     for (std::size_t j = 0; j < v[i].size(); ++j) h(i, j) = v[i][j];
   Kokkos::deep_copy(x, h);
-  Rows y("y", v.size(), 3 + KM + NC), w("w", v.size(), lm::gaussian_laplace_scratch(KM, 2));
-  Kokkos::parallel_for("gaussian_laplace", int(v.size()), GaussianLaplace{x, y, w});
+  Rows y("y", v.size(), 3 + KM + NC), w("w", 3 * v.size(), lm::gaussian_laplace_scratch(KM, 2));
+  Kokkos::parallel_for("gaussian_laplace", Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Dynamic>>(3 * int(v.size()), 1),
+                       GaussianLaplace{x, y, w});
   return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), y);
 }
 
 TEST_CASE("gaussian_laplace: log integral, mean and covariance against mpmath, k = 1..5" * doctest::test_suite("slow")) {
-  const auto rows = read_gl_rows();
+  // On a device build k = 4 and 5 run 6 of their 45 rows each (one GPU thread
+  // per row in double precision took 972 s for all of them): the first block of
+  // 15, the smallest and the fourth lam level, the mode at the kink, random and off
+  // it (offsets 0-2 and 9-11). k = 1..3 and the host build check every row.
+  std::vector<std::vector<double>> rows;
+  {
+    const bool device = !std::is_same_v<Kokkos::DefaultExecutionSpace::memory_space, Kokkos::HostSpace>;
+    int prev = 0, j = 0;
+    for (auto& r : read_gl_rows()) {
+      const int k = int(r[0]);
+      j = k == prev ? j + 1 : 0;
+      prev = k;
+      if (!device || k <= 3 || (j < 15 && j % 9 < 3)) rows.push_back(r);
+    }
+  }
   const auto y = gaussian_laplace_run(rows);
   // worst by k: log I (value function), log I (moment functions), mean, covariance
   double worst[KM + 1][4] = {};
