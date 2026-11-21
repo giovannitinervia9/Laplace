@@ -21,7 +21,6 @@
 #include <limits>
 #include <sstream>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 namespace mvgaussian_cdf_test {
@@ -242,16 +241,6 @@ TEST_CASE("mvgaussian cdf: derivatives in the lower and upper limits against mpm
     if (!x.empty()) rows.push_back(x);
   }
   REQUIRE(rows.size() == 56);
-  // On a device build the kernel runs 13 of the 56 rows (one GPU thread per row
-  // in double precision took 3209 s for all of them); the host build checks every row.
-  // Kept: far tail with both ends finite (0, 21, 42), with one infinite end
-  // (1, 22, 43, 47), mixed (2, 23), and the bulk (14, 35, 52, 53); k = 2, 3, 4
-  // each, every order and split in every row.
-  if (!std::is_same_v<Kokkos::DefaultExecutionSpace::memory_space, Kokkos::HostSpace>) {
-    std::vector<std::vector<double>> sub;
-    for (int i : {0, 1, 2, 14, 21, 22, 23, 35, 42, 43, 47, 52, 53}) sub.push_back(rows[i]);
-    rows.swap(sub);
-  }
   const auto y = mvgaussian_cdf_dab_rows(rows);
   // worst relative error by order: rows with log P above -23; below it, the
   // entries in the limits of coordinates with one infinite end (the log route)

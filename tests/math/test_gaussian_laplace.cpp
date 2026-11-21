@@ -20,7 +20,6 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #ifndef LAPLACE_REFERENCE_DIR
@@ -91,21 +90,7 @@ Kokkos::View<double**, Kokkos::LayoutRight, Kokkos::HostSpace> gaussian_laplace_
 }
 
 TEST_CASE("gaussian_laplace: log integral, mean and covariance against mpmath, k = 1..5" * doctest::test_suite("slow")) {
-  // On a device build k = 4 and 5 run 6 of their 45 rows each (one GPU thread
-  // per row in double precision took 972 s for all of them): the first block of
-  // 15, the smallest and the fourth lam level, the mode at the kink, random and off
-  // it (offsets 0-2 and 9-11). k = 1..3 and the host build check every row.
-  std::vector<std::vector<double>> rows;
-  {
-    const bool device = !std::is_same_v<Kokkos::DefaultExecutionSpace::memory_space, Kokkos::HostSpace>;
-    int prev = 0, j = 0;
-    for (auto& r : read_gl_rows()) {
-      const int k = int(r[0]);
-      j = k == prev ? j + 1 : 0;
-      prev = k;
-      if (!device || k <= 3 || (j < 15 && j % 9 < 3)) rows.push_back(r);
-    }
-  }
+  const auto rows = read_gl_rows();
   const auto y = gaussian_laplace_run(rows);
   // worst by k: log I (value function), log I (moment functions), mean, covariance
   double worst[KM + 1][4] = {};
