@@ -87,6 +87,19 @@ else()
   target_link_libraries(laplace_dense PRIVATE Eigen3::Eigen)
 endif()
 
+# Sparse linear algebra (laplace::sparse, include/laplace/sparse/sparse_ldlt.hpp):
+# the same arrangement, one source with the Eigen code, never compiled by nvcc.
+add_library(laplace_sparse STATIC src/sparse/eigen_sparse_backend.cpp)
+add_library(Laplace::sparse ALIAS laplace_sparse)
+target_include_directories(laplace_sparse PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_compile_definitions(laplace_sparse PRIVATE EIGEN_MPL2_ONLY EIGEN_DONT_PARALLELIZE)
+if(LAPLACE_EIGEN_INCLUDE)
+  target_include_directories(laplace_sparse SYSTEM PRIVATE ${LAPLACE_EIGEN_INCLUDE})
+else()
+  target_link_libraries(laplace_sparse PRIVATE Eigen3::Eigen)
+endif()
+
 option(LAPLACE_BUILD_BENCHMARKS "Build the measurement tools" ${PROJECT_IS_TOP_LEVEL})
 if(LAPLACE_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)

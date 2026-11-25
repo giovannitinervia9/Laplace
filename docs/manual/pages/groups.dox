@@ -117,6 +117,9 @@ parent here, in tree order; the module pages define their groups without
 /** \defgroup dense Dense linear algebra
 \ingroup matrices
 \brief Decompositions of dense matrices on the host: Cholesky, triangular solve, pivoted QR, SVD, symmetric and generalized symmetric eigendecompositions, null space. */
+/** \defgroup sparse Sparse linear algebra
+\ingroup matrices
+\brief Host-only sparse symmetric \f$L D L^\top\f$ factorization and linear system solver in compressed sparse columns. */
 /** \addtogroup pdmat
 \ingroup matrices */
 /** \addtogroup psdmat
@@ -344,3 +347,6 @@ parent here, in tree order; the module pages define their groups without
 /** \defgroup optimizers_primal_dual Primal-dual method
 \ingroup optimizers
 \brief Primal-dual minimization of a smooth objective plus a convex penalty through a linear map. */
+
+/** \defgroup engine Fitting engine
+\brief Row-level model representation, Kokkos derivative assembly kernels, and inner objective for fixed-hyperparameter optimization. */

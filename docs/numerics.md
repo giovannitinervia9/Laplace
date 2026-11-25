@@ -15517,3 +15517,112 @@ Building the array of `R` and its derivatives in one pass would recover part of 
 and it does not fall out of the present route, the derivatives of Stirling's error
 being a separate function per order. Decided by Giovanni on 2026-11-20 not to do it:
 the ratio stays as one function per order, and the 2 microseconds stay where they are.
+
+## The engine's row kernels and inner fit (2026-11-25)
+
+**What.** The first milestone of the fitting engine (`include/laplace/engine/`): a model as
+data for the general route (stored design rows of fixed width for the linear nodes, the
+nonlinear pointwise nodes `link` and `logistic_curve` walked with a switch on their kind, the
+distrib a template argument chosen by a switch on the host over a list given by the caller,
+the number $R \le 4$ of linear predictors a constant of the kernel); four row kernels, each
+computing its quantity and nothing above it (the value $f = -\sum_i w_i \ell_i$, also its
+gradient, also the observed information, or also the expected information
+$\sum_i w_i J_i^\top I(\theta_i) J_i$, which needs the nodes to order one only); values that
+carry their support, with derivatives packed on the sorted index tuples; the Hessian of a
+model with one grouping as an arrowhead, factorized by a sparse $LDL^\top$
+(`laplace::sparse::sparse_ldlt`, Eigen's `SimplicialLDLT` with the approximate minimum degree
+ordering, in the static library `laplace_sparse`) behind `sparse_curvature_solver`; and the
+inner objective `row_model_objective` for `newton_optimizer`, with quadratic penalties at
+fixed hyperparameters, held coordinates, the cache of the last assembly and three
+curvatures (observed, expected, observed replaced by expected where it is not positive
+definite). The derivatives of the logistic curve were derived and checked with SymPy
+(`tools/reference/engine_nodes.py`).
+
+**Correctness** (`tests/engine/`, gcc and CUDA).
+
+- Three simulated models, 300 units, at a point away from the optimum: a Gaussian with a
+  random intercept (10 groups) and a log link on the scale; a gamma whose mean is the logistic
+  curve of three predictors, one of them through a log link (a nested node), with a random
+  intercept in the asymptote; a Student t with location, scale and degrees of freedom
+  modelled (separable). Against a twin written in the test (theta and its derivatives in the
+  predictors by hand, composed with dense tensors over the unsorted units): value, gradient,
+  observed and expected information within $10^{-12}$ of the largest entry. Gradient against
+  central differences of the value, observed information against central differences of the
+  gradient: within $10^{-7}$ of the scale.
+- Two models with a reference inner fit from hand-written engines written before the library's
+  engine (the reference coefficients and data are frozen in the tests, `tests/data/engine/`):
+  a Gaussian with a cubic B-spline and its roughness penalty, a random intercept and the scale
+  modelled and held, 2000 rows, reproduced to $10^{-9}$ in every coordinate; a gamma whose mean
+  is the logistic curve with a random asymptote, 2000 rows, to $10^{-9}$ relative.
+- Dense and sparse curvature reach the same point ($10^{-7}$); the fallback to the expected
+  information is counted; held coordinates keep their value; asking again at the fitted
+  point runs no kernel.
+
+- CUDA: the same 9 test cases and 1498 assertions as gcc, 0 failed.
+
+**Open.** Order three and four of the kernels and the outer criterion (the next milestone); the
+start; more than one grouping; local slots above 32 (team scratch memory); the block size on the
+GPU, not tuned.
+
+## The engine's marginal criterion (2026-11-25)
+
+**What.** The second milestone of the fitting engine (`include/laplace/engine/`): derivatives
+of the row kernels to order four, and the Laplace marginal criterion with its exact gradient and
+Hessian. A value now carries its third and fourth derivatives in the linear predictors, packed
+on the sorted triples and quadruples (`predictor_value<R, K>`, positions in closed form checked
+at compile time against `distrib::sym_tensor_position`), and the chain rule has one function
+for each of the orders three and four (one term for each partition of the index set, summed only
+where the blocks lie in the supports of the inputs). The logistic curve has its derivatives to
+order four, written through $f = A\,h(x_m, s)$, $h = g(z)$, $g = 1/(1 + e^z)$, and derived and
+checked with SymPy (`tools/reference/engine_nodes.py`, 34 closed forms against SymPy's own
+derivatives of $f$). Two passes over the units (`outer_rows.hpp`): of order three, the vector
+$\tau_c = \sum_{rs} (H^{-1})_{rs} T_{rsc}$; of order four, also $T[v_a]$ on the arrowhead,
+$T[v_a, v_b]$ and $q_{ab} = \sum (H^{-1})_{rs} Q_{rstu} v_{a,t} v_{b,u}$ for the outer directions
+$v_a$, with $T$ and $Q$ the third and fourth derivatives of $-\sum_i w_i \ell_i$ and every
+contraction taken once per unit. The criterion (`laplace_marginal_criterion`) is
+$V(u) = F(\hat x; \rho) + \tfrac12\log|H| - \tfrac12\log|S_\lambda|_+$ over the log
+hyperparameters of the penalty terms and the coordinates estimated on it, with every other free
+coordinate integrated; $H$ is the observed Hessian, $V = +\infty$ where it is not positive
+definite or where the inner fit fails (both counted), and $H^{-1}$ is a dense matrix formed from
+the sparse factorization. The outer fit is `newton_optimizer` on the exact Hessian.
+
+**Correctness** (`tests/engine/test_marginal_criterion.cpp`, gcc and CUDA).
+
+- Three simulated models, away from the optimum of the criterion: a Gaussian with a random
+  intercept (400 units, 10 groups; $\log\lambda$ of the group prior and the two coefficients of
+  the log scale on the criterion), a gamma whose mean is the logistic curve fed by a log link
+  (400 units, 10 groups; $\log\lambda$ and $\log\phi$), a Student t with three modelled parameters
+  (300 units; $\log\nu$). The exact gradient against central differences of $V$ at steps $h$ and
+  $h/2$ ($h = 10^{-3}$) extrapolated by Richardson, the exact Hessian against those of the
+  gradient:
+
+  | model | gradient error / scale | Hessian error / scale |
+  |---|---|---|
+  | Gaussian, gcc | $7.5\cdot10^{-11}$ / 22 | $1.7\cdot10^{-11}$ / 735 |
+  | gamma with the logistic curve, gcc | $6.4\cdot10^{-11}$ / 62 | $2.7\cdot10^{-11}$ / 144 |
+  | Student t, gcc | $1.3\cdot10^{-10}$ / 4.2 | $1.5\cdot10^{-10}$ / 16 |
+  | the three, CUDA | at most $2.3\cdot10^{-10}$ | at most $1.5\cdot10^{-10}$ |
+
+  The bound of the test is $10^{-8}$ of the scale. Each evaluation of the differences starts its
+  inner fit at the inner minimum of the centre: started from the previous point, the inner
+  residual (about the square of the distance moved) enters $\tfrac12\log|H|$ at first order and
+  left an error proportional to the step ($10^{-6}$ at $h = 10^{-6}$ on the gamma).
+- Two models with a frozen reference fit (the data of the inner-fit tests, 2000 rows, frozen in
+  `tests/data/engine/`). A Gaussian with a cubic B-spline and its roughness penalty, a random
+  intercept and the log scale modelled (four outer coordinates): the criterion at the
+  reference optimum matches the reference to $10^{-12}$ once the constant $\tfrac{n}{2}\log 2\pi$
+  that the reference leaves out is added, and a complete fit from $u = 0$ reaches its point to
+  $3.8\cdot10^{-8}$ in 8 outer iterations. A gamma whose mean is the logistic curve with a random
+  asymptote (two outer coordinates): the criterion at the reference optimum matches to
+  $4\cdot10^{-12}$ relative, and a complete fit from the reference's start takes the same five
+  Newton steps and ends on the same point.
+- Where the inner fit started next to the minimum stalls (its step below the rounding of the
+  coordinates before the decrement falls below its tolerance) its point is used and the stall is
+  counted (`marginal_criterion_counts::inner_stalls`); this happened on $10^6$ rows near the
+  optimum.
+
+**Open.** The expected information in $\log|H|$ with its derivatives; $H^{-1}$ by selected
+inversion and the arrowhead block formula for $\operatorname{tr}(H^{-1}\dot H_a H^{-1}\dot H_b)$
+in place of dense $N \times N$ matrices; a polishing Newton step at the inner minimum (a cold inner
+fit left $3.8\cdot10^{-8}$ in $V$ on the gamma); more than 16 local slots or 4 outer directions in
+the order-four pass; more than one grouping.

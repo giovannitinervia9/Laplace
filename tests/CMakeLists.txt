@@ -129,10 +129,13 @@ set(LAPLACE_TEST_SOURCES
   optimizers/test_linear_map_fits.cpp
   optimizers/test_nonconvex_fits.cpp
   optimizers/test_first_order.cpp
+  engine/test_row_kernels.cpp
+  engine/test_inner_fit.cpp
+  engine/test_marginal_criterion.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})
-target_link_libraries(laplace_tests PRIVATE Laplace::laplace Laplace::dense laplace_doctest)
+target_link_libraries(laplace_tests PRIVATE Laplace::laplace Laplace::dense Laplace::sparse laplace_doctest)
 # reference values (tests/data/reference) and the shared measurement helpers (benchmarks/)
 # The per-thread stack the CUDA build asks the driver for before the first kernel
 # (tests/main.cpp says why; -DLAPLACE_TEST_CUDA_STACK=n to measure another value)

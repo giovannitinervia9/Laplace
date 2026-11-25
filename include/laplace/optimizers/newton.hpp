@@ -28,6 +28,10 @@
 // (Dennis and Schnabel's maxstep, mgcv's maxNstep): a quadratic model can
 // propose a step far beyond where it holds. A step is never lengthened.
 //
+// With a sparse curvature (sparse_curvature_solver.hpp) there is no eigen
+// route and no negative curvature search: a matrix that is not positive
+// definite gives the steepest descent direction.
+//
 // The line search (Armijo by default) starts at s = 1. A failed search ends
 // the run: "stalled" when the step fell below the rounding of x, "line
 // search failed" otherwise. Success comes only from the stop rule.
@@ -46,6 +50,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <type_traits>
 
 namespace laplace::optimizers {
 
@@ -389,7 +394,9 @@ struct newton_optimizer {
     optimizer_vector x("x", n), g("g", n), d("d", n), x_trial("x_trial", n), x_previous("x_previous", n);
     typename O::curvature_type H("H", n, n);
     typename curvature_solver_for<typename O::curvature_type>::type solver(n);
-    detail::eigen_modified_direction eigen(n);
+    // the eigen route and the negative curvature search need the dense matrix
+    constexpr bool dense = std::is_same_v<typename O::curvature_type, dense_curvature_matrix>;
+    detail::eigen_modified_direction eigen(dense ? n : 0);
     Kokkos::deep_copy(x, x0);
 
     double f = objective.value_gradient_curvature(x, g, H);
@@ -429,7 +436,9 @@ struct newton_optimizer {
         break;
       }
 
-      if (!newton_step && !eigen.compute(H, g, eigen_floor, max_modified_step, d)) {
+      bool eigen_step = false;
+      if constexpr (dense) eigen_step = !newton_step && eigen.compute(H, g, eigen_floor, max_modified_step, d);
+      if (!newton_step && !eigen_step) {
         // no usable curvature: steepest descent with a largest component of 1
         for (int i = 0; i < n; ++i) d(i) = -g(i);
         detail::cap_largest_component(d, 1.0);
@@ -437,12 +446,14 @@ struct newton_optimizer {
       detail::cap_largest_component(d, max_step);
 
       line_search_result s = line_search.search(objective, x, f, g, d, 1.0, x_trial);
-      if (s.outcome == line_search_outcome::not_descent_direction && !newton_step) {
-        const double curvature = detail::curvature_along(H, d);
-        if (curvature < 0.0) {
-          report.value_evaluations += s.value_evaluations;
-          s = detail::negative_curvature_search(objective, x, f, d, curvature, line_search.sufficient_decrease,
-                                                line_search.max_evaluations, x_trial);
+      if constexpr (dense) {
+        if (s.outcome == line_search_outcome::not_descent_direction && !newton_step) {
+          const double curvature = detail::curvature_along(H, d);
+          if (curvature < 0.0) {
+            report.value_evaluations += s.value_evaluations;
+            s = detail::negative_curvature_search(objective, x, f, d, curvature, line_search.sufficient_decrease,
+                                                  line_search.max_evaluations, x_trial);
+          }
         }
       }
       report.value_evaluations += s.value_evaluations;

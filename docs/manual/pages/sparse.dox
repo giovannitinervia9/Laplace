@@ -1,0 +1,57 @@
+/**
+\addtogroup sparse
+
+The `laplace::sparse` module provides a host-only sparse symmetric \f$L D L^\top\f$ factorization and solver in `<laplace/sparse/sparse_ldlt.hpp>`. Like \ref dense "the dense module", the Eigen backend (Guennebaud and others, 2010) is compiled into its own static library, `laplace_sparse` (CMake target `Laplace::sparse`), as standard C++ and never by `nvcc`, so the public header includes no Eigen types. Functions in this module are not marked `LAPLACE_HD` and run on one host thread per call.
+
+## Matrix format and factorization
+
+\ref laplace::sparse::sparse_ldlt "sparse_ldlt" factorizes a shifted symmetric \f$n \times n\f$ matrix \f$A + \lambda I\f$, where \f$A\f$ is supplied by its lower triangle (diagonal included) in compressed sparse columns:
+- `col_ptr` holds \f$n + 1\f$ column offsets into `row_idx` and `values`, with `col_ptr[n]` giving the number of stored lower-triangular entries.
+- `row_idx` holds the row index of each stored entry with `row >= column`, sorted in ascending order within each column. When a nonzero shift \f$\lambda\f$ is passed, the diagonal entry of each column must be stored first at `col_ptr[c]`.
+- `values` holds the numerical values corresponding to `row_idx`.
+
+Calling \ref laplace::sparse::sparse_ldlt::factorize "factorize()" delegates to Eigen's `SimplicialLDLT` with an approximate minimum degree (AMD) fill-reducing ordering. The sparsity pattern (`n`, `col_ptr`, `row_idx`) is analyzed symbolically on the first call and re-analyzed only when the pattern changes; repeated factorizations with the same sparsity pattern reuse the symbolic ordering and factorization and touch only the numerical values.
+
+The outcome is reported as a \ref laplace::sparse::sparse_ldlt_outcome "sparse_ldlt_outcome":
+- `positive_definite`: Eigen's factorization succeeded, all pivots of \f$D\f$ are finite, and every pivot of \f$D\f$ is strictly positive.
+- `not_positive_definite`: Eigen's factorization failed or at least one pivot of \f$D\f$ is zero or negative.
+- `non_finite`: an entry of `values` or a computed pivot of \f$D\f$ is non-finite.
+
+After factorization, \ref laplace::sparse::sparse_ldlt::solve "solve()" solves \f$(A + \lambda I) z = b\f$ in place on a host array `b` of length \f$n\f$ (returning `false` if no valid factorization is currently stored), and \ref laplace::sparse::sparse_ldlt::min_pivot "min_pivot()" and \ref laplace::sparse::sparse_ldlt::max_pivot "max_pivot()" return the smallest and largest pivots of \f$D\f$ (\f$0.0\f$ for \f$n = 0\f$).
+
+## Example
+
+The following host snippet factorizes a \f$3 \times 3\f$ tridiagonal symmetric positive-definite matrix stored in lower compressed sparse column format and solves \f$A z = b\f$ in place:
+
+```cpp
+#include <laplace/sparse/sparse_ldlt.hpp>
+
+#include <array>
+
+bool solve_tridiagonal_example() {
+  const int n = 3;
+  const std::array<int, 4> col_ptr = {0, 2, 4, 5};
+  const std::array<int, 5> row_idx = {0, 1, 1, 2, 2};
+  const std::array<double, 5> values = {2.0, -1.0, 2.0, -1.0, 2.0};
+
+  laplace::sparse::sparse_ldlt ldlt;
+  if (ldlt.factorize(n, col_ptr.data(), row_idx.data(), values.data()) !=
+      laplace::sparse::sparse_ldlt_outcome::positive_definite) {
+    return false;
+  }
+
+  std::array<double, 3> b = {1.0, 0.0, 1.0};
+  return ldlt.solve(b.data());  // b now holds {1.0, 1.0, 1.0}
+}
+```
+
+## Module types
+
+In namespace `laplace::sparse`:
+- \ref laplace::sparse::sparse_ldlt_outcome "sparse_ldlt_outcome"
+- \ref laplace::sparse::sparse_ldlt "sparse_ldlt"
+
+## References
+
+- G. Guennebaud, B. Jacob and others (2010), Eigen v3, C++ template library for linear algebra, version 3.4, https://eigen.tuxfamily.org
+*/

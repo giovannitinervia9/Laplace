@@ -1,6 +1,6 @@
 # Measurement tools (accuracy and speed); not part of the test suite.
 
-laplace_kokkos_sources(math_elementary.cpp math_special.cpp math_incomplete.cpp math_ibeta.cpp math_inverse.cpp math_normal.cpp math_gamma_deriv.cpp math_gamma_mixed.cpp math_gamma_ratio.cpp math_beta_deriv.cpp math_student.cpp math_owen.cpp math_bessel.cpp math_bessel_k.cpp math_faa.cpp math_quad.cpp math_dd.cpp math_rel.cpp math_stirling.cpp bijector_scalar.cpp distrib_generic.cpp pdmat_pilot.cpp bijector_coupled.cpp pdmat_unstructured.cpp pdmat_toeplitz.cpp pdmat_factor_analytic.cpp pdmat_reduced_rank.cpp basis_bspline.cpp basis_cyclic_bspline.cpp basis_tensor.cpp distrib_negbin.cpp distrib_betabinom.cpp distrib_pig.cpp distrib_weibull.cpp distrib_beta.cpp distrib_vonmises_scale.cpp distrib_vonmises.cpp)
+laplace_kokkos_sources(math_elementary.cpp math_special.cpp math_incomplete.cpp math_ibeta.cpp math_inverse.cpp math_normal.cpp math_gamma_deriv.cpp math_gamma_mixed.cpp math_gamma_ratio.cpp math_beta_deriv.cpp math_student.cpp math_owen.cpp math_bessel.cpp math_bessel_k.cpp math_faa.cpp math_quad.cpp math_dd.cpp math_rel.cpp math_stirling.cpp bijector_scalar.cpp distrib_generic.cpp pdmat_pilot.cpp bijector_coupled.cpp pdmat_unstructured.cpp pdmat_toeplitz.cpp pdmat_factor_analytic.cpp pdmat_reduced_rank.cpp basis_bspline.cpp basis_cyclic_bspline.cpp basis_tensor.cpp distrib_negbin.cpp distrib_betabinom.cpp distrib_pig.cpp distrib_weibull.cpp distrib_beta.cpp distrib_vonmises_scale.cpp distrib_vonmises.cpp engine_inner_fit.cpp engine_reml_fit.cpp)
 
 add_executable(math_elementary math_elementary.cpp)
 target_link_libraries(math_elementary PRIVATE Laplace::laplace)
@@ -202,3 +202,9 @@ target_link_libraries(optimizers_primal_dual PRIVATE Laplace::laplace)
 laplace_kokkos_sources(optimizers_first_order_vectors.cpp)
 add_executable(optimizers_first_order_vectors optimizers_first_order_vectors.cpp)
 target_link_libraries(optimizers_first_order_vectors PRIVATE Laplace::laplace)
+
+# the engine's inner fit on the models of the prototypes
+add_executable(engine_inner_fit engine_inner_fit.cpp)
+target_link_libraries(engine_inner_fit PRIVATE Laplace::laplace Laplace::dense Laplace::sparse)
+add_executable(engine_reml_fit engine_reml_fit.cpp)
+target_link_libraries(engine_reml_fit PRIVATE Laplace::laplace Laplace::dense Laplace::sparse)

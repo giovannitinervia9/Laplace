@@ -1,0 +1,302 @@
+/**
+\addtogroup engine
+
+The `laplace::engine` module represents structured distributional regression models as flat device-accessible arrays, evaluates per-unit parameter tensors and their derivatives up to order 4 inside Kokkos kernels, and exposes both the inner log-likelihood objective with arrowhead curvature and the Laplace marginal criterion with its exact gradient and Hessian to the library's optimizers. Include `<laplace/engine/row_design.hpp>`, `<laplace/engine/pointwise_node.hpp>`, `<laplace/engine/predictor_tensor.hpp>`, `<laplace/engine/row_model.hpp>`, `<laplace/engine/row_kernels.hpp>`, `<laplace/engine/inner_fit.hpp>`, `<laplace/engine/outer_rows.hpp>`, or `<laplace/engine/marginal_criterion.hpp>`.
+
+The functions marked `LAPLACE_HD` (`pointwise_node::n_inputs()`, `logistic_curve_value()`, `logistic_curve_d1()` to `logistic_curve_d4()`, `packed_pair()`, `packed_triple()`, `packed_quad()`, `linear_predictor_value()`, `chain_rule_d1()` to `chain_rule_d4()`, and the member helpers of `row_model_view`, `arrowhead_layout`, and `outer_pass_layout`) can be called on the host and inside Kokkos kernels on the device. Design helpers, `build_row_model()`, `assemble_row_model()`, `assemble_outer_row_model()`, `row_model_objective`, `fit_inner()`, `laplace_marginal_criterion`, and `fit_marginal()` run on the host, with `assemble_row_model()` and `assemble_outer_row_model()` launching the `assemble_rows()` and `assemble_outer_rows()` kernels on `Kokkos::DefaultExecutionSpace`. A program that includes `inner_fit.hpp` or `marginal_criterion.hpp` links `Laplace::dense` and `Laplace::sparse`, since those headers hold the curvature and sparse \f$L D L^\top\f$ solvers. On three simulated models and two models with frozen reference fits of 2000 units, on gcc and CUDA, row kernels match dense reference evaluations within \f$10^{-12}\f$ of scale, inner fits match reference solutions within \f$10^{-9}\f$, exact marginal gradients and Hessians match Richardson-extrapolated central differences within \f$2.3 \times 10^{-10}\f$ of scale, and marginal fits reproduce the reference optima within \f$3.8 \times 10^{-8}\f$.
+
+## Model specification and design rows
+
+A model operates on \f$n\f$ observation units, \f$1 \le R \le 4\f$ linear predictors per unit (`row_predictor_capacity = 4`), and a distribution with \f$1 \le P \le 6\f$ natural parameters (`row_param_capacity = 6`). Each unit \f$i \in \{0, \dots, n - 1\}\f$ has linear predictors
+\f[
+\eta_r(i) = o_r(i) + \sum_{e=0}^{W - 1} v_{ie}\, x_{c(i, e)}, \qquad r = 0, \dots, R - 1,
+\f]
+where \f$o_r(i)\f$ is an optional offset (zero if `offset` or `offset[r]` is empty), \f$v_{ie}\f$ is entry \f$e\f$ of the stored design row of unit \f$i\f$, \f$c(i, e)\f$ is its index in the vector of coordinates \f$x \in \mathbb{R}^N\f$, and entries with `coefficient == -1` are empty. All blocks of \ref laplace::engine::design_entries "design_entries" are stacked to a uniform row width \f$W\f$, the sum of the individual block widths, so that device threads executing across units do not diverge.
+
+Three host helpers build `design_entries` blocks:
+- \ref laplace::engine::design_column "design_column()" creates a width-1 block mapping a covariate vector to a single coordinate.
+- \ref laplace::engine::design_basis "design_basis()" evaluates any basis satisfying \ref basis at a covariate vector, filling `width = basis.row_width()` entries per unit starting at `first_coefficient` and setting indices listed in `dropped` to `-1` for identifiability.
+- \ref laplace::engine::design_group_effect "design_group_effect()" creates a width-1 block in which unit \f$i\f$ reads coordinate \f$j\f$ of its own group.
+
+Coordinates \f$x\f$ are partitioned into \f$n_{\mathrm{global}}\f$ global coordinates shared by all units, followed by \f$G\f$ group blocks of width \f$d_{\mathrm{grp}}\f$ (`n_groups` and `group_width`), giving \f$N = n_{\mathrm{global}} + G d_{\mathrm{grp}}\f$ total coordinates. Group \f$\gamma \in \{0, \dots, G - 1\}\f$ occupies indices \f$n_{\mathrm{global}} + \gamma d_{\mathrm{grp}}, \dots, n_{\mathrm{global}} + (\gamma + 1) d_{\mathrm{grp}} - 1\f$. Only one grouping is supported, and each unit may reference only global coordinates and the coordinates of its own group.
+
+## Pointwise nodes, supports, and packed tensors
+
+Per-unit model values are numbered sequentially: indices \f$0, \dots, R - 1\f$ hold the linear predictors \f$\eta_0, \dots, \eta_{R-1}\f$, and index \f$R + k\f$ holds the output of node \f$k\f$ (\f$0 \le k < n_{\mathrm{nodes}} \le 8\f$, `row_node_capacity = 8`, `row_value_capacity = 12`). Nodes must be listed in topological order so that every input of node \f$k\f$ has index strictly less than \f$R + k\f$. The array `row_model_spec::param_value` maps each of the \f$P\f$ distribution parameters to one value index.
+
+Two node kinds (`pointwise_node_kind`) are supported:
+- `link`: takes one input \f$u\f$ and evaluates \f$\varphi^{-1}(u)\f$, where \f$\varphi\f$ is `pointwise_node::link`, a `bijector::scalar_bijector` (\ref bijector_scalar "scalar bijectors").
+- `logistic_curve`: takes three inputs \f$(A, x_m, s)\f$ and reads a data column \f$t\f$ (`data_column`) to evaluate \f$f(A, x_m, s; t) = A / (1 + e^z)\f$, where \f$z = (x_m - t)/s\f$. Setting \f$p = 1 / (1 + e^z)\f$, \f$q = p(1 - p)\f$, and \f$w = 1 - 2p\f$, the partial derivatives in \f$(A, x_m, s)\f$ (verified symbolically with SymPy; Meurer and others, 2017) are:
+\f[
+\begin{aligned}
+f_A &= p, &
+f_{x_m} &= -\frac{A q}{s}, &
+f_s &= \frac{A q z}{s}, \\
+f_{AA} &= 0, &
+f_{A, x_m} &= -\frac{q}{s}, &
+f_{A, s} &= \frac{q z}{s}, \\
+f_{x_m, x_m} &= \frac{A q w}{s^2}, &
+f_{x_m, s} &= \frac{A q (1 - w z)}{s^2}, &
+f_{s, s} &= \frac{A q z (w z - 2)}{s^2}.
+\end{aligned}
+\f]
+The third- and fourth-order helpers \ref laplace::engine::logistic_curve_d3 "logistic_curve_d3()" and \ref laplace::engine::logistic_curve_d4 "logistic_curve_d4()" evaluate the packed partial derivatives via \f$f = A\, h(x_m, s)\f$ with \f$h = g(z)\f$, \f$g(z) = 1 / (1 + e^z)\f$, and \f$g_1 = -q\f$, \f$g_2 = w q\f$, \f$g_3 = 2 q^2 - w^2 q\f$, \f$g_4 = w^3 q - 8 w q^2\f$ (all 34 forms derived and verified with SymPy in `tools/reference/engine_nodes.py`).
+
+Each value is carried in a \ref laplace::engine::predictor_value "predictor_value\<R, K\>" (default \f$K = 2\f$, or \f$3, 4\f$) holding the scalar `v`, a bit mask `support` whose bit \f$r\f$ is set when the value depends on \f$\eta_r\f$, first derivatives `d1[R]`, and second derivatives `d2` packed on sorted pairs \f$0 \le a \le b < R\f$ in lexicographic order via \ref laplace::engine::packed_pair "packed_pair(a, b, R)" \f$= a R - a(a - 1)/2 + (b - a)\f$. When \f$K \ge 3\f$, `d3` stores third derivatives packed on sorted triples \f$0 \le a \le b \le c < R\f$ via \ref laplace::engine::packed_triple "packed_triple\<R\>(a, b, c)", and when \f$K \ge 4\f$, `d4` stores fourth derivatives packed on sorted quadruples \f$0 \le a \le b \le c \le d < R\f$ via \ref laplace::engine::packed_quad "packed_quad\<R\>(a, b, c, d)", both matching `distrib::sym_tensor_position` (\ref distrib_core "distribution core").
+
+For a node \f$o = f(i_0, \dots, i_{M-1})\f$ with \f$M \in \{1, 3\}\f$ inputs (`pointwise_node_input_capacity = 3`), \ref laplace::engine::chain_rule_d1 "chain_rule_d1()" sets `o.support` to the bitwise union of input supports and evaluates only entries in `o.support`, while \ref laplace::engine::chain_rule_d2 "chain_rule_d2()" assumes `o.support` is already set and evaluates only the second-order entries with both indices in `o.support`:
+\f[
+\begin{aligned}
+o_a &= \sum_{p=0}^{M-1} f_p\, i_{p, a}, \\
+o_{ab} &= \sum_{p=0}^{M-1} f_p\, i_{p, ab} + \sum_{p=0}^{M-1} \sum_{q=0}^{M-1} f_{pq}\, i_{p, a}\, i_{q, b},
+\end{aligned}
+\f]
+where \f$f_{pq}\f$ are packed on sorted input pairs. Splitting the first and second orders ensures that kernels requiring only order-1 derivatives never compute second-order node derivatives.
+
+For higher-order passes, \ref laplace::engine::chain_rule_d3 "chain_rule_d3()" (\f$K \ge 3\f$) and \ref laplace::engine::chain_rule_d4 "chain_rule_d4()" (\f$K \ge 4\f$) also assume `o.support` is set, write only their own order, and include a term only when every block of predictor indices passed to an input lies in that input's support. At order three, with \f$f_{pqr}\f$ packed on sorted input triples,
+\f[
+o_{abc} = \sum_{p=0}^{M-1} f_p\, i_{p, abc} + \sum_{p=0}^{M-1}\sum_{q=0}^{M-1} f_{pq}\,(i_{p, ab}\, i_{q, c} + i_{p, ac}\, i_{q, b} + i_{p, bc}\, i_{q, a}) + \sum_{p=0}^{M-1}\sum_{q=0}^{M-1}\sum_{r=0}^{M-1} f_{pqr}\, i_{p, a}\, i_{q, b}\, i_{r, c}.
+\f]
+At order four, `chain_rule_d4()` evaluates one term for each partition of the four indices \f$\{a, b, c, d\}\f$ into blocks, summed over repeated inputs within their supports.
+
+## Row kernels and blocking
+
+\ref laplace::engine::build_row_model "build_row_model(spec, P, rows_per_block)" validates the specification, stably sorts units by group (preserving the original index mapping in `row_model::order`), partitions each group into contiguous blocks of at most `rows_per_block` units (default \f$16\f$), remaps every design entry coordinate to a local slot \f$s \in \{0, \dots, L - 1\}\f$ with \f$L = n_{\mathrm{global}} + d_{\mathrm{grp}} \le 32\f$ (`row_local_capacity = 32`, or `-1` for empty entries), and copies the arrays to `row_model_view` in `Kokkos::DefaultExecutionSpace::memory_space`.
+
+On the host, \ref laplace::engine::assemble_row_model "assemble_row_model\<List\>(m, x, q, out)" switches on `m.distrib` within `distrib_list<Ds...>` and on \f$R \in \{1, \dots, 4\}\f$, launches `assemble_rows<D, R, Q>()` over the blocks using `Kokkos::Experimental::ScatterView`, and copies the result into `row_assembly`. Inside each kernel, the per-unit node walk evaluates nodes in topological order up to the derivative order required by `q` and no higher. Each block accumulates its local value, local gradient, and local lower-triangular Hessian in thread-local buffers of size at most \f$L\f$ and \f$L(L+1)/2\f$ and contributes its sums once.
+
+Let \f$\ell_i = \log f(y_i; \theta_i)\f$ denote the log-density (or log-mass) of unit \f$i\f$ at parameter vector \f$\theta_i = (\theta_{i,0}, \dots, \theta_{i,P-1})\f$ and \f$w_i\f$ its weight (`1.0` when `weight` is empty). The four values of \ref laplace::engine::row_quantity "row_quantity" compute:
+- `value`: node order \f$0\f$, returning \f$f(x) = -\sum_{i=0}^{n-1} w_i \ell_i\f$.
+- `gradient`: node order \f$1\f$, returning \f$f(x)\f$ and \f$\nabla f(x)\f$.
+- `observed_information`: node order \f$2\f$, returning \f$f(x)\f$, \f$\nabla f(x)\f$, and the observed Hessian \f$\nabla^2 f(x)\f$.
+- `expected_information`: node order \f$1\f$, returning \f$f(x)\f$, \f$\nabla f(x)\f$, and \f$\sum_{i=0}^{n-1} w_i J_i^\top I(\theta_i) J_i\f$, where \f$J_i = \mathrm{d}\theta_i / \mathrm{d}x\f$ and \f$I(\theta_i)\f$ is the distribution's expected information matrix.
+
+With \f$\theta = \theta(\eta)\f$, the chain rule from parameters \f$\theta\f$ to linear predictors \f$\eta\f$ gives
+\f[
+\begin{aligned}
+\frac{\partial \ell}{\partial \eta_a} &= \sum_{j=0}^{P-1} \ell_j\, \theta_{j, a}, \\
+\frac{\partial^2 \ell}{\partial \eta_a \partial \eta_b} &= \sum_{j=0}^{P-1} \ell_j\, \theta_{j, ab} + \sum_{j=0}^{P-1} \sum_{k=0}^{P-1} \ell_{jk}\, \theta_{j, a}\, \theta_{k, b}, \\
+\mathbb{E}\!\left[-\frac{\partial^2 \ell}{\partial \eta_a \partial \eta_b}\right] &= \sum_{j=0}^{P-1} \sum_{k=0}^{P-1} I_{jk}\, \theta_{j, a}\, \theta_{k, b},
+\end{aligned}
+\f]
+where \f$\ell_j = \partial \ell / \partial \theta_j\f$, \f$\ell_{jk} = \partial^2 \ell / \partial \theta_j \partial \theta_k\f$, and \f$I_{jk} = \mathbb{E}[-\ell_{jk}]\f$. In the expected information, the second derivatives \f$\theta_{j, ab}\f$ of the nodes multiply the score \f$\ell_j\f$, whose expectation under the model is zero; those terms drop out, so `expected_information` requires the nodes to order one only. Because \f$\eta_r(i)\f$ is affine in \f$x\f$, derivatives in \f$x\f$ follow by multiplying those in \f$\eta\f$ by the stored design entries \f$v_{ie}\f$.
+
+## Arrowhead layout and sparse curvature
+
+Because units read only global coordinates and the coordinates of their single group, the assembled information matrix has an arrowhead structure described by \ref laplace::engine::arrowhead_layout "arrowhead_layout":
+1. The \f$n_{\mathrm{global}} \times n_{\mathrm{global}}\f$ global block, lower triangle stored by rows (`global_size()` \f$= n_{\mathrm{global}}(n_{\mathrm{global}} + 1)/2\f$, indexed by `global(r, c)` for \f$r \ge c\f$).
+2. For each group \f$\gamma = 0, \dots, G - 1\f$, its \f$d_{\mathrm{grp}} \times d_{\mathrm{grp}}\f$ square block lower triangle by rows (`group(gamma, j, l)` for \f$j \ge l\f$), followed by its \f$d_{\mathrm{grp}} \times n_{\mathrm{global}}\f$ cross block with the globals by rows (`cross(gamma, j, c)`).
+
+When `row_model_objective` is instantiated with `optimizers::sparse_curvature_matrix`, it builds the compressed-sparse-column lower-triangle pattern of this arrowhead once at construction (diagonal entry first in each column) and passes it to `optimizers::sparse_curvature_solver`, which factorizes it via \ref sparse "sparse_ldlt". Unlike `optimizers::dense_curvature_matrix`, sparse curvature has no eigendecomposition route and no negative-curvature search in `optimizers::newton_optimizer` (\ref optimizers_second_order "Newton and trust region"): if an assembled sparse matrix is not positive definite, Newton falls back to steepest descent.
+
+## Inner objective, penalties, caching, and fitting
+
+\ref laplace::engine::row_model_objective "row_model_objective\<List, Curvature\>" satisfies `optimizers::curvature_objective` and minimizes
+\f[
+F(x) = -\sum_{i=0}^{n-1} w_i \ell_i(x) + \sum_{t} \sum_{\nu} \frac{1}{2} \beta_{t, \nu}^\top S_t \beta_{t, \nu},
+\f]
+where each \ref laplace::engine::quadratic_penalty_term "quadratic_penalty_term" \f$t\f$ applies a fixed symmetric \f$m \times m\f$ column-major penalty matrix \f$S_t\f$ (`block_size` \f$= m\f$) to consecutive blocks \f$\beta_{t, \nu}\f$ of size \f$m\f$ across `[offset, offset + dim)`, provided no penalty block crosses between the global block and a group or between two groups.
+
+The curvature option \ref laplace::engine::row_curvature "row_curvature" selects `observed` (observed Hessian, default for `dense_curvature_matrix`), `expected` (expected information plus penalties), or `observed_else_expected` (default for `sparse_curvature_matrix`: tries the observed Hessian and, if `factorize()` is not `positive_definite`, re-assembles `expected_information` and increments `expected_fallbacks`). Held coordinate indices passed in `held` keep their values: their gradient entries are set to \f$0\f$ and their rows and columns in \f$H\f$ become those of the identity (\f$1\f$ on the diagonal, \f$0\f$ off-diagonal).
+
+The objective caches the last evaluation point and assembly (`last_assembly()`, excluding penalties). A call at the exact same point `x` requiring no higher kernel level than already cached increments `counts().reused` and launches no kernel. \ref laplace::engine::row_model_objective::set_penalty_scales "set_penalty_scales()" updates the penalty factors \f$\lambda_t\f$ without invalidating the cached assembly, and \ref laplace::engine::row_model_objective::observed_value_gradient_curvature "observed_value_gradient_curvature()" always assembles the observed Hessian regardless of `row_curvature`. \ref laplace::engine::row_kernel_counts "row_kernel_counts" records kernel calls per `row_quantity`, total assembly wall time in `seconds`, `expected_fallbacks`, and `reused`. \ref laplace::engine::fit_inner "fit_inner(objective, x0, newton)" resets the objective's counts, runs `optimizers::minimize()`, and returns an \ref laplace::engine::inner_fit_report "inner_fit_report".
+
+## Marginal criterion
+
+\ref laplace::engine::laplace_marginal_criterion "laplace_marginal_criterion\<List\>" (in `<laplace/engine/marginal_criterion.hpp>`) exposes the Laplace approximation of the marginal likelihood of a smooth model, together with its exact gradient and exact dense Hessian, as a `curvature_objective` for the library's optimizers. Its inner objective uses `row_model_objective` with `optimizers::sparse_curvature_matrix` and minimizes
+\f[
+F(x; \rho) = -\sum_{i=0}^{n-1} w_i \ell_i(x) + \sum_{t} \frac{\lambda_t}{2} \sum_{\nu} \beta_{t, \nu}^\top S_t \beta_{t, \nu},
+\f]
+where \f$\lambda_t = e^{\rho_k}\f$ for a `quadratic_penalty_term` whose `hyperparameter` field is \f$k \ge 0\f$ and \f$\lambda_t = 1\f$ for a fixed penalty term (`hyperparameter == -1`).
+
+The outer parameter vector is \f$u = (\rho_0, \dots, \rho_{n_\rho - 1}, \psi)\f$ of length \f$n_u = n_\rho + |\psi|\f$, where \f$\rho_0, \dots, \rho_{n_\rho - 1}\f$ are the \f$n_\rho\f$ log hyperparameters and \f$\psi\f$ are coordinates of \f$x\f$ (`outer_coordinates`) held in the inner fit and estimated on the criterion. Any coordinates passed in `fixed` stay fixed at their initial values in `x0` and are not estimated; every other coordinate is free and integrated by the Laplace approximation. With \f$\hat x\f$ the inner minimum at \f$u\f$ and \f$H\f$ the observed Hessian of \f$F\f$ in the free coordinates at \f$\hat x\f$ (factorized by `sparse::sparse_ldlt`, whose `log_abs_determinant()` gives \f$\log|H|\f$), the criterion minimized is
+\f[
+V(u) = F(\hat x; \rho) + \frac{1}{2} \log|H| - \frac{1}{2} \log|S_\lambda|_+,
+\f]
+where
+\f[
+\log|S_\lambda|_+ = \sum_{t} n_t \bigl(r_t \log \lambda_t + \log|S_t|_+\bigr),
+\f]
+with \f$n_t\f$ the number of blocks of penalty term \f$t\f$, \f$r_t\f$ the rank of \f$S_t\f$, and \f$\log|\cdot|_+\f$ the logarithm of the product of the positive eigenvalues. Up to an additive constant, \f$V(u)\f$ is minus the logarithm of the Laplace approximation of the marginal likelihood.
+
+The constructor throws `std::invalid_argument` if `x0` does not have length \f$N\f$, if two penalty terms share a coordinate, if any hyperparameter index in \f$0, \dots, n_\rho - 1\f$ is unused, if the outer vector is empty, or if `dense::symmetric_eigen_decomposition()` fails on a penalty matrix \f$S_t\f$. The rank \f$r_t\f$ and pseudo-determinant \f$\log|S_t|_+\f$ count eigenvalues \f$w_j\f$ of \f$S_t\f$ satisfying \f$w_j > 10^{-9} \max_l |w_l|\f$.
+
+Each evaluation at a new \f$u\f$ updates the penalty scales and starts `fit_inner()` from the previous inner minimum \f$\hat x\f$ (with the entries of \f$\psi\f$ set from \f$u\f$). If an inner fit stops with `optimizer_status::stalled` because the step fell below rounding before the decrement reached tolerance, its point is used and `inner_stalls` is incremented. If the inner fit fails otherwise, \f$V(u) = +\infty\f$, `inner_failures` is incremented, and `last_inner_failure` records the status. At \f$\hat x\f$, the criterion always assembles the observed Hessian via `observed_value_gradient_curvature()` with no fallback to the expected information; if `sparse_ldlt::factorize()` does not return `positive_definite`, \f$V(u) = +\infty\f$ and `not_positive_definite` is incremented. Whenever \f$V(u) = +\infty\f$, `value_gradient()` and `value_gradient_curvature()` fill the output gradient and Hessian with quiet NaN. Repeated calls at the same \f$u\f$ reuse cached values and derivatives.
+
+The exact gradient and Hessian of \f$V(u)\f$ read two device passes over the units in `<laplace/engine/outer_rows.hpp>`, launched by \ref laplace::engine::assemble_outer_row_model "assemble_outer_row_model\<List\>()" through \ref laplace::engine::assemble_outer_rows "assemble_outer_rows()". Write \f$T\f$ and \f$Q\f$ for the third and fourth derivatives in \f$x\f$ of the unpenalized term \f$-\sum_{i=0}^{n-1} w_i \ell_i(x)\f$ (the quadratic penalties contribute nothing above order 2), \f$H_I\f$ for the symmetric \f$N \times N\f$ inverse of \f$H\f$ padded with zeros on held rows and columns, and \f$v_0, \dots, v_{n_u - 1}\f$ for the outer sensitivity directions in \f$x\f$. Each kernel evaluates nodes only up to its own order and contracts each unit's design row once with the third and fourth predictor derivatives of \f$-\ell_i\f$:
+- Order 3 (`order == 3`, used for \f$\nabla V\f$): computes the \f$N\f$-vector \f$\tau_c = \sum_{r, s=0}^{N-1} (H_I)_{rs}\, T_{rsc}\f$.
+- Order 4 (`order == 4`, used for \f$\nabla^2 V\f$): computes \f$\tau\f$ and, for each direction \f$a \in \{0, \dots, n_u - 1\}\f$ and sorted pair \f$0 \le a \le b < n_u\f$, the arrowhead matrix \f$T[v_a]_{rs} = \sum_{c=0}^{N-1} T_{rsc}\, v_{a, c}\f$, the vector \f$T[v_a, v_b]_c = \sum_{r, s=0}^{N-1} T_{crs}\, v_{a, r}\, v_{b, s}\f$, and the scalar \f$q_{ab} = \sum_{r, s, t, u=0}^{N-1} (H_I)_{rs}\, Q_{rstu}\, v_{a, t}\, v_{b, u}\f$.
+
+The pass output is laid out in one vector by \ref laplace::engine::outer_pass_layout "outer_pass_layout". Because block accumulators reside on the thread stack, `assemble_outer_row_model()` throws `std::invalid_argument` if a block has more than `row_outer_local_capacity = 16` local slots or if the order-4 pass receives more than `row_outer_direction_capacity = 4` directions (`value_gradient_curvature()` enforces the same limit on `n_outer()`).
+
+Let \f$v_a = \mathrm{d}\hat x / \mathrm{d}u_a\f$ be the sensitivity of the inner minimum to \f$u_a\f$: for a log hyperparameter \f$u_a = \rho_k\f$ (\f$a = k < n_\rho\f$), \f$v_a = -H_I s_k\f$ with \f$s_k = \sum_{t:\, \mathrm{hyp}(t)=k} \lambda_t S_t \hat x\f$; for an outer coordinate \f$u_a = \psi_{a - n_\rho}\f$ at index \f$c\f$, \f$v_a = e_c - H_I H_{\mathrm{full}} e_c\f$, where \f$e_c\f$ is the \f$c\f$-th coordinate unit vector and \f$H_{\mathrm{full}}\f$ is the observed Hessian of \f$F\f$ in all \f$N\f$ coordinates. Let \f$E_a = \sum_{t:\, \mathrm{hyp}(t)=a} \lambda_t S_t\f$ for \f$a < n_\rho\f$ and \f$E_a = 0\f$ for \f$\psi\f$, and set \f$\dot H_a = E_a + T[v_a]\f$. The gradient and Hessian of \f$V(u)\f$ are
+\f[
+\begin{aligned}
+(\nabla V)_a &= \mathrm{d}F_a + \frac{1}{2}\bigl(\operatorname{tr}(H_I E_a) + \tau^\top v_a\bigr) - \frac{1}{2} \sum_{t:\, \mathrm{hyp}(t) = a} n_t r_t, \\
+(\nabla^2 V)_{ab} &= F_{2, ab} + \frac{1}{2}\Bigl(-\operatorname{tr}(H_I \dot H_b H_I \dot H_a) + \delta_{ab}\operatorname{tr}(H_I E_a) + q_{ab} + \tau^\top \hat x_{ab}\Bigr),
+\end{aligned}
+\f]
+where the sum over \f$n_t r_t\f$ vanishes for \f$\psi\f$, \f$\mathrm{d}F_a\f$ equals \f$\frac{1}{2}\sum_{t:\,\mathrm{hyp}(t)=a} \lambda_t \sum_\nu \hat\beta_{t,\nu}^\top S_t \hat\beta_{t,\nu}\f$ for \f$\rho_a\f$ and the gradient component \f$(\nabla_x F(\hat x; \rho))_c\f$ for \f$\psi\f$ at coordinate \f$c\f$, \f$\delta_{ab}\f$ is the Kronecker delta, and
+\f[
+\begin{aligned}
+F_{2, ab} &= \delta_{ab}[a < n_\rho]\, \mathrm{d}F_a + [a < n_\rho]\, s_a^\top v_b + [b < n_\rho]\, s_b^\top v_a + v_a^\top H_{\mathrm{full}} v_b, \\
+\hat x_{ab} &= -H_I \bigl(T[v_a, v_b] + [b < n_\rho]\, E_b v_a + [a < n_\rho]\, E_a v_b + \delta_{ab}[a < n_\rho]\, s_a\bigr),
+\end{aligned}
+\f]
+with \f$[a < n_\rho]\f$ equal to \f$1\f$ for a log hyperparameter and \f$0\f$ otherwise.
+
+Forming \f$H_I\f$ as a dense \f$N \times N\f$ matrix costs \f$N^2\f$ doubles of memory on host and device and up to \f$N\f$ sparse triangular solves from the \f$L D L^\top\f$ factorization per new \f$u\f$. Computing \f$\operatorname{tr}(H_I \dot H_b H_I \dot H_a)\f$ forms the dense \f$N \times N \times n_u\f$ device array \f$X_a = H_I \dot H_a\f$ (\f$n_u N^2\f$ doubles and \f$O(N\,\mathrm{nnz}(\dot H_a))\f$ work per direction), followed by \f$n_u(n_u + 1)/2\f$ device trace reductions. \ref laplace::engine::fit_marginal "fit_marginal(criterion, u0, newton)" runs `optimizers::minimize()` with `optimizers::newton_optimizer` on the dense \f$n_u \times n_u\f$ Hessian and returns a \ref laplace::engine::marginal_fit_report "marginal_fit_report" containing the optimizer report, \ref laplace::engine::marginal_criterion_counts "marginal_criterion_counts", and the final `inner_point`.
+
+## Example
+
+The host function below builds a Gaussian model with \f$\mu_i = \beta_0 + \beta_1 x_i\f$ and \f$\log \sigma_i = \gamma_0\f$ using a `link` node and fits it with `fit_inner()`:
+
+```cpp
+#include <laplace/bijector/scalar.hpp>
+#include <laplace/distrib/gaussian1.hpp>
+#include <laplace/engine/inner_fit.hpp>
+
+#include <vector>
+
+laplace::engine::inner_fit_report fit_gaussian_log_scale(
+    const std::vector<double>& x_cov,
+    const std::vector<double>& y) {
+  const int n = static_cast<int>(y.size());
+  const std::vector<double> ones(n, 1.0);
+
+  laplace::engine::row_model_spec spec;
+  spec.n_predictors = 2;
+  spec.n_global = 3;  // coordinates: 0 = beta0, 1 = beta1, 2 = gamma0
+  spec.y = y;
+  spec.design = {
+      laplace::engine::design_column(0, ones, 0),
+      laplace::engine::design_column(0, x_cov, 1),
+      laplace::engine::design_column(1, ones, 2),
+  };
+
+  laplace::engine::pointwise_node sigma_node;
+  sigma_node.kind = laplace::engine::pointwise_node_kind::link;
+  sigma_node.input[0] = 1;  // linear predictor 1 -> value 2
+  sigma_node.link = laplace::bijector::scalar_bijector{
+      laplace::bijector::scalar_bijector_map::log};
+  spec.nodes = {sigma_node};
+  spec.param_value = {0, 2};  // mu = value 0, sigma = value 2
+  spec.distrib = 0;
+
+  using list = laplace::engine::distrib_list<laplace::distrib::gaussian1_distrib>;
+  const laplace::engine::row_model model =
+      laplace::engine::build_row_model(spec, laplace::distrib::gaussian1_distrib::n_params);
+  laplace::engine::row_model_objective<list> obj(model, {});
+
+  laplace::optimizers::optimizer_vector x0("x0", model.n_coordinates());
+  x0(0) = 0.0;
+  x0(1) = 0.0;
+  x0(2) = 0.0;
+  return laplace::engine::fit_inner(obj, x0);
+}
+```
+
+## Marginal fit example
+
+The host function below extends the Gaussian model of the example above with a random group intercept \f$u_g \sim \mathcal{N}(0, e^{-\rho_0})\f$ (`hyperparameter = 0`) and minimizes \f$V(\rho_0)\f$ with `fit_marginal()`:
+
+```cpp
+#include <laplace/bijector/scalar.hpp>
+#include <laplace/distrib/gaussian1.hpp>
+#include <laplace/engine/marginal_criterion.hpp>
+
+#include <vector>
+
+laplace::engine::marginal_fit_report fit_gaussian_marginal(
+    const std::vector<double>& x_cov,
+    const std::vector<int>& group,
+    int n_groups,
+    const std::vector<double>& y) {
+  const int n = static_cast<int>(y.size());
+  const std::vector<double> ones(n, 1.0);
+
+  laplace::engine::row_model_spec spec;
+  spec.n_predictors = 2;
+  spec.n_global = 3;  // coordinates: 0 = beta0, 1 = beta1, 2 = gamma0, 3.. = u_g
+  spec.n_groups = n_groups;
+  spec.group_width = 1;
+  spec.group = group;
+  spec.y = y;
+  spec.design = {
+      laplace::engine::design_column(0, ones, 0),
+      laplace::engine::design_column(0, x_cov, 1),
+      laplace::engine::design_column(1, ones, 2),
+      laplace::engine::design_group_effect(spec, 0, ones, 0),
+  };
+
+  laplace::engine::pointwise_node sigma_node;
+  sigma_node.kind = laplace::engine::pointwise_node_kind::link;
+  sigma_node.input[0] = 1;
+  sigma_node.link = laplace::bijector::scalar_bijector{
+      laplace::bijector::scalar_bijector_map::log};
+  spec.nodes = {sigma_node};
+  spec.param_value = {0, 2};
+  spec.distrib = 0;
+
+  using list = laplace::engine::distrib_list<laplace::distrib::gaussian1_distrib>;
+  const laplace::engine::row_model model =
+      laplace::engine::build_row_model(spec, laplace::distrib::gaussian1_distrib::n_params);
+
+  laplace::engine::quadratic_penalty_term group_prior;
+  group_prior.offset = spec.n_global;
+  group_prior.dim = n_groups;
+  group_prior.block_size = 1;
+  group_prior.matrix = {1.0};
+  group_prior.hyperparameter = 0;
+
+  std::vector<double> x0(model.n_coordinates(), 0.0);
+  laplace::engine::laplace_marginal_criterion<list> criterion(
+      model, {group_prior}, {}, {}, x0);
+
+  laplace::optimizers::optimizer_vector u0("u0", criterion.n_outer());
+  u0(0) = 0.0;
+  return laplace::engine::fit_marginal(criterion, u0);
+}
+```
+
+## Accuracy and tests
+
+The test suites `tests/engine/test_row_kernels.cpp`, `tests/engine/test_inner_fit.cpp`, and `tests/engine/test_marginal_criterion.cpp` pass on both gcc and CUDA (9 test cases and 1498 assertions in the row-kernel and inner-fit suites, and 5 test cases in the marginal-criterion suite; see `docs/numerics.md`). All 34 logistic-curve derivative forms in `pointwise_node.hpp` are verified against SymPy at 50 digits within \f$10^{-40}\f$ (`tools/reference/engine_nodes.py`), and `packed_triple()` and `packed_quad()` are checked at compile time against `distrib::sym_tensor_position` for \f$n \in \{1, 2, 3, 4, 6\}\f$.
+
+In `tests/engine/test_marginal_criterion.cpp`, central differences of \f$V\f$ and of \f$\nabla V\f$ at steps \f$h = 10^{-3}\f$ and \f$h/2\f$ (Richardson-extrapolated) start every evaluation from the inner minimum of the centre \f$u_0\f$: when started from the previous point, the inner residual (about the square of the distance moved) enters \f$\frac{1}{2}\log|H|\f$ at first order and leaves an error proportional to the step (measured at \f$10^{-6}\f$ at \f$h = 10^{-6}\f$ on the gamma model). Measured maximum errors on gcc are \f$7.5 \times 10^{-11}\f$ (scale \f$22\f$) for the gradient and \f$1.7 \times 10^{-11}\f$ (scale \f$735\f$) for the Hessian on the Gaussian model, \f$6.4 \times 10^{-11}\f$ (scale \f$62\f$) and \f$2.7 \times 10^{-11}\f$ (scale \f$144\f$) on the gamma logistic-curve model, and \f$1.3 \times 10^{-10}\f$ (scale \f$4.2\f$) and \f$1.5 \times 10^{-10}\f$ (scale \f$16\f$) on the Student \f$t\f$ model; on CUDA across the three models, errors are at most \f$2.3 \times 10^{-10}\f$ (gradient) and \f$1.5 \times 10^{-10}\f$ (Hessian). On \f$10^6\f$ rows near the optimum, inner fits whose step fell below coordinate rounding before reaching decrement tolerance are accepted and counted in `inner_stalls`.
+
+| Test suite and model | Reference or check | Tolerance |
+|---|---|---|
+| Row kernels: Gaussian (\f$n=300\f$, \f$G=10\f$, log link on \f$\sigma\f$) | Dense hand-written reference (value, gradient, observed, expected) | \f$10^{-12}\f$ of max scale |
+| Row kernels: Gamma (\f$n=300\f$, \f$G=10\f$, logistic curve with log link) | Dense hand-written reference (value, gradient, observed, expected) | \f$10^{-12}\f$ of max scale |
+| Row kernels: Student \f$t\f$ (\f$n=300\f$, separable) | Dense hand-written reference (value, gradient, observed, expected) | \f$10^{-12}\f$ of max scale |
+| Row kernels: all three models | The value of every kernel and the gradient of the three that give it, against those of `observed_information` | \f$10^{-13}\f$ relative (value) or of the largest gradient entry |
+| Row kernels: all three models | Central differences (\f$h_j = 10^{-5}(1 + |x_j|)\f$) for gradient and Hessian | \f$10^{-7}\f$ of `scale + 1` |
+| Inner fit: Gaussian with group prior (\f$n=2000\f$, \f$G=40\f$) | Dense vs sparse curvature point, gradient norm, cache reuse | \f$10^{-7}\f$, \f$\|\nabla f\|_\infty \le 10^{-4}\f$ |
+| Inner fit: Gaussian with held coordinates (\f$n=1000\f$, \f$G=20\f$) | Exact preservation of held coordinates, gradient norm | exact, \f$\|\nabla f\|_\infty \le 10^{-4}\f$ |
+| Inner fit: Gamma logistic curve (\f$n=3000\f$, \f$G=30\f$, sparse) | Stationarity and parameter recovery | \f$\|\nabla f\|_\infty \le 10^{-4}\f$ |
+| Inner fit: Gaussian B-spline + group effect (\f$n=2000\f$, \f$G=20\f$) | Frozen reference inner-fit coordinates (`kokkos_fit_2000.csv`) | \f$10^{-9}\f$ absolute |
+| Inner fit: Gamma logistic curve + asymptote (\f$n=2000\f$, \f$G=20\f$) | Frozen reference inner-fit coordinates (`lk3_gamma_2000.csv`) | \f$10^{-9}(1 + |x_{\mathrm{ref}, j}|)\f$ |
+| Inner fit: Student \f$t\f$ (\f$n=3000\f$, dense) | Observed vs expected curvature point, gradient norm | \f$10^{-5}\f$, \f$\|\nabla f\|_\infty \le 10^{-4}\f$ |
+| Marginal criterion: Gaussian (\f$n=400\f$, \f$G=10\f$, \f$\log\lambda\f$ and scale coefficients) | Richardson central differences (\f$h = 10^{-3}\f$) for gradient and Hessian | \f$10^{-8}(1 + \text{scale})\f$ |
+| Marginal criterion: Gamma logistic curve (\f$n=400\f$, \f$G=10\f$, \f$\log\lambda, \log\phi\f$) | Richardson central differences (\f$h = 10^{-3}\f$) for gradient and Hessian | \f$10^{-8}(1 + \text{scale})\f$ |
+| Marginal criterion: Student \f$t\f$ (\f$n=300\f$, separable, \f$\log\nu\f$) | Richardson central differences (\f$h = 10^{-3}\f$) for gradient and Hessian | \f$10^{-8}(1 + \text{scale})\f$ |
+| Marginal criterion: Gaussian B-spline + group prior + scale (\f$n=2000\f$, 4 outer coordinates) | Frozen reference optimum (matches \f$V\f$ within \f$10^{-12}\f$ once the constant \f$\frac{n}{2}\log 2\pi\f$ that the reference leaves out is added; full fit from \f$u = 0\f$ within \f$3.8 \times 10^{-8}\f$ in 8 iterations) | \f$10^{-10}\f$ relative (\f$V\f$), \f$\|\nabla V\|_\infty \le 10^{-5}\f$, \f$\|u - u_{\mathrm{ref}}\|_\infty \le 10^{-5}\f$ |
+| Marginal criterion: Gamma logistic curve + asymptote (\f$n=2000\f$, 2 outer coordinates) | Frozen reference optimum (matches \f$V\f$ within \f$4 \times 10^{-12}\f$ relative; full fit takes 5 steps to the same point) | \f$10^{-10}\f$ relative (\f$V\f$), \f$\|\nabla V\|_\infty \le 10^{-5}\f$, \f$\|u - u_{\mathrm{ref}}\|_\infty \le 10^{-5}\f$ |
+
+## Module functions and types
+
+In namespace `laplace::engine`:
+- Design blocks (`row_design.hpp`): \ref laplace::engine::design_entries "design_entries", \ref laplace::engine::design_column "design_column()", \ref laplace::engine::design_basis "design_basis()".
+- Pointwise nodes (`pointwise_node.hpp`): \ref laplace::engine::pointwise_node_kind "pointwise_node_kind", \ref laplace::engine::pointwise_node_input_capacity "pointwise_node_input_capacity", \ref laplace::engine::pointwise_node "pointwise_node", \ref laplace::engine::logistic_curve_value "logistic_curve_value()", \ref laplace::engine::logistic_curve_d1 "logistic_curve_d1()", \ref laplace::engine::logistic_curve_d2 "logistic_curve_d2()", \ref laplace::engine::logistic_curve_d3 "logistic_curve_d3()", \ref laplace::engine::logistic_curve_d4 "logistic_curve_d4()".
+- Predictor tensors (`predictor_tensor.hpp`): \ref laplace::engine::packed_pair "packed_pair()", \ref laplace::engine::packed_triple "packed_triple()", \ref laplace::engine::packed_quad "packed_quad()", \ref laplace::engine::predictor_value "predictor_value", \ref laplace::engine::linear_predictor_value "linear_predictor_value()", \ref laplace::engine::chain_rule_d1 "chain_rule_d1()", \ref laplace::engine::chain_rule_d2 "chain_rule_d2()", \ref laplace::engine::chain_rule_d3 "chain_rule_d3()", \ref laplace::engine::chain_rule_d4 "chain_rule_d4()".
+- Model data (`row_model.hpp`): \ref laplace::engine::row_predictor_capacity "row_predictor_capacity", \ref laplace::engine::row_node_capacity "row_node_capacity", \ref laplace::engine::row_value_capacity "row_value_capacity", \ref laplace::engine::row_param_capacity "row_param_capacity", \ref laplace::engine::row_local_capacity "row_local_capacity", \ref laplace::engine::row_model_spec "row_model_spec", \ref laplace::engine::design_group_effect "design_group_effect()", \ref laplace::engine::row_model_view "row_model_view", \ref laplace::engine::row_model "row_model", \ref laplace::engine::build_row_model "build_row_model()".
+- Row kernels (`row_kernels.hpp`): \ref laplace::engine::row_quantity "row_quantity", \ref laplace::engine::distrib_list "distrib_list", \ref laplace::engine::arrowhead_layout "arrowhead_layout", \ref laplace::engine::row_assembly "row_assembly", \ref laplace::engine::assemble_rows "assemble_rows()", \ref laplace::engine::assemble_row_model "assemble_row_model()".
+- Inner objective and fit (`inner_fit.hpp`): \ref laplace::engine::row_curvature "row_curvature", \ref laplace::engine::quadratic_penalty_term "quadratic_penalty_term", \ref laplace::engine::row_kernel_counts "row_kernel_counts", \ref laplace::engine::row_model_objective "row_model_objective", \ref laplace::engine::inner_fit_report "inner_fit_report", \ref laplace::engine::fit_inner "fit_inner()".
+- Outer passes (`outer_rows.hpp`): \ref laplace::engine::row_outer_local_capacity "row_outer_local_capacity", \ref laplace::engine::row_outer_direction_capacity "row_outer_direction_capacity", \ref laplace::engine::outer_matrix_view "outer_matrix_view", \ref laplace::engine::outer_pass_layout "outer_pass_layout", \ref laplace::engine::assemble_outer_rows "assemble_outer_rows()", \ref laplace::engine::assemble_outer_row_model "assemble_outer_row_model()".
+- Marginal criterion (`marginal_criterion.hpp`): \ref laplace::engine::marginal_criterion_counts "marginal_criterion_counts", \ref laplace::engine::laplace_marginal_criterion "laplace_marginal_criterion", \ref laplace::engine::marginal_fit_report "marginal_fit_report", \ref laplace::engine::fit_marginal "fit_marginal()".
+
+## References
+
+- A. Meurer and others (2017), SymPy: symbolic computing in Python, PeerJ Computer Science, 3, e103. https://doi.org/10.7717/peerj-cs.103
+*/
