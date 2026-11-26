@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
@@ -130,6 +131,9 @@ void check_three_routes(const regression_problem& pr, P penalty, std::vector<dou
   CHECK(lo::optimizer_succeeded(r2.status));
   CHECK(lo::optimizer_succeeded(r3.status));
   CHECK(r2.damped_coordinates == 0);
+  // a convex quadratic s: the eigenvalue correction never acts, so the runs are those before it
+  CHECK(r2.eigen_modified_iterations == 0);
+  CHECK(r3.eigen_modified_iterations == 0);
 
   const auto b1 = to_vector(r1.point), b2 = to_vector(r2.point), b3 = to_vector(r3.point);
   double scale = 0.0;
@@ -184,7 +188,150 @@ double mcp_violation(objective_type& smooth, const lo::optimizer_point& x, doubl
   return worst;
 }
 
+// minus the log-likelihood of y_i ~ N(mu_i, sigma_i^2) without its constant, with
+// mu_i = b_0 + sum_j x_ij b_j and log sigma_i = c_0 + c_1 w_i, on the host; the
+// coordinates are (b_0, ..., b_p, c_0, c_1). Per row, with r = y - mu and
+// e = exp(-2 log sigma): s_i = log sigma + r^2 e / 2, ds/dmu = -r e,
+// ds/dlog sigma = 1 - r^2 e, and the second derivatives e, 2 r e and 2 r^2 e,
+// whose 2 x 2 determinant -2 r^2 e^2 is negative: away from the optimum the
+// Hessian can be indefinite (prototipi/node_dispatch, ninth part).
+struct gaussian_scale_objective {
+  using curvature_type = lo::dense_curvature_matrix;
+  std::vector<double> x, y, w;  // x is n x p, row-major
+  int n = 0, p = 0;
+
+  int size() const { return p + 3; }
+  double evaluate(const lo::optimizer_point& v, const lo::optimizer_vector* g, curvature_type* H) const {
+    const int m = size();
+    if (g)
+      for (int j = 0; j < m; ++j) (*g)(j) = 0.0;
+    if (H)
+      for (int r = 0; r < m; ++r)
+        for (int c = 0; c < m; ++c) (*H)(r, c) = 0.0;
+    std::vector<double> a(std::size_t(p) + 1);  // the row of the location's design
+    double s = 0.0;
+    for (int i = 0; i < n; ++i) {
+      a[0] = 1.0;
+      double mu = v(0);
+      for (int j = 0; j < p; ++j) a[std::size_t(j) + 1] = x[std::size_t(i * p + j)], mu += x[std::size_t(i * p + j)] * v(j + 1);
+      const double ls = v(p + 1) + v(p + 2) * w[std::size_t(i)], e = std::exp(-2.0 * ls), r = y[std::size_t(i)] - mu;
+      s += ls + 0.5 * r * r * e;
+      const double d1 = -r * e, d2 = 1.0 - r * r * e, h11 = e, h12 = 2.0 * r * e, h22 = 2.0 * r * r * e;
+      const double b[2] = {1.0, w[std::size_t(i)]};
+      if (g) {
+        for (int j = 0; j <= p; ++j) (*g)(j) += d1 * a[std::size_t(j)];
+        for (int k = 0; k < 2; ++k) (*g)(p + 1 + k) += d2 * b[k];
+      }
+      if (H) {
+        for (int j = 0; j <= p; ++j) {
+          for (int k = 0; k <= p; ++k) (*H)(j, k) += h11 * a[std::size_t(j)] * a[std::size_t(k)];
+          for (int k = 0; k < 2; ++k) {
+            (*H)(j, p + 1 + k) += h12 * a[std::size_t(j)] * b[k];
+            (*H)(p + 1 + k, j) += h12 * a[std::size_t(j)] * b[k];
+          }
+        }
+        for (int k = 0; k < 2; ++k)
+          for (int l = 0; l < 2; ++l) (*H)(p + 1 + k, p + 1 + l) += h22 * b[k] * b[l];
+      }
+    }
+    return s;
+  }
+  double value(const lo::optimizer_point& v) { return evaluate(v, nullptr, nullptr); }
+  double value_gradient(const lo::optimizer_point& v, const lo::optimizer_vector& g) { return evaluate(v, &g, nullptr); }
+  double value_gradient_curvature(const lo::optimizer_point& v, const lo::optimizer_vector& g, curvature_type& H) {
+    return evaluate(v, &g, &H);
+  }
+};
+
+// n rows, p covariates N(0, 1), w uniform on (-1, 1); b = (3, 1, -0.8, 0.6, 0, ...),
+// c = (0, 0.5); Box-Muller on a fixed generator, so that gcc and MSVC draw the same data
+gaussian_scale_objective make_gaussian_scale_problem(int n, int p) {
+  std::uint64_t state = 20261125;
+  auto unif = [&state]() {
+    state = state * 6364136223846793005ull + 1442695040888963407ull;
+    return (double((state >> 11)) + 0.5) * (1.0 / 9007199254740992.0);
+  };
+  auto norm = [&unif]() { return std::sqrt(-2.0 * std::log(unif())) * std::cos(6.283185307179586 * unif()); };
+  gaussian_scale_objective o;
+  o.n = n, o.p = p;
+  o.x.resize(std::size_t(n * p)), o.y.resize(std::size_t(n)), o.w.resize(std::size_t(n));
+  const double b[4] = {3.0, 1.0, -0.8, 0.6};
+  for (int i = 0; i < n; ++i) {
+    double mu = b[0];
+    for (int j = 0; j < p; ++j) {
+      o.x[std::size_t(i * p + j)] = norm();
+      if (j < 3) mu += b[j + 1] * o.x[std::size_t(i * p + j)];
+    }
+    o.w[std::size_t(i)] = 2.0 * unif() - 1.0;
+    o.y[std::size_t(i)] = mu + std::exp(0.5 * o.w[std::size_t(i)]) * norm();
+  }
+  return o;
+}
+
 }  // namespace proximal_test
+
+TEST_CASE("proximal methods: an indefinite Hessian (the scale modelled) gets its eigenvalues corrected") {
+  using namespace proximal_test;
+  auto smooth = make_gaussian_scale_problem(200, 10);
+  const int m = smooth.size(), p = smooth.p;
+  const double lambda = 20.0;
+  lo::penalized_objective<gaussian_scale_objective, lasso_penalty> objective(smooth, m,
+                                                                             lo::attach_penalty(make_lasso(p), 1, {lambda}));
+  lo::optimizer_vector x0("x0", m);  // zeros: mu = 0 against y about 3, the Hessian is indefinite
+  {
+    lo::dense_curvature_matrix H("H", m, m);
+    lo::optimizer_vector g("g", m);
+    smooth.value_gradient_curvature(x0, g, H);
+    lo::dense_curvature_solver solver(m);
+    REQUIRE(solver.factorize(H) == lo::curvature_factorization::not_positive_definite);
+  }
+
+  lo::proximal_newton_optimizer<> corrected;
+  corrected.stop_rule.tolerance = 1e-12;
+  auto plain = corrected;
+  plain.eigen_floor = std::numeric_limits<double>::infinity();
+  const auto r0 = lo::minimize(plain, objective, x0);
+  const auto r1 = lo::minimize(corrected, objective, x0);
+  lo::proximal_gradient_optimizer<> fista;
+  fista.stop_rule.tolerance = 1e-12;
+  const auto r2 = lo::minimize(fista, objective, x0);
+  MESSAGE("plain: status ", int(r0.status), " after ", r0.iterations, "; corrected: status ", int(r1.status), " after ",
+          r1.iterations, ", ", r1.eigen_modified_iterations, " corrected, decrement ", r1.decrement, "; FISTA: status ",
+          int(r2.status), " after ", r2.iterations);
+
+  // the failure: the model of the first iteration has no minimum
+  CHECK(!lo::optimizer_succeeded(r0.status));
+  CHECK(r0.iterations == 0);
+  CHECK(r0.eigen_modified_iterations == 0);
+  // the repair, and the report: corrected iterations counted, the final one plain
+  CHECK(lo::optimizer_succeeded(r1.status));
+  CHECK(r1.eigen_modified_iterations >= 1);
+  CHECK(r1.eigen_modified_iterations < r1.iterations);
+  CHECK(r1.final_factorization == lo::curvature_factorization::positive_definite);
+  CHECK(std::isfinite(r1.decrement));
+  CHECK(r2.eigen_modified_iterations == 0);
+  // the same point and support as FISTA
+  REQUIRE(lo::optimizer_succeeded(r2.status));
+  int support = 0;
+  for (int j = 0; j < m; ++j) {
+    CHECK(std::abs(r1.point(j) - r2.point(j)) <= 1e-5);
+    CHECK((r1.point(j) == 0.0) == (r2.point(j) == 0.0));
+    if (j >= 1 && j <= p) support += r1.point(j) != 0.0;
+  }
+  MESSAGE("support ", support, " of ", p);
+  CHECK(support > 0);
+  CHECK(support < p);
+  CHECK(prox_mapping_sup(objective, r1.point, 1e-3) <= 1e-5 * lambda);
+
+  // a corrected iteration reports no decrement: stopped at once, on the budget
+  auto none = corrected;
+  none.max_iterations = 0;
+  const auto r3 = lo::minimize(none, objective, x0);
+  CHECK(r3.status == lo::optimizer_status::iteration_budget);
+  CHECK(r3.eigen_modified_iterations == 1);
+  CHECK(std::isnan(r3.decrement));
+  CHECK(r3.final_factorization == lo::curvature_factorization::not_positive_definite);
+}
 
 TEST_CASE("proximal methods: the lasso by FISTA and proximal Newton, point, support, optimality") {
   using namespace proximal_test;
@@ -262,6 +409,7 @@ TEST_CASE("proximal methods: MCP, rho declared and wrongly declared") {
   CHECK(lo::optimizer_succeeded(r1.status));
   CHECK(mcp_violation(smooth, r1.point, lambda, gamma) <= 1e-5);
   CHECK(r2.damped_coordinates > 0);
+  CHECK(r2.eigen_modified_iterations == 0);
   if (lo::optimizer_succeeded(r2.status)) CHECK(mcp_violation(smooth, r2.point, lambda, gamma) <= 1e-5);
   // H has no Cholesky factor problem here (X'X is positive definite): proximal Newton must converge
   CHECK(lo::optimizer_succeeded(r2.status));
@@ -356,6 +504,8 @@ TEST_CASE("proximal methods: lasso and elastic net against the frozen glmnet ref
     CHECK((r1.final_factorization == lo::curvature_factorization::positive_definite) == !free_singular);
     CHECK(r1.decrement_from_prox_mapping == free_singular);
     CHECK(!r2.decrement_from_prox_mapping);
+    // X'X singular on d2 but positive semidefinite: left to the free-block route, never corrected
+    CHECK(r1.eigen_modified_iterations == 0);
     // at the decrement tolerance 1e-10: f - f* at most 1.8e-10 and coefficients
     // within 2.4e-6 on d2 (measured), within 2e-7 elsewhere
     CHECK(e1 <= (d.p >= d.n ? 5e-6 : 5e-7));

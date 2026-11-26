@@ -23,6 +23,20 @@
 //   bound max_i sum_j |H_ij| on the largest eigenvalue of H (and
 //   L >= rho / rho_safety), and the gradient restart of O'Donoghue and Candes.
 //
+// Curvature that is not positive semidefinite (Giovanni, 2026-11-25): when H has
+// no Cholesky factor, its eigendecomposition H = V diag(w) V' is taken, and when
+// the smallest eigenvalue is below -floor, floor = eigen_floor max_i |w_i|, H is
+// replaced by V diag(max(|w_i|, floor)) V', as newton_optimizer does. With an
+// indefinite H the model g'd + d'Hd/2 + r(x + d) has no minimum for a penalty of
+// linear growth, and the run ended at iteration 0 (a Gaussian with its scale
+// modelled and a lasso on the location, prototipi/node_dispatch). A positive
+// semidefinite singular H (a lasso with p > n) is left as it is: the penalty bounds
+// the model there, and the free-block route below handles it. Everything after
+// reads the corrected matrix; the iteration's decrement is NaN, so that no point
+// where the observed H is indefinite is declared converged, and
+// eigen_modified_iterations in the report counts these iterations. An infinite
+// eigen_floor turns the correction off.
+//
 // The inner solve stops when its measure at the iterate z, (1/2) G'H^-1 G with
 // G the model's proximal gradient mapping at z (step 1/L), is at most
 // inner_fraction (default 0.01) times the current proximal Newton decrement
@@ -51,6 +65,7 @@
 // halving s from 1. A failed search ends the run: "stalled" when the step fell
 // below the rounding of x, "line search failed" otherwise.
 
+#include "laplace/dense/dense.hpp"
 #include "laplace/optimizers/dense_curvature_solver.hpp"
 #include "laplace/optimizers/line_search.hpp"
 #include "laplace/optimizers/minimize.hpp"
@@ -137,14 +152,19 @@ inline double half_curvature(const optimizer_point& z, const optimizer_point& x,
  * times \f$\frac{1}{2} d^\top H d\f$, or after `max_inner_sweeps` (default \f$1000\f$) sweeps or iterations.
  *
  * Stationarity is the proximal Newton decrement \f$\delta = \frac{1}{2} d^\top H d\f$ in the objective's units.
+ * When the Cholesky factorization of \f$H\f$ fails and its smallest eigenvalue is below \f$-\eta\max_i|w_i|\f$
+ * from \f$H = V\operatorname{diag}(w)V^\top\f$ (\f$\eta =\f$ `eigen_floor`, default \f$10^{-8}\f$; infinite disables),
+ * \f$H\f$ is replaced by \f$V\operatorname{diag}(\max(|w_i|, \eta\max_k|w_k|))V^\top\f$ while leaving positive semidefinite
+ * singular matrices untouched; corrected iterations report quiet NaN `decrement`, keep the observed `final_factorization`,
+ * and increment `optimizer_report::eigen_modified_iterations`.
  * When \f$H\f$ restricted to the free coordinates (those not held at a kink) has no Cholesky factor and \f$H\f$ is finite,
  * \f$\delta\f$ falls back to the `proximal_gradient_optimizer` measure at the outer point \f$x\f$,
  * \f$\frac{1}{2}\max(t, \gamma_{\max})\lVert G_t\rVert^2\f$, where \f$G_t = (x - \operatorname{prox}_{t r}(x - t\nabla s(x)))/t\f$,
  * \f$t = 1/L\f$ is the step of the inner model (Gershgorin bound, at least \f$\rho / \f$`rho_safety`), and
  * \f$\gamma_{\max}\f$ is the largest secant ratio \f$\delta_x^\top \delta_x / (\delta_x^\top \delta_g)\f$ (with
  * \f$\delta_x^\top \delta_g > 0\f$) over accepted steps for consecutive point and gradient differences \f$\delta_x\f$ and
- * \f$\delta_g\f$. Then `optimizer_report::decrement_from_prox_mapping` is `true`; \f$\delta\f$ is quiet NaN only when \f$H\f$
- * is not finite.
+ * \f$\delta_g\f$. Then `optimizer_report::decrement_from_prox_mapping` is `true`; outside corrected iterations, \f$\delta\f$ is
+ * quiet NaN only when \f$H\f$ is not finite.
  * If the inner solve misses its target, `stop_rule` receives \f$\max(\delta, \delta_{\mathrm{in}} / \kappa_{\mathrm{in}})\f$
  * where \f$\delta_{\mathrm{in}}\f$ is the last inner measure and \f$\kappa_{\mathrm{in}}\f$ is `inner_fraction`.
  * The step \f$x + \alpha d\f$ uses Armijo backtracking \f$f(x + \alpha d) - f(x) \le c_1 \alpha (g^\top d + r(x + d) - r(x))\f$
@@ -154,8 +174,9 @@ inline double half_curvature(const optimizer_point& z, const optimizer_point& x,
  * Possible `optimizer_report::status` values are `converged`, `converged_at_resolution`, `stopped_on_change`,
  * `stalled` (step fell below rounding in \f$x\f$), `line_search_failed`, `iteration_budget` (`max_iterations`, default \f$200\f$),
  * `evaluation_budget` (`max_value_evaluations`, default \f$10^5\f$), and `start_not_admissible`. In `optimizer_report`,
- * `gradient` is \f$\nabla s\f$ at `point`, `final_factorization` is the last factorization of \f$H\f$ or its free restriction,
- * `damped_coordinates` counts damped coordinate updates, and `decrement_from_prox_mapping` marks the fallback measure.
+ * `gradient` is \f$\nabla s\f$ at `point`, `final_factorization` is the last factorization of the observed \f$H\f$ or its free
+ * restriction, `damped_coordinates` counts damped coordinate updates, `eigen_modified_iterations` counts
+ * eigenvalue-corrected iterations, and `decrement_from_prox_mapping` marks the fallback measure.
  * See \ref optimizers_proximal for measured accuracy.
  *
  * \tparam StopRule Stopping rule requiring at most `stop_needs_decrement` and `stop_needs_previous` (`gradient_stop_rule` is rejected at compile time).
@@ -182,16 +203,23 @@ struct proximal_newton_optimizer {
   int max_backtracks = 60;
   /// \brief Damping factor giving \f$a_j = \rho_j / \f$`rho_safety` and \f$L \ge \rho / \f$`rho_safety` (default \f$0.99\f$).
   double rho_safety = 0.99;
+  /// \brief Relative eigenvalue floor \f$\eta\f$ for an indefinite \f$H\f$ (default \f$10^{-8}\f$; infinite turns the correction off).
+  double eigen_floor = 1e-8;
   /// \brief Optional per-iteration trace callback (default empty).
   optimizer_trace trace;
 
   /**
    * \brief Runs proximal Newton from `x0`.
    *
+   * When the Cholesky factorization of \f$H\f$ fails and its smallest eigenvalue is below \f$-\eta\max_i|w_i|\f$
+   * (\f$\eta =\f$ `eigen_floor`, infinite disables), \f$H\f$ is replaced by its eigenvalue-corrected form while leaving
+   * positive semidefinite singular matrices untouched. Corrected iterations report quiet NaN `decrement` and increment
+   * `eigen_modified_iterations`.
+   *
    * \tparam O Composite objective type satisfying `composite_objective`, `curvature_objective`, and `dense_curvature_matrix` curvature.
    * \param objective Composite objective \f$f = s + r\f$.
    * \param x0 Starting point \f$x_0\f$; \f$f(x_0)\f$ must be finite.
-   * \return An `optimizer_report` with `decrement` equal to \f$\frac{1}{2} d^\top H d\f$ (falling back to the `proximal_gradient_optimizer` measure at `point` when \f$H\f$ is finite and the free curvature block lacks a Cholesky factor, and quiet NaN only when \f$H\f$ is not finite), `decrement_from_prox_mapping`, `gradient` equal to \f$\nabla s\f$ at `point`, `final_factorization`, and `damped_coordinates`.
+   * \return An `optimizer_report` with `decrement` equal to \f$\frac{1}{2} d^\top H d\f$ (quiet NaN on an eigenvalue-corrected iteration or when \f$H\f$ is not finite, and falling back to the `proximal_gradient_optimizer` measure at `point` when \f$H\f$ is finite, uncorrected, and the free curvature block lacks a Cholesky factor), `decrement_from_prox_mapping`, `gradient` equal to \f$\nabla s\f$ at `point`, `final_factorization`, `damped_coordinates`, and `eigen_modified_iterations`.
    *
    * Measured accuracy is documented on \ref optimizers_proximal.
    */
@@ -207,6 +235,8 @@ struct proximal_newton_optimizer {
         w("w", n), w_old("w_old", n), v("v", n), h("h", n), g_previous("g_previous", n);
     dense_curvature_matrix H("H", n, n);
     typename curvature_solver_for<dense_curvature_matrix>::type solver(n);
+    Kokkos::View<double*, Kokkos::HostSpace> eigenvalues("eigenvalues", n);
+    dense_curvature_matrix eigenvectors("eigenvectors", n, n);
     Kokkos::deep_copy(x, x0);
 
     // block of each coordinate (-1: unpenalized), its offset in the block, its rho
@@ -243,7 +273,28 @@ struct proximal_newton_optimizer {
 
     for (int k = 0;; ++k) {
       report.final_factorization = solver.factorize(H);
-      const bool positive_definite = report.final_factorization == curvature_factorization::positive_definite;
+      // an indefinite H gets its eigenvalues corrected (header comment); the report
+      // keeps the factorization of the observed H
+      bool eigen_modified = false;
+      if (report.final_factorization == curvature_factorization::not_positive_definite && std::isfinite(eigen_floor) &&
+          laplace::dense::symmetric_eigen_decomposition(H, eigenvalues, eigenvectors).success) {
+        const double w_abs = std::max(std::abs(eigenvalues(0)), std::abs(eigenvalues(n - 1)));
+        const double floor = std::max(eigen_floor * w_abs, std::numeric_limits<double>::min());
+        if (eigenvalues(0) < -floor) {
+          eigen_modified = true;
+          ++report.eigen_modified_iterations;
+          for (int c = 0; c < n; ++c)
+            for (int r = c; r < n; ++r) {
+              double s = 0.0;
+              for (int k = 0; k < n; ++k)
+                s += eigenvectors(r, k) * std::max(std::abs(eigenvalues(k)), floor) * eigenvectors(c, k);
+              H(r, c) = H(c, r) = s;
+            }
+        }
+      }
+      const bool positive_definite =
+          eigen_modified ? solver.factorize(H) == curvature_factorization::positive_definite
+                         : report.final_factorization == curvature_factorization::positive_definite;
 
       // the inner solve, from z = x; u = H(z - x) is kept up to date, so the
       // model's gradient at z is g + u
@@ -408,6 +459,8 @@ struct proximal_newton_optimizer {
         report.decrement = 0.5 * std::max(t, gamma_max) * gg / (t * t);
         report.decrement_from_prox_mapping = true;
       }
+      // no convergence where the observed H is indefinite (header comment)
+      if (eigen_modified) report.decrement = nan;
       const double r_z = objective.nonsmooth_value(z);
       double delta_pred = r_z - r_x;
       for (int i = 0; i < n; ++i) delta_pred += g(i) * (z(i) - x(i));

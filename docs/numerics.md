@@ -15518,6 +15518,93 @@ and it does not fall out of the present route, the derivatives of Stirling's err
 being a separate function per order. Decided by Giovanni on 2026-11-20 not to do it:
 the ratio stays as one function per order, and the 2 microseconds stay where they are.
 
+## Proximal Newton with an indefinite Hessian: the eigenvalues corrected (2026-11-25)
+
+**What.** `proximal_newton_optimizer` takes the curvature H of the smooth part as
+given. When H is indefinite the quadratic model of the subproblem,
+g'd + d'Hd/2 + r(x + d), has no minimum for a penalty of linear growth such as the
+lasso, the step it finds gives no decrease, and the run ended at iteration 0 with
+`line_search_failed`. This happens with the observed Hessian of a Gaussian whose
+scale is modelled too: per row, with r = y - mu and e = sigma^-2, minus the
+log-likelihood has second derivatives e, 2 r e and 2 r^2 e in (mu, log sigma),
+whose determinant -2 r^2 e^2 is negative, so the summed Hessian is indefinite
+wherever the residuals are large against sigma (from a start at zero, for
+example). `newton_optimizer` passes on the same model without the penalty because
+it corrects the eigenvalues; the change brings the same correction into proximal
+Newton.
+
+**How.** At each iteration the Cholesky factor of H is attempted as before. Only
+when it fails, the eigendecomposition H = V diag(w) V' is taken
+(`laplace::dense::symmetric_eigen_decomposition`), and when the smallest
+eigenvalue is below -floor, floor = eigen_floor max_i |w_i| (eigen_floor = 1e-8,
+the default of `newton_optimizer`), H is replaced by
+V diag(max(|w_i|, floor)) V'. The coordinate descent or FISTA on the model, the
+inner measure and the decrement then read the corrected matrix. Three choices:
+
+- The test is "indefinite", not "not positive definite". A positive semidefinite
+  singular H, such as X'X with p > n, is left as it is: the penalty bounds the
+  model there, and the Cholesky factor on the free coordinates (with the fallback
+  measure of the section on SCAD and MCP) already handles it. Correcting it would
+  add a ridge of 1e-8 of the largest eigenvalue and move those runs.
+- The decrement of a corrected iteration is NaN, as in `newton_optimizer`, so no
+  point where the observed H is indefinite is declared converged (at a saddle the
+  step is 0 and so would be the decrement). The report keeps the factorization of
+  the observed H in `final_factorization`.
+- The damping of a coordinate with H_jj <= rho_j (a weakly convex penalty) acts
+  on the corrected diagonal, as before on the observed one; the damping of an
+  unpenalized coordinate with H_jj <= 0 cannot fire on a corrected iteration,
+  whose diagonal is at least the floor.
+
+The new report field `eigen_modified_iterations` counts the corrected iterations;
+an infinite `eigen_floor` turns the correction off.
+
+**Measured.** The test (`tests/optimizers/test_proximal.cpp`, "an indefinite
+Hessian (the scale modelled) gets its eigenvalues corrected"): y_i ~
+N(mu_i, sigma_i^2), mu_i = b_0 + x_i'b over 10 covariates (three slopes not
+zero), log sigma_i = c_0 + c_1 w_i, 200 rows, a lasso with weight 20 on the ten
+slopes, 13 coordinates, from zero, where H has no Cholesky factor.
+
+| run | status | iterations | corrected |
+|---|---|---|---|
+| correction off | line search failed | 0 | 0 |
+| correction on | converged | 9 | 3 |
+| FISTA (proximal gradient) | converged | 261 | |
+
+The corrected run reaches FISTA's point within 1e-5 with the same support (6 of
+10 slopes), its final iteration is plain (positive definite factor, finite
+decrement 8.1e-13), and the prox mapping at the point is below 1e-5 of the weight.
+On the same kind of model at 10^5 and 10^6 rows (50 covariates, 53 coordinates)
+the correction converged in 6 to 7 iterations against 9 to 10 with the expected
+information as the curvature, with H corrected at the first assembly only.
+
+No existing proximal test is touched: every proximal Newton run of
+`test_proximal.cpp` and `test_nonconvex_fits.cpp` reports
+`eigen_modified_iterations == 0`, so H is never changed and the iterations, points
+and statuses are those of before (their curvature is X'X, positive definite or
+positive semidefinite). The CUDA build gives the same counts on the new test
+(9 iterations, 3 corrected, FISTA 261), and the whole suite, slow cases included,
+ends with 0 failed assertions on gcc and on CUDA.
+
+**Cost.** The decomposition is dense and cubic and is paid only on the iterations
+whose Cholesky attempt fails. Eigen, one thread, a decomposition against a
+Cholesky factor of the same matrix:
+
+| n | Cholesky | eigendecomposition | ratio |
+|---|---|---|---|
+| 53 | 0.007 ms | 0.088 ms | 12 |
+| 201 | 0.21 ms | 3.5 ms | 16 |
+| 500 | 2.4 ms | 48 ms | 20 |
+| 1000 | 15 ms | 363 ms | 24 |
+
+The p > n fits (201 coordinates, X'X singular) pay one decomposition per
+iteration without being corrected, about 3.5 ms.
+
+**Open.** A large sparse curvature (many latent coefficients) cannot take a dense
+decomposition, and its correction is not settled. The expected information as a
+fallback when the correction fails (a failed decomposition, or a failed line
+search after a corrected step) is not in the optimizer, which receives one
+curvature; it is left to the caller.
+
 ## The engine's row kernels and inner fit (2026-11-25)
 
 **What.** The first milestone of the fitting engine (`include/laplace/engine/`): a model as

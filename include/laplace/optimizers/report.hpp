@@ -116,6 +116,7 @@ enum class curvature_factorization {
  * | `gradient_evaluations` | `long` | \f$0\f$ | Evaluations of \f$\nabla f\f$ |
  * | `curvature_evaluations` | `long` | \f$0\f$ | Evaluations of \f$H\f$ |
  * | `damped_coordinates` | `int` | \f$0\f$ | Coordinate updates damped by proximal Newton |
+ * | `eigen_modified_iterations` | `int` | \f$0\f$ | Iterations of proximal Newton whose indefinite curvature was eigenvalue-corrected |
  * | `decrement_from_prox_mapping` | `bool` | `false` | Whether proximal Newton reported its fallback measure in `decrement` |
  * | `elapsed_seconds` | `double` | \f$0\f$ | Wall-clock time of the run from `std::chrono::steady_clock` |
  *
@@ -147,6 +148,13 @@ enum class curvature_factorization {
  * (penalized coordinates with \f$H_{jj} \le \rho_j\f$, where \f$\rho_j\f$ is
  * the block's weak-convexity constant, or unpenalized coordinates with
  * \f$H_{jj} \le 0\f$); it is \f$0\f$ for all other methods.
+ * `eigen_modified_iterations` counts the iterations of proximal Newton where
+ * \f$H\f$ had no Cholesky factor and its smallest eigenvalue lay below
+ * \f$-\eta \max_i |w_i|\f$ (with eigenvalues \f$w_i\f$ and relative floor
+ * \f$\eta\f$ given by `eigen_floor`), so \f$H\f$ was replaced by its
+ * eigenvalue-corrected form and `decrement` was set to quiet NaN; positive
+ * semidefinite singular matrices are not counted, and it is \f$0\f$ for all
+ * other methods.
  * `decrement_from_prox_mapping` is `true` when proximal Newton reports its
  * fallback proximal gradient mapping measure in `decrement` because \f$H\f$ is
  * finite and its restriction to the free coordinates has no Cholesky factor,
@@ -245,6 +253,17 @@ struct optimizer_report {
    * \brief Coordinate updates damped by proximal Newton (penalized with \f$H_{jj} \le \rho_j\f$ or unpenalized with \f$H_{jj} \le 0\f$); \f$0\f$ for all other methods (default \f$0\f$).
    */
   int damped_coordinates = 0;
+  /**
+   * \ingroup optimizers
+   * \brief Iterations of proximal Newton with an eigenvalue-corrected indefinite curvature; \f$0\f$ for all other methods (default \f$0\f$).
+   *
+   * Counts iterations where \f$H\f$ had no Cholesky factor and its smallest
+   * eigenvalue lay below \f$-\eta \max_i |w_i|\f$ (with eigenvalues \f$w_i\f$
+   * and relative floor \f$\eta\f$ given by `eigen_floor`), triggering
+   * eigenvalue correction and a quiet NaN `decrement`. Positive semidefinite
+   * singular matrices are not counted. See \ref optimizers_proximal "Proximal methods".
+   */
+  int eigen_modified_iterations = 0;
   /**
    * \ingroup optimizers
    * \brief Whether `decrement` is proximal Newton's fallback measure (default `false`).

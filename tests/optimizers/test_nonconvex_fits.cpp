@@ -174,6 +174,8 @@ void check_fit(const wave2_reference::dataset& d, const ncvreg_fit& ref, const s
   // free coordinates (many in the flat tails) outnumber the rows
   CHECK(c1.report.decrement_from_prox_mapping == (ref.dataset == "d2_n100_p200" && ref.lambda_fraction == 0.01));
   CHECK(!c2.report.decrement_from_prox_mapping);
+  // X'X is positive semidefinite: the eigenvalue correction never acts, so the runs are those before it
+  CHECK(c1.report.eigen_modified_iterations == 0);
   if (ref.dataset != "d2_n100_p200" || ref.lambda_fraction == 0.5) {
     // ncvreg's minimum is the one every method reaches from 0 (24 fits, measured on gcc and
     // CUDA): proximal Newton within 2.3e-6 and 1.5e-10, MFISTA within 2.8e-6 and 2.95 times
