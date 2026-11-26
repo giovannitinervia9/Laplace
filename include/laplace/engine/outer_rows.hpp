@@ -13,7 +13,7 @@
 //
 //   order 3   tau_c = sum_rs Hi_rs T_rsc                  (N numbers)
 //   order 4   tau, and for each direction a and pair a <= b
-//             T[v_a]_rs = sum_c T_rsc v_a,c               (on the arrowhead)
+//             T[v_a]_rs = sum_c T_rsc v_a,c               (on the information layout)
 //             T[v_a, v_b]_c = sum_rs T_crs v_a,r v_b,s    (N numbers)
 //             q_ab = sum_rstu Hi_rs Q_rstu v_a,t v_b,u    (one number)
 //
@@ -29,7 +29,7 @@
 //   q_ab        += sum_tu (sum_pq L4_pqtu M_pq) xi_a,t xi_b,u
 //
 // Output, in one device vector: tau (N); then for order 4 the A matrices T[v_a]
-// in the arrowhead layout of row_kernels.hpp, the A (A + 1) / 2 vectors
+// in the information layout of row_model.hpp, the A (A + 1) / 2 vectors
 // T[v_a, v_b] (pairs a <= b in lexicographic order) and the A (A + 1) / 2
 // numbers q_ab.
 //
@@ -72,11 +72,11 @@ using outer_matrix_view = Kokkos::View<const double**, Kokkos::LayoutLeft, row_m
 
 /**
  * \ingroup engine
- * \brief Sizes of the output of an outer pass: \f$N\f$ coordinates, \f$A\f$ directions, the arrowhead.
+ * \brief Sizes of the output of an outer pass: \f$N\f$ coordinates, \f$A\f$ directions, the information layout.
  * \see assemble_outer_rows(), \ref engine
  */
 struct outer_pass_layout {
-  int n = 0, n_directions = 0, arrowhead = 0;
+  int n = 0, n_directions = 0, information = 0;
   /**
    * \ingroup engine
    * \brief Number of sorted pairs \f$0 \le a \le b < A\f$ of outer directions.
@@ -91,25 +91,25 @@ struct outer_pass_layout {
   LAPLACE_HD int tau() const { return 0; }
   /**
    * \ingroup engine
-   * \brief Offset of the arrowhead matrix \f$T[v_a]\f$ for direction `a` in an order-4 pass output.
+   * \brief Offset of the matrix \f$T[v_a]\f$, in the information layout, for direction `a` in an order-4 pass output.
    * \param a Direction index \f$0 \le a < \f$ `n_directions`.
-   * \return Zero-based offset \f$N + a \cdot \f$ `arrowhead`.
+   * \return Zero-based offset \f$N + a \cdot \f$ `information`.
    */
-  LAPLACE_HD int third_direction(int a) const { return n + a * arrowhead; }
+  LAPLACE_HD int third_direction(int a) const { return n + a * information; }
   /**
    * \ingroup engine
    * \brief Offset of the vector \f$T[v_a, v_b]\f$ of length \f$N\f$ for pair index `ab` in an order-4 pass output.
    * \param ab Lexicographic pair index \f$0 \le \mathrm{ab} < \f$ `n_pairs()`.
-   * \return Zero-based offset \f$N + A \cdot \f$ `arrowhead` \f$+ \mathrm{ab} \cdot N\f$.
+   * \return Zero-based offset \f$N + A \cdot \f$ `information` \f$+ \mathrm{ab} \cdot N\f$.
    */
-  LAPLACE_HD int third_pair(int ab) const { return n + n_directions * arrowhead + ab * n; }
+  LAPLACE_HD int third_pair(int ab) const { return n + n_directions * information + ab * n; }
   /**
    * \ingroup engine
    * \brief Offset of the scalar \f$q_{ab}\f$ for pair index `ab` in an order-4 pass output.
    * \param ab Lexicographic pair index \f$0 \le \mathrm{ab} < \f$ `n_pairs()`.
-   * \return Zero-based offset \f$N + A \cdot \f$ `arrowhead` \f$+ \f$ `n_pairs()` \f$\cdot N + \mathrm{ab}\f$.
+   * \return Zero-based offset \f$N + A \cdot \f$ `information` \f$+ \f$ `n_pairs()` \f$\cdot N + \mathrm{ab}\f$.
    */
-  LAPLACE_HD int fourth_pair(int ab) const { return n + n_directions * arrowhead + n_pairs() * n + ab; }
+  LAPLACE_HD int fourth_pair(int ab) const { return n + n_directions * information + n_pairs() * n + ab; }
   /**
    * \ingroup engine
    * \brief Total number of scalars in the output of the outer pass of the given order.
@@ -160,19 +160,18 @@ void assemble_outer_rows(const row_model_view& M, const Kokkos::View<const doubl
   using S = detail_outer::outer_sizes<D, R, Order>;
   using Val = predictor_value<R, Order>;
   static_assert(S::P <= row_param_capacity, "the distrib has more parameters than row_param_capacity");
-  const arrowhead_layout lay{M.n_global, M.n_groups, M.group_width};
-  const outer_pass_layout out{M.n_coordinates(), n_directions, lay.size()};
+  const outer_pass_layout out{M.n_coordinates(), n_directions, M.information_size};
   const int nA = n_directions;
   SV sv(acc);
   Kokkos::parallel_for(
       "laplace::engine::assemble_outer_rows", Kokkos::RangePolicy<exec>(0, M.n_blocks), KOKKOS_LAMBDA(const int b) {
         auto a = sv.access();
-        (void)lay, (void)out, (void)nA, (void)V;  // captured here: nvcc refuses a first capture inside if constexpr
-        const int g = M.block_group(b), L = M.n_local();
+        (void)out, (void)nA, (void)V;  // captured here: nvcc refuses a first capture inside if constexpr
+        const int L = M.n_local();
         int gi[S::LC];
         double xl[S::LC], tau[S::LC];
         for (int s = 0; s < L; ++s) {
-          gi[s] = M.global_index(s, g);
+          gi[s] = M.global_index(s, b);
           xl[s] = x(gi[s]);
           tau[s] = 0.0;
         }
@@ -312,13 +311,10 @@ void assemble_outer_rows(const row_model_view& M, const Kokkos::View<const doubl
         }
         for (int s = 0; s < L; ++s) a(out.tau() + gi[s]) += tau[s];
         if constexpr (Order == 4) {
-          const int G0 = M.n_global;
           for (int dd = 0; dd < nA; ++dd)
             for (int r = 0; r < L; ++r)
               for (int c = 0; c <= r; ++c) {
-                const int pos = r < G0   ? lay.global(r, c)
-                                : c < G0 ? lay.cross(g, r - G0, c)
-                                         : lay.group(g, r - G0, c - G0);
+                const int pos = M.information_position(b, r, c);
                 a(out.third_direction(dd) + pos) += hd[dd][detail_rows::lower_index(r, c)];
               }
           for (int p = 0; p < nA * (nA + 1) / 2; ++p) {
@@ -388,8 +384,7 @@ void assemble_outer_row_model(const row_model& m, int order, const Kokkos::View<
   const int nA = order == 4 ? n_directions : 0;
   if (nA < 0 || nA > row_outer_direction_capacity)
     throw std::invalid_argument("assemble_outer_row_model: more directions than row_outer_direction_capacity");
-  const arrowhead_layout lay{m.view.n_global, m.view.n_groups, m.view.group_width};
-  const outer_pass_layout lo{m.n_coordinates(), nA, lay.size()};
+  const outer_pass_layout lo{m.n_coordinates(), nA, m.view.information_size};
   row_model_view::dview acc("laplace::engine::outer_pass", lo.size(order));
   bool found = false;
   [&]<class... Ds>(distrib_list<Ds...>) {

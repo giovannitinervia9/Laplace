@@ -24,11 +24,9 @@
 // needs the nodes to order one only. A linear predictor is a stored design
 // row times x, so the derivatives in x are those in eta times the row.
 //
-// The output (row_assembly) is in the layout of the arrowhead (row_model.hpp):
-// gradient in the numbering of x; the information as the global block (lower
-// triangle by rows), then for each group its square block (lower triangle by
-// rows) and its cross block with the globals (group_width x n_global, by
-// rows).
+// The output (row_assembly) is the gradient in the numbering of x and the
+// information in the layout of row_model.hpp (information_position): with one
+// grouping, the arrowhead.
 
 #include <laplace/core/config.hpp>
 #include <laplace/distrib/core.hpp>
@@ -69,73 +67,12 @@ struct distrib_list {};
 
 /**
  * \ingroup engine
- * \brief Index mapping for the arrowhead layout of row_assembly::information.
- *
- * Stores the lower triangle of the \f$n_{\mathrm{global}} \times n_{\mathrm{global}}\f$ global block
- * by rows, followed for each group \f$g \in [0, G)\f$ (`n_groups`) by its
- * \f$d_{\mathrm{grp}} \times d_{\mathrm{grp}}\f$ (`group_width`) square block lower triangle by rows
- * and its \f$d_{\mathrm{grp}} \times n_{\mathrm{global}}\f$ cross block with the globals by rows.
- *
- * \see row_assembly, assemble_rows(), \ref engine
- */
-struct arrowhead_layout {
-  int n_global = 0, n_groups = 0, group_width = 0;
-  /**
-   * \ingroup engine
-   * \brief Number of lower-triangular entries in the global block.
-   * \return \f$n_{\mathrm{global}}(n_{\mathrm{global}} + 1)/2\f$.
-   */
-  LAPLACE_HD int global_size() const { return n_global * (n_global + 1) / 2; }
-  /**
-   * \ingroup engine
-   * \brief Number of entries per group (square block lower triangle plus cross block).
-   * \return \f$d_{\mathrm{grp}}(d_{\mathrm{grp}} + 1)/2 + d_{\mathrm{grp}} n_{\mathrm{global}}\f$.
-   */
-  LAPLACE_HD int group_block_size() const { return group_width * (group_width + 1) / 2 + group_width * n_global; }
-  /**
-   * \ingroup engine
-   * \brief Total number of stored entries in the arrowhead layout.
-   * \return `global_size() + n_groups * group_block_size()`.
-   */
-  LAPLACE_HD int size() const { return global_size() + n_groups * group_block_size(); }
-  /**
-   * \ingroup engine
-   * \brief Offset of entry \f$(r, c)\f$ in the global block (\f$0 \le c \le r < n_{\mathrm{global}}\f$).
-   * \param r Row index.
-   * \param c Column index.
-   * \return Zero-based offset in `row_assembly::information`.
-   */
-  LAPLACE_HD int global(int r, int c) const { return r * (r + 1) / 2 + c; }
-  /**
-   * \ingroup engine
-   * \brief Offset of entry \f$(j, l)\f$ in the square block of group \f$g\f$ (\f$0 \le l \le j < d_{\mathrm{grp}}\f$).
-   * \param g Group index.
-   * \param j Row index within group \f$g\f$.
-   * \param l Column index within group \f$g\f$.
-   * \return Zero-based offset in `row_assembly::information`.
-   */
-  LAPLACE_HD int group(int g, int j, int l) const { return global_size() + g * group_block_size() + j * (j + 1) / 2 + l; }
-  /**
-   * \ingroup engine
-   * \brief Offset of entry \f$(j, c)\f$ in the cross block between group \f$g\f$ and global coordinate \f$c\f$.
-   * \param g Group index.
-   * \param j Within-group coordinate index.
-   * \param c Global coordinate index.
-   * \return Zero-based offset in `row_assembly::information`.
-   */
-  LAPLACE_HD int cross(int g, int j, int c) const {
-    return global_size() + g * group_block_size() + group_width * (group_width + 1) / 2 + j * n_global + c;
-  }
-};
-
-/**
- * \ingroup engine
  * \brief Host result of a row kernel evaluation.
  *
  * Holds the objective value \f$f(x) = -\sum_i w_i \ell_i(x)\f$, and when requested by `row_quantity`,
- * the gradient in coordinate order and the information matrix in arrowhead_layout order.
+ * the gradient in coordinate order and the information matrix in the layout of row_model_view::information_position().
  *
- * \see arrowhead_layout, assemble_row_model(), \ref engine
+ * \see row_model_view, assemble_row_model(), \ref engine
  */
 struct row_assembly {
   double value = 0.0;
@@ -277,7 +214,7 @@ struct kernel_sizes {
  * Launches one work item per unit block over `M.n_blocks` on `row_model_view::exec` using
  * `Kokkos::Experimental::ScatterView`. Evaluates pointwise nodes only up to order 0 (`value`),
  * 1 (`gradient` or `expected_information`), or 2 (`observed_information`). `acc` must have length
- * \f$1\f$ (`value`), \f$1 + N\f$ (`gradient`), or \f$1 + N + \f$ `arrowhead_layout::size()`
+ * \f$1\f$ (`value`), \f$1 + N\f$ (`gradient`), or \f$1 + N + \f$ `row_model_view::information_size`
  * (`observed_information` or `expected_information`), where \f$N = \f$ `M.n_coordinates()`.
  *
  * \tparam D Distribution type satisfying \ref distrib_core (`D::n_params <= row_param_capacity`).
@@ -287,7 +224,7 @@ struct kernel_sizes {
  * \param x Device view of coordinates of length \f$N\f$.
  * \param acc Device accumulator view initialized by the caller; contributions are added into it.
  *
- * \see assemble_row_model(), row_quantity, arrowhead_layout, \ref engine
+ * \see assemble_row_model(), row_quantity, row_model_view, \ref engine
  */
 template <class D, int R, row_quantity Q>
 void assemble_rows(const row_model_view& M, const Kokkos::View<const double*, row_model_view::mem>& x,
@@ -299,15 +236,14 @@ void assemble_rows(const row_model_view& M, const Kokkos::View<const double*, ro
   using S = detail_rows::kernel_sizes<D, R, Q>;
   static_assert(S::P <= row_param_capacity, "the distrib has more parameters than row_param_capacity");
   const int N = M.n_coordinates();
-  const arrowhead_layout lay{M.n_global, M.n_groups, M.group_width};
   SV sv(acc);
   Kokkos::parallel_for(
       "laplace::engine::assemble_rows", Kokkos::RangePolicy<exec>(0, M.n_blocks), KOKKOS_LAMBDA(const int b) {
         auto a = sv.access();
-        (void)N, (void)lay;  // captured here: nvcc refuses a first capture inside if constexpr
-        const int g = M.block_group(b), L = M.n_local();
+        (void)N;  // captured here: nvcc refuses a first capture inside if constexpr
+        const int L = M.n_local();
         double xl[S::LC];
-        for (int s = 0; s < L; ++s) xl[s] = x(M.global_index(s, g));
+        for (int s = 0; s < L; ++s) xl[s] = x(M.global_index(s, b));
         double f = 0.0, gl[S::want_g ? S::LC : 1], Hl[S::NH];
         if constexpr (S::want_g)
           for (int s = 0; s < L; ++s) gl[s] = 0.0;
@@ -383,17 +319,10 @@ void assemble_rows(const row_model_view& M, const Kokkos::View<const double*, ro
         }
         a(0) += f;
         if constexpr (S::want_g)
-          for (int s = 0; s < L; ++s) a(1 + M.global_index(s, g)) += gl[s];
+          for (int s = 0; s < L; ++s) a(1 + M.global_index(s, b)) += gl[s];
         if constexpr (S::want_h) {
-          const int G0 = M.n_global;
           for (int r = 0; r < L; ++r)
-            for (int c = 0; c <= r; ++c) {
-              const double h = Hl[detail_rows::lower_index(r, c)];
-              const int pos = r < G0   ? lay.global(r, c)
-                              : c < G0 ? lay.cross(g, r - G0, c)
-                                       : lay.group(g, r - G0, c - G0);
-              a(1 + N + pos) += h;
-            }
+            for (int c = 0; c <= r; ++c) a(1 + N + M.information_position(b, r, c)) += Hl[detail_rows::lower_index(r, c)];
         }
       });
   Kokkos::Experimental::contribute(acc, sv);
@@ -452,10 +381,10 @@ template <class List>
 void assemble_row_model(const row_model& m, const Kokkos::View<const double*, row_model_view::mem>& x, row_quantity q,
                         row_assembly& out) {
   const int N = m.n_coordinates();
-  const arrowhead_layout lay{m.view.n_global, m.view.n_groups, m.view.group_width};
+  const int I = m.view.information_size;
   const bool g = q != row_quantity::value;
   const bool h = q == row_quantity::observed_information || q == row_quantity::expected_information;
-  const int size = 1 + (g ? N : 0) + (h ? lay.size() : 0);
+  const int size = 1 + (g ? N : 0) + (h ? I : 0);
   row_model_view::dview acc("laplace::engine::row_assembly", size);
   bool found = false;
   [&]<class... Ds>(distrib_list<Ds...>) {
@@ -467,8 +396,8 @@ void assemble_row_model(const row_model& m, const Kokkos::View<const double*, ro
   out.value = hacc(0);
   out.gradient.assign(g ? N : 0, 0.0);
   for (int j = 0; g && j < N; ++j) out.gradient[j] = hacc(1 + j);
-  out.information.assign(h ? lay.size() : 0, 0.0);
-  for (int j = 0; h && j < lay.size(); ++j) out.information[j] = hacc(1 + N + j);
+  out.information.assign(h ? I : 0, 0.0);
+  for (int j = 0; h && j < I; ++j) out.information[j] = hacc(1 + N + j);
 }
 
 }  // namespace laplace::engine

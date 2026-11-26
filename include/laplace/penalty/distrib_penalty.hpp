@@ -15,12 +15,14 @@
 //
 // The descriptors of the penalty are those of M, written in
 // distrib_penalty_traits<M>, specialized for the laws that have a penalty
-// reading (so far mvgaussian2_distrib<S>); another M does not compile. The
-// prox descriptor is not among them: it follows from M's optional prox_y,
+// reading (mvgaussian1_distrib<S> and mvgaussian2_distrib<S> here, the
+// univariate laws and their products in independent_product_penalty.hpp);
+// another M does not compile. The prox descriptor is not among them: it follows from M's optional prox_y,
 // which prox_beta() forwards at mu_0 (section 5c).
 #pragma once
 
 #include <laplace/distrib/multivariate_core.hpp>
+#include <laplace/distrib/mvgaussian1.hpp>
 #include <laplace/distrib/mvgaussian2.hpp>
 #include <laplace/penalty/core.hpp>
 
@@ -88,6 +90,34 @@ struct distrib_penalty_traits<distrib::mvgaussian2_distrib<S>> {
   static constexpr int theta_regularity = distrib::infinitely_smooth;
   /// \f$Q = \sum_k \lambda_k S_k\f$ exactly for `pdmat::weighted_sum_psdmat`.
   static constexpr bool q_linear_in_theta = std::is_same_v<S, pdmat::weighted_sum_psdmat>;
+  /// Scale mixture: none declared.
+  static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::none;
+  /// Weak-convexity constant: 0, the penalty is convex.
+  LAPLACE_HD static double weak_convexity(const double*) { return 0.0; }
+};
+
+/**
+ * \ingroup penalty_distrib_penalty
+ * \brief Descriptors of the penalty of `distrib::mvgaussian1_distrib<S>`, the Gaussian prior in the covariance form.
+ *
+ * The penalty \f$\tfrac12 \beta^\top \Sigma(\theta)^{-1}\beta + \tfrac12\log\det\Sigma(\theta) + \tfrac{d}{2}\log 2\pi\f$
+ * is quadratic in \f$\beta\f$: \f$C^\infty\f$ in \f$\beta\f$ and in \f$\theta\f$, convex, without
+ * kinks, coupled through \f$\Sigma^{-1}\f$, never linear in \f$\theta\f$.
+ *
+ * \tparam S Matrix structure.
+ */
+template <class S>
+struct distrib_penalty_traits<distrib::mvgaussian1_distrib<S>> {
+  /// Regularity in \f$\beta\f$: \f$C^\infty\f$.
+  static constexpr int beta_regularity = distrib::infinitely_smooth;
+  /// Kinks: none.
+  static constexpr penalty_kink_geometry kinks = penalty_kink_geometry::none;
+  /// Structure: coupled through the inverse of the covariance.
+  static constexpr penalty_structure structure = penalty_structure::coupled;
+  /// Regularity in \f$\theta\f$: \f$C^\infty\f$.
+  static constexpr int theta_regularity = distrib::infinitely_smooth;
+  /// The precision \f$\Sigma(\theta)^{-1}\f$ is not a weighted sum in \f$\theta\f$.
+  static constexpr bool q_linear_in_theta = false;
   /// Scale mixture: none declared.
   static constexpr penalty_scale_mixture scale_mixture = penalty_scale_mixture::none;
   /// Weak-convexity constant: 0, the penalty is convex.

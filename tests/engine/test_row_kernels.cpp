@@ -1,4 +1,4 @@
-// The row kernels of the engine (engine/row_kernels.hpp) on the three models
+// The row kernels of the engine (engine/row_kernels.hpp) on the models
 // of engine_models.hpp, at a point away from the optimum:
 //   - against a twin written here by hand: theta(eta) and its derivatives
 //     model by model, composed with dense tensors over the original
@@ -143,7 +143,7 @@ void check_model(const le::row_model_spec& s, int model, const std::vector<doubl
   const le::row_model m = le::build_row_model(s, D::n_params, 7);
   const int N = static_cast<int>(x.size());
   REQUIRE(m.n_coordinates() == N);
-  dense_objective obs(m, {}, le::row_curvature::observed), exp(m, {}, le::row_curvature::expected);
+  dense_objective obs(m, {}, {}, le::row_curvature::observed), exp(m, {}, {}, le::row_curvature::expected);
   const kernel_eval ko = run(obs, x), ke = run(exp, x);
   double tf, tf2;
   std::vector<double> tg, tH, tg2, tHe;
@@ -194,6 +194,15 @@ TEST_CASE("engine row kernels: gamma with a logistic curve fed by a link, agains
   std::vector<double> x = {2.7, 4.6, std::log(1.2), -1.7};
   for (int g = 0; g < 10; ++g) x.push_back(0.05 * (g % 5) - 0.1);
   check_model<ld::gamma1_distrib>(s, GAMMA, x);
+}
+
+// Two crossed groupings: blocks of one pair of groups, and the information's blocks of the pairs met
+TEST_CASE("engine row kernels: Gaussian with two crossed groupings, against the twin and differences") {
+  const auto s = crossed_spec(300, 6, 5, 14);
+  std::vector<double> x = {0.8, 0.3, -0.1, 0.5};
+  for (int g = 0; g < 6; ++g) x.push_back(0.1 * (g % 4) - 0.15), x.push_back(0.05 * (g % 3) - 0.05);
+  for (int h = 0; h < 5; ++h) x.push_back(0.08 * (h % 3) - 0.1);
+  check_model<ld::gaussian1_distrib>(s, GAUSS, x);
 }
 
 TEST_CASE("engine row kernels: Student t, separable, against the twin and differences") {

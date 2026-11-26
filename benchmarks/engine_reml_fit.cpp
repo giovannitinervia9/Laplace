@@ -37,8 +37,11 @@ int run(int argc, char** argv) {
   const bool lk = model == "lk";
   auto pf = lk ? engine_test::kokkos_fit_model(argv[2], 0.0, 0.0, 0.0, 0.0) : engine_test::lk3_gamma_model(argv[2], 0.0, -2.0);
   std::vector<double> u0;
+  std::vector<le::penalty_hyperparameter> hyper;
   if (lk) {
-    pf.penalties[0].hyperparameter = 0, pf.penalties[1].hyperparameter = 1;
+    // log tau of the group prior (gaussian1's sigma through the logarithm), log lambda of the smooth
+    pf.penalties[0].theta_source = {0}, pf.penalties[1].theta_source = {1};
+    hyper = {{engine_test::log_link()}, {}};
     double my = 0.0, vy = 0.0;
     for (double v : pf.spec.y) my += v;
     my /= pf.spec.y.size();
@@ -46,8 +49,9 @@ int run(int argc, char** argv) {
     vy /= pf.spec.y.size() - 1;
     u0 = {0.0, 0.0, 0.5 * std::log(vy), 0.0};
   } else {
-    pf.penalties[0].hyperparameter = 0;
-    u0 = {-2.0 * std::log(0.1 * 150.0 + 1e-8), -2.0};
+    pf.penalties[0].theta_source = {0};
+    hyper = {{engine_test::log_link()}};
+    u0 = {std::log(0.1 * 150.0 + 1e-8), -2.0};
   }
   const int reps = argc > 3 ? std::atoi(argv[3]) : 3;
   const int block = argc > 4 ? std::atoi(argv[4]) : 16;
@@ -84,12 +88,12 @@ int run(int argc, char** argv) {
     }
   };
   if (std::getenv("ENGINE_REML_TRACE")) {
-    criterion crit(m, pf.penalties, pf.held, {}, pf.x0, inner);
+    criterion crit(m, pf.penalties, hyper, pf.held, {}, pf.x0, inner);
     traced t{&crit};
     (void)lo::minimize(outer, t, uv);
   }
   for (int k = 0; k < reps; ++k) {
-    criterion crit(m, pf.penalties, pf.held, {}, pf.x0, inner);
+    criterion crit(m, pf.penalties, hyper, pf.held, {}, pf.x0, inner);
     const auto t0 = std::chrono::steady_clock::now();
     r = le::fit_marginal(crit, uv, outer);
     best = std::min(best, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
@@ -106,8 +110,10 @@ int run(int argc, char** argv) {
               c.not_positive_definite, c.outer_passes[0], c.outer_passes[1], c.inner_kernels.calls[0],
               c.inner_kernels.calls[1], c.inner_kernels.calls[2], c.inner_kernels.calls[3],
               c.inner_kernels.expected_fallbacks, c.inner_kernels.reused);
-  std::printf("TIME (last run) inner %.6f s (kernels %.6f), host algebra %.6f s, outer passes %.6f s\n", c.seconds_inner,
-              c.inner_kernels.seconds, c.seconds_algebra, c.seconds_passes);
+  std::printf("TIME (last run) inner %.6f s (kernels %.6f), host algebra %.6f s, outer passes %.6f s, penalties %.6f s, "
+              "polishing steps %ld\n",
+              c.seconds_inner, c.inner_kernels.seconds, c.seconds_algebra, c.seconds_passes, c.seconds_penalties,
+              c.polishing_steps);
   for (int a = 0; a < static_cast<int>(u0.size()); ++a) std::printf("OUTER %d %.17g\n", a, r.optimizer.point(a));
   return 0;
 }

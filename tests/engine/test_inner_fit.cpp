@@ -29,8 +29,8 @@ lo::optimizer_vector point(const std::vector<double>& v) {
 }
 
 // the group effects of a model start at n_global: a prior N(0, tau^2) on each
-std::vector<le::quadratic_penalty_term> group_prior(const le::row_model_spec& s, double tau) {
-  return {le::quadratic_penalty_term{s.n_global, s.n_groups * s.group_width, 1, {1.0 / (tau * tau)}}};
+std::vector<le::penalty_term> group_prior(const le::row_model_spec& s, double tau) {
+  return {group_gaussian_prior(s, 0, -1, tau)};
 }
 
 // Newton with a tight stop: the default decrement tolerance (1e-6, absolute) leaves gradients of 1e-3
@@ -81,13 +81,60 @@ TEST_CASE("engine inner fit: Gaussian with a group prior, dense and sparse curva
   CHECK(sparse.counts().reused == 2);
 }
 
+// A penalty whose replicate crosses the groups: a random walk over the group effects with a small
+// ridge (the Gaussian prior with precision lambda (D'D + I/10), D the first differences), so the sparse
+// pattern holds entries outside the arrowhead; dense and sparse curvatures agree, and the fit lands on
+// the same point.
+TEST_CASE("engine inner fit: a penalty across the groups, outside the arrowhead") {
+  const auto s = gauss_spec(1500, 15, 24);
+  const auto m = le::build_row_model(s, 2);
+  const int N = m.n_coordinates(), G = s.n_groups;
+  std::vector<double> S(G * G, 0.0);
+  for (int g = 0; g + 1 < G; ++g) {
+    S[g + G * g] += 1.0, S[(g + 1) + G * (g + 1)] += 1.0;
+    S[g + G * (g + 1)] -= 1.0, S[(g + 1) + G * g] -= 1.0;
+  }
+  // a small ridge: without it a common shift of the effects is the intercept's, and no minimum is unique
+  for (int g = 0; g < G; ++g) S[g + G * g] += 0.1;
+  const std::vector<le::penalty_term> pen = {smooth_prior(s.n_global, G, S, -1, std::log(3.0))};
+  le::row_model_objective<engine_distribs, lo::dense_curvature_matrix> dense(m, pen);
+  le::row_model_objective<engine_distribs, lo::sparse_curvature_matrix> sparse(m, pen);
+  // the curvature at a point, entry by entry
+  std::vector<double> x(N);
+  for (int j = 0; j < N; ++j) x[j] = 0.1 * std::sin(1.0 + j);
+  lo::optimizer_vector gd("gd", N), gs("gs", N);
+  lo::dense_curvature_matrix Hd("Hd", N, N);
+  lo::sparse_curvature_matrix Hs;
+  const double fd = dense.observed_value_gradient_curvature(point(x), gd, Hd);
+  const double fs = sparse.observed_value_gradient_curvature(point(x), gs, Hs);
+  // two assemblies: on the GPU the order of the atomic sums moves the last bits, so the bounds are relative
+  CHECK(std::abs(fd - fs) <= 1e-14 * std::abs(fd));
+  double eg = 0.0, eh = 0.0, sg = 0.0, sh = 0.0;
+  for (int j = 0; j < N; ++j) eg = std::max(eg, std::abs(gd(j) - gs(j))), sg = std::max(sg, std::abs(gd(j)));
+  for (int c = 0; c < N; ++c)
+    for (int r = c; r < N; ++r) {
+      int q = -1;
+      for (int k = Hs.col_ptr[c]; k < Hs.col_ptr[c + 1]; ++k)
+        if (Hs.row_idx[k] == r) q = k;
+      eh = std::max(eh, std::abs(Hd(r, c) - (q >= 0 ? Hs.values[q] : 0.0))), sh = std::max(sh, std::abs(Hd(r, c)));
+    }
+  CHECK(eg <= 1e-13 * sg);
+  CHECK(eh <= 1e-13 * sh);
+  const std::vector<double> x0(N, 0.0);
+  const auto rd = le::fit_inner(dense, point(x0), tight());
+  const auto rs = le::fit_inner(sparse, point(x0), tight());
+  REQUIRE(lo::optimizer_succeeded(rd.optimizer.status));
+  REQUIRE(lo::optimizer_succeeded(rs.optimizer.status));
+  for (int j = 0; j < N; ++j) CHECK(std::abs(rd.optimizer.point(j) - rs.optimizer.point(j)) <= 1e-7);
+}
+
 TEST_CASE("engine inner fit: held coordinates keep their value") {
   const auto s = gauss_spec(1000, 20, 22);
   const auto m = le::build_row_model(s, 2);
   std::vector<double> x0(m.n_coordinates(), 0.0);
   x0[2] = -0.25, x0[3] = 0.5;
   le::row_model_objective<engine_distribs, lo::sparse_curvature_matrix> obj(
-      m, group_prior(s, 0.5), le::row_curvature::observed_else_expected, {2, 3});
+      m, group_prior(s, 0.5), {}, le::row_curvature::observed_else_expected, {2, 3});
   const auto r = le::fit_inner(obj, point(x0), tight());
   REQUIRE(lo::optimizer_succeeded(r.optimizer.status));
   CHECK(r.optimizer.point(2) == -0.25);
@@ -127,7 +174,7 @@ TEST_CASE("engine inner fit: the Gaussian model of the kokkos_fit prototype, aga
       0.084581719592005056,  -0.032412682735832241, 0.34526164857802366};
   const auto m = le::build_row_model(pf.spec, 2);
   le::row_model_objective<engine_distribs, lo::sparse_curvature_matrix> obj(
-      m, pf.penalties, le::row_curvature::observed_else_expected, pf.held);
+      m, pf.penalties, {}, le::row_curvature::observed_else_expected, pf.held);
   const auto r = le::fit_inner(obj, point(pf.x0), tight());
   REQUIRE(lo::optimizer_succeeded(r.optimizer.status));
   for (std::size_t j = 0; j < ref.size(); ++j) CHECK(std::abs(r.optimizer.point(j) - ref[j]) <= 1e-9);
@@ -148,7 +195,7 @@ TEST_CASE("engine inner fit: the gamma model with a logistic curve of the lk3 pr
       -10.887191812090675, 15.043697945548853,  5.7888364757847892,  13.499021388615727};
   const auto m = le::build_row_model(pf.spec, 2);
   le::row_model_objective<engine_distribs, lo::sparse_curvature_matrix> obj(
-      m, pf.penalties, le::row_curvature::observed_else_expected, pf.held);
+      m, pf.penalties, {}, le::row_curvature::observed_else_expected, pf.held);
   const auto r = le::fit_inner(obj, point(pf.x0), tight());
   REQUIRE(lo::optimizer_succeeded(r.optimizer.status));
   for (std::size_t j = 0; j < ref.size(); ++j)
@@ -159,8 +206,8 @@ TEST_CASE("engine inner fit: Student t, dense curvature, observed and expected i
   const auto s = student_spec(3000, 24);
   const auto m = le::build_row_model(s, 3);
   const std::vector<double> x0 = {0.0, 0.0, 0.0, 0.0, std::log(10.0)};
-  le::row_model_objective<engine_distribs, lo::dense_curvature_matrix> obs(m, {}, le::row_curvature::observed);
-  le::row_model_objective<engine_distribs, lo::dense_curvature_matrix> exp(m, {}, le::row_curvature::expected);
+  le::row_model_objective<engine_distribs, lo::dense_curvature_matrix> obs(m, {}, {}, le::row_curvature::observed);
+  le::row_model_objective<engine_distribs, lo::dense_curvature_matrix> exp(m, {}, {}, le::row_curvature::expected);
   const auto ro = le::fit_inner(obs, point(x0), tight());
   const auto re = le::fit_inner(exp, point(x0), tight());
   REQUIRE(lo::optimizer_succeeded(ro.optimizer.status));
@@ -168,4 +215,78 @@ TEST_CASE("engine inner fit: Student t, dense curvature, observed and expected i
   for (int j = 0; j < 5; ++j) CHECK(std::abs(ro.optimizer.point(j) - re.optimizer.point(j)) <= 1e-5);
   CHECK(gradient_norm(obs, ro.optimizer.point) <= 1e-4);
   CHECK(std::exp(ro.optimizer.point(4)) == doctest::Approx(5.0).epsilon(0.4));
+}
+
+namespace {
+
+lo::proximal_newton_optimizer<> tight_proximal() {
+  lo::proximal_newton_optimizer<> pn;
+  pn.stop_rule.tolerance = 1e-14;
+  return pn;
+}
+
+}  // namespace
+
+// A lasso on the six coefficients of the location of a Gaussian whose scale is modelled: laplace1 of scale
+// s on each (one replicate per coefficient, separable, so the subproblem runs coordinate descent). The
+// optimality conditions at the fit: g_j + sign(b_j) / s = 0 where b_j != 0, |g_j| <= 1 / s where b_j = 0,
+// g the gradient of the smooth part; g = 0 on the unpenalized coordinates.
+TEST_CASE("engine inner fit: a lasso on the location, proximal Newton, against the optimality conditions") {
+  const auto s = lasso_spec(2000, 41);
+  const auto m = le::build_row_model(s, 2);
+  const double scale = 1.0 / 60.0;
+  const std::vector<le::penalty_term> pen = {univariate_prior(laplace::distrib::laplace1_distrib{}, 1, 6, 1, {-1}, {scale})};
+  le::row_model_composite_objective<engine_distribs> obj(m, pen);
+  CHECK(obj.nonsmooth_block_count() == 6);
+  const std::vector<double> x0(9, 0.0);
+  const auto r = le::fit_inner(obj, point(x0), tight_proximal());
+  REQUIRE(lo::optimizer_succeeded(r.optimizer.status));
+  lo::optimizer_vector g("g", 9);
+  obj.value_gradient(r.optimizer.point, g);
+  int zeros = 0;
+  for (int j = 0; j < 9; ++j) {
+    const double b = r.optimizer.point(j);
+    if (j < 1 || j > 6) CHECK(std::abs(g(j)) <= 1e-6);
+    else if (b != 0.0) CHECK(std::abs(g(j) + (b > 0.0 ? 1.0 : -1.0) / scale) <= 1e-7 / scale);
+    else {
+      CHECK(std::abs(g(j)) <= (1.0 + 1e-7) / scale);
+      ++zeros;
+    }
+  }
+  MESSAGE("lasso: ", zeros, " coefficients at zero, b1 ", r.optimizer.point(1), ", b4 ", r.optimizer.point(4),
+          ", eigenvalue-corrected iterations ", r.optimizer.eigen_modified_iterations);
+  CHECK(zeros >= 1);  // at least one coefficient on its kink, where the subgradient condition applies
+  CHECK(r.optimizer.point(1) != 0.0);
+  CHECK(r.optimizer.point(4) != 0.0);
+}
+
+// A group lasso on the same six coefficients: mvpowerexp1 over sigma^2 I with shape 1/2, the penalty
+// ||b|| / (2 sigma) plus its constant (not separable: one block, FISTA on the subproblem). At the fit,
+// with b != 0, g + b / (2 sigma ||b||) = 0 on the group.
+TEST_CASE("engine inner fit: a group lasso on the location, proximal Newton, against the optimality conditions") {
+  const auto s = lasso_spec(2000, 42);
+  const auto m = le::build_row_model(s, 2);
+  using pe = laplace::distrib::mvpowerexp1_distrib<laplace::pdmat::scaled_identity_pdmat>;
+  laplace::pdmat::scaled_identity_pdmat I;
+  I.dim = 6;
+  const double log_sigma = std::log(0.01);
+  const auto pen = le::make_penalty_term(laplace::penalty::distrib_penalty<pe>{pe(I)}, {{1, 2, 3, 4, 5, 6}}, {-1, -1},
+                                         {log_sigma, 0.5});
+  le::row_model_composite_objective<engine_distribs> obj(m, {pen});
+  CHECK(obj.nonsmooth_block_count() == 1);
+  CHECK(!obj.nonsmooth_block_separable(0));
+  const std::vector<double> x0(9, 0.0);
+  const auto r = le::fit_inner(obj, point(x0), tight_proximal());
+  REQUIRE(lo::optimizer_succeeded(r.optimizer.status));
+  lo::optimizer_vector g("g", 9);
+  obj.value_gradient(r.optimizer.point, g);
+  double nb = 0.0;
+  for (int j = 1; j <= 6; ++j) nb += r.optimizer.point(j) * r.optimizer.point(j);
+  nb = std::sqrt(nb);
+  REQUIRE(nb > 0.0);
+  const double c = 1.0 / (2.0 * std::exp(log_sigma) * nb);
+  double e = 0.0;
+  for (int j = 0; j < 9; ++j) e = std::max(e, std::abs(g(j) + (j >= 1 && j <= 6 ? c * r.optimizer.point(j) : 0.0)));
+  MESSAGE("group lasso: ||b|| ", nb, ", stationarity ", e, " in ", r.optimizer.iterations, " iterations");
+  CHECK(e <= 1e-6 / (2.0 * std::exp(log_sigma)));  // relative to the size of the subgradient, 1/(2 sigma)
 }

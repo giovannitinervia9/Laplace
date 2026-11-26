@@ -51,7 +51,7 @@ int run(int argc, char** argv) {
   le::inner_fit_report r;
   for (int k = 0; k < reps; ++k) {
     le::row_model_objective<engine_test::engine_distribs, lo::sparse_curvature_matrix> obj(
-        m, pf.penalties, le::row_curvature::observed_else_expected, pf.held);
+        m, pf.penalties, {}, le::row_curvature::observed_else_expected, pf.held);
     const auto t0 = std::chrono::steady_clock::now();
     r = le::fit_inner(obj, x0, newton);
     best = std::min(best, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());

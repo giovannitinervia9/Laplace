@@ -19,6 +19,10 @@
 #include <laplace/distrib/student_t1.hpp>
 #include <laplace/engine/inner_fit.hpp>
 #include <laplace/engine/row_model.hpp>
+#include <laplace/pdmat/scaled_identity.hpp>
+#include <laplace/pdmat/weighted_sum.hpp>
+#include <laplace/penalty/distrib_penalty.hpp>
+#include <laplace/penalty/independent_product_penalty.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -60,6 +64,37 @@ inline laplace::bijector::scalar_bijector log_link() {
   return laplace::bijector::scalar_bijector{laplace::bijector::scalar_bijector_map::log};
 }
 
+// ------------------------------------------------- penalties
+//
+// A univariate law D (of laplace::distrib, through univariate_as_multivariate) as the prior of each
+// coordinate first + g * stride + j, g = 0 .. G - 1: one replicate per group.
+template <class D>
+le::penalty_term univariate_prior(D law, int first, int G, int stride, std::vector<int> source, std::vector<double> value) {
+  using uam = laplace::distrib::univariate_as_multivariate<D>;
+  const laplace::penalty::distrib_penalty<uam> p{uam(law)};
+  std::vector<std::vector<int>> reps;
+  for (int g = 0; g < G; ++g) reps.push_back({first + g * stride});
+  return le::make_penalty_term(p, reps, std::move(source), std::move(value));
+}
+
+// u_g ~ N(0, tau^2) on the group effects (gaussian1, theta = tau)
+inline le::penalty_term group_gaussian_prior(const le::row_model_spec& s, int j, int source, double tau) {
+  return univariate_prior(laplace::distrib::gaussian1_distrib{}, s.n_global + j, s.n_groups, s.group_width, {source}, {tau});
+}
+
+// the improper Gaussian prior lambda S on the coordinates [first, first + p), S p x p column-major
+// (mvgaussian2 over weighted_sum_psdmat, theta = log lambda)
+inline le::penalty_term smooth_prior(int first, int p, const std::vector<double>& S, int source, double log_lambda) {
+  Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace> m("S", p, p);
+  for (int j = 0; j < p; ++j)
+    for (int k = 0; k < p; ++k) m(j, k) = S[j + p * k];
+  using mvg = laplace::distrib::mvgaussian2_distrib<laplace::pdmat::weighted_sum_psdmat>;
+  const laplace::penalty::distrib_penalty<mvg> pen{mvg(laplace::pdmat::weighted_sum_psdmat(std::vector<decltype(m)>{m}))};
+  std::vector<int> c(p);
+  for (int j = 0; j < p; ++j) c[j] = first + j;
+  return le::make_penalty_term(pen, {c}, {source}, {log_lambda});
+}
+
 inline le::pointwise_node link_node(int input) {
   le::pointwise_node nd;
   nd.kind = le::pointwise_node_kind::link;
@@ -88,6 +123,97 @@ inline le::row_model_spec gauss_spec(int n, int G, std::uint64_t seed) {
   m.design = {le::design_column(0, one, 0), le::design_column(0, x, 1), le::design_column(1, one, 2),
               le::design_column(1, w, 3)};
   m.design.push_back(le::design_group_effect(m, 0, one, 0));
+  m.nodes = {link_node(1)};
+  m.param_value = {0, 2};
+  return m;
+}
+
+// gauss with a random intercept in each predictor: mu = b0 + b1 x + u_g, log sigma = c0 + c1 w + v_g,
+// (u_g, v_g) correlated. Coordinates: b0, b1, c0, c1, then (u_g, v_g) for g = 0 .. G - 1
+inline le::row_model_spec gauss2_spec(int n, int G, std::uint64_t seed) {
+  rng r(seed);
+  le::row_model_spec m;
+  m.n_predictors = 2;
+  m.distrib = GAUSS;
+  m.n_global = 4;
+  m.n_groups = G, m.group_width = 2;
+  std::vector<double> x(n), w(n), one(n, 1.0), u(G), v(G);
+  for (int g = 0; g < G; ++g) {
+    const double a = r.norm(), b = r.norm();
+    u[g] = 0.5 * a, v[g] = 0.2 * (0.6 * a + 0.8 * b);
+  }
+  m.group.resize(n);
+  m.y.resize(n);
+  for (int i = 0; i < n; ++i) {
+    x[i] = r.norm(), w[i] = r.unif() - 0.5, m.group[i] = static_cast<int>(r.next() % G);
+    const double mu = 1.0 + 0.5 * x[i] + u[m.group[i]], sigma = std::exp(-0.3 + 0.8 * w[i] + v[m.group[i]]);
+    m.y[i] = mu + sigma * r.norm();
+  }
+  m.design = {le::design_column(0, one, 0), le::design_column(0, x, 1), le::design_column(1, one, 2),
+              le::design_column(1, w, 3)};
+  m.design.push_back(le::design_group_effect(m, 0, one, 0));
+  m.design.push_back(le::design_group_effect(m, 1, one, 1));
+  m.nodes = {link_node(1)};
+  m.param_value = {0, 2};
+  return m;
+}
+
+// two crossed groupings: mu = b0 + b1 x + u_g + a_h, log sigma = c0 + c1 w + v_g, g of grouping A
+// (width 2: u_g, v_g) and h of grouping B (width 1), drawn independently of g. Coordinates: b0, b1, c0,
+// c1, then (u_g, v_g) for g = 0 .. G - 1, then a_h for h = 0 .. H - 1
+inline le::row_model_spec crossed_spec(int n, int G, int H, std::uint64_t seed) {
+  rng r(seed);
+  le::row_model_spec m;
+  m.n_predictors = 2;
+  m.distrib = GAUSS;
+  m.n_global = 4;
+  m.n_groups = G, m.group_width = 2;
+  m.crossed.resize(1);
+  auto& B = m.crossed[0];
+  B.n_groups = H, B.width = 1;
+  std::vector<double> x(n), w(n), one(n, 1.0), u(G), v(G), a(H);
+  for (int g = 0; g < G; ++g) u[g] = 0.5 * r.norm(), v[g] = 0.2 * r.norm();
+  for (int h = 0; h < H; ++h) a[h] = 0.4 * r.norm();
+  m.group.resize(n), B.group.resize(n);
+  m.y.resize(n);
+  for (int i = 0; i < n; ++i) {
+    x[i] = r.norm(), w[i] = r.unif() - 0.5;
+    m.group[i] = static_cast<int>(r.next() % G), B.group[i] = static_cast<int>(r.next() % H);
+    const double mu = 1.0 + 0.5 * x[i] + u[m.group[i]] + a[B.group[i]];
+    const double sigma = std::exp(-0.3 + 0.8 * w[i] + v[m.group[i]]);
+    m.y[i] = mu + sigma * r.norm();
+  }
+  m.design = {le::design_column(0, one, 0), le::design_column(0, x, 1), le::design_column(1, one, 2),
+              le::design_column(1, w, 3)};
+  m.design.push_back(le::design_group_effect(m, 0, one, 0));
+  m.design.push_back(le::design_group_effect(m, 1, one, 1));
+  m.design.push_back(le::design_crossed_effect(m, 1, 0, one, 0));
+  m.nodes = {link_node(1)};
+  m.param_value = {0, 2};
+  return m;
+}
+
+// a sparse location: mu = b0 + sum_k b_k x_k (k = 1 .. 6, b = 0.8, 0, 0, -0.5, 0, 0), log sigma = c0 + c1 w.
+// Coordinates: b0, b1 .. b6, c0, c1
+inline le::row_model_spec lasso_spec(int n, std::uint64_t seed) {
+  rng r(seed);
+  le::row_model_spec m;
+  m.n_predictors = 2;
+  m.distrib = GAUSS;
+  m.n_global = 9;
+  const double b[7] = {1.0, 0.8, 0.0, 0.0, -0.5, 0.0, 0.0};
+  std::vector<std::vector<double>> x(7, std::vector<double>(n, 1.0));
+  std::vector<double> w(n), one(n, 1.0);
+  m.y.resize(n);
+  for (int i = 0; i < n; ++i) {
+    double mu = b[0];
+    for (int k = 1; k < 7; ++k) x[k][i] = r.norm(), mu += b[k] * x[k][i];
+    w[i] = r.unif() - 0.5;
+    m.y[i] = mu + std::exp(-0.3 + 0.8 * w[i]) * r.norm();
+  }
+  for (int k = 0; k < 7; ++k) m.design.push_back(le::design_column(0, x[k], k));
+  m.design.push_back(le::design_column(1, one, 7));
+  m.design.push_back(le::design_column(1, w, 8));
   m.nodes = {link_node(1)};
   m.param_value = {0, 2};
   return m;
@@ -152,7 +278,7 @@ inline le::row_model_spec student_spec(int n, std::uint64_t seed) {
 // the held coordinates and its start.
 struct prototype_fit {
   le::row_model_spec spec;
-  std::vector<le::quadratic_penalty_term> penalties;
+  std::vector<le::penalty_term> penalties;  // their hyperparameters fixed (source -1)
   std::vector<int> held;
   std::vector<double> x0;
 };
@@ -180,7 +306,7 @@ inline bool read_columns(const char* path, int k, std::vector<std::vector<double
 
 // The model of prototipi/kokkos_fit/lk.cpp: y ~ N(mu, sigma), mu = b0 + b1 x + s(t) + u_g,
 // log sigma = c0 + c1 w, s a cubic B-spline of 10 columns (the last dropped) with the penalty
-// lambda S0 on the integrated squared second derivative (lambda = exp(rho1)), u_g ~ N(0, tau^2)
+// lambda S0 on the integrated squared second derivative (log lambda = rho1), u_g ~ N(0, tau^2)
 // (tau = exp(rho0)). Columns of the data: id (from 1), x, t, w, y. Coordinates: 0 b0, 1 b1,
 // 2..10 the spline, 11 c0, 12 c1 (held), 13 + g the group effects. Start: the mean of y, zeros.
 inline prototype_fit kokkos_fit_model(const char* path, double rho0, double rho1, double c0, double c1) {
@@ -209,8 +335,6 @@ inline prototype_fit kokkos_fit_model(const char* path, double rho0, double rho1
           if (first + i < 9 && first + j < 9) S0[(first + i) + 9 * (first + j)] += wt * r[i] * r[j];
     }
   }
-  for (double& v : S0) v *= std::exp(rho1);
-
   prototype_fit pf;
   le::row_model_spec& s = pf.spec;
   s.n_predictors = 2;
@@ -225,7 +349,7 @@ inline prototype_fit kokkos_fit_model(const char* path, double rho0, double rho1
   s.design.push_back(le::design_group_effect(s, 0, one, 0));
   s.nodes = {link_node(1)};
   s.param_value = {0, 2};
-  pf.penalties = {{NG, G, 1, {std::exp(-2.0 * rho0)}}, {2, 9, 9, S0}};
+  pf.penalties = {group_gaussian_prior(s, 0, -1, std::exp(rho0)), smooth_prior(2, 9, S0, -1, rho1)};
   pf.held = {11, 12};
   pf.x0.assign(NG + G, 0.0);
   double my = 0.0;
@@ -263,7 +387,7 @@ inline prototype_fit lk3_gamma_model(const char* path, double rho, double c0) {
   curve.data_column = 0;
   s.nodes = {curve, link_node(3)};  // values 4 and 5
   s.param_value = {4, 5};
-  pf.penalties = {{NG, G, 1, {std::exp(-2.0 * rho)}}};
+  pf.penalties = {group_gaussian_prior(s, 0, -1, std::exp(rho))};
   pf.held = {3};
   pf.x0.assign(NG + G, 0.0);
   pf.x0[0] = 150.0, pf.x0[1] = 600.0, pf.x0[2] = 300.0, pf.x0[3] = c0;

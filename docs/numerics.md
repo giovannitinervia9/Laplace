@@ -15713,3 +15713,83 @@ inversion and the arrowhead block formula for $\operatorname{tr}(H^{-1}\dot H_a 
 in place of dense $N \times N$ matrices; a polishing Newton step at the inner minimum (a cold inner
 fit left $3.8\cdot10^{-8}$ in $V$ on the gamma); more than 16 local slots or 4 outer directions in
 the order-four pass; more than one grouping.
+
+## The engine with general penalties, crossed groupings and kinked penalties (2026-11-26)
+
+**What.** The third milestone of the fitting engine (`include/laplace/engine/`). A penalty is now
+any penalty of `laplace::penalty`, minus the log of a prior with its normalizing constant (proper,
+or intrinsic over its range), applied by a `penalty_term` to replicates that are gathered lists of
+model coordinates (`penalty_term.hpp`); each of its hyperparameters is fixed or reads an outer
+coordinate $u_a$ through a scalar bijector, $\theta = \phi_a(u_a)$, and two penalties share a
+hyperparameter by reading the same coordinate. The marginal criterion is
+$V(u) = F(\hat x; u) + \tfrac12\log|H| - \tfrac q2\log 2\pi$, $q$ the number of integrated
+coordinates, with nothing left out; its gradient and Hessian carry the penalties' derivatives of
+order three and four in the coefficients and their mixed derivatives in (coefficients,
+hyperparameters), with the chain rule through the bijectors. After each inner fit one Newton step
+is taken with the factor of $H$ (the polishing step, on by default). A model may have up to four
+groupings, the first and three crossed with it: the units are blocked by their tuple of groups and
+the information holds, besides the arrowhead of each grouping, one block for each pair of groups
+that share a unit. Penalties with kinks enter the inner fit as the non-smooth part of a composite
+objective for `proximal_newton_optimizer` (`row_model_composite_objective`); the criterion refuses
+them, and refuses unnormalizable penalties.
+
+**Correctness** (`tests/engine/`, gcc and CUDA).
+
+- The exact gradient and Hessian of $V$ against central differences at steps $h = 10^{-3}$ and
+  $h/2$ extrapolated by Richardson (each evaluation starts its inner fit at the inner minimum of
+  the centre), on simulated models away from the optimum. The bound of the test is $10^{-8}$ of
+  the scale.
+
+  | case | gradient error / scale, gcc | Hessian error / scale, gcc |
+  |---|---|---|
+  | Gaussian, group prior ($\log\tau$, two coefficients of $\log\sigma$) | $1.3\cdot10^{-10}$ / 22 | $1.6\cdot10^{-11}$ / 735 |
+  | gamma with the logistic curve ($\log\tau$, $\log\phi$) | $4.0\cdot10^{-11}$ / 62 | $3.1\cdot10^{-11}$ / 144 |
+  | Student t, no penalty ($\log\nu$) | $3.4\cdot10^{-11}$ / 4.2 | $2.7\cdot10^{-12}$ / 16 |
+  | Student t prior on the group effects ($\log\sigma$, $\log\nu$, one coefficient) | $1.2\cdot10^{-10}$ / 60 | $2.5\cdot10^{-11}$ / 653 |
+  | pseudo-Huber prior on the group effects ($\log\sigma$, $\log\nu$) | $5.7\cdot10^{-11}$ / 0.24 | $7.4\cdot10^{-12}$ / 10 |
+  | one $\tau$ shared by the priors of two predictors' effects | $9.6\cdot10^{-11}$ / 14 | $3.8\cdot10^{-11}$ / 116 |
+  | unstructured covariance of two predictors' effects (log-Cholesky, three coordinates) | $2.0\cdot10^{-10}$ / 8.2 | $3.3\cdot10^{-11}$ / 196 |
+  | two crossed groupings (widths 2 and 1, three $\log\tau$, one coefficient) | $1.6\cdot10^{-10}$ / 4.9 | $5.0\cdot10^{-11}$ / 115 |
+  | covariance and precision forms of a group prior | $7.3\cdot10^{-11}$ / 112 | $6.1\cdot10^{-11}$ / 542 |
+  | every case, CUDA | at most $5.7\cdot10^{-10}$ | at most $1.2\cdot10^{-10}$ |
+
+  The covariance form ($\Sigma = e^{2\theta}$) and the precision form ($Q = e^{2\theta}$) give the
+  same criterion at opposite $\theta$, to $10^{-10}$ relative, with opposite gradients in $\theta$.
+- The polishing step. Without it, three of these cases (the Student prior, the shared $\tau$, the
+  covariance) were off by $10^{-7}$ at $h = 10^{-3}$ and within $10^{-11}$ at $h = 2\cdot10^{-3}$
+  and $5\cdot10^{-4}$: not a missing term but the inner residual. A decrement of $10^{-15}$ leaves
+  about $10^{-8}$ in $x$, which enters $\tfrac12\log|H|$ at first order through $\tau^\top d$. With
+  the step every case is at $10^{-10}$ to $10^{-12}$ of its scale, and the criterion of the gamma
+  reference fit below ($V \approx 9178$) moved from $3.8\cdot10^{-8}$ to $4.5\cdot10^{-11}$ from the
+  reference, in absolute value. It costs
+  one assembly of order two and one factorization per evaluation.
+- The two frozen reference fits of the second milestone, with their penalties rewritten as priors
+  (the group prior a `gaussian1` through the logarithm, the roughness penalty an improper
+  `mvgaussian2` over `weighted_sum_psdmat`): the constants are now the priors' normalizations
+  against $-\tfrac q2\log 2\pi$ (the roughness penalty has rank 8, the last column of the basis
+  being dropped). Gaussian: the criterion at the reference optimum ($V \approx 952$) to $9\cdot10^{-13}$ in absolute
+  value, a complete
+  fit to $3.8\cdot10^{-8}$ in the point in 8 outer iterations. Gamma with the logistic curve: to
+  $4.5\cdot10^{-11}$ and $6\cdot10^{-8}$ in 5. The same on CUDA.
+- The row kernels of a model with two crossed groupings against the twin written by hand, within
+  $10^{-12}$ of the scale, and against differences; a penalty whose replicate spans groups (a random
+  walk over the group effects with a small ridge) gives the same curvature, dense and sparse,
+  within $10^{-13}$ of the scale.
+- Kinked penalties, by `proximal_newton_optimizer` on a Gaussian with the scale modelled, against
+  the optimality conditions: a lasso (`laplace1` on six coefficients of the location, coordinate
+  descent in the subproblem) satisfies them to $2.5\cdot10^{-8}$ of $1/s$ with two coefficients on
+  the kink and one eigenvalue-corrected iteration; a group lasso (`mvpowerexp1` over $\sigma^2 I$
+  with shape $1/2$, FISTA in the subproblem) to $7.7\cdot10^{-6}$ against $1/(2\sigma) = 50$ in 8
+  iterations.
+
+**Limits.** The inner fit with kinked penalties is dense (proximal Newton takes a dense curvature);
+the criterion refuses every kinked penalty, also one whose hyperparameters are fixed; the penalties
+are evaluated on the host, replicate by replicate, and that cost with many latent coordinates is
+not measured; the regularity of a penalty in its coefficients is declared but nothing reads it yet.
+The traits of `mvgaussian1` were added to `penalty/distrib_penalty.hpp`.
+
+**Open.** The hyperparameters of a kinked penalty (by a path, or by exact integration across the
+kink); priors on hyperparameters; a penalty that reads the output of a node through a bijector,
+with its log-Jacobian; the expected information in $\log|H|$; $H^{-1}$ by selected inversion; a
+per-coordinate proximal operator for separable penalties with many coordinates per replicate
+(each coordinate now costs the prox of its whole replicate).

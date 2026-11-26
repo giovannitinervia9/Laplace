@@ -1,49 +1,59 @@
 #pragma once
 
 // The Laplace marginal criterion of a smooth model (laplace::engine; plan,
-// sections 7.3 and 7.10), with its exact gradient and Hessian.
+// sections 7.3, 7.11 and 7.12), with its exact gradient and Hessian.
 //
 // The inner objective (inner_fit.hpp) is
 //
-//   F(x; rho) = -sum_i w_i l_i(x) + sum_t (lambda_t / 2) sum_blocks beta' S_t beta,
+//   F(x; u) = -sum_i w_i l_i(x) + sum_t sum_r pen_t(x[C_tr]; theta_t(u)),
 //
-// with lambda_t = exp(rho_k) for a penalty term whose hyperparameter is k
-// (quadratic_penalty_term::hyperparameter) and lambda_t = 1 for a fixed one.
-// The outer vector is u = (rho_0, ..., rho_{K-1}, psi), where psi are
-// coordinates of x estimated on the criterion (held in the inner fit). Every
-// other coordinate is free, except those the caller fixes, and is integrated
-// by the Laplace approximation. With x^ the inner minimum at u and H the
-// Hessian of F in the free coordinates at x^, the criterion minimized is
+// each penalty minus the log of a prior with its normalizing constant (proper,
+// or intrinsic with the pseudo-determinant over its range). The outer vector
+// is u = (u_0, ..., u_{K-1}, psi): u_a is the free value of an outer
+// hyperparameter, whose natural value phi_a(u_a) (the inverse of the bijector
+// of penalty_hyperparameter) every hyperparameter of a penalty that reads a
+// reads; psi are coordinates of x estimated on the criterion (held in the
+// inner fit). Every other coordinate is free, except those the caller fixes,
+// and is integrated by the Laplace approximation. With x^ the inner minimum at
+// u, H the Hessian of F in the free coordinates at x^ and q their number,
 //
-//   V(u) = F(x^; rho) + (1/2) log|H| - (1/2) log|S_lambda|_+,
+//   V(u) = F(x^; u) + (1/2) log|H| - (q/2) log 2 pi,
 //
-// log|S_lambda|_+ = sum_t n_t (r_t log lambda_t + log|S_t|_+), with n_t the
-// number of blocks of term t, r_t the rank of S_t and log|.|_+ the logarithm
-// of the product of the positive eigenvalues (the terms must not share
-// coordinates). V is minus the logarithm of the Laplace approximation of the
-// marginal likelihood, up to a constant.
+// minus the logarithm of the Laplace approximation of the marginal likelihood
+// (an intrinsic penalty is flat along its null space, so those directions are
+// integrated against Lebesgue measure).
 //
-// Its derivatives. Let v_a = dx^/du_a: for rho_k, v_a = -Hi s_k with
-// s_k = sum_{t: k} lambda_t S_t x; for psi at coordinate c,
-// v_a = e_c - Hi H_full e_c, where Hi is the inverse of H padded with zeros
-// on held rows and columns and H_full the Hessian of F in all coordinates.
-// With E_a = sum_{t: k} lambda_t S_t (zero for psi), T and Q the third and
-// fourth derivatives of the first term of F, and tau, T[v_a], T[v_a, v_b],
-// q_ab the passes of outer_rows.hpp,
+// Its derivatives. Write P_a = dF/du_a at fixed x, P_ab = d2F/du_a du_b at
+// fixed x (both zero for psi), s_a = grad_x P_a, s_ab = grad_x P_ab,
+// E_a = Hess_x P_a, E_ab = Hess_x P_ab, and tau^(a)_c = sum_rs Hi_rs
+// d3 P_a/dx_r dx_s dx_c: through the bijectors, P_a = sum_{j: a} phi'_a
+// dpen/dtheta_j and P_ab = sum_{j: a, k: b} phi'_a phi'_b d2pen/dtheta_j
+// dtheta_k + delta_ab phi''_a sum_{j: a} dpen/dtheta_j, summed over the terms
+// and their replicates. T and Q are the third and fourth derivatives of F in
+// x, the likelihood's from the passes of outer_rows.hpp and the penalties' on
+// the host; tau_c = sum_rs Hi_rs T_rsc. Let v_a = dx^/du_a: v_a = -Hi s_a for
+// a hyperparameter; v_a = e_c - Hi H_full e_c for psi at coordinate c, where
+// Hi is the inverse of H padded with zeros on held rows and columns and
+// H_full the Hessian of F in all coordinates. Then
 //
 //   dH_a = E_a + T[v_a]
-//   g_a  = dF_a + (1/2) (tr(Hi E_a) + tau' v_a) - (1/2) sum_{t: k} n_t r_t
-//   H_ab = F2_ab + (1/2) (-tr(Hi dH_b Hi dH_a) + delta_ab tr(Hi E_a) + q_ab + tau' x^_ab)
+//   g_a  = P_a + grad_x F . e_c [psi] + (1/2) (tr(Hi E_a) + tau' v_a)
+//   H_ab = F2_ab + (1/2) (-tr(Hi dH_a Hi dH_b) + tr(Hi E_ab) + tau^(a)' v_b
+//                         + tau^(b)' v_a + Q[Hi; v_a, v_b] + tau' x^_ab)
 //
-// where dF_a is (1/2) sum_{t: k} lambda_t beta' S_t beta for rho_k and the
-// gradient of F at coordinate c for psi; F2_ab = delta_ab dF_a [a is rho] +
-// s_a' v_b + s_b' v_a + v_a' H_full v_b; and
-// x^_ab = -Hi (T[v_a, v_b] + [b is rho] E_b v_a + [a is rho] E_a v_b + delta_ab [a is rho] s_a).
+// with F2_ab = P_ab + s_a' v_b + s_b' v_a + v_a' H_full v_b and
+// x^_ab = -Hi (T[v_a, v_b] + E_b v_a + E_a v_b + s_ab).
 //
 // The Hessian H in log|H| is the observed one (decision E1 of 2026-11-25):
 // where it is not positive definite at the inner minimum the criterion is +inf
 // and the evaluation is counted. Hi is a dense N x N matrix (decision D1): the
 // columns of the sparse factorization solved for every free coordinate.
+//
+// Refused at construction: an unnormalizable penalty (SCAD, MCP), whose
+// exp(-pen) has no integral, and a penalty with kinks (the hyperparameters of a
+// kinked penalty, by a path or by exact integration across the kink, are not
+// in this version). The Hessian needs every estimated hyperparameter of a
+// penalty to be at least C2 in theta.
 
 #include <laplace/dense/dense.hpp>
 #include <laplace/engine/inner_fit.hpp>
@@ -55,6 +65,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
@@ -117,20 +128,22 @@ struct marginal_criterion_counts {
   long inner_stalls = 0;             ///< inner fits whose step fell below rounding: their point is used
   optimizers::optimizer_status last_inner_failure = optimizers::optimizer_status::converged;  ///< why the last one failed
   long not_positive_definite = 0;    ///< points where the observed H was not positive definite: +inf
+  long polishing_steps = 0;          ///< Newton steps taken with the factor of H after an inner fit
   long outer_passes[2] = {0, 0};     ///< order 3, order 4
   row_kernel_counts inner_kernels;   ///< the inner objective's kernels, summed over every inner fit
-  double seconds_inner = 0.0, seconds_algebra = 0.0, seconds_passes = 0.0;
+  double seconds_inner = 0.0, seconds_algebra = 0.0, seconds_passes = 0.0, seconds_penalties = 0.0;  ///< wall-clock seconds per phase (inner fits, algebra, passes, host penalties)
 };
 
 /**
  * \ingroup engine
  * \brief The Laplace marginal criterion \f$V(u)\f$ of a smooth model, with exact gradient and Hessian.
  *
- * A `curvature_objective` (dense) over the outer vector \f$u = (\rho, \psi)\f$ for the library's
+ * A `curvature_objective` (dense) over the outer vector \f$u\f$ (the free values of the outer
+ * hyperparameters, then the coordinates \f$\psi\f$ estimated on the criterion) for the library's
  * optimizers; each new \f$u\f$ runs an inner fit from the previous inner minimum.
  *
  * \tparam List distrib_list of the distribs the model may name.
- * \see fit_marginal(), marginal_criterion_counts, \ref engine
+ * \see fit_marginal(), marginal_criterion_counts, penalty_term, penalty_hyperparameter, \ref engine
  */
 template <class List>
 class laplace_marginal_criterion {
@@ -150,56 +163,37 @@ class laplace_marginal_criterion {
    * \ingroup engine
    * \brief Builds the criterion.
    * \param m Built model (must outlive the criterion).
-   * \param penalties Quadratic penalty terms; those with `hyperparameter >= 0` are scaled by \f$e^{\rho_k}\f$.
+   * \param penalties Penalty terms; a hyperparameter with source \f$a \ge 0\f$ reads outer coordinate \f$a\f$.
+   * \param hyperparameters One per outer hyperparameter: the bijector from its natural value to \f$u_a\f$.
    * \param outer_coordinates Coordinates estimated on the criterion (\f$\psi\f$), held in the inner fit.
    * \param fixed Coordinates held at their value in `x0` and not estimated.
    * \param x0 Start of the first inner fit, length \f$N\f$.
    * \param inner_newton Options of the inner Newton fits.
    */
-  laplace_marginal_criterion(const row_model& m, std::vector<quadratic_penalty_term> penalties,
-                             std::vector<int> outer_coordinates, std::vector<int> fixed, std::vector<double> x0,
-                             optimizers::newton_optimizer<> inner_newton = {})
-      : model_(&m), n_(m.n_coordinates()), psi_(std::move(outer_coordinates)),
-        inner_(m, penalties, row_curvature::observed_else_expected, held_list(psi_, fixed)),
-        newton_(inner_newton), xhat_(std::move(x0)), held_(n_, 0),
-        layout_{m.view.n_global, m.view.n_groups, m.view.group_width} {
+  laplace_marginal_criterion(const row_model& m, std::vector<penalty_term> penalties,
+                             std::vector<penalty_hyperparameter> hyperparameters, std::vector<int> outer_coordinates,
+                             std::vector<int> fixed, std::vector<double> x0, optimizers::newton_optimizer<> inner_newton = {})
+      : model_(&m), n_(m.n_coordinates()), hyper_(std::move(hyperparameters)), psi_(std::move(outer_coordinates)),
+        inner_(m, penalties, natural_at_zero(hyper_), row_curvature::observed_else_expected, held_list(psi_, fixed)),
+        newton_(inner_newton), xhat_(std::move(x0)), held_(n_, 0) {
     if (static_cast<int>(xhat_.size()) != n_) throw std::invalid_argument("laplace_marginal_criterion: x0 must have N entries");
     for (int c : psi_) held_[c] = 1;
     for (int c : fixed) held_[c] = 1;
+    q_ = 0;
+    for (int j = 0; j < n_; ++j) q_ += held_[j] ? 0 : 1;
     const auto& pen = inner_.penalties();
-    n_hyper_ = 0;
-    for (const auto& p : pen) n_hyper_ = std::max(n_hyper_, p.hyperparameter + 1);
-    std::vector<int> seen(n_hyper_, 0), owner(n_, -1);
-    for (std::size_t t = 0; t < pen.size(); ++t) {
-      const auto& p = pen[t];
-      if (p.hyperparameter >= 0) seen[p.hyperparameter] = 1;
-      for (int c = p.offset; c < p.offset + p.dim; ++c) {
-        if (owner[c] >= 0) throw std::invalid_argument("laplace_marginal_criterion: two penalty terms share a coordinate");
-        owner[c] = static_cast<int>(t);
-      }
+    std::vector<int> seen(K(), 0);
+    for (int t = 0; t < static_cast<int>(pen.terms().size()); ++t) {
+      const auto& e = pen.evaluator(t);
+      if (e.normalization() == penalty::penalty_normalization::unnormalizable)
+        throw std::invalid_argument("laplace_marginal_criterion: an unnormalizable penalty has no marginal likelihood");
+      if (e.kinks() != penalty::penalty_kink_geometry::none)
+        throw std::invalid_argument("laplace_marginal_criterion: a penalty with kinks (its hyperparameters are not in this version)");
+      for (int a : pen.terms()[t].theta_source)
+        if (a >= 0) seen[a] = 1;
     }
-    for (int k = 0; k < n_hyper_; ++k)
-      if (!seen[k]) throw std::invalid_argument("laplace_marginal_criterion: a hyperparameter index that no term uses");
-    // the rank and log pseudo-determinant of each S_t
-    // ponytail: eigenvalues above 1e-9 max|w| count as positive; a rank given by the caller if a
-    // penalty is ill conditioned enough to make this ambiguous.
-    for (const auto& p : pen) {
-      const int mm = p.block_size;
-      Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace> S("S", mm, mm), U("U", mm, mm);
-      Kokkos::View<double*, Kokkos::HostSpace> w("w", mm);
-      for (int j = 0; j < mm; ++j)
-        for (int k = 0; k < mm; ++k) S(j, k) = p.matrix[j + mm * k];
-      const auto st = dense::symmetric_eigen_decomposition(S, w, U);
-      if (!st.success) throw std::invalid_argument("laplace_marginal_criterion: the eigenvalues of a penalty matrix failed");
-      double wmax = 0.0;
-      for (int j = 0; j < mm; ++j) wmax = std::max(wmax, std::abs(w(j)));
-      int r = 0;
-      double ld = 0.0;
-      for (int j = 0; j < mm; ++j)
-        if (w(j) > 1e-9 * wmax) ++r, ld += std::log(w(j));
-      rank_.push_back(r);
-      logdet_.push_back(ld);
-    }
+    for (int a = 0; a < K(); ++a)
+      if (!seen[a]) throw std::invalid_argument("laplace_marginal_criterion: an outer hyperparameter that no penalty reads");
     if (n_outer() < 1) throw std::invalid_argument("laplace_marginal_criterion: an empty outer vector");
   }
 
@@ -208,13 +202,13 @@ class laplace_marginal_criterion {
    * \brief Length \f$K + |\psi|\f$ of the outer vector \f$u\f$.
    * \return Number of outer coordinates.
    */
-  int n_outer() const { return n_hyper_ + static_cast<int>(psi_.size()); }
+  int n_outer() const { return K() + static_cast<int>(psi_.size()); }
   /**
    * \ingroup engine
-   * \brief Number \f$K\f$ of log hyperparameters \f$\rho\f$ in the outer vector.
+   * \brief Number \f$K\f$ of outer hyperparameters.
    * \return Number of hyperparameters.
    */
-  int n_hyperparameters() const { return n_hyper_; }
+  int n_hyperparameters() const { return K(); }
   /**
    * \ingroup engine
    * \brief Last inner minimum \f$\hat x\f$ computed by the criterion.
@@ -229,10 +223,30 @@ class laplace_marginal_criterion {
   const marginal_criterion_counts& counts() const { return counts_; }
   /**
    * \ingroup engine
-   * \brief Inner sparse objective holding the penalty terms, current scales, and last assembly.
+   * \brief Inner sparse objective holding the penalty terms at the last hyperparameters, and the last assembly.
    * \return Const reference to `inner_objective`.
    */
   const inner_objective& inner() const { return inner_; }
+  /**
+   * \ingroup engine
+   * \brief Whether each inner fit ends with one Newton step taken with the factor of \f$H\f$ (default `true`).
+   *
+   * The inner residual \f$d\f$ enters \f$\tfrac12\log|H|\f$ at first order; the step leaves a
+   * residual of the order of \f$\lVert d\rVert^2\f$, at the cost of one more assembly and factorization.
+   * \param on `false` to skip the step.
+   */
+  void set_polishing(bool on) { polish_ = on; }
+  /**
+   * \ingroup engine
+   * \brief The natural values \f$\phi_a(u_a)\f$ of the outer hyperparameters at `u`.
+   * \param u Outer vector (its first `n_hyperparameters()` entries are read).
+   * \return One natural value per outer hyperparameter.
+   */
+  std::vector<double> natural_hyperparameters(const optimizers::optimizer_point& u) const {
+    std::vector<double> h(K());
+    for (int a = 0; a < K(); ++a) h[a] = hyper_[a].map.inverse(u(a));
+    return h;
+  }
 
   /**
    * \ingroup engine
@@ -266,7 +280,8 @@ class laplace_marginal_criterion {
    * \ingroup engine
    * \brief Evaluates \f$V(u)\f$, its exact gradient `g`, and its exact dense Hessian `H`.
    *
-   * Throws `std::invalid_argument` if `n_outer() > row_outer_direction_capacity`. If \f$V(u) = +\infty\f$,
+   * Throws `std::invalid_argument` if `n_outer() > row_outer_direction_capacity` or if a penalty
+   * with an estimated hyperparameter is not \f$C^2\f$ in \f$\theta\f$. If \f$V(u) = +\infty\f$,
    * fills `g` and `H` with quiet NaN. Reuses cached results when called at the same `u` as the
    * previous evaluation.
    *
@@ -291,18 +306,18 @@ class laplace_marginal_criterion {
  private:
   using clock = std::chrono::steady_clock;
   using dev_matrix = Kokkos::View<double**, Kokkos::LayoutLeft, row_model_view::mem>;
+  using vec = std::vector<double>;
 
   const row_model* model_;
   int n_;
+  std::vector<penalty_hyperparameter> hyper_;
   std::vector<int> psi_;
   inner_objective inner_;
   optimizers::newton_optimizer<> newton_;
   std::vector<double> xhat_;
   std::vector<int> held_;
-  arrowhead_layout layout_;
-  int n_hyper_ = 0;
-  std::vector<int> rank_;
-  std::vector<double> logdet_;
+  int q_ = 0;  // integrated coordinates
+  bool polish_ = true;
   marginal_criterion_counts counts_;
   // the state at the last point
   std::vector<double> u_last_;
@@ -315,13 +330,18 @@ class laplace_marginal_criterion {
   bool have_hi_ = false, hid_current_ = false;
   dev_matrix Hid_;  // Hi on the device
 
+  int K() const { return static_cast<int>(hyper_.size()); }
+
   static std::vector<int> held_list(const std::vector<int>& a, const std::vector<int>& b) {
     std::vector<int> h = a;
     h.insert(h.end(), b.begin(), b.end());
     return h;
   }
-
-  int n_blocks(const quadratic_penalty_term& p) const { return p.dim / p.block_size; }
+  static std::vector<double> natural_at_zero(const std::vector<penalty_hyperparameter>& h) {
+    std::vector<double> v;
+    for (const auto& p : h) v.push_back(p.map.inverse(0.0));
+    return v;
+  }
 
   void evaluate(const optimizers::optimizer_point& u, int level) {
     const int A = n_outer();
@@ -332,21 +352,23 @@ class laplace_marginal_criterion {
       u_last_.assign(u.data(), u.data() + A);
       have_hi_ = false, hid_current_ = false;
       level_ = 0;
-      fit_value();
+      fit_value(u);
     }
     if (level >= 1 && std::isfinite(V_)) derivatives(level);
     level_ = std::max(level_, level);
   }
 
-  void fit_value() {
-    const auto& pen = inner_.penalties();
-    std::vector<double> scale(pen.size(), 1.0);
-    for (std::size_t t = 0; t < pen.size(); ++t)
-      if (pen[t].hyperparameter >= 0) scale[t] = std::exp(u_last_[pen[t].hyperparameter]);
-    inner_.set_penalty_scales(scale);
+  void fit_value(const optimizers::optimizer_point& u) {
+    const auto theta = natural_hyperparameters(u);
+    for (double t : theta)
+      if (!std::isfinite(t)) {
+        V_ = std::numeric_limits<double>::infinity();
+        return;
+      }
+    inner_.set_hyperparameters(theta);
     optimizers::optimizer_vector x0("x0", n_);
     for (int j = 0; j < n_; ++j) x0(j) = xhat_[j];
-    for (std::size_t k = 0; k < psi_.size(); ++k) x0(psi_[k]) = u_last_[n_hyper_ + k];
+    for (std::size_t k = 0; k < psi_.size(); ++k) x0(psi_[k]) = u_last_[K() + k];
     auto t0 = clock::now();
     const auto r = fit_inner(inner_, x0, newton_);
     counts_.seconds_inner += std::chrono::duration<double>(clock::now() - t0).count();
@@ -367,20 +389,29 @@ class laplace_marginal_criterion {
     }
     for (int j = 0; j < n_; ++j) xhat_[j] = r.optimizer.point(j);
     optimizers::optimizer_vector g("g", n_);
-    const auto xv = point_view();
-    const double F = inner_.observed_value_gradient_curvature(xv, g, Hs_);
-    t0 = clock::now();
-    const auto out = ldlt_.factorize(n_, Hs_.col_ptr.data(), Hs_.row_idx.data(), Hs_.values.data());
-    counts_.seconds_algebra += std::chrono::duration<double>(clock::now() - t0).count();
-    if (out != sparse::sparse_ldlt_outcome::positive_definite) {
-      ++counts_.not_positive_definite;
-      V_ = std::numeric_limits<double>::infinity();
-      return;
+    double F = 0.0;
+    // the observed H at x^, then one Newton step with its factor (the polishing step): the inner
+    // residual d enters (1/2) log|H| at first order, through tau' d, and the step leaves its square
+    for (int step = 0; step < 2; ++step) {
+      const auto xv = point_view();
+      F = inner_.observed_value_gradient_curvature(xv, g, Hs_);
+      t0 = clock::now();
+      const auto out = ldlt_.factorize(n_, Hs_.col_ptr.data(), Hs_.row_idx.data(), Hs_.values.data());
+      counts_.seconds_algebra += std::chrono::duration<double>(clock::now() - t0).count();
+      if (out != sparse::sparse_ldlt_outcome::positive_definite) {
+        ++counts_.not_positive_definite;
+        V_ = std::numeric_limits<double>::infinity();
+        return;
+      }
+      if (step == 1 || !polish_) break;
+      std::vector<double> d(n_);
+      for (int j = 0; j < n_; ++j) d[j] = held_[j] ? 0.0 : -g(j);
+      ldlt_.solve(d.data());
+      for (int j = 0; j < n_; ++j)
+        if (!held_[j]) xhat_[j] += d[j];
+      ++counts_.polishing_steps;
     }
-    double logS = 0.0;
-    for (std::size_t t = 0; t < pen.size(); ++t)
-      logS += n_blocks(pen[t]) * (rank_[t] * std::log(scale[t]) + logdet_[t]);
-    V_ = F + 0.5 * ldlt_.log_abs_determinant() - 0.5 * logS;
+    V_ = F + 0.5 * ldlt_.log_abs_determinant() - 0.5 * q_ * std::log(2.0 * std::numbers::pi);
   }
 
   optimizers::optimizer_vector point_view() const {
@@ -389,35 +420,157 @@ class laplace_marginal_criterion {
     return x;
   }
 
-  // the global (row, column) of each entry of the arrowhead layout
-  void arrowhead_entry(int q, int& r, int& c) const {
-    const int G0 = layout_.n_global, w = layout_.group_width;
-    if (q < layout_.global_size()) {
-      r = 0;
-      while ((r + 1) * (r + 2) / 2 <= q) ++r;
-      c = q - r * (r + 1) / 2;
-      return;
+
+  // a sparse symmetric matrix as a list of entries (both triangles)
+  struct entry_list {
+    std::vector<int> r, c;
+    std::vector<double> v;
+    void add(int i, int j, double x) { r.push_back(i), c.push_back(j), v.push_back(x); }
+    vec times(const vec& w, int N) const {
+      vec o(N, 0.0);
+      for (std::size_t k = 0; k < v.size(); ++k) o[r[k]] += v[k] * w[c[k]];
+      return o;
     }
-    q -= layout_.global_size();
-    const int g = q / layout_.group_block_size();
-    q -= g * layout_.group_block_size();
-    const int sq = w * (w + 1) / 2;
-    if (q < sq) {
-      int j = 0;
-      while ((j + 1) * (j + 2) / 2 <= q) ++j;
-      r = G0 + g * w + j, c = G0 + g * w + (q - j * (j + 1) / 2);
-    } else {
-      q -= sq;
-      r = G0 + g * w + q / G0, c = q % G0;
+  };
+
+  // what the penalties give to the derivatives at x^ (section comment at the top)
+  struct penalty_parts {
+    vec P;                          // P_a
+    std::vector<vec> s;             // s_a
+    std::vector<entry_list> E;      // E_a
+    std::vector<vec> tau_a;         // tau^(a)
+    vec tau;                        // the penalties' share of tau
+    std::vector<entry_list> Tv;     // T_pen[v_a]
+    vec Pab;                        // P_ab, pairs a <= b of hyperparameters
+    std::vector<vec> sab;           // s_ab
+    std::vector<entry_list> Eab;    // E_ab
+    std::vector<vec> Tvv;           // T_pen[v_a, v_b], pairs a <= b of all outer coordinates
+    vec Qvv;                        // Q_pen[Hi; v_a, v_b]
+  };
+
+  // the outer hyperparameter of each hyperparameter of a term, with phi' and phi''
+  void chain(const optimizers::optimizer_point& u, vec& d1, vec& d2) const {
+    d1.assign(K(), 0.0), d2.assign(K(), 0.0);
+    for (int a = 0; a < K(); ++a) d1[a] = hyper_[a].map.inverse_d1(u(a)), d2[a] = hyper_[a].map.inverse_d2(u(a));
+  }
+
+  // first-order parts (P_a, s_a, E_a, tau^(a)) and the penalties' tau (needs Hi)
+  void penalty_first(penalty_parts& pp, int level) const {
+    const int N = n_, Kh = K();
+    const auto& pen = inner_.penalties();
+    optimizers::optimizer_vector uv("u", n_outer());
+    for (int a = 0; a < n_outer(); ++a) uv(a) = u_last_[a];
+    vec d1, d2;
+    chain(uv, d1, d2);
+    auto hi = [&](int i, int j) { return Hi_[i + static_cast<std::size_t>(N) * j]; };
+    pp.P.assign(Kh, 0.0), pp.s.assign(Kh, vec(N, 0.0)), pp.E.assign(Kh, {}), pp.tau_a.assign(Kh, vec(N, 0.0));
+    pp.tau.assign(N, 0.0);
+    std::vector<double> b, buf;
+    auto x = [&](int j) { return xhat_[j]; };
+    for (int t = 0; t < static_cast<int>(pen.terms().size()); ++t) {
+      const auto& term = pen.terms()[t];
+      auto& e = pen.evaluator(t);
+      buf.resize(std::max({e.tensor_size(3), e.tensor_size(2), e.tensor_size(1), 1}));
+      for (const auto& rep : term.replicates) {
+        penalty_set::gather(x, rep, b);
+        if (e.derivative(3, 0, nullptr, b.data(), buf.data()))
+          for_each_penalty_entry(e, 3, buf.data(), [&](const int* c, double v) {
+            pp.tau[rep[c[2]]] += hi(rep[c[0]], rep[c[1]]) * v;
+          });
+        for (int j = 0; j < static_cast<int>(term.theta_source.size()); ++j) {
+          const int a = term.theta_source[j];
+          if (a < 0) continue;
+          const double f = d1[a];
+          if (e.derivative(0, 1, &j, b.data(), buf.data())) pp.P[a] += f * buf[0];
+          if (e.derivative(1, 1, &j, b.data(), buf.data()))
+            for_each_penalty_entry(e, 1, buf.data(), [&](const int* c, double v) { pp.s[a][rep[c[0]]] += f * v; });
+          if (e.derivative(2, 1, &j, b.data(), buf.data()))
+            for_each_penalty_entry(e, 2, buf.data(), [&](const int* c, double v) { pp.E[a].add(rep[c[0]], rep[c[1]], f * v); });
+          if (e.derivative(3, 1, &j, b.data(), buf.data()))
+            for_each_penalty_entry(e, 3, buf.data(), [&](const int* c, double v) {
+              pp.tau_a[a][rep[c[2]]] += f * hi(rep[c[0]], rep[c[1]]) * v;
+            });
+        }
+      }
+    }
+    (void)level;
+  }
+
+  // second-order parts: P_ab, s_ab, E_ab, T_pen[v_a], T_pen[v_a, v_b], Q_pen[Hi; v_a, v_b]
+  void penalty_second(penalty_parts& pp, const std::vector<vec>& v) const {
+    const int N = n_, Kh = K(), A = n_outer();
+    const auto& pen = inner_.penalties();
+    optimizers::optimizer_vector uv("u", A);
+    for (int a = 0; a < A; ++a) uv(a) = u_last_[a];
+    vec d1, d2;
+    chain(uv, d1, d2);
+    auto hi = [&](int i, int j) { return Hi_[i + static_cast<std::size_t>(N) * j]; };
+    const int npair = Kh * (Kh + 1) / 2, apair = A * (A + 1) / 2;
+    pp.Pab.assign(npair, 0.0), pp.sab.assign(npair, vec(N, 0.0)), pp.Eab.assign(npair, {});
+    pp.Tv.assign(A, {}), pp.Tvv.assign(apair, vec(N, 0.0)), pp.Qvv.assign(apair, 0.0);
+    auto pair = [&](int a, int b) { return a * Kh - a * (a - 1) / 2 + (b - a); };  // a <= b
+    std::vector<double> b, buf;
+    auto x = [&](int j) { return xhat_[j]; };
+    for (int t = 0; t < static_cast<int>(pen.terms().size()); ++t) {
+      const auto& term = pen.terms()[t];
+      auto& e = pen.evaluator(t);
+      const int h = static_cast<int>(term.theta_source.size());
+      bool estimated = false;
+      for (int a : term.theta_source) estimated = estimated || a >= 0;
+      if (estimated && e.theta_regularity() < 2)
+        throw std::invalid_argument("laplace_marginal_criterion: an estimated hyperparameter of a penalty that is not C2 in theta");
+      buf.resize(std::max({e.tensor_size(4), e.tensor_size(3), e.tensor_size(2), e.tensor_size(1), 1}));
+      for (const auto& rep : term.replicates) {
+        penalty_set::gather(x, rep, b);
+        if (e.derivative(3, 0, nullptr, b.data(), buf.data()))
+          for_each_penalty_entry(e, 3, buf.data(), [&](const int* c, double w) {
+            const int r0 = rep[c[0]], r1 = rep[c[1]], r2 = rep[c[2]];
+            for (int a = 0; a < A; ++a) pp.Tv[a].add(r0, r1, w * v[a][r2]);
+            for (int a = 0, ab = 0; a < A; ++a)
+              for (int bb = a; bb < A; ++bb, ++ab) pp.Tvv[ab][r0] += w * v[a][r1] * v[bb][r2];
+          });
+        if (e.derivative(4, 0, nullptr, b.data(), buf.data()))
+          for_each_penalty_entry(e, 4, buf.data(), [&](const int* c, double w) {
+            const double hw = w * hi(rep[c[0]], rep[c[1]]);
+            const int r2 = rep[c[2]], r3 = rep[c[3]];
+            for (int a = 0, ab = 0; a < A; ++a)
+              for (int bb = a; bb < A; ++bb, ++ab) pp.Qvv[ab] += hw * v[a][r2] * v[bb][r3];
+          });
+        for (int j = 0; j < h; ++j) {
+          const int a = term.theta_source[j];
+          if (a < 0) continue;
+          // the phi'' term of P_aa, s_aa, E_aa
+          const double f2 = d2[a];
+          const int aa = pair(a, a);
+          if (e.derivative(0, 1, &j, b.data(), buf.data())) pp.Pab[aa] += f2 * buf[0];
+          if (e.derivative(1, 1, &j, b.data(), buf.data()))
+            for_each_penalty_entry(e, 1, buf.data(), [&](const int* c, double w) { pp.sab[aa][rep[c[0]]] += f2 * w; });
+          if (e.derivative(2, 1, &j, b.data(), buf.data()))
+            for_each_penalty_entry(e, 2, buf.data(), [&](const int* c, double w) { pp.Eab[aa].add(rep[c[0]], rep[c[1]], f2 * w); });
+          for (int k = j; k < h; ++k) {
+            const int bh = term.theta_source[k];
+            if (bh < 0) continue;
+            const int idx[2] = {j, k};
+            // (j, k) and, for j != k, (k, j): both orders of the pair of outer coordinates
+            const double f = d1[a] * d1[bh];
+            const int p = pair(std::min(a, bh), std::max(a, bh));
+            // a pair (j, k) with j != k reading the same a counts twice in d2/du_a^2
+            const double mult = (j != k && a == bh) ? 2.0 : 1.0;
+            if (e.derivative(0, 2, idx, b.data(), buf.data())) pp.Pab[p] += mult * f * buf[0];
+            if (e.derivative(1, 2, idx, b.data(), buf.data()))
+              for_each_penalty_entry(e, 1, buf.data(), [&](const int* c, double w) { pp.sab[p][rep[c[0]]] += mult * f * w; });
+            if (e.derivative(2, 2, idx, b.data(), buf.data()))
+              for_each_penalty_entry(e, 2, buf.data(), [&](const int* c, double w) { pp.Eab[p].add(rep[c[0]], rep[c[1]], mult * f * w); });
+          }
+        }
+      }
     }
   }
 
   void derivatives(int level) {
-    const int N = n_, A = n_outer(), K = n_hyper_;
+    const int N = n_, A = n_outer(), Kh = K();
     if (level == 2 && A > row_outer_direction_capacity)
       throw std::invalid_argument("laplace_marginal_criterion: more outer coordinates than row_outer_direction_capacity");
-    const auto& pen = inner_.penalties();
-    const auto& scale = inner_.penalty_scales();
     auto t0 = clock::now();
     // H^-1, padded with zeros on held rows and columns
     // ponytail: dense N x N (decision D1): memory N^2, time N solves; selected inversion when a
@@ -434,9 +587,8 @@ class laplace_marginal_criterion {
       }
       have_hi_ = true;
     }
-    auto hi = [&](int i, int j) { return Hi_[i + static_cast<std::size_t>(N) * j]; };
-    auto hi_times = [&](const std::vector<double>& w) {
-      std::vector<double> o(N, 0.0);
+    auto hi_times = [&](const vec& w) {
+      vec o(N, 0.0);
       for (int j = 0; j < N; ++j)
         if (w[j] != 0.0)
           for (int i = 0; i < N; ++i) o[i] += Hi_[i + static_cast<std::size_t>(N) * j] * w[j];
@@ -444,40 +596,34 @@ class laplace_marginal_criterion {
     };
     // the full Hessian and gradient of F at x^ (held coordinates included)
     const row_assembly& as = inner_.last_assembly();
-    std::vector<double> Hf(static_cast<std::size_t>(N) * N, 0.0), gf = as.gradient;
-    for (int q = 0; q < layout_.size(); ++q) {
-      int r, c;
-      arrowhead_entry(q, r, c);
+    vec Hf(static_cast<std::size_t>(N) * N, 0.0), gf = as.gradient;
+    for (std::size_t q = 0; q < as.information.size(); ++q) {
+      const int r = model_->information_row[q], c = model_->information_column[q];
       Hf[r + static_cast<std::size_t>(N) * c] = Hf[c + static_cast<std::size_t>(N) * r] = as.information[q];
     }
-    // per hyperparameter: s_k, dF_k, tr(Hi E_k), sum n_t r_t
-    std::vector<std::vector<double>> s(K, std::vector<double>(N, 0.0));
-    std::vector<double> dF(K, 0.0), trE(K, 0.0), nr(K, 0.0);
-    for (std::size_t t = 0; t < pen.size(); ++t) {
-      const auto& p = pen[t];
-      const int mm = p.block_size, k = p.hyperparameter;
-      for (int b0 = p.offset; b0 < p.offset + p.dim; b0 += mm)
-        for (int j = 0; j < mm; ++j)
-          for (int l = 0; l < mm; ++l) {
-            const double e = scale[t] * p.matrix[j + mm * l];
-            Hf[(b0 + j) + static_cast<std::size_t>(N) * (b0 + l)] += e;
-            gf[b0 + j] += e * xhat_[b0 + l];
-            if (k < 0) continue;
-            s[k][b0 + j] += e * xhat_[b0 + l];
-            dF[k] += 0.5 * xhat_[b0 + j] * e * xhat_[b0 + l];
-            trE[k] += hi(b0 + j, b0 + l) * e;
-          }
-      if (k >= 0) nr[k] += n_blocks(p) * rank_[t];
-    }
+    const auto& pen = inner_.penalties();
+    auto x = [&](int j) { return xhat_[j]; };
+    pen.for_each_hessian_entry(x, [&](int r, int c, double v) { Hf[r + static_cast<std::size_t>(N) * c] += v; });
+    pen.add_gradient(x, [&](int j, double v) { gf[j] += v; });
+    counts_.seconds_algebra += std::chrono::duration<double>(clock::now() - t0).count();
+    t0 = clock::now();
+    penalty_parts pp;
+    penalty_first(pp, level);
+    counts_.seconds_penalties += std::chrono::duration<double>(clock::now() - t0).count();
+    t0 = clock::now();
+    vec trE(Kh, 0.0);
+    for (int a = 0; a < Kh; ++a)
+      for (std::size_t k = 0; k < pp.E[a].v.size(); ++k)
+        trE[a] += Hi_[pp.E[a].c[k] + static_cast<std::size_t>(N) * pp.E[a].r[k]] * pp.E[a].v[k];
     // the directions v_a
-    std::vector<std::vector<double>> v(A);
+    std::vector<vec> v(A);
     for (int a = 0; a < A; ++a) {
-      if (a < K) {
-        v[a] = hi_times(s[a]);
+      if (a < Kh) {
+        v[a] = hi_times(pp.s[a]);
         for (double& z : v[a]) z = -z;
       } else {
-        const int c = psi_[a - K];
-        std::vector<double> col(Hf.begin() + static_cast<std::size_t>(N) * c, Hf.begin() + static_cast<std::size_t>(N) * (c + 1));
+        const int c = psi_[a - Kh];
+        vec col(Hf.begin() + static_cast<std::size_t>(N) * c, Hf.begin() + static_cast<std::size_t>(N) * (c + 1));
         v[a] = hi_times(col);
         for (double& z : v[a]) z = -z;
         v[a][c] += 1.0;
@@ -510,9 +656,10 @@ class laplace_marginal_criterion {
     ++counts_.outer_passes[level == 2 ? 1 : 0];
     counts_.seconds_passes += std::chrono::duration<double>(clock::now() - t0).count();
     t0 = clock::now();
-    const outer_pass_layout lo{N, level == 2 ? A : 0, layout_.size()};
-    const double* tau = pass.data() + lo.tau();
-    auto dot = [&](const double* a, const std::vector<double>& b) {
+    const outer_pass_layout lo{N, level == 2 ? A : 0, model_->view.information_size};
+    vec tau(pass.begin() + lo.tau(), pass.begin() + lo.tau() + N);
+    for (int j = 0; j < N; ++j) tau[j] += pp.tau[j];
+    auto dot = [&](const vec& a, const vec& b) {
       double z = 0.0;
       for (int i = 0; i < N; ++i) z += a[i] * b[i];
       return z;
@@ -520,33 +667,25 @@ class laplace_marginal_criterion {
     grad_.assign(A, 0.0);
     for (int a = 0; a < A; ++a) {
       const double tv = dot(tau, v[a]);
-      grad_[a] = a < K ? dF[a] + 0.5 * (trE[a] + tv) - 0.5 * nr[a] : gf[psi_[a - K]] + 0.5 * tv;
+      grad_[a] = a < Kh ? pp.P[a] + 0.5 * (trE[a] + tv) : gf[psi_[a - Kh]] + 0.5 * tv;
     }
-    if (level == 2) hessian(pass, lo, Hf, s, dF, trE, v);
     counts_.seconds_algebra += std::chrono::duration<double>(clock::now() - t0).count();
+    if (level == 2) {
+      t0 = clock::now();
+      penalty_second(pp, v);
+      counts_.seconds_penalties += std::chrono::duration<double>(clock::now() - t0).count();
+      t0 = clock::now();
+      hessian(pass, lo, Hf, tau, pp, v);
+      counts_.seconds_algebra += std::chrono::duration<double>(clock::now() - t0).count();
+    }
   }
 
-  void hessian(const std::vector<double>& pass, const outer_pass_layout& lo, const std::vector<double>& Hf,
-               const std::vector<std::vector<double>>& s, const std::vector<double>& dF, const std::vector<double>& trE,
-               const std::vector<std::vector<double>>& v) {
-    const int N = n_, A = n_outer(), K = n_hyper_;
-    const auto& pen = inner_.penalties();
-    const auto& scale = inner_.penalty_scales();
+  void hessian(const std::vector<double>& pass, const outer_pass_layout& lo, const vec& Hf, const vec& tau,
+               const penalty_parts& pp, const std::vector<vec>& v) {
+    const int N = n_, A = n_outer(), Kh = K();
     auto hi = [&](int i, int j) { return Hi_[i + static_cast<std::size_t>(N) * j]; };
-    // E_k w on the blocks of the terms of hyperparameter k
-    auto E_times = [&](int k, const std::vector<double>& w) {
-      std::vector<double> o(N, 0.0);
-      for (std::size_t t = 0; t < pen.size(); ++t) {
-        const auto& p = pen[t];
-        if (p.hyperparameter != k) continue;
-        const int mm = p.block_size;
-        for (int b0 = p.offset; b0 < p.offset + p.dim; b0 += mm)
-          for (int j = 0; j < mm; ++j)
-            for (int l = 0; l < mm; ++l) o[b0 + j] += scale[t] * p.matrix[j + mm * l] * w[b0 + l];
-      }
-      return o;
-    };
-    // dH_a in compressed columns (both triangles), for X_a = Hi dH_a and its traces on the device
+    auto kpair = [&](int a, int b) { return a * Kh - a * (a - 1) / 2 + (b - a); };  // a <= b < Kh
+    // dH_a = E_a + T[v_a] in compressed columns (both triangles), for X_a = Hi dH_a and its traces on the device
     // ponytail: A dense N x N products (A N^2 memory, N nnz(dH) time); the arrowhead block formula
     // when a model with many groups is measured (decision D1).
     std::vector<int> cp(static_cast<std::size_t>(A) * (N + 1), 0), rows;
@@ -556,22 +695,18 @@ class laplace_marginal_criterion {
       for (int a = 0; a < A; ++a) {
         for (auto& c : col) c.clear();
         const double* T = pass.data() + lo.third_direction(a);
-        for (int q = 0; q < layout_.size(); ++q) {
+        for (int q = 0; q < model_->view.information_size; ++q) {
           if (T[q] == 0.0) continue;
-          int r, c;
-          arrowhead_entry(q, r, c);
+          const int r = model_->information_row[q], c = model_->information_column[q];
           col[c].push_back({r, T[q]});
           if (r != c) col[r].push_back({c, T[q]});
         }
-        if (a < K)
-          for (std::size_t t = 0; t < pen.size(); ++t) {
-            const auto& p = pen[t];
-            if (p.hyperparameter != a) continue;
-            const int mm = p.block_size;
-            for (int b0 = p.offset; b0 < p.offset + p.dim; b0 += mm)
-              for (int j = 0; j < mm; ++j)
-                for (int l = 0; l < mm; ++l) col[b0 + l].push_back({b0 + j, scale[t] * p.matrix[j + mm * l]});
-          }
+        const auto& tv = pp.Tv[a];
+        for (std::size_t k = 0; k < tv.v.size(); ++k) col[tv.c[k]].push_back({tv.r[k], tv.v[k]});
+        if (a < Kh) {
+          const auto& E = pp.E[a];
+          for (std::size_t k = 0; k < E.v.size(); ++k) col[E.c[k]].push_back({E.r[k], E.v[k]});
+        }
         int* cpa = cp.data() + static_cast<std::size_t>(a) * (N + 1);
         cpa[0] = static_cast<int>(rows.size());
         for (int j = 0; j < N; ++j) {
@@ -582,12 +717,11 @@ class laplace_marginal_criterion {
     }
     std::vector<double> trxx_all;
     detail_marginal::trace_products(Hid_, N, A, cp, rows, vals, trxx_all);
-    const double* tau = pass.data() + lo.tau();
-    std::vector<double> ht(N, 0.0);  // Hi tau
+    vec ht(N, 0.0);  // Hi tau
     for (int j = 0; j < N; ++j)
       if (tau[j] != 0.0)
         for (int i = 0; i < N; ++i) ht[i] += hi(i, j) * tau[j];
-    std::vector<std::vector<double>> Hv(A, std::vector<double>(N, 0.0));  // H_full v_b
+    std::vector<vec> Hv(A, vec(N, 0.0));  // H_full v_b
     for (int b = 0; b < A; ++b)
       for (int j = 0; j < N; ++j)
         if (v[b][j] != 0.0)
@@ -596,30 +730,45 @@ class laplace_marginal_criterion {
     int ab = 0;
     for (int a = 0; a < A; ++a)
       for (int b = a; b < A; ++b, ++ab) {
+        const bool ha = a < Kh, hb = b < Kh;
+        const int kp = ha && hb ? kpair(a, b) : -1;
         // F2
-        double f2 = (a == b && a < K) ? dF[a] : 0.0;
+        double f2 = kp >= 0 ? pp.Pab[kp] : 0.0;
         for (int i = 0; i < N; ++i) {
           f2 += v[a][i] * Hv[b][i];
-          if (a < K) f2 += s[a][i] * v[b][i];
-          if (b < K) f2 += s[b][i] * v[a][i];
+          if (ha) f2 += pp.s[a][i] * v[b][i];
+          if (hb) f2 += pp.s[b][i] * v[a][i];
         }
         const double trxx = trxx_all[ab];  // tr(Hi dH_a Hi dH_b)
-        // x^_ab
-        std::vector<double> rhs(pass.begin() + lo.third_pair(ab), pass.begin() + lo.third_pair(ab) + N);
-        if (b < K) {
-          const auto e = E_times(b, v[a]);
+        // tr(Hi E_ab)
+        double trEab = 0.0;
+        if (kp >= 0) {
+          const auto& E = pp.Eab[kp];
+          for (std::size_t k = 0; k < E.v.size(); ++k) trEab += hi(E.c[k], E.r[k]) * E.v[k];
+        }
+        // tau^(a)' v_b + tau^(b)' v_a
+        double ta = 0.0;
+        for (int i = 0; i < N; ++i) {
+          if (ha) ta += pp.tau_a[a][i] * v[b][i];
+          if (hb) ta += pp.tau_a[b][i] * v[a][i];
+        }
+        // x^_ab: rhs = T[v_a, v_b] + E_b v_a + E_a v_b + s_ab
+        vec rhs(pass.begin() + lo.third_pair(ab), pass.begin() + lo.third_pair(ab) + N);
+        for (int i = 0; i < N; ++i) rhs[i] += pp.Tvv[ab][i];
+        if (hb) {
+          const auto e = pp.E[b].times(v[a], N);
           for (int i = 0; i < N; ++i) rhs[i] += e[i];
         }
-        if (a < K) {
-          const auto e = E_times(a, v[b]);
+        if (ha) {
+          const auto e = pp.E[a].times(v[b], N);
           for (int i = 0; i < N; ++i) rhs[i] += e[i];
-          if (a == b)
-            for (int i = 0; i < N; ++i) rhs[i] += s[a][i];
         }
+        if (kp >= 0)
+          for (int i = 0; i < N; ++i) rhs[i] += pp.sab[kp][i];
         double tx = 0.0;  // tau' x^_ab = -(Hi tau)' rhs
         for (int j = 0; j < N; ++j) tx -= ht[j] * rhs[j];
-        const double q = pass[lo.fourth_pair(ab)];
-        const double h = f2 + 0.5 * (-trxx + ((a == b && a < K) ? trE[a] : 0.0) + q + tx);
+        const double q = pass[lo.fourth_pair(ab)] + pp.Qvv[ab];
+        const double h = f2 + 0.5 * (-trxx + trEab + ta + q + tx);
         hess_[a + A * b] = hess_[b + A * a] = h;
       }
   }
