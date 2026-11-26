@@ -14,7 +14,7 @@
 //     penalties, a covariance over the effects of two predictors, and the
 //     covariance and precision forms of one prior;
 //   - on every model of check_criterion, the selected inverse (latent_inverse_route::selected)
-//     against the dense one, and the automatic route (selected for a gradient, dense for a
+//     against the dense one, and the automatic route (selected for the gradient and the
 //     Hessian, reported as such): the same value, gradient and Hessian up to rounding.
 // Host code: the kernels are launched by the library's functions.
 
@@ -67,6 +67,7 @@ criterion_check check_criterion(const le::row_model_spec& s, int P, const std::v
                                 std::vector<double> x0, const std::vector<double>& u0, double h) {
   const auto m = le::build_row_model(s, P, 7);
   le::laplace_marginal_criterion<engine_distribs> crit(m, pen, hyper, psi, {}, x0, tight());
+  crit.set_latent_inverse_route(le::latent_inverse_route::dense);  // the reference of the routes below
   const int A = crit.n_outer();
   REQUIRE(A == static_cast<int>(u0.size()));
   lo::optimizer_vector g("g", A);
@@ -80,8 +81,8 @@ criterion_check check_criterion(const le::row_model_spec& s, int P, const std::v
     for (int b = 0; b < A; ++b) H0[a + A * b] = H(a, b);
   const std::vector<double> xhat0 = crit.inner_point();
   // the other routes: the same inner fits, so the derivatives differ by rounding only. Selected once with
-  // the Hessian (the last reader of the dense inverse) and once with the gradient only; automatic with
-  // the gradient, then the Hessian; dense explicitly
+  // the Hessian (its traces from the derivative of the selected inverse) and once with the gradient only; automatic (the
+  // default) with the gradient, then the Hessian
   {
     le::laplace_marginal_criterion<engine_distribs> cs(m, pen, hyper, psi, {}, x0, tight()),
         cg(m, pen, hyper, psi, {}, x0, tight());
@@ -91,6 +92,9 @@ criterion_check check_criterion(const le::row_model_spec& s, int P, const std::v
     const double vs = cs.value_gradient_curvature(vec(u0), g, Hs);
     CHECK(crit.counts().latent_inverse_used == le::latent_inverse_route::dense);
     CHECK(cs.counts().latent_inverse_used == le::latent_inverse_route::selected);
+    // the selected Hessian's traces from the derivative of the selected inverse, never the dense fallback
+    CHECK(cs.counts().dense_trace_evaluations == 0);
+    CHECK(crit.counts().dense_trace_evaluations == 1);
     c.route_value_err = std::abs(vs - c.value);
     for (int a = 0; a < A; ++a) {
       c.route_grad_err = std::max(c.route_grad_err, std::abs(g(a) - g0[a]));
@@ -99,23 +103,18 @@ criterion_check check_criterion(const le::row_model_spec& s, int P, const std::v
     (void)cg.value_gradient(vec(u0), g);
     CHECK(cg.counts().latent_inverse_used == le::latent_inverse_route::selected);
     for (int a = 0; a < A; ++a) c.route_grad_err = std::max(c.route_grad_err, std::abs(g(a) - g0[a]));
-    // automatic (crit above, the default): selected for a gradient, then dense for the Hessian at the
-    // same point; and the explicit dense route against crit
-    le::laplace_marginal_criterion<engine_distribs> ca(m, pen, hyper, psi, {}, x0, tight()),
-        cd(m, pen, hyper, psi, {}, x0, tight());
-    cd.set_latent_inverse_route(le::latent_inverse_route::dense);
+    // automatic (the default): selected for a gradient, then for the Hessian at the same point
+    le::laplace_marginal_criterion<engine_distribs> ca(m, pen, hyper, psi, {}, x0, tight());
     (void)ca.value_gradient(vec(u0), g);
     CHECK(ca.counts().latent_inverse_used == le::latent_inverse_route::selected);
     for (int a = 0; a < A; ++a) c.route_grad_err = std::max(c.route_grad_err, std::abs(g(a) - g0[a]));
-    for (auto* cr : {&ca, &cd}) {
-      const double va = cr->value_gradient_curvature(vec(u0), g, Hs);
-      CHECK(cr->counts().latent_inverse_used == le::latent_inverse_route::dense);
-      c.route_value_err = std::max(c.route_value_err, std::abs(va - c.value));
-      for (int a = 0; a < A; ++a) {
-        c.route_grad_err = std::max(c.route_grad_err, std::abs(g(a) - g0[a]));
-        for (int b = 0; b < A; ++b)
-          c.route_hess_err = std::max(c.route_hess_err, std::abs(Hs(a, b) - H0[a + A * b]));
-      }
+    const double va = ca.value_gradient_curvature(vec(u0), g, Hs);
+    CHECK(ca.counts().latent_inverse_used == le::latent_inverse_route::selected);
+    CHECK(ca.counts().dense_trace_evaluations == 0);
+    c.route_value_err = std::max(c.route_value_err, std::abs(va - c.value));
+    for (int a = 0; a < A; ++a) {
+      c.route_grad_err = std::max(c.route_grad_err, std::abs(g(a) - g0[a]));
+      for (int b = 0; b < A; ++b) c.route_hess_err = std::max(c.route_hess_err, std::abs(Hs(a, b) - H0[a + A * b]));
     }
   }
   // central differences at steps h and h / 2, extrapolated (Richardson): error O(h^4)

@@ -1,5 +1,7 @@
 // The selected inverse of laplace::sparse::sparse_ldlt (Takahashi's recursion) against the dense inverse
-// from laplace::dense (an independent Cholesky), on every entry of the pattern of L + L', the fill included.
+// from laplace::dense (an independent Cholesky), on every entry of the pattern of L + L', the fill included;
+// and its derivative along a random direction dA on the pattern of A against the dense -Z dA Z, with the
+// contraction sum dZ_ij V_ij against -tr(Z dA Z V).
 #include <doctest/doctest.h>
 
 #include <laplace/dense/dense.hpp>
@@ -41,6 +43,7 @@ lower_entries dominant(lower_entries a, double extra) {
 struct check_result {
   long pattern_entries = 0, stored_but_outside = 0;
   double max_error = 0.0, max_z = 0.0;
+  double max_derivative_error = 0.0, max_dz = 0.0, dot_error = 0.0, dot_value = 0.0;
 };
 
 check_result compare(const lower_entries& a, double shift) {
@@ -56,6 +59,7 @@ check_result compare(const lower_entries& a, double shift) {
   }
   ls::sparse_ldlt f;
   CHECK_THROWS_AS((void)f.selected_inverse_entry(0, 0), std::out_of_range);
+  CHECK_THROWS_AS((void)f.selected_inverse_derivative_entry(0, 0), std::out_of_range);
   REQUIRE(f.factorize(n, cp.data(), ri.data(), vx.data(), shift) == ls::sparse_ldlt_outcome::positive_definite);
   CHECK_THROWS_AS((void)f.selected_inverse_entry(0, 0), std::out_of_range);
   REQUIRE(f.compute_selected_inverse());
@@ -81,6 +85,44 @@ check_result compare(const lower_entries& a, double shift) {
       ++out.pattern_entries;
       out.max_error = std::max(out.max_error, std::abs(z - B(i, j)));
     }
+
+  // the derivative along a random symmetric dA, and a random symmetric V, both on the pattern of A
+  std::mt19937 rng(7 + n);
+  std::uniform_real_distribution<double> unif(-1.0, 1.0);
+  std::vector<double> dvx(vx.size()), wvx(vx.size());
+  Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace> dA("dA", n, n), V("V", n, n);
+  for (int c = 0; c < n; ++c)
+    for (int k = cp[c]; k < cp[c + 1]; ++k) {
+      dvx[k] = unif(rng), wvx[k] = unif(rng);
+      dA(ri[k], c) = dA(c, ri[k]) = dvx[k];
+      V(ri[k], c) = V(c, ri[k]) = wvx[k];
+    }
+  REQUIRE(f.compute_selected_inverse_derivative(dvx.data()));
+  // dense dZ = -B dA B, and -tr(B dA B V) = sum dZ_ij V_ij
+  std::vector<double> T(static_cast<std::size_t>(n) * n, 0.0), dZ(static_cast<std::size_t>(n) * n, 0.0);
+  for (int i = 0; i < n; ++i)
+    for (int k = 0; k < n; ++k) {
+      if (dA(i, k) == 0.0) continue;
+      for (int j = 0; j < n; ++j) T[i + n * j] += dA(i, k) * B(k, j);  // T = dA B
+    }
+  for (int i = 0; i < n; ++i)
+    for (int k = 0; k < n; ++k)
+      for (int j = 0; j < n; ++j) dZ[i + n * j] -= B(i, k) * T[k + n * j];
+  double dot = 0.0;
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < n; ++j) out.max_dz = std::max(out.max_dz, std::abs(dZ[i + n * j])), dot += dZ[i + n * j] * V(i, j);
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < n; ++j) {
+      double z = 0.0;
+      try {
+        z = f.selected_inverse_derivative_entry(i, j);
+      } catch (const std::out_of_range&) {
+        continue;
+      }
+      out.max_derivative_error = std::max(out.max_derivative_error, std::abs(z - dZ[i + n * j]));
+    }
+  out.dot_value = dot;
+  out.dot_error = std::abs(f.selected_inverse_derivative_dot(wvx.data()) - dot);
   return out;
 }
 
@@ -90,6 +132,11 @@ void check(const lower_entries& a, double shift, long min_entries) {
   CHECK(r.stored_but_outside == 0);
   CHECK(r.pattern_entries >= min_entries);
   CHECK(r.max_error <= 1e-13 * r.max_z);
+  MESSAGE("derivative: max error ", r.max_derivative_error, " of max |dZ| ", r.max_dz, " (relative ",
+          r.max_dz > 0.0 ? r.max_derivative_error / r.max_dz : 0.0, "); contraction ", r.dot_value, ", error ",
+          r.dot_error);
+  CHECK(r.max_derivative_error <= 1e-12 * r.max_dz);
+  CHECK(r.dot_error <= 1e-11 * (1.0 + std::abs(r.dot_value)));
 }
 
 }  // namespace

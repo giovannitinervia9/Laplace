@@ -143,6 +143,45 @@ class sparse_ldlt {
    * \return \f$Z_{ij}\f$.
    */
   double selected_inverse_entry(int i, int j) const;
+  /**
+   * \ingroup sparse
+   * \brief Computes the derivative of the selected inverse along a direction \f$\dot A\f$ on the pattern of \f$A\f$.
+   *
+   * \f$\dot A\f$ is symmetric and given by its lower triangle on the pattern of the last factorized matrix
+   * (`dvalues` aligned with its `col_ptr` and `row_idx`). The derivative of the factorization along
+   * \f$\dot A\f$, \f$\dot L\f$ and \f$\dot D\f$ on the pattern of \f$L\f$, follows from
+   * \f$\dot L_{ij} D_j + L_{ij} \dot D_j = \dot A_{ij} - \sum_{k<j} (\dot L_{ik} L_{jk} D_k + L_{ik} \dot L_{jk} D_k
+   * + L_{ik} L_{jk} \dot D_k)\f$ for \f$i \ge j\f$ (with \f$L_{jj} = 1\f$, \f$\dot L_{jj} = 0\f$), and the derivative
+   * of Takahashi's recursion gives \f$\dot Z = -Z \dot A Z\f$ on the pattern of \f$L + L^\top\f$:
+   * \f$\dot Z_{ij} = -\sum_{k \in J_j} (\dot Z_{ik} L_{kj} + Z_{ik} \dot L_{kj})\f$ and
+   * \f$\dot Z_{jj} = -\dot D_j / D_j^2 - \sum_{k \in J_j} (\dot L_{kj} Z_{kj} + L_{kj} \dot Z_{kj})\f$ (permuted ordering).
+   * The time is of the order of one numeric factorization and one selected inverse; the memory that of
+   * \f$L\f$ three times. Needs compute_selected_inverse(); a later factorize() or another call replaces it.
+   * \param dvalues Array of `col_ptr[n]` lower-triangular entries of \f$\dot A\f$.
+   * \return `true` if the selected inverse was available and the derivative was computed; `false` otherwise.
+   */
+  bool compute_selected_inverse_derivative(const double* dvalues);
+  /**
+   * \ingroup sparse
+   * \brief The entry \f$\dot Z_{ij}\f$ of the last derivative of the selected inverse, in the original ordering.
+   *
+   * Throws `std::out_of_range` outside the pattern of \f$L + L^\top\f$ or when no derivative is stored.
+   * \param i Row, in \f$[0, n)\f$.
+   * \param j Column, in \f$[0, n)\f$.
+   * \return \f$\dot Z_{ij}\f$.
+   */
+  double selected_inverse_derivative_entry(int i, int j) const;
+  /**
+   * \ingroup sparse
+   * \brief The sum \f$\sum_{i,j} \dot Z_{ij} V_{ij}\f$ for a symmetric \f$V\f$ on the pattern of \f$A\f$.
+   *
+   * \f$V\f$ is given by its lower triangle, aligned like `dvalues`; each entry below the diagonal counts
+   * twice. With \f$\dot Z = -Z \dot A Z\f$ this is \f$-\operatorname{tr}(Z \dot A Z V)\f$.
+   * Throws `std::out_of_range` when no derivative is stored.
+   * \param values Array of `col_ptr[n]` lower-triangular entries of \f$V\f$.
+   * \return The sum.
+   */
+  double selected_inverse_derivative_dot(const double* values) const;
 
  private:
   struct impl;

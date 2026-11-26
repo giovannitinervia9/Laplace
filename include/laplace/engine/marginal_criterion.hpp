@@ -54,10 +54,12 @@
 // factor of H (Takahashi's recursion, sparse_ldlt::compute_selected_inverse),
 // which holds every pair of coordinates that meet in one unit or in one
 // replicate of a penalty; these are all the entries that the value, the
-// gradient and the passes read, and every product Hi w is a solve. The term
-// tr(Hi dH_a Hi dH_b) of the Hessian still forms the dense Hi on both routes,
-// so the default (automatic, provisional) takes the selected route for the
-// value and the gradient and the dense one when the Hessian is asked.
+// gradient and the passes read, and every product Hi w is a solve. On the
+// selected route the term tr(Hi dH_a Hi dH_b) of the Hessian is
+// -sum_ij (dZ_a)_ij (dH_b)_ij, with dZ_a = -Hi dH_a Hi the derivative of the
+// selected inverse along dH_a (sparse_ldlt::compute_selected_inverse_derivative),
+// so nothing dense is formed. The default (automatic) is the selected route at
+// every level; the dense one is the user's explicit choice.
 // The full Hessian H_full is a list of entries.
 //
 // Refused at construction: an unnormalizable penalty (SCAD, MCP), whose
@@ -73,6 +75,7 @@
 
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -133,9 +136,9 @@ inline void trace_products(const Kokkos::View<double**, Kokkos::LayoutLeft, row_
  * \see laplace_marginal_criterion::set_latent_inverse_route(), \ref engine
  */
 enum class latent_inverse_route : int {
-  automatic,  ///< Per evaluation: selected for the value and the gradient, dense when the outer Hessian is asked (which forms the dense inverse on either route). Provisional: revisited when the outer Hessian has a route without the dense inverse.
+  automatic,  ///< The default: the selected route for the value, the gradient and the outer Hessian.
   dense,      ///< The dense \f$N \times N\f$ inverse from one solve per free coordinate (memory \f$8N^2\f$ bytes).
-  selected,   ///< \f$H^{-1}\f$ on the pattern of the factor of \f$H\f$ only (Takahashi's recursion); the outer Hessian still forms the dense inverse.
+  selected,   ///< \f$H^{-1}\f$ on the pattern of the factor of \f$H\f$ only (Takahashi's recursion), and for the outer Hessian its derivative along each \f$\dot H_a\f$; nothing dense.
 };
 
 /**
@@ -158,7 +161,8 @@ struct marginal_criterion_counts {
   double seconds_factorization = 0.0;   ///< factorizations of \f$H\f$ at \f$\hat x\f$ (part of `seconds_algebra`)
   double seconds_inverse = 0.0;         ///< forming \f$H^{-1}\f$: the dense solves or the selected inverse (part of `seconds_algebra`)
   double seconds_to_device = 0.0;       ///< copying \f$H^{-1}\f$ on the information layout to the device (part of `seconds_passes`)
-  double seconds_trace_products = 0.0;  ///< the dense \f$H^{-1}\f$ on the device, the products \f$H^{-1} \dot H_a\f$ and their traces (part of `seconds_algebra`)
+  double seconds_trace_products = 0.0;  ///< the traces \f$\operatorname{tr}(H^{-1} \dot H_a H^{-1} \dot H_b)\f$: dense products on the device, or derivatives of the selected inverse (part of `seconds_algebra`)
+  long dense_trace_evaluations = 0;     ///< outer Hessians whose traces formed the dense \f$H^{-1}\f$: the dense route, or the selected route's fallback when an entry of \f$\dot H_a\f$ falls outside the pattern of \f$H\f$
   long factor_nonzeros = 0;             ///< entries of the factor of \f$H\f$ below its diagonal, at the last factorization
   latent_inverse_route latent_inverse_used = latent_inverse_route::dense;  ///< the route of the last evaluation of the derivatives (dense or selected)
 };
@@ -480,8 +484,7 @@ class laplace_marginal_criterion {
     return w;
   }
   // the dense Hi: one solve for each free coordinate
-  // ponytail: N^2 memory and N solves; the term tr(Hi dH_a Hi dH_b) of the Hessian is the last
-  // reader on the selected route, until it has a form of its own.
+  // ponytail: N^2 memory and N solves: the dense route, kept as the reference of the selected one.
   void dense_inverse() {
     const int N = n_;
     Hi_.assign(static_cast<std::size_t>(N) * N, 0.0);
@@ -646,8 +649,8 @@ class laplace_marginal_criterion {
       throw std::invalid_argument("laplace_marginal_criterion: more outer coordinates than row_outer_direction_capacity");
     auto t0 = clock::now();
     // H^-1, padded with zeros on held rows and columns, by the route of this point
-    // automatic (provisional): the Hessian forms the dense inverse anyway, so a selected one would be extra
-    selected_ = route_ == latent_inverse_route::selected || (route_ == latent_inverse_route::automatic && level < 2);
+    // automatic: the selected route at every level (Giovanni, 2026-11-26, on the full fits of step 2)
+    selected_ = route_ != latent_inverse_route::dense;
     counts_.latent_inverse_used = selected_ ? latent_inverse_route::selected : latent_inverse_route::dense;
     if (selected_ ? !have_selected_ : !have_hi_) {
       if (selected_) have_selected_ = ldlt_.compute_selected_inverse();
@@ -748,13 +751,64 @@ class laplace_marginal_criterion {
     }
   }
 
+  // tr(Hi dH_a Hi dH_b) = -sum_ij (dZ_a)_ij (dH_b)_ij, with dZ_a = -Hi dH_a Hi the derivative of the
+  // selected inverse along dH_a (sparse_ldlt::compute_selected_inverse_derivative): dH_a lies on the
+  // pattern of H, held rows and columns left out (Hi is zero there). One derivative per outer
+  // coordinate, nothing dense. false when an entry of dH_a falls outside the pattern of H.
+  bool selected_traces(const std::vector<double>& pass, const outer_pass_layout& lo, const penalty_parts& pp,
+                       std::vector<double>& out) {
+    const int A = n_outer(), Kh = K();
+    const std::size_t nz = Hs_.values.size();
+    std::vector<double> dH(static_cast<std::size_t>(A) * nz, 0.0);
+    // position of the entry (r, c) of the lower triangle of H, -1 outside the pattern
+    auto at = [&](int r, int c) -> long {
+      if (r < c) std::swap(r, c);
+      const int* first = Hs_.row_idx.data() + Hs_.col_ptr[c];
+      const int* last = Hs_.row_idx.data() + Hs_.col_ptr[c + 1];
+      const int* p = std::lower_bound(first, last, r);
+      return p != last && *p == r ? static_cast<long>(p - Hs_.row_idx.data()) : -1;
+    };
+    for (int a = 0; a < A; ++a) {
+      double* d = dH.data() + static_cast<std::size_t>(a) * nz;
+      auto add = [&](int r, int c, double x) {
+        if (x == 0.0 || held_[r] || held_[c]) return true;
+        const long p = at(r, c);
+        if (p < 0) return false;
+        d[p] += x;
+        return true;
+      };
+      // T[v_a] on the information layout (one entry per pair); T_pen[v_a] and E_a list both triangles
+      const double* T = pass.data() + lo.third_direction(a);
+      for (int q = 0; q < model_->view.information_size; ++q)
+        if (!add(model_->information_row[q], model_->information_column[q], T[q])) return false;
+      const auto& tv = pp.Tv[a];
+      for (std::size_t k = 0; k < tv.v.size(); ++k)
+        if (tv.r[k] >= tv.c[k] && !add(tv.r[k], tv.c[k], tv.v[k])) return false;
+      if (a < Kh) {
+        const auto& E = pp.E[a];
+        for (std::size_t k = 0; k < E.v.size(); ++k)
+          if (E.r[k] >= E.c[k] && !add(E.r[k], E.c[k], E.v[k])) return false;
+      }
+    }
+    out.assign(static_cast<std::size_t>(A) * (A + 1) / 2, 0.0);
+    for (int a = 0, ab = 0; a < A; ++a) {
+      if (!ldlt_.compute_selected_inverse_derivative(dH.data() + static_cast<std::size_t>(a) * nz)) return false;
+      for (int b = a; b < A; ++b, ++ab)
+        out[ab] = -ldlt_.selected_inverse_derivative_dot(dH.data() + static_cast<std::size_t>(b) * nz);
+    }
+    return true;
+  }
+
   void hessian(const std::vector<double>& pass, const outer_pass_layout& lo, const entry_list& Hf, const vec& tau,
                const penalty_parts& pp, const std::vector<vec>& v) {
     const int N = n_, A = n_outer(), Kh = K();
     auto kpair = [&](int a, int b) { return a * Kh - a * (a - 1) / 2 + (b - a); };  // a <= b < Kh
+    std::vector<double> trxx_all;
+    const auto tt = clock::now();
+    if (!(selected_ && selected_traces(pass, lo, pp, trxx_all))) {
     // dH_a = E_a + T[v_a] in compressed columns (both triangles), for X_a = Hi dH_a and its traces on the device
-    // ponytail: A dense N x N products (A N^2 memory, N nnz(dH) time); the arrowhead block formula
-    // when a model with many groups is measured (decision D1).
+    // ponytail: A dense N x N products (A N^2 memory, N nnz(dH) time): the dense route, and the
+    // selected route's fallback when an entry of dH_a falls outside the pattern of H.
     std::vector<int> cp(static_cast<std::size_t>(A) * (N + 1), 0), rows;
     std::vector<double> vals;
     {
@@ -782,13 +836,11 @@ class laplace_marginal_criterion {
         }
       }
     }
-    std::vector<double> trxx_all;
     if (!have_hi_) {
       const auto ti = clock::now();
       dense_inverse();
       counts_.seconds_inverse += std::chrono::duration<double>(clock::now() - ti).count();
     }
-    const auto tt = clock::now();
     if (!hid_current_) {
       if (static_cast<int>(Hid_.extent(0)) != N) Hid_ = dev_matrix("laplace::engine::Hi", N, N);
       Kokkos::View<const double**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> h(Hi_.data(), N, N);
@@ -796,6 +848,8 @@ class laplace_marginal_criterion {
       hid_current_ = true;
     }
     detail_marginal::trace_products(Hid_, N, A, cp, rows, vals, trxx_all);
+    ++counts_.dense_trace_evaluations;
+    }
     counts_.seconds_trace_products += std::chrono::duration<double>(clock::now() - tt).count();
     const vec ht = hi_times(tau);  // Hi tau
     std::vector<vec> Hv(A);        // H_full v_b

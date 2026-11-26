@@ -30,6 +30,21 @@ where \f$\mathcal{J}_j\f$ is the set of row indices of the nonzeros in column \f
 
 `compute_selected_inverse()` returns `false` when no factorization is stored, and any later `factorize()` call discards the computed selected inverse. Calling \ref laplace::sparse::sparse_ldlt::selected_inverse_entry "selected_inverse_entry(i, j)" takes original (unpermuted) indices in either order and throws `std::out_of_range` if `(i, j)` lies outside the pattern of \f$L + L^\top\f$ or if `compute_selected_inverse()` has not run since the last factorization. In `tests/sparse/test_selected_inverse.cpp`, every entry of the pattern of \f$L + L^\top\f$ (including fill) is compared against `laplace::dense::spd_solve()` on a \f$1 \times 1\f$ matrix, a tridiagonal matrix, an arrowhead matrix, random sparse matrices (with shift \f$0\f$ and \f$0.75\f$), and a matrix from two crossed groupings; the largest error is \f$8.0 \times 10^{-16} \max_{i,j} |Z_{ij}|\f$ on gcc and \f$6.0 \times 10^{-16} \max_{i,j} |Z_{ij}|\f$ on CUDA (the host code compiled by gcc and by MSVC), within the test bound of \f$10^{-13} \max_{i,j} |Z_{ij}|\f$.
 
+## Derivative of the selected inverse
+
+Calling \ref laplace::sparse::sparse_ldlt::compute_selected_inverse_derivative "compute_selected_inverse_derivative(dvalues)" computes the directional derivative \f$\dot Z = -Z \dot A Z\f$ on the sparsity pattern of \f$L + L^\top\f$. Here \f$\dot A\f$ is a symmetric matrix given by its lower triangle on the pattern of the last factorized matrix, with `dvalues` aligned with `col_ptr` and `row_idx`. First, a left-looking sweep in the permuted ordering gives the factor derivatives \f$\dot L\f$ and \f$\dot D\f$ on the pattern of \f$L\f$ (with \f$L_{jj} = 1\f$ and \f$\dot L_{jj} = 0\f$):
+\f[
+\dot L_{ij} D_j + L_{ij} \dot D_j = \dot A_{ij} - \sum_{k < j} \left(\dot L_{ik} L_{jk} D_k + L_{ik} \dot L_{jk} D_k + L_{ik} L_{jk} \dot D_k\right), \qquad i \ge j.
+\f]
+Then the derivative of Takahashi's recursion over columns \f$j = n - 1, \dots, 0\f$ in the permuted ordering yields \f$\dot Z\f$ on the pattern of \f$L + L^\top\f$:
+\f[
+\dot Z_{ij} = -\sum_{k \in \mathcal{J}_j} \left(\dot Z_{ik} L_{kj} + Z_{ik} \dot L_{kj}\right) \quad (i \in \mathcal{J}_j), \qquad
+\dot Z_{jj} = -\frac{\dot D_j}{D_j^2} - \sum_{k \in \mathcal{J}_j} \left(\dot L_{kj} Z_{kj} + L_{kj} \dot Z_{kj}\right).
+\f]
+Both sweeps read only entries on the pattern. Each direction takes time of the order of one numeric factorization plus one selected inverse, measured in `docs/numerics.md` at \f$0.65\f$ to \f$1.1\f$ times their sum. The derivative storage uses three arrays of the size of \f$L\f$.
+
+`compute_selected_inverse_derivative()` requires `compute_selected_inverse()` to have run since the last factorization and returns `false` otherwise; a later `factorize()` call discards the stored derivative and another call replaces it. Calling \ref laplace::sparse::sparse_ldlt::selected_inverse_derivative_entry "selected_inverse_derivative_entry(i, j)" takes original indices in either order and throws `std::out_of_range` if `(i, j)` lies outside the pattern of \f$L + L^\top\f$ or if no derivative is stored. Calling \ref laplace::sparse::sparse_ldlt::selected_inverse_derivative_dot "selected_inverse_derivative_dot(values)" takes a symmetric matrix \f$V\f$ given by its lower triangle on the pattern of the factorized matrix, aligned like `dvalues`. It returns \f$s = \sum_{i,j} \dot Z_{ij} V_{ij} = -\operatorname{tr}(Z \dot A Z V)\f$, counting each entry below the diagonal twice, and throws `std::out_of_range` when no derivative is stored. In `tests/sparse/test_selected_inverse.cpp`, on the same six matrices, a random symmetric \f$\dot A\f$ and a random symmetric \f$V\f$ on the pattern of \f$A\f$ are checked against dense \f$-Z \dot A Z\f$ and \f$-\operatorname{tr}(Z \dot A Z V)\f$. The largest entrywise error is \f$1.5 \times 10^{-15} \max_{i,j} |\dot Z_{ij}|\f$ and the contraction error is within \f$8 \times 10^{-15}\f$, identical on gcc and CUDA. Both satisfy the test bounds of \f$10^{-12} \max_{i,j} |\dot Z_{ij}|\f$ and \f$10^{-11}(1 + |s|)\f$.
+
 ## Example
 
 The following host snippet factorizes a \f$3 \times 3\f$ tridiagonal symmetric positive-definite matrix stored in lower compressed sparse column format and solves \f$A z = b\f$ in place:
@@ -60,7 +75,7 @@ bool solve_tridiagonal_example() {
 
 In namespace `laplace::sparse`:
 - \ref laplace::sparse::sparse_ldlt_outcome "sparse_ldlt_outcome"
-- \ref laplace::sparse::sparse_ldlt "sparse_ldlt" (including \ref laplace::sparse::sparse_ldlt::factor_nonzeros "factor_nonzeros()", \ref laplace::sparse::sparse_ldlt::compute_selected_inverse "compute_selected_inverse()", and \ref laplace::sparse::sparse_ldlt::selected_inverse_entry "selected_inverse_entry()")
+- \ref laplace::sparse::sparse_ldlt "sparse_ldlt" (including \ref laplace::sparse::sparse_ldlt::factor_nonzeros "factor_nonzeros()", \ref laplace::sparse::sparse_ldlt::compute_selected_inverse "compute_selected_inverse()", \ref laplace::sparse::sparse_ldlt::selected_inverse_entry "selected_inverse_entry()", \ref laplace::sparse::sparse_ldlt::compute_selected_inverse_derivative "compute_selected_inverse_derivative()", \ref laplace::sparse::sparse_ldlt::selected_inverse_derivative_entry "selected_inverse_derivative_entry()", and \ref laplace::sparse::sparse_ldlt::selected_inverse_derivative_dot "selected_inverse_derivative_dot()")
 
 ## References
 

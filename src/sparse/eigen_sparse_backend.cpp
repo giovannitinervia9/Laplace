@@ -20,8 +20,15 @@ struct sparse_ldlt::impl {
   Eigen::SimplicialLDLT<sparse_matrix, Eigen::Lower, Eigen::AMDOrdering<int>> ldlt;
   sparse_matrix A;
   std::vector<int> col_ptr, row_idx;  // the pattern last analyzed
-  bool analyzed = false, factorized = false, have_selected = false;
+  bool analyzed = false, factorized = false, have_selected = false, have_derivative = false;
   std::vector<double> z_lower, z_diag;  // the selected inverse: z_lower on the pattern of L, permuted ordering
+  // the derivative along a direction: of the factor (dl on the pattern of L, dd) and of the selected inverse
+  std::vector<double> dl, dd, dz_lower, dz_diag;
+  // for the derivative, built once per pattern: where each stored entry of A sits in the factor's storage
+  // (p >= 0 an entry of L, -1 - j the diagonal j), and the rows of L (for row j the columns k < j with
+  // L_jk != 0 and the position of L_jk)
+  bool structure_ready = false;
+  std::vector<int> a_position, row_ptr, row_col, row_pos;
   double min_pivot = 0.0, max_pivot = 0.0, log_abs_det = 0.0;
 };
 
@@ -35,6 +42,7 @@ sparse_ldlt_outcome sparse_ldlt::factorize(int n, const int* col_ptr, const int*
   impl& m = *impl_;
   m.factorized = false;
   m.have_selected = false;
+  m.have_derivative = false;
   const int nnz = col_ptr[n];
   for (int k = 0; k < nnz; ++k)
     if (!std::isfinite(values[k])) return sparse_ldlt_outcome::non_finite;
@@ -55,6 +63,7 @@ sparse_ldlt_outcome sparse_ldlt::factorize(int n, const int* col_ptr, const int*
   if (!same_pattern) {
     m.ldlt.analyzePattern(m.A);
     m.analyzed = true;
+    m.structure_ready = false;
   }
   m.ldlt.factorize(m.A);
   if (m.ldlt.info() != Eigen::Success) return sparse_ldlt_outcome::not_positive_definite;
@@ -134,6 +143,135 @@ double sparse_ldlt::selected_inverse_entry(int i, int j) const {
   const int* it = std::lower_bound(first, last, a);
   if (it == last || *it != a) throw std::out_of_range("sparse_ldlt::selected_inverse_entry: outside the pattern of L + L'");
   return m.z_lower[it - L.innerIndexPtr()];
+}
+
+namespace {
+
+// the position in the factor's storage of the permuted entry (a, b): -1 - a on the diagonal, else the
+// index of L_ab (a > b) in its column; -2 - n when outside the pattern
+int factor_position(const sparse_matrix& L, int a, int b) {
+  if (a == b) return -1 - a;
+  if (a < b) std::swap(a, b);
+  const int* first = L.innerIndexPtr() + L.outerIndexPtr()[b];
+  const int* last = L.innerIndexPtr() + L.outerIndexPtr()[b + 1];
+  const int* it = std::lower_bound(first, last, a);
+  if (it == last || *it != a) return -2 - static_cast<int>(L.rows());
+  return static_cast<int>(it - L.innerIndexPtr());
+}
+
+}  // namespace
+
+bool sparse_ldlt::compute_selected_inverse_derivative(const double* dvalues) {
+  impl& m = *impl_;
+  m.have_derivative = false;
+  if (!m.have_selected) return false;
+  const auto& L = m.ldlt.matrixL().nestedExpression();
+  const int n = static_cast<int>(L.rows());
+  const int* Lp = L.outerIndexPtr();
+  const int* Li = L.innerIndexPtr();
+  const double* Lx = L.valuePtr();
+  const auto D = m.ldlt.vectorD();
+  const auto& idx = m.ldlt.permutationP().indices();
+  if (!m.structure_ready) {
+    const int nnz = m.col_ptr[n];
+    m.a_position.resize(nnz);
+    for (int c = 0; c < n; ++c)
+      for (int k = m.col_ptr[c]; k < m.col_ptr[c + 1]; ++k) {
+        const int r = m.row_idx[k];
+        m.a_position[k] = factor_position(L, idx.size() > 0 ? idx[r] : r, idx.size() > 0 ? idx[c] : c);
+      }
+    m.row_ptr.assign(n + 1, 0);
+    for (int p = 0; p < Lp[n]; ++p) ++m.row_ptr[Li[p] + 1];
+    for (int j = 0; j < n; ++j) m.row_ptr[j + 1] += m.row_ptr[j];
+    m.row_col.resize(Lp[n]);
+    m.row_pos.resize(Lp[n]);
+    std::vector<int> next(m.row_ptr.begin(), m.row_ptr.end() - 1);
+    for (int k = 0; k < n; ++k)  // columns in increasing order, so each row lists its columns sorted
+      for (int p = Lp[k]; p < Lp[k + 1]; ++p) m.row_col[next[Li[p]]] = k, m.row_pos[next[Li[p]]++] = p;
+    m.structure_ready = true;
+  }
+  // the direction on the factor's storage (permuted ordering, lower triangle)
+  std::vector<double> xl(Lp[n], 0.0), xd(n, 0.0);
+  for (int k = 0; k < m.col_ptr[n]; ++k) {
+    const int q = m.a_position[k];
+    if (q < -1 - n) throw std::logic_error("sparse_ldlt: an entry of A outside the pattern of its factor");
+    (q >= 0 ? xl[q] : xd[-1 - q]) += dvalues[k];
+  }
+  // the derivative of the factorization, left-looking: column j from the columns k < j with L_jk != 0
+  m.dl.assign(Lp[n], 0.0);
+  m.dd.assign(n, 0.0);
+  std::vector<double> x(n, 0.0);
+  for (int j = 0; j < n; ++j) {
+    for (int p = Lp[j]; p < Lp[j + 1]; ++p) x[Li[p]] = xl[p];
+    double dj = xd[j];
+    for (int t = m.row_ptr[j]; t < m.row_ptr[j + 1]; ++t) {
+      const int k = m.row_col[t], pjk = m.row_pos[t];
+      const double ljk = Lx[pjk], dljk = m.dl[pjk], Dk = D[k], dDk = m.dd[k];
+      dj -= 2.0 * ljk * dljk * Dk + ljk * ljk * dDk;
+      const double c1 = ljk * Dk, c2 = dljk * Dk + ljk * dDk;
+      for (int q = pjk + 1; q < Lp[k + 1]; ++q) x[Li[q]] -= m.dl[q] * c1 + Lx[q] * c2;  // rows i > j of column k
+    }
+    m.dd[j] = dj;
+    for (int p = Lp[j]; p < Lp[j + 1]; ++p) {
+      m.dl[p] = (x[Li[p]] - Lx[p] * dj) / D[j];
+      x[Li[p]] = 0.0;
+    }
+  }
+  // the derivative of Takahashi's recursion, the same sweep as compute_selected_inverse()
+  m.dz_lower.assign(Lp[n], 0.0);
+  m.dz_diag.assign(n, 0.0);
+  std::vector<double> w(n, 0.0), lj(n, 0.0), dlj(n, 0.0);
+  std::vector<char> in(n, 0);
+  for (int j = n - 1; j >= 0; --j) {
+    for (int p = Lp[j]; p < Lp[j + 1]; ++p) in[Li[p]] = 1, lj[Li[p]] = Lx[p], dlj[Li[p]] = m.dl[p], w[Li[p]] = 0.0;
+    // w_i = sum_{k in J} (dZ_ik L_kj + Z_ik dL_kj) for i in J
+    for (int p = Lp[j]; p < Lp[j + 1]; ++p) {
+      const int k = Li[p];
+      const double lkj = Lx[p], dlkj = m.dl[p];
+      w[k] += m.dz_diag[k] * lkj + m.z_diag[k] * dlkj;
+      for (int q = Lp[k]; q < Lp[k + 1]; ++q) {
+        const int r = Li[q];
+        if (!in[r]) continue;
+        w[r] += m.dz_lower[q] * lkj + m.z_lower[q] * dlkj;    // i = r > k
+        w[k] += m.dz_lower[q] * lj[r] + m.z_lower[q] * dlj[r];  // i = k < r
+      }
+    }
+    double d = -m.dd[j] / (D[j] * D[j]);
+    for (int p = Lp[j]; p < Lp[j + 1]; ++p) {
+      m.dz_lower[p] = -w[Li[p]];
+      d -= m.dl[p] * m.z_lower[p] + Lx[p] * m.dz_lower[p];
+      in[Li[p]] = 0;
+    }
+    m.dz_diag[j] = d;
+  }
+  m.have_derivative = true;
+  return true;
+}
+
+double sparse_ldlt::selected_inverse_derivative_entry(int i, int j) const {
+  const impl& m = *impl_;
+  if (!m.have_derivative)
+    throw std::out_of_range("sparse_ldlt::selected_inverse_derivative_entry: no derivative computed");
+  const auto& L = m.ldlt.matrixL().nestedExpression();
+  const auto& idx = m.ldlt.permutationP().indices();
+  const int q = factor_position(L, idx.size() > 0 ? idx[i] : i, idx.size() > 0 ? idx[j] : j);
+  if (q < -static_cast<int>(L.rows()) - 1)
+    throw std::out_of_range("sparse_ldlt::selected_inverse_derivative_entry: outside the pattern of L + L'");
+  return q >= 0 ? m.dz_lower[q] : m.dz_diag[-1 - q];
+}
+
+double sparse_ldlt::selected_inverse_derivative_dot(const double* values) const {
+  const impl& m = *impl_;
+  if (!m.have_derivative)
+    throw std::out_of_range("sparse_ldlt::selected_inverse_derivative_dot: no derivative computed");
+  const int n = static_cast<int>(m.col_ptr.size()) - 1;
+  double s = 0.0;
+  for (int c = 0; c < n; ++c)
+    for (int k = m.col_ptr[c]; k < m.col_ptr[c + 1]; ++k) {
+      const int q = m.a_position[k];
+      s += (q >= 0 ? 2.0 * m.dz_lower[q] : m.dz_diag[-1 - q]) * values[k];
+    }
+  return s;
 }
 
 }  // namespace laplace::sparse

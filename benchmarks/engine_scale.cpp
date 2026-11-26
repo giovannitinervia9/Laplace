@@ -10,8 +10,8 @@
 // form H^-1 (extrapolated to N), the selected inverse and one pass of the penalties on the host. With
 // gradient it then evaluates the criterion and its gradient once at the start (the route given; the
 // dense route only when its N x N inverse fits in the memory budget); with full (or auto when the dense
-// matrices of the outer Hessian fit) a complete REML fit with fit_marginal, whose outer Hessian forms the
-// dense inverse on either route. With inner it runs only the inner fit from the start, through an
+// matrices of the outer Hessian fit) a complete REML fit with fit_marginal, on the route given (the
+// selected one forms nothing dense, its outer Hessian included). With inner it runs only the inner fit from the start, through an
 // objective that times every call of the objective and, after each curvature, one extra numeric
 // factorization of the matrix returned (not counted in the fit): the time of Newton outside the objective
 // (its own factorizations and solves) is the rest. Prints the peak working set of the process; run one case
@@ -213,6 +213,17 @@ int run(int argc, char** argv) {
     t0 = clock_type::now();
     (void)ldlt.compute_selected_inverse();
     std::printf("PART selected inverse %.6f s\n", since(t0));
+    // its derivative along one direction on the pattern of H (H itself), and one contraction: the work of
+    // one outer coordinate in the outer Hessian by the derivative of Takahashi's recursion
+    for (int rep = 0; rep < 2; ++rep) {  // the first call also builds the structure of the derivative
+      t0 = clock_type::now();
+      (void)ldlt.compute_selected_inverse_derivative(Hs.values.data());
+      const double t_der = since(t0);
+      t0 = clock_type::now();
+      const double dot = ldlt.selected_inverse_derivative_dot(Hs.values.data());
+      std::printf("PART selected inverse derivative %.6f s%s, contraction %.6f s (%g)\n", t_der,
+                  rep == 0 ? " (with its structure)" : "", since(t0), dot);
+    }
     const auto& ps = obj.penalties();
     std::vector<double> xh(r.optimizer.point.data(), r.optimizer.point.data() + N);
     auto xf = [&](int j) { return xh[j]; };
@@ -273,9 +284,9 @@ int run(int argc, char** argv) {
   std::printf("FIT %.6f s, status %d, outer iterations %d, criterion %.17g\n", t_fit, static_cast<int>(r.optimizer.status),
               r.optimizer.iterations, r.optimizer.value);
   std::printf("COUNTS evaluations %ld %ld %ld, inner fits %ld (failures %ld, stalls %ld, not pd %ld), outer passes %ld %ld, "
-              "polishing steps %ld, nnz(L) %ld\n",
+              "polishing steps %ld, nnz(L) %ld, dense traces %ld\n",
               c.evaluations[0], c.evaluations[1], c.evaluations[2], c.inner_fits, c.inner_failures, c.inner_stalls,
-              c.not_positive_definite, c.outer_passes[0], c.outer_passes[1], c.polishing_steps, c.factor_nonzeros);
+              c.not_positive_definite, c.outer_passes[0], c.outer_passes[1], c.polishing_steps, c.factor_nonzeros, c.dense_trace_evaluations);
   std::printf("TIME inner %.6f (kernels %.6f), observed H %.6f, algebra %.6f [factorization %.6f, H^-1 solves %.6f, "
               "trace products %.6f, rest %.6f], passes %.6f [H^-1 to device %.6f, kernels %.6f], penalties %.6f, "
               "outside %.6f s\n",

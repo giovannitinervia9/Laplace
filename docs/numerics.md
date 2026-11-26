@@ -15889,3 +15889,86 @@ the same criterion and iterations.
 **Limits.** The selected inverse runs on the host, column by column; the outer Hessian still needs
 the dense inverse, so a REML fit by Newton is still bounded by $8N^2$ bytes; a crossed model is
 bounded by the fill of its factor (simplicial $LDL^\top$, 12 per cent of $N^2/2$ at $N = 3004$).
+
+## The engine's outer Hessian on the selected route: the derivative of the selected inverse (2026-11-26)
+
+**What.** The term $\operatorname{tr}(H_I \dot H_a H_I \dot H_b)$ of the outer Hessian of the Laplace
+marginal criterion, the last reader of the dense inverse on the selected route, now comes from the
+selected inverse and its directional derivative. $H$ is the $N \times N$ inner curvature, factorized as
+$P H P^\top = L D L^\top$; $Z = H^{-1}$; $\dot H_a$ is the derivative of $H$ along outer coordinate $a$
+($a = 1, \dots, n_u$), which lies on the pattern of $H$ (the likelihood's third derivatives along
+$v_a = d\hat x / du_a$ on the information layout, the penalties' $T[v_a]$ and $E_a$ on their
+replicates), and the pattern of $H$ lies inside that of $L + L^\top$.
+
+**How.** `sparse_ldlt::compute_selected_inverse_derivative(dA)` differentiates the factorization along a
+symmetric $\dot A$ on the pattern of the factorized matrix (left-looking, in the permuted ordering, with
+$L_{jj} = 1$ and $\dot L_{jj} = 0$):
+
+$$\dot L_{ij} D_j + L_{ij} \dot D_j = \dot A_{ij} - \sum_{k<j} \left(\dot L_{ik} L_{jk} D_k + L_{ik} \dot L_{jk} D_k + L_{ik} L_{jk} \dot D_k\right), \quad i \ge j,$$
+
+then Takahashi's recursion, giving $\dot Z = -Z \dot A Z$ on the pattern of $L + L^\top$:
+
+$$\dot Z_{ij} = -\sum_{k \in \mathcal J_j} \left(\dot Z_{ik} L_{kj} + Z_{ik} \dot L_{kj}\right), \qquad
+\dot Z_{jj} = -\frac{\dot D_j}{D_j^2} - \sum_{k \in \mathcal J_j} \left(\dot L_{kj} Z_{kj} + L_{kj} \dot Z_{kj}\right),$$
+
+$\mathcal J_j$ the rows of the entries of column $j$ of $L$ below the diagonal. The derivatives read
+only entries on the pattern, as the recursion does. `selected_inverse_derivative_dot(V)` returns
+$\sum_{ij} \dot Z_{ij} V_{ij}$ for a symmetric $V$ on the pattern of $A$ (each entry below the diagonal
+counted twice), which is $-\operatorname{tr}(Z \dot A Z V)$. In `laplace_marginal_criterion` on the
+selected route each $\dot H_a$ is scattered onto the lower triangle of $H$ (held rows and columns left
+out, $H_I$ being zero there), one derivative is computed per outer coordinate, and
+$\operatorname{tr}(H_I \dot H_a H_I \dot H_b) = -\sum_{ij} (\dot Z_a)_{ij} (\dot H_b)_{ij}$ for the pairs
+$a \le b$. Nothing of size $N^2$ is formed. Should an entry of $\dot H_a$ fall outside the pattern of
+$H$, the dense products are used instead, and the new count `dense_trace_evaluations` reports it; it
+did not happen on any tested model. The route `automatic` still takes the dense route when the
+Hessian is asked, until its thresholds are measured.
+
+**Accuracy.** Against the dense $-Z \dot A Z$ (`tests/sparse/test_selected_inverse.cpp`, random
+$\dot A$ and $V$ on the pattern, six matrices): largest error $1.5 \cdot 10^{-15}$ of $\max |\dot Z|$,
+contractions within $8 \cdot 10^{-15}$, identical figures on gcc and CUDA; bounds $10^{-12} \max|\dot Z|$
+and $10^{-11}(1 + |\text{dot}|)$. The marginal criterion's selected Hessian against the dense one on
+the ten models of `tests/engine/test_marginal_criterion.cpp`: largest difference $1.1 \cdot 10^{-13}$
+on gcc and $2.3 \cdot 10^{-13}$ on CUDA, at most $2 \cdot 10^{-16}$ and $1.8 \cdot 10^{-15}$ of the
+Hessian's scale, never the dense fallback.
+
+**Cost of one direction** (`engine_scale <case> parts`, gcc, 12 threads, quiet machine; second call,
+the first also builds the row structure of the factor, once per pattern):
+
+| case | $N$ | numeric factorization | selected inverse | derivative per direction | contraction |
+|------|-----|----------------------|------------------|--------------------------|-------------|
+| one grouping, $G = 10^4$ | $10^4$ | 0.38 ms | 0.28 ms | 0.42 ms | 32 µs |
+| one grouping, $G = 10^5$ | $10^5$ | 5.0 ms | 2.4 ms | 5.0 ms | 0.33 ms |
+| one grouping, $G = 10^6$ | $10^6$ | 64 ms | 23 ms | 61 ms | 5.3 ms |
+| crossed, $G = 10^3$ | 3004 | 65 ms | 0.36 s | 0.44 s | 64 µs |
+| crossed, $G = 3 \cdot 10^3$ | 9004 | 2.48 s | 9.6 s | 13.7 s | 0.30 ms |
+
+A direction costs 0.65 to 1.1 times a numeric factorization plus a selected inverse. One outer
+Hessian ($n_u = 3$ directions for one grouping, 4 for crossed, plus the selected inverse) costs
+1.6 ms at one grouping with $G = 10^4$, against about 2.1 s and 4.8 GB on the dense route; 17 ms at
+$10^5$ and 0.21 s at $10^6$, where the dense route does not fit in memory; 2.1 s for crossed at
+$10^3$ and 64 s at $3 \cdot 10^3$, where it is about as costly as the dense route.
+
+**Complete REML fits** (`engine_scale <case> full`, gcc, 12 threads, both routes from the same start;
+time and peak working set of the process). The criterion and the outer point agree to the last digit:
+
+| case | dense | selected |
+|------|-------|----------|
+| one grouping, $G = 10^4$ | 12.8 s, 4.06 GB | 0.20 s, 0.07 GB |
+| one grouping, $G = 10^5$ | does not fit | 1.73 s, 0.64 GB |
+| one grouping, $G = 10^6$ | does not fit | 17.6 s, 6.3 GB |
+| crossed, $G = 10^3$ | 13.0 s, 0.48 GB | 17.4 s, 0.08 GB |
+| crossed, $G = 3 \cdot 10^3$ | 569 s, 4.08 GB | 585 s, 0.37 GB |
+
+The two crossed fits at $3 \cdot 10^3$ ran while another job was starting on the machine for their last
+minutes; their times are within a few per cent. On one grouping the selected route removes the
+memory limit and is 65 times faster at $10^4$; on crossed groupings it takes 1.0 to 1.3 times as
+long as the dense route with a sixth to a tenth of the memory.
+
+**Limits.** The derivative runs on the host, column by column, like the selected inverse. On crossed
+models the selected inverse and its derivative dominate (both are slow at 10 to 12 per cent fill), so
+the selected route there costs about what the dense route costs.
+
+**Default.** On these fits `latent_inverse_route::automatic`, the default, became the selected route at
+every level (the value, the gradient and the outer Hessian); the dense route is used only when it is
+asked for. On crossed groupings this costs up to a third more time at $G = 10^3$ for a sixth of the
+memory.
