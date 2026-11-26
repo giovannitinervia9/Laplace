@@ -12,7 +12,10 @@
 //     pseudo-Huber), whose third and fourth derivatives in beta and mixed
 //     derivatives in (beta, theta) enter, a hyperparameter shared by two
 //     penalties, a covariance over the effects of two predictors, and the
-//     covariance and precision forms of one prior.
+//     covariance and precision forms of one prior;
+//   - on every model of check_criterion, the selected inverse (latent_inverse_route::selected)
+//     against the dense one, and the automatic route (selected for a gradient, dense for a
+//     Hessian, reported as such): the same value, gradient and Hessian up to rounding.
 // Host code: the kernels are launched by the library's functions.
 
 #include <doctest/doctest.h>
@@ -55,6 +58,7 @@ le::penalty_hyperparameter free_scale() { return {}; }
 
 struct criterion_check {
   double grad_err = 0.0, grad_scale = 0.0, hess_err = 0.0, hess_scale = 0.0, value = 0.0;
+  double route_value_err = 0.0, route_grad_err = 0.0, route_hess_err = 0.0;  // selected against dense
   std::vector<double> gradient;
 };
 
@@ -75,6 +79,45 @@ criterion_check check_criterion(const le::row_model_spec& s, int P, const std::v
   for (int a = 0; a < A; ++a)
     for (int b = 0; b < A; ++b) H0[a + A * b] = H(a, b);
   const std::vector<double> xhat0 = crit.inner_point();
+  // the other routes: the same inner fits, so the derivatives differ by rounding only. Selected once with
+  // the Hessian (the last reader of the dense inverse) and once with the gradient only; automatic with
+  // the gradient, then the Hessian; dense explicitly
+  {
+    le::laplace_marginal_criterion<engine_distribs> cs(m, pen, hyper, psi, {}, x0, tight()),
+        cg(m, pen, hyper, psi, {}, x0, tight());
+    cs.set_latent_inverse_route(le::latent_inverse_route::selected);
+    cg.set_latent_inverse_route(le::latent_inverse_route::selected);
+    lo::dense_curvature_matrix Hs("Hs", A, A);
+    const double vs = cs.value_gradient_curvature(vec(u0), g, Hs);
+    CHECK(crit.counts().latent_inverse_used == le::latent_inverse_route::dense);
+    CHECK(cs.counts().latent_inverse_used == le::latent_inverse_route::selected);
+    c.route_value_err = std::abs(vs - c.value);
+    for (int a = 0; a < A; ++a) {
+      c.route_grad_err = std::max(c.route_grad_err, std::abs(g(a) - g0[a]));
+      for (int b = 0; b < A; ++b) c.route_hess_err = std::max(c.route_hess_err, std::abs(Hs(a, b) - H0[a + A * b]));
+    }
+    (void)cg.value_gradient(vec(u0), g);
+    CHECK(cg.counts().latent_inverse_used == le::latent_inverse_route::selected);
+    for (int a = 0; a < A; ++a) c.route_grad_err = std::max(c.route_grad_err, std::abs(g(a) - g0[a]));
+    // automatic (crit above, the default): selected for a gradient, then dense for the Hessian at the
+    // same point; and the explicit dense route against crit
+    le::laplace_marginal_criterion<engine_distribs> ca(m, pen, hyper, psi, {}, x0, tight()),
+        cd(m, pen, hyper, psi, {}, x0, tight());
+    cd.set_latent_inverse_route(le::latent_inverse_route::dense);
+    (void)ca.value_gradient(vec(u0), g);
+    CHECK(ca.counts().latent_inverse_used == le::latent_inverse_route::selected);
+    for (int a = 0; a < A; ++a) c.route_grad_err = std::max(c.route_grad_err, std::abs(g(a) - g0[a]));
+    for (auto* cr : {&ca, &cd}) {
+      const double va = cr->value_gradient_curvature(vec(u0), g, Hs);
+      CHECK(cr->counts().latent_inverse_used == le::latent_inverse_route::dense);
+      c.route_value_err = std::max(c.route_value_err, std::abs(va - c.value));
+      for (int a = 0; a < A; ++a) {
+        c.route_grad_err = std::max(c.route_grad_err, std::abs(g(a) - g0[a]));
+        for (int b = 0; b < A; ++b)
+          c.route_hess_err = std::max(c.route_hess_err, std::abs(Hs(a, b) - H0[a + A * b]));
+      }
+    }
+  }
   // central differences at steps h and h / 2, extrapolated (Richardson): error O(h^4)
   for (int a = 0; a < A; ++a) {
     double dv[2];
@@ -102,13 +145,17 @@ criterion_check check_criterion(const le::row_model_spec& s, int P, const std::v
     }
   }
   MESSAGE("V ", c.value, ": gradient error ", c.grad_err, " of ", c.grad_scale, ", Hessian error ", c.hess_err, " of ",
-          c.hess_scale);
+          c.hess_scale, "; selected route against dense: value ", c.route_value_err, ", gradient ", c.route_grad_err,
+          ", Hessian ", c.route_hess_err);
   return c;
 }
 
 void check_bounds(const criterion_check& c) {
   CHECK(c.grad_err <= 1e-8 * (1.0 + c.grad_scale));
   CHECK(c.hess_err <= 1e-8 * (1.0 + c.hess_scale));
+  CHECK(c.route_value_err <= 1e-12 * (1.0 + std::abs(c.value)));
+  CHECK(c.route_grad_err <= 1e-10 * (1.0 + c.grad_scale));
+  CHECK(c.route_hess_err <= 1e-10 * (1.0 + c.hess_scale));
 }
 
 }  // namespace

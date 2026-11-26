@@ -17,7 +17,18 @@ The outcome is reported as a \ref laplace::sparse::sparse_ldlt_outcome "sparse_l
 - `not_positive_definite`: Eigen's factorization failed or at least one pivot of \f$D\f$ is zero or negative.
 - `non_finite`: an entry of `values` or a computed pivot of \f$D\f$ is non-finite.
 
-After factorization, \ref laplace::sparse::sparse_ldlt::solve "solve()" solves \f$(A + \lambda I) z = b\f$ in place on a host array `b` of length \f$n\f$ (returning `false` if no valid factorization is currently stored), and \ref laplace::sparse::sparse_ldlt::min_pivot "min_pivot()" and \ref laplace::sparse::sparse_ldlt::max_pivot "max_pivot()" return the smallest and largest pivots of \f$D\f$ (\f$0.0\f$ for \f$n = 0\f$).
+After factorization, \ref laplace::sparse::sparse_ldlt::solve "solve()" solves \f$(A + \lambda I) z = b\f$ in place on a host array `b` of length \f$n\f$ (returning `false` if no valid factorization is currently stored), \ref laplace::sparse::sparse_ldlt::min_pivot "min_pivot()" and \ref laplace::sparse::sparse_ldlt::max_pivot "max_pivot()" return the smallest and largest pivots of \f$D\f$ (\f$0.0\f$ for \f$n = 0\f$), and \ref laplace::sparse::sparse_ldlt::factor_nonzeros "factor_nonzeros()" returns the number of stored entries of \f$L\f$ strictly below its unit diagonal (\f$0\f$ before the first factorization).
+
+## Selected inverse
+
+For a factorization \f$P (A + \lambda I) P^\top = L D L^\top\f$, where \f$P\f$ is the AMD permutation, \f$L\f$ is unit lower triangular, and \f$D\f$ is diagonal, write \f$Z = (A + \lambda I)^{-1}\f$. Calling \ref laplace::sparse::sparse_ldlt::compute_selected_inverse "compute_selected_inverse()" computes the entries of \f$Z\f$ on the sparsity pattern of \f$L + L^\top\f$ only (fill included) by Takahashi's recursion (Takahashi, Fagan and Chen, 1973; Erisman and Tinney, 1975) over columns \f$j = n - 1, \dots, 0\f$ in the permuted ordering:
+\f[
+Z_{ij} = -\sum_{k \in \mathcal{J}_j} Z_{ik} L_{kj} \quad (i \in \mathcal{J}_j), \qquad
+Z_{jj} = \frac{1}{D_j} - \sum_{k \in \mathcal{J}_j} L_{kj} Z_{kj},
+\f]
+where \f$\mathcal{J}_j\f$ is the set of row indices of the nonzeros in column \f$j\f$ of \f$L\f$ below the diagonal. Every entry \f$Z_{ik}\f$ read by the sums lies in the pattern because the rows in \f$\mathcal{J}_j\f$ are pairwise joined in the pattern of \f$L\f$; in particular, every stored entry of \f$A\f$ and its transpose lies in the pattern. The recursion costs of the order of one numeric factorization and stores one `double` per entry of \f$L\f$ below the diagonal plus \f$n\f$ diagonal entries.
+
+`compute_selected_inverse()` returns `false` when no factorization is stored, and any later `factorize()` call discards the computed selected inverse. Calling \ref laplace::sparse::sparse_ldlt::selected_inverse_entry "selected_inverse_entry(i, j)" takes original (unpermuted) indices in either order and throws `std::out_of_range` if `(i, j)` lies outside the pattern of \f$L + L^\top\f$ or if `compute_selected_inverse()` has not run since the last factorization. In `tests/sparse/test_selected_inverse.cpp`, every entry of the pattern of \f$L + L^\top\f$ (including fill) is compared against `laplace::dense::spd_solve()` on a \f$1 \times 1\f$ matrix, a tridiagonal matrix, an arrowhead matrix, random sparse matrices (with shift \f$0\f$ and \f$0.75\f$), and a matrix from two crossed groupings; the largest error is \f$8.0 \times 10^{-16} \max_{i,j} |Z_{ij}|\f$ on gcc and \f$6.0 \times 10^{-16} \max_{i,j} |Z_{ij}|\f$ on CUDA (the host code compiled by gcc and by MSVC), within the test bound of \f$10^{-13} \max_{i,j} |Z_{ij}|\f$.
 
 ## Example
 
@@ -49,7 +60,7 @@ bool solve_tridiagonal_example() {
 
 In namespace `laplace::sparse`:
 - \ref laplace::sparse::sparse_ldlt_outcome "sparse_ldlt_outcome"
-- \ref laplace::sparse::sparse_ldlt "sparse_ldlt"
+- \ref laplace::sparse::sparse_ldlt "sparse_ldlt" (including \ref laplace::sparse::sparse_ldlt::factor_nonzeros "factor_nonzeros()", \ref laplace::sparse::sparse_ldlt::compute_selected_inverse "compute_selected_inverse()", and \ref laplace::sparse::sparse_ldlt::selected_inverse_entry "selected_inverse_entry()")
 
 ## References
 

@@ -49,6 +49,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <concepts>
 #include <limits>
 #include <type_traits>
 
@@ -151,6 +152,26 @@ inline double seconds_since(std::chrono::steady_clock::time_point start) {
 }
 
 }  // namespace detail
+
+/**
+ * \ingroup optimizers_second_order
+ * \brief A curvature objective that may hand over the factor of the curvature it has just written.
+ *
+ * `factorized_curvature()` returns a pointer to `curvature_solver_for<curvature_type>::type` holding the
+ * positive definite factor of exactly the `H` written by the last `value_gradient_curvature()`, or
+ * `nullptr` when it holds none. newton_optimizer then takes its direction from that factor instead of
+ * factorizing `H` again; with `nullptr` it factorizes `H` as usual. \ref laplace::engine::row_model_objective "engine::row_model_objective"
+ * models this concept, since it factorizes its curvature to check it.
+ *
+ * \tparam O Objective type.
+ * \see newton_optimizer, curvature_objective, \ref optimizers_second_order
+ */
+template <class O>
+concept factorized_curvature_objective = curvature_objective<O> && requires(O& objective) {
+  {
+    objective.factorized_curvature()
+  } -> std::same_as<typename curvature_solver_for<typename O::curvature_type>::type*>;
+};
 
 /**
  * \ingroup optimizers_second_order
@@ -411,9 +432,17 @@ struct newton_optimizer {
 
     for (int k = 0;; ++k) {
       // the Newton step and the decrement at x
-      report.final_factorization = solver.factorize(H);
+      // the factor of H: the objective's own when it hands one over (factorized_curvature_objective)
+      typename curvature_solver_for<typename O::curvature_type>::type* factor = nullptr;
+      if constexpr (factorized_curvature_objective<O>) factor = objective.factorized_curvature();
+      if (factor) {
+        report.final_factorization = factor->last_factorization();
+      } else {
+        factor = &solver;
+        report.final_factorization = solver.factorize(H);
+      }
       bool newton_step = report.final_factorization == curvature_factorization::positive_definite &&
-                         solver.newton_direction(g, d);
+                         factor->newton_direction(g, d);
       double slope = newton_step ? detail::dot(g, d) : 0.0;
       newton_step = newton_step && slope <= 0.0;  // 0 only at g = 0
       report.decrement = newton_step ? 0.5 * std::abs(slope) : std::numeric_limits<double>::quiet_NaN();

@@ -290,3 +290,101 @@ TEST_CASE("engine inner fit: a group lasso on the location, proximal Newton, aga
   MESSAGE("group lasso: ||b|| ", nb, ", stationarity ", e, " in ", r.optimizer.iterations, " iterations");
   CHECK(e <= 1e-6 / (2.0 * std::exp(log_sigma)));  // relative to the size of the subgradient, 1/(2 sigma)
 }
+
+namespace {
+
+// the objective without factorized_curvature(): Newton factorizes every curvature itself, as before
+// the factor was handed over
+template <class O>
+struct own_factor_objective {
+  using curvature_type = typename O::curvature_type;
+  O& o;
+  double value(const lo::optimizer_point& x) { return o.value(x); }
+  double value_gradient(const lo::optimizer_point& x, const lo::optimizer_vector& g) { return o.value_gradient(x, g); }
+  double value_gradient_curvature(const lo::optimizer_point& x, const lo::optimizer_vector& g, curvature_type& H) {
+    return o.value_gradient_curvature(x, g, H);
+  }
+};
+
+// the objective as it is, counting the factors it hands over
+template <class O>
+struct counted_factor_objective {
+  using curvature_type = typename O::curvature_type;
+  O& o;
+  int handed = 0;
+  double value(const lo::optimizer_point& x) { return o.value(x); }
+  double value_gradient(const lo::optimizer_point& x, const lo::optimizer_vector& g) { return o.value_gradient(x, g); }
+  double value_gradient_curvature(const lo::optimizer_point& x, const lo::optimizer_vector& g, curvature_type& H) {
+    return o.value_gradient_curvature(x, g, H);
+  }
+  auto* factorized_curvature() {
+    auto* f = o.factorized_curvature();
+    handed += f != nullptr;
+    return f;
+  }
+};
+
+// Newton on obj from x0, once taking the objective's factor and once factorizing itself: the same
+// factor of the same matrix, so the same iterates; the factor is handed over at every curvature that
+// passed the check (curvatures minus expected fallbacks)
+template <class O>
+void check_factor_handed_over(O& obj, const std::vector<double>& x0) {
+  static_assert(lo::factorized_curvature_objective<O>);
+  own_factor_objective<O> own{obj};
+  counted_factor_objective<O> counted{obj};
+  static_assert(!lo::factorized_curvature_objective<own_factor_objective<O>>);
+  obj.reset_counts();
+  const auto ro = lo::minimize(tight(), own, point(x0));
+  const long fallbacks_own = obj.counts().expected_fallbacks;
+  obj.reset_counts();
+  const auto rh = lo::minimize(tight(), counted, point(x0));
+  const long fallbacks = obj.counts().expected_fallbacks;
+  REQUIRE(lo::optimizer_succeeded(rh.status));
+  CHECK(rh.status == ro.status);
+  CHECK(rh.iterations == ro.iterations);
+  CHECK(rh.curvature_evaluations == ro.curvature_evaluations);
+  CHECK(rh.value_evaluations == ro.value_evaluations);
+  CHECK(fallbacks == fallbacks_own);
+  // the same arithmetic up to the order of the kernels' sums (atomics on the device)
+  CHECK(std::abs(rh.value - ro.value) <= 1e-12 * (1.0 + std::abs(ro.value)));
+  double dx = 0.0;
+  for (std::size_t j = 0; j < x0.size(); ++j)
+    dx = std::max(dx, std::abs(rh.point(j) - ro.point(j)) / (1.0 + std::abs(ro.point(j))));
+  CHECK(dx <= 1e-10);
+  // the last curvature is factorized only to compute the decrement of the stop, also from the handed factor
+  CHECK(counted.handed == rh.curvature_evaluations - fallbacks);
+  CHECK(counted.handed > 0);
+  MESSAGE(x0.size(), " coordinates: largest relative difference in the point ", dx, "; iterations ", rh.iterations,
+          ", curvatures ", rh.curvature_evaluations, ", factors handed over ",
+          counted.handed, ", expected fallbacks ", fallbacks);
+}
+
+}  // namespace
+
+TEST_CASE("engine inner fit: Newton takes the factor of the checked curvature from the objective") {
+  {
+    const auto s = gamma_spec(3000, 30, 23);
+    const auto m = le::build_row_model(s, 2);
+    std::vector<double> x0(m.n_coordinates(), 0.0);
+    x0[0] = 2.5, x0[1] = 4.0, x0[2] = 0.0, x0[3] = -1.0;
+    le::row_model_objective<engine_distribs, lo::sparse_curvature_matrix> obj(m, group_prior(s, 0.3));
+    check_factor_handed_over(obj, x0);
+  }
+  {
+    const auto s = student_spec(3000, 24);
+    const auto m = le::build_row_model(s, 3);
+    le::row_model_objective<engine_distribs, lo::dense_curvature_matrix> obj(
+        m, {}, {}, le::row_curvature::observed_else_expected);
+    check_factor_handed_over(obj, {0.0, 0.0, 0.0, 0.0, std::log(10.0)});
+  }
+  {
+    // with observed (no check) nothing is handed over
+    const auto s = student_spec(3000, 24);
+    const auto m = le::build_row_model(s, 3);
+    le::row_model_objective<engine_distribs, lo::dense_curvature_matrix> obj(m, {}, {}, le::row_curvature::observed);
+    lo::optimizer_vector g("g", 5);
+    lo::dense_curvature_matrix H("H", 5, 5);
+    (void)obj.value_gradient_curvature(point({0.0, 0.0, 0.0, 0.0, std::log(10.0)}), g, H);
+    CHECK(obj.factorized_curvature() == nullptr);
+  }
+}

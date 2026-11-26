@@ -112,6 +112,37 @@ class sparse_ldlt {
    * \return The logarithm of the absolute determinant (\f$0.0\f$ if \f$n = 0\f$ or no factorization is stored).
    */
   double log_abs_determinant() const;
+  /**
+   * \ingroup sparse
+   * \brief Returns the number of stored entries of the factor \f$L\f$ below its unit diagonal, from the last symbolic analysis.
+   * \return The count (\f$0\f$ before the first factorization).
+   */
+  long factor_nonzeros() const;
+  /**
+   * \ingroup sparse
+   * \brief Computes the selected inverse: the entries of \f$Z = (A + \lambda I)^{-1}\f$ on the pattern of \f$L + L^\top\f$.
+   *
+   * Takahashi's recursion on the last factorization \f$P (A + \lambda I) P^\top = L D L^\top\f$, column by
+   * column from the last: with \f$J_j\f$ the rows of the entries of column \f$j\f$ of \f$L\f$ below the diagonal,
+   * \f$Z_{ij} = -\sum_{k \in J_j} Z_{ik} L_{kj}\f$ for \f$i \in J_j\f$ and
+   * \f$Z_{jj} = 1/D_j - \sum_{k \in J_j} L_{kj} Z_{kj}\f$ (in the permuted ordering). Every \f$Z_{ik}\f$ it reads
+   * lies on the pattern, since the rows of \f$J_j\f$ are pairwise joined in the pattern of \f$L\f$. The time is of
+   * the order of one numeric factorization and the memory that of \f$L\f$. A later factorize() discards it.
+   * \return `true` if a factorization was stored and the entries were computed; `false` otherwise.
+   */
+  bool compute_selected_inverse();
+  /**
+   * \ingroup sparse
+   * \brief The entry \f$Z_{ij}\f$ of the selected inverse, in the original ordering of the matrix.
+   *
+   * Every pair \f$(i, j)\f$ at which \f$A\f$ has a stored entry (or its transpose) is on the pattern.
+   * Throws `std::out_of_range` when \f$(i, j)\f$ is outside the pattern of \f$L + L^\top\f$ or when
+   * compute_selected_inverse() has not run since the last factorization.
+   * \param i Row, in \f$[0, n)\f$.
+   * \param j Column, in \f$[0, n)\f$.
+   * \return \f$Z_{ij}\f$.
+   */
+  double selected_inverse_entry(int i, int j) const;
 
  private:
   struct impl;

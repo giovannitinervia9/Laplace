@@ -390,16 +390,36 @@ class row_model_objective {
    */
   double value_gradient_curvature(const optimizers::optimizer_point& x, const optimizers::optimizer_vector& g,
                                   curvature_type& H) {
+    check_current_ = false;
     assemble(x, curvature_ == row_curvature::expected ? 3 : 2);
     write_gradient(x, g);
     write_curvature(x, H);
-    if (curvature_ == row_curvature::observed_else_expected && last_level_ == 2 &&
-        check_.factorize(H) != optimizers::curvature_factorization::positive_definite) {
-      assemble(x, 3);
-      ++counts_.expected_fallbacks;
-      write_curvature(x, H);
+    if (curvature_ == row_curvature::observed_else_expected && last_level_ == 2) {
+      if (check_.factorize(H) == optimizers::curvature_factorization::positive_definite) {
+        check_current_ = true;
+      } else {
+        assemble(x, 3);
+        ++counts_.expected_fallbacks;
+        write_curvature(x, H);
+      }
     }
     return last_.value + pen_.value(x);
+  }
+
+  /**
+   * \ingroup engine
+   * \brief The positive definite factor of the curvature written by the last value_gradient_curvature(), or `nullptr`.
+   *
+   * Not null only when that call checked the observed information (`row_curvature::observed_else_expected`)
+   * and found it positive definite: the factor is then of exactly the matrix written into `H`, and
+   * \ref laplace::optimizers::newton_optimizer "newton_optimizer" solves with it instead of factorizing `H` again.
+   * Null after a fallback to the expected information, with the other curvature choices, and after
+   * observed_value_gradient_curvature(). Valid while the caller leaves that `H` unchanged.
+   * \return Pointer to the solver holding the factor, or `nullptr`.
+   * \see optimizers::factorized_curvature_objective
+   */
+  typename optimizers::curvature_solver_for<Curvature>::type* factorized_curvature() {
+    return check_current_ ? &check_ : nullptr;
   }
 
   /**
@@ -412,6 +432,7 @@ class row_model_objective {
    */
   double observed_value_gradient_curvature(const optimizers::optimizer_point& x, const optimizers::optimizer_vector& g,
                                            curvature_type& H) {
+    check_current_ = false;
     assemble(x, 2);
     write_gradient(x, g);
     write_curvature(x, H);
@@ -440,6 +461,7 @@ class row_model_objective {
   std::vector<int> held_;
   row_model_view::dview xd_;
   typename optimizers::curvature_solver_for<Curvature>::type check_;
+  bool check_current_ = false;  // check_ holds the factor of the H last written by value_gradient_curvature()
   row_assembly last_;
   std::vector<double> x_last_;
   int last_level_ = -1;  // 0 value, 1 gradient, 2 observed, 3 expected

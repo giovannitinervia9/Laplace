@@ -132,6 +132,7 @@ set(LAPLACE_TEST_SOURCES
   engine/test_row_kernels.cpp
   engine/test_inner_fit.cpp
   engine/test_marginal_criterion.cpp
+  sparse/test_selected_inverse.cpp
 )
 laplace_kokkos_sources(main.cpp ${LAPLACE_TEST_SOURCES})
 add_executable(laplace_tests main.cpp ${LAPLACE_TEST_SOURCES})

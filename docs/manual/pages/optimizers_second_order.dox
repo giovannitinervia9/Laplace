@@ -5,7 +5,9 @@ This page documents two second-order optimization methods in namespace `laplace:
 
 ## Newton's method
 
-Newton's method minimizes a \ref laplace::optimizers::curvature_objective "curvature_objective" on the host, using \ref laplace::optimizers::decrement_stop_rule "decrement_stop_rule" and \ref laplace::optimizers::armijo_line_search "armijo_line_search" (Dennis and Schnabel, 1996, Algorithm A6.3.1) by default. When the curvature matrix has a Cholesky factor, it takes the Newton step; otherwise it replaces each eigenvalue by its absolute value, raised to a relative floor (Nocedal and Wright, 2006, section 3.4), and adds a negative-curvature step along the lowest eigenvector when needed (Moré and Sorensen, 1979). Step bounds limit both the modified direction and the final step (Dennis and Schnabel, 1996), and the line search backtracks from unit step, switching to a second-order decrease test along negative curvature at a saddle (Moré and Sorensen, 1979). Without a Cholesky factor, the decrement is quiet NaN so that no indefinite or singular point converges by the decrement. See \ref laplace::optimizers::newton_optimizer "newton_optimizer" for the formulas, settings, statuses, and cost.
+Newton's method minimizes a \ref laplace::optimizers::curvature_objective "curvature_objective" on the host, using \ref laplace::optimizers::decrement_stop_rule "decrement_stop_rule" and \ref laplace::optimizers::armijo_line_search "armijo_line_search" (Dennis and Schnabel, 1996, Algorithm A6.3.1) by default. When the curvature matrix has a Cholesky factor, it takes the Newton step; otherwise it replaces each eigenvalue by its absolute value, raised to a relative floor (Nocedal and Wright, 2006, section 3.4), and adds a negative-curvature step along the lowest eigenvector when needed (Moré and Sorensen, 1979). Step bounds limit both the modified direction and the final step (Dennis and Schnabel, 1996), and the line search backtracks from unit step, switching to a second-order decrease test along negative curvature at a saddle (Moré and Sorensen, 1979). Without a Cholesky factor, the decrement is quiet NaN so that no indefinite or singular point converges by the decrement.
+
+An objective that already factorizes its curvature matrix can avoid a second factorization per step by modeling \ref laplace::optimizers::factorized_curvature_objective "factorized_curvature_objective", which refines `curvature_objective` with `factorized_curvature()` returning a pointer to `curvature_solver_for<curvature_type>::type` (or `nullptr`). When `factorized_curvature()` returns a non-null pointer holding the positive-definite factor of the exact `H` just written by `value_gradient_curvature()`, `newton_optimizer::run()` reads its `last_factorization()` and solves for the Newton step and decrement with that factor instead of factorizing `H` again; when it returns `nullptr` or the concept is not modeled, Newton factorizes `H` itself. Because the handed factor belongs to the same matrix `H`, the Newton steps and iterates do not change (checked in `tests/engine/test_inner_fit.cpp` on `engine::row_model_objective`, giving identical statuses, iteration counts, and evaluation counts, zero point difference on gcc and a bound of \f$10^{-10}\f$ relative on the point). See \ref laplace::optimizers::newton_optimizer "newton_optimizer" for the formulas, settings, statuses, and cost.
 
 ## The trust region
 
@@ -89,6 +91,7 @@ bool rosenbrock_trust_region_example() {
 ## Module types
 
 In namespace `laplace::optimizers`:
+- \ref laplace::optimizers::factorized_curvature_objective "factorized_curvature_objective"
 - \ref laplace::optimizers::newton_optimizer "newton_optimizer"
 - \ref laplace::optimizers::trust_region_optimizer "trust_region_optimizer"
 

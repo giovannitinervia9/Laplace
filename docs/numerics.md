@@ -15793,3 +15793,99 @@ kink); priors on hyperparameters; a penalty that reads the output of a node thro
 with its log-Jacobian; the expected information in $\log|H|$; $H^{-1}$ by selected inversion; a
 per-coordinate proximal operator for separable penalties with many coordinates per replicate
 (each coordinate now costs the prox of its whole replicate).
+
+## The engine's selected inverse, and one factorization per inner Newton step (2026-11-26)
+
+**What.** The marginal criterion reads $H^{-1}$, the inverse of the curvature $H$ of the inner
+objective at its minimum $\hat x$ ($N \times N$, $N$ the number of model coordinates), in the value
+($\tfrac12\log|H|$ needs only the factor), the gradient and the outer passes, and these read it only
+at pairs of coordinates that meet in one block of rows or in one replicate of a penalty. Those
+pairs lie inside the pattern of $L + L^\top$, where $H = P^\top L D L^\top P$ is the sparse
+$LDL^\top$ factorization of `laplace::sparse` with the fill-reducing permutation $P$. The selected
+inverse is $Z = H^{-1}$ on that pattern only, by Takahashi's recursion on the columns $j$ from the
+last to the first:
+$$
+Z_{ij} = -\sum_{k \in \mathcal J_j} Z_{ik} L_{kj} \quad (i \in \mathcal J_j), \qquad
+Z_{jj} = \frac{1}{D_j} - \sum_{k \in \mathcal J_j} L_{kj} Z_{kj},
+$$
+$\mathcal J_j$ the rows of the nonzeros of column $j$ of $L$ below the diagonal (Takahashi, Fagan
+and Chen, 1973; Erisman and Tinney, 1975). Every $Z_{ik}$ the sum reads lies in the pattern, since
+$\mathcal J_j$ is a clique of the filled graph. `sparse_ldlt::compute_selected_inverse()` computes
+it on the host, `selected_inverse_entry(i, j)` returns an entry (and throws outside the pattern).
+The criterion takes either route, `latent_inverse_route::dense` (the $N \times N$ inverse by $N$
+solves, $8N^2$ bytes) or `selected`; the outer passes read $H^{-1}$ on the information layout
+(one number per position), so either feeds them, and every product $H^{-1}w$ is a solve. The term
+$\operatorname{tr}(H^{-1}\,\partial_a H\, H^{-1}\,\partial_b H)$ of the outer Hessian still forms the
+dense inverse on both routes. The default, `automatic`, is provisional: selected when an evaluation
+asks the value and the gradient, dense when it asks the outer Hessian (which forms the dense
+inverse anyway); it is revisited when the outer Hessian has a route without the dense inverse.
+`counts().latent_inverse_used` reports the route of the last evaluation.
+
+The inner Newton fit factorized each curvature twice: `row_model_objective`, with the default
+curvature rule `observed_else_expected`, factorizes the observed information to see whether it is
+positive definite (and falls back to the expected information if not), and `newton_optimizer`
+then factorized the same matrix for its step. The objective now hands its factor over
+(`factorized_curvature()`, the concept `factorized_curvature_objective`): when the check passed,
+Newton solves with that factor of exactly the matrix it holds; after a fallback, with the other
+curvature rules, and with any objective without the member, it factorizes as before.
+
+**Correctness** (gcc and CUDA).
+
+- `tests/sparse/test_selected_inverse.cpp`: every entry of the pattern of $L + L^\top$ (fill
+  included) against the inverse of `laplace::dense`, on a single coordinate, a tridiagonal matrix,
+  an arrowhead (100 blocks of 2 and a border of 4), random sparse matrices (4 per cent, $n = 150$,
+  also with a shift of 0.75) and two crossed groupings ($40 \times 40$): largest error
+  $8.0\cdot10^{-16}$ of the largest entry on gcc and $6.0\cdot10^{-16}$ on CUDA (the host code compiled by
+  gcc and by MSVC), bound $10^{-13}$.
+- Every model of the criterion's derivative tests (the ten models of the nine cases in the table of
+  the previous entry) on the three
+  routes at the same point: the selected route with the Hessian and with the gradient alone, the
+  automatic route with the gradient (reported selected) and then the Hessian (reported dense), and
+  the dense route, against the first evaluation. Largest difference relative to $1 +$ the scale,
+  over two runs of each build: gcc gradient $9.0\cdot10^{-16}$, Hessian $2.0\cdot10^{-16}$, value
+  identical; CUDA $6.3\cdot10^{-15}$ and $5.3\cdot10^{-15}$, value within $3.4\cdot10^{-13}$
+  absolute ($V$ between 140 and 741). The figures move between runs with the order of the kernels'
+  sums. Bounds $10^{-12}(1 + |V|)$ and $10^{-10}(1 +$ the scale$)$.
+- Newton with and without the handed factor, on the gamma model with the logistic curve (34
+  coordinates, sparse curvature) and on the Student t model (5 coordinates, dense curvature,
+  `observed_else_expected`): the same iterations (6), curvatures (7), expected fallbacks (1) and
+  point (difference 0 on gcc); the factor was handed over at the 6 curvatures that passed the check.
+
+**Speed** (gcc 12 threads, CUDA RTX 4070 SUPER; `benchmarks/engine_scale.cpp`; $G$ groups of 20
+rows, one grouping with $A = 3$ outer coordinates or two crossed with $A = 4$).
+
+One value and gradient of the criterion at the start:
+
+| case | gcc dense | gcc selected | CUDA dense | CUDA selected |
+|---|---|---|---|---|
+| one grouping, $G = 10^3$ | 11.5 ms | 5.4 ms | 10.5 ms | 2.8 ms |
+| one grouping, $G = 10^4$ | 684 ms, 0.85 GB | 34 ms, 0.05 GB | 764 ms | 20 ms |
+| one grouping, $G = 10^5$ | (80 GB) | 306 ms, 0.43 GB | | 191 ms |
+| one grouping, $G = 10^6$ | | 2.96 s, 4.25 GB | | |
+| crossed, $G = 10^3$ | 3.90 s | 2.89 s | 3.61 s | 2.43 s |
+
+The selected inverse itself takes 25 ms at one grouping with $G = 10^6$ ($N \approx 10^6$) and
+0.38 s for the crossed case at $G = 10^3$ (12 per cent fill). Complete REML fits ask the outer
+Hessian at every iteration, so they form the dense inverse on either route: one grouping at
+$G = 10^4$ 10.9 s (gcc) and 4.0 s (CUDA) on both; crossed at $G = 10^3$ 14.6 s dense against
+16.7 s selected on gcc (the selected inverse computed as well), the reason for the provisional
+default. REML on the 10^6-row model of `engine_reml_fit lk`: 2.20 s against 2.25 s before (gcc),
+0.70 s on CUDA.
+
+The inner fit from the start, before and after the factor was handed to Newton (gcc, 12 threads):
+
+| case | inner fit before | after | factorizations before / after |
+|---|---|---|---|
+| crossed, $G = 10^3$ ($N = 3004$) | 1.90 s | 1.13 s | 28 / 16 |
+| crossed, $G = 3\cdot10^3$ ($N = 9004$) | 96.4 s | 58.3 s | 40 / 23 |
+| one grouping, $G = 10^4$ | 16 ms | 13 ms | 4 / 2 |
+
+Before, each curvature was factorized twice; after, once, and twice only where the observed
+information failed the check and the expected one was factorized by Newton (2 of 14 and 3 of 20).
+On the 10^6-row gamma model with the logistic curve (`engine_reml_fit lk3`) a complete REML fit
+takes 3.83 s against 4.13-4.17 s at abf780b (before the selected inverse and the handed factor), with
+the same criterion and iterations.
+
+**Limits.** The selected inverse runs on the host, column by column; the outer Hessian still needs
+the dense inverse, so a REML fit by Newton is still bounded by $8N^2$ bytes; a crossed model is
+bounded by the fill of its factor (simplicial $LDL^\top$, 12 per cent of $N^2/2$ at $N = 3004$).

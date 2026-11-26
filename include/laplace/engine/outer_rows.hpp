@@ -9,7 +9,10 @@
 // third derivatives of its first term in x and Q for the fourth (the
 // penalties are quadratic, so they have none), Hi for a symmetric N x N
 // matrix (the inverse of the Hessian, with the rows and columns of held
-// coordinates zero) and v_1, ..., v_A for directions in x. The passes are
+// coordinates zero) and v_1, ..., v_A for directions in x. A unit reads Hi
+// only between coordinates of its own block, which are positions of the
+// information layout, so Hi is given on that layout (one number per
+// position): a dense inverse or a selected one gives it alike. The passes are
 //
 //   order 3   tau_c = sum_rs Hi_rs T_rsc                  (N numbers)
 //   order 4   tau, and for each direction a and pair a <= b
@@ -33,7 +36,8 @@
 // T[v_a, v_b] (pairs a <= b in lexicographic order) and the A (A + 1) / 2
 // numbers q_ab.
 //
-// Hi is read from device memory for each pair of design entries of a unit; the
+// Hi is read from device memory for each pair of design entries of a unit, at
+// row_model_view::information_position() of the pair of local slots; the
 // local sums of a block live on the thread's stack, so the local slots of a
 // block are at most row_outer_local_capacity and the directions at most
 // row_outer_direction_capacity.
@@ -65,10 +69,17 @@ inline constexpr int row_outer_direction_capacity = 4;
 
 /**
  * \ingroup engine
- * \brief Device matrix read by the outer passes: \f$H^{-1}\f$ (\f$N \times N\f$) and the directions (\f$N \times A\f$), column-major.
+ * \brief Device matrix read by the outer passes: the directions (\f$N \times A\f$), column-major.
  * \see assemble_outer_rows(), \ref engine
  */
 using outer_matrix_view = Kokkos::View<const double**, Kokkos::LayoutLeft, row_model_view::mem>;
+
+/**
+ * \ingroup engine
+ * \brief Device vector read by the outer passes as \f$H^{-1}\f$ on the information layout: the entry at position \f$q\f$ is \f$H^{-1}_{rc}\f$ with \f$r\f$ = `row_model::information_row[q]` and \f$c\f$ = `information_column[q]`.
+ * \see assemble_outer_rows(), \ref engine
+ */
+using outer_information_view = Kokkos::View<const double*, row_model_view::mem>;
 
 /**
  * \ingroup engine
@@ -142,7 +153,7 @@ struct outer_sizes {
  * \tparam Order 3 (the vector \f$\tau\f$) or 4 (also the direction terms of the header).
  * \param M Built device model view (`n_local() <= row_outer_local_capacity`).
  * \param x Device coordinates, length \f$N\f$.
- * \param Hi Device \f$N \times N\f$ matrix read as \f$H^{-1}\f$.
+ * \param Hi Device \f$H^{-1}\f$ on the information layout (outer_information_view).
  * \param V Device \f$N \times A\f$ directions (read when `Order == 4`).
  * \param n_directions \f$A \le\f$ `row_outer_direction_capacity` (0 when `Order == 3`).
  * \param acc Device accumulator of length outer_pass_layout::size().
@@ -151,7 +162,7 @@ struct outer_sizes {
  */
 template <class D, int R, int Order>
 void assemble_outer_rows(const row_model_view& M, const Kokkos::View<const double*, row_model_view::mem>& x,
-                         const outer_matrix_view& Hi,
+                         const outer_information_view& Hi,
                          const outer_matrix_view& V,
                          int n_directions, const row_model_view::dview& acc) {
   static_assert(Order == 3 || Order == 4, "an outer pass has order 3 or 4");
@@ -230,7 +241,8 @@ void assemble_outer_rows(const row_model_view& M, const Kokkos::View<const doubl
             for (int e2 = 0; e2 < M.width; ++e2) {
               const int s2 = M.design_slot(i, e2);
               if (s2 < 0) continue;
-              Mq[p1][M.entry_predictor(e2)] += v1 * M.design_value(i, e2) * Hi(gi[s1], gi[s2]);
+              const double h = Hi(s1 >= s2 ? M.information_position(b, s1, s2) : M.information_position(b, s2, s1));
+              Mq[p1][M.entry_predictor(e2)] += v1 * M.design_value(i, e2) * h;
             }
           }
           double c3[R];
@@ -330,7 +342,7 @@ namespace detail_outer {
 
 template <class D, int R>
 void run_order(const row_model& m, int order, const Kokkos::View<const double*, row_model_view::mem>& x,
-               const outer_matrix_view& Hi,
+               const outer_information_view& Hi,
                const outer_matrix_view& V, int nA,
                const row_model_view::dview& acc) {
   if (order == 3) assemble_outer_rows<D, R, 3>(m.view, x, Hi, V, nA, acc);
@@ -339,7 +351,7 @@ void run_order(const row_model& m, int order, const Kokkos::View<const double*, 
 
 template <class D>
 void run_distrib(const row_model& m, int order, const Kokkos::View<const double*, row_model_view::mem>& x,
-                 const outer_matrix_view& Hi,
+                 const outer_information_view& Hi,
                  const outer_matrix_view& V, int nA,
                  const row_model_view::dview& acc) {
   if (m.view.P != D::n_params) throw std::invalid_argument("assemble_outer_row_model: the model was built for another distrib");
@@ -366,7 +378,7 @@ void run_distrib(const row_model& m, int order, const Kokkos::View<const double*
  * \param m Built model.
  * \param order 3 or 4.
  * \param x Device coordinates.
- * \param Hi Device \f$N \times N\f$ matrix.
+ * \param Hi Device \f$H^{-1}\f$ on the information layout (outer_information_view).
  * \param V Device \f$N \times A\f$ directions (order 4).
  * \param n_directions \f$A\f$ (order 4; ignored at order 3).
  * \param out Host vector receiving outer_pass_layout::size() numbers.
@@ -375,7 +387,7 @@ void run_distrib(const row_model& m, int order, const Kokkos::View<const double*
  */
 template <class List>
 void assemble_outer_row_model(const row_model& m, int order, const Kokkos::View<const double*, row_model_view::mem>& x,
-                              const outer_matrix_view& Hi,
+                              const outer_information_view& Hi,
                               const outer_matrix_view& V,
                               int n_directions, std::vector<double>& out) {
   if (order != 3 && order != 4) throw std::invalid_argument("assemble_outer_row_model: the order must be 3 or 4");
