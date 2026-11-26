@@ -16,5 +16,7 @@ install*/
 # reference values produced by mpmath (tools/reference) are versioned
 !tests/data/reference/*.csv
 !tests/data/reference/**/*.csv
+# and so are the frozen data of the engine's tests
+!tests/data/engine/*.csv
 __pycache__/
 
