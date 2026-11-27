@@ -3,6 +3,8 @@
 // from CSparse). Compiled as C++, never by nvcc.
 #include <laplace/sparse/sparse_ldlt.hpp>
 
+#include "detail/supernodal_factor.hpp"
+
 #include <Eigen/OrderingMethods>
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
@@ -15,6 +17,14 @@
 namespace laplace::sparse {
 
 using sparse_matrix = Eigen::SparseMatrix<double, Eigen::ColMajor, int>;
+
+// The width of the trailing dense supernode from which `automatic` takes the supernodal route. Measured
+// on 2026-11-27 (prototipi/step2b/bench_w0.cpp, crossed models, OpenBLAS, 1 and 12 threads): the routes
+// cost the same at a width of about 40 (factorization, selected inverse and one derivative direction
+// within 0.95-1.2 of each other); at about 80 the supernodal route is 1.6-2.7 times faster; at about 5
+// (one grouping, four globals) it is 0.5-0.9 times as fast. Near the crossover the simplicial route,
+// the reference, is kept.
+constexpr int supernodal_route_min_width = 64;
 
 struct sparse_ldlt::impl {
   Eigen::SimplicialLDLT<sparse_matrix, Eigen::Lower, Eigen::AMDOrdering<int>> ldlt;
@@ -30,6 +40,10 @@ struct sparse_ldlt::impl {
   bool structure_ready = false;
   std::vector<int> a_position, row_ptr, row_col, row_pos;
   double min_pivot = 0.0, max_pivot = 0.0, log_abs_det = 0.0;
+  // the route: requested by set_route(), in use since the last analysis; the supernodal factor
+  sparse_ldlt_route requested = sparse_ldlt_route::automatic, in_use = sparse_ldlt_route::automatic;
+  std::unique_ptr<detail::supernodal_factor> supernodal;
+  bool supernodal_route() const { return in_use == sparse_ldlt_route::supernodal; }
 };
 
 sparse_ldlt::sparse_ldlt() : impl_(std::make_unique<impl>()) {}
@@ -46,7 +60,8 @@ sparse_ldlt_outcome sparse_ldlt::factorize(int n, const int* col_ptr, const int*
   const int nnz = col_ptr[n];
   for (int k = 0; k < nnz; ++k)
     if (!std::isfinite(values[k])) return sparse_ldlt_outcome::non_finite;
-  const bool same_pattern = m.analyzed && static_cast<int>(m.col_ptr.size()) == n + 1 &&
+  const bool same_pattern = m.analyzed && m.in_use != sparse_ldlt_route::automatic &&
+                            static_cast<int>(m.col_ptr.size()) == n + 1 &&
                             std::equal(col_ptr, col_ptr + n + 1, m.col_ptr.begin()) &&
                             std::equal(row_idx, row_idx + nnz, m.row_idx.begin());
   if (!same_pattern) {
@@ -56,6 +71,26 @@ sparse_ldlt_outcome sparse_ldlt::factorize(int n, const int* col_ptr, const int*
     m.A.resizeNonZeros(nnz);
     std::copy(col_ptr, col_ptr + n + 1, m.A.outerIndexPtr());
     std::copy(row_idx, row_idx + nnz, m.A.innerIndexPtr());
+    // the route: forced, or chosen from the width of the trailing dense supernode of the factor
+    // (supernodal_route_min_width, measured)
+    m.in_use = m.requested;
+    if (m.requested != sparse_ldlt_route::simplicial) {
+      if (!m.supernodal) m.supernodal = std::make_unique<detail::supernodal_factor>();
+      m.supernodal->analyze(n, col_ptr, row_idx);
+      if (m.requested == sparse_ldlt_route::automatic)
+        m.in_use = m.supernodal->root_width() >= supernodal_route_min_width ? sparse_ldlt_route::supernodal
+                                                                              : sparse_ldlt_route::simplicial;
+      if (m.supernodal_route()) m.analyzed = true;
+      else m.supernodal.reset();
+    }
+  }
+  if (m.supernodal_route()) {
+    const auto out = m.supernodal->factorize(values, shift);
+    m.min_pivot = m.supernodal->min_pivot();
+    m.max_pivot = m.supernodal->max_pivot();
+    m.log_abs_det = m.supernodal->log_abs_determinant();
+    m.factorized = out == sparse_ldlt_outcome::positive_definite;
+    return out;
   }
   std::copy(values, values + nnz, m.A.valuePtr());
   if (shift != 0.0)
@@ -76,8 +111,15 @@ sparse_ldlt_outcome sparse_ldlt::factorize(int n, const int* col_ptr, const int*
   return m.min_pivot > 0.0 ? sparse_ldlt_outcome::positive_definite : sparse_ldlt_outcome::not_positive_definite;
 }
 
+void sparse_ldlt::set_route(sparse_ldlt_route route) {
+  if (route != impl_->requested) impl_->requested = route, impl_->in_use = sparse_ldlt_route::automatic;
+}
+
+sparse_ldlt_route sparse_ldlt::route() const { return impl_->in_use; }
+
 bool sparse_ldlt::solve(double* b) const {
   if (!impl_->factorized) return false;
+  if (impl_->supernodal_route()) return impl_->supernodal->solve(b);
   const int n = static_cast<int>(impl_->A.rows());
   Eigen::Map<Eigen::VectorXd> v(b, n);
   v = impl_->ldlt.solve(Eigen::VectorXd(v));
@@ -88,12 +130,14 @@ double sparse_ldlt::min_pivot() const { return impl_->min_pivot; }
 double sparse_ldlt::max_pivot() const { return impl_->max_pivot; }
 double sparse_ldlt::log_abs_determinant() const { return impl_->log_abs_det; }
 long sparse_ldlt::factor_nonzeros() const {
+  if (impl_->analyzed && impl_->supernodal_route()) return impl_->supernodal->factor_nonzeros();
   return impl_->analyzed ? static_cast<long>(impl_->ldlt.matrixL().nestedExpression().nonZeros()) : 0;
 }
 
 bool sparse_ldlt::compute_selected_inverse() {
   impl& m = *impl_;
   if (!m.factorized) return false;
+  if (m.supernodal_route()) return m.have_selected = m.supernodal->compute_selected_inverse();
   const auto& L = m.ldlt.matrixL().nestedExpression();  // strictly lower (LDL' keeps D apart), rows sorted
   const int n = static_cast<int>(L.rows());
   const int* Lp = L.outerIndexPtr();
@@ -133,6 +177,7 @@ bool sparse_ldlt::compute_selected_inverse() {
 double sparse_ldlt::selected_inverse_entry(int i, int j) const {
   const impl& m = *impl_;
   if (!m.have_selected) throw std::out_of_range("sparse_ldlt::selected_inverse_entry: no selected inverse computed");
+  if (m.supernodal_route()) return m.supernodal->selected_inverse_entry(i, j);
   const auto& idx = m.ldlt.permutationP().indices();
   int a = idx.size() > 0 ? idx[i] : i, b = idx.size() > 0 ? idx[j] : j;
   if (a == b) return m.z_diag[a];
@@ -165,6 +210,7 @@ bool sparse_ldlt::compute_selected_inverse_derivative(const double* dvalues) {
   impl& m = *impl_;
   m.have_derivative = false;
   if (!m.have_selected) return false;
+  if (m.supernodal_route()) return m.have_derivative = m.supernodal->compute_selected_inverse_derivative(dvalues);
   const auto& L = m.ldlt.matrixL().nestedExpression();
   const int n = static_cast<int>(L.rows());
   const int* Lp = L.outerIndexPtr();
@@ -252,6 +298,7 @@ double sparse_ldlt::selected_inverse_derivative_entry(int i, int j) const {
   const impl& m = *impl_;
   if (!m.have_derivative)
     throw std::out_of_range("sparse_ldlt::selected_inverse_derivative_entry: no derivative computed");
+  if (m.supernodal_route()) return m.supernodal->selected_inverse_derivative_entry(i, j);
   const auto& L = m.ldlt.matrixL().nestedExpression();
   const auto& idx = m.ldlt.permutationP().indices();
   const int q = factor_position(L, idx.size() > 0 ? idx[i] : i, idx.size() > 0 ? idx[j] : j);
@@ -264,6 +311,7 @@ double sparse_ldlt::selected_inverse_derivative_dot(const double* values) const 
   const impl& m = *impl_;
   if (!m.have_derivative)
     throw std::out_of_range("sparse_ldlt::selected_inverse_derivative_dot: no derivative computed");
+  if (m.supernodal_route()) return m.supernodal->selected_inverse_derivative_dot(values);
   const int n = static_cast<int>(m.col_ptr.size()) - 1;
   double s = 0.0;
   for (int c = 0; c < n; ++c)

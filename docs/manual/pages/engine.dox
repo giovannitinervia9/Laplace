@@ -161,7 +161,7 @@ F_{2, ab} &= P_{ab} + s_a^\top v_b + s_b^\top v_a + v_a^\top H_{\mathrm{full}} v
 
 \ref laplace::engine::fit_marginal "fit_marginal(criterion, u0, newton)" runs `optimizers::minimize()` with `optimizers::newton_optimizer` on the dense \f$n_u \times n_u\f$ Hessian and returns a \ref laplace::engine::marginal_fit_report "marginal_fit_report" containing the optimizer report, \ref laplace::engine::marginal_criterion_counts "marginal_criterion_counts", and the final `inner_point`. In `marginal_criterion_counts`, `latent_inverse_used` records the route of the last evaluation of the derivatives (`dense` or `selected`, never `automatic`), `factor_nonzeros` records the entries of the factor of \f$H\f$ below its diagonal at the last factorization, `dense_trace_evaluations` counts outer Hessians whose traces formed the dense \f$H_I\f$ (on `dense`, or on `selected` as a fallback when an entry of \f$\dot H_a\f$ falls outside the pattern of \f$H\f$), and `seconds_factorization`, `seconds_inverse`, `seconds_to_device`, and `seconds_trace_products` record the time spent factorizing \f$H\f$, forming \f$H^{-1}\f$, copying \f$H_I\f$ on the information layout to the device, and computing the traces \f$\operatorname{tr}(H_I \dot H_a H_I \dot H_b)\f$ by dense products on the device or derivatives of the selected inverse (alongside `polishing_steps`, `seconds_observed`, and `seconds_penalties`).
 
-In `benchmarks/engine_scale.cpp` (gcc with 12 threads and CUDA on an RTX 4070 SUPER; \f$G\f$ groups of 20 rows, one grouping with \f$A = 3\f$ outer coordinates or two crossed groupings with \f$A = 4\f$), one evaluation of the value and gradient at the start compares the two routes as follows (`compute_selected_inverse()` itself takes 25 ms at one grouping with \f$G = 10^6\f$, \f$N \approx 10^6\f$, and 0.38 s for the crossed case at \f$G = 10^3\f$ with \f$12\%\f$ fill):
+In `benchmarks/engine_scale.cpp` (gcc with 12 threads and CUDA on an RTX 4070 SUPER; \f$G\f$ groups of 20 rows, one grouping with \f$A = 3\f$ outer coordinates or two crossed groupings with \f$A = 4\f$), one evaluation of the value and gradient at the start compares the two routes as follows (`compute_selected_inverse()` itself takes 25 ms at one grouping with \f$G = 10^6\f$, \f$N \approx 10^6\f$, and 17.4 ms for the crossed case at \f$G = 10^3\f$):
 
 | Case | gcc `dense` | gcc `selected` | CUDA `dense` | CUDA `selected` |
 |---|---|---|---|---|
@@ -169,7 +169,7 @@ In `benchmarks/engine_scale.cpp` (gcc with 12 threads and CUDA on an RTX 4070 SU
 | One grouping, \f$G = 10^4\f$ | 684 ms (0.85 GB) | 34 ms (0.05 GB) | 764 ms | 20 ms |
 | One grouping, \f$G = 10^5\f$ | (80 GB) | 306 ms (0.43 GB) | — | 191 ms |
 | One grouping, \f$G = 10^6\f$ | — | 2.96 s (4.25 GB) | — | — |
-| Crossed groupings, \f$G = 10^3\f$ | 3.90 s | 2.89 s | 3.61 s | 2.43 s |
+| Crossed groupings, \f$G = 10^3\f$ | 1.06 s | 0.204 s | 1.56 s | 0.435 s |
 
 For the outer Hessian on `selected` (`engine_scale <case> parts`, gcc, 12 threads; second call, as the first also builds the factor's row structure once per pattern), one direction and contraction compare against factorization and selected inversion as follows:
 
@@ -178,20 +178,20 @@ For the outer Hessian on `selected` (`engine_scale <case> parts`, gcc, 12 thread
 | One grouping, \f$G = 10^4\f$ | \f$10^4\f$ | 0.38 ms | 0.28 ms | 0.42 ms | 32 µs |
 | One grouping, \f$G = 10^5\f$ | \f$10^5\f$ | 5.0 ms | 2.4 ms | 5.0 ms | 0.33 ms |
 | One grouping, \f$G = 10^6\f$ | \f$10^6\f$ | 64 ms | 23 ms | 61 ms | 5.3 ms |
-| Crossed groupings, \f$G = 10^3\f$ | 3004 | 65 ms | 0.36 s | 0.44 s | 64 µs |
-| Crossed groupings, \f$G = 3 \times 10^3\f$ | 9004 | 2.48 s | 9.6 s | 13.7 s | 0.30 ms |
+| Crossed groupings, \f$G = 10^3\f$ | 3004 | 6.7 ms | 17.4 ms | 22.3 ms | 0.50 ms |
+| Crossed groupings, \f$G = 3 \times 10^3\f$ | 9004 | 49.6 ms | 0.192 s | 0.260 s | 4.0 ms |
 
-A direction costs \f$0.65\f$ to \f$1.1\f$ times a numeric factorization plus a selected inverse. One outer Hessian (\f$n_u = 3\f$ directions for one grouping, \f$4\f$ for crossed groupings, plus the selected inverse) costs 1.6 ms at one grouping with \f$G = 10^4\f$ (against about 2.1 s and 4.8 GB on `dense`), 17 ms at \f$G = 10^5\f$, and 0.21 s at \f$G = 10^6\f$ (where `dense` does not fit in memory). For crossed groupings, one outer Hessian costs 2.1 s at \f$G = 10^3\f$ and 64 s at \f$G = 3 \times 10^3\f$, about as costly as `dense` because the selected inverse and its derivative dominate at \f$10\%\f$ to \f$12\%\f$ fill. Complete outer fits on gcc (12 threads) give the same criterion and outer point to the last digit on both routes; time and peak working set of the process:
+A direction costs \f$0.65\f$ to \f$1.1\f$ times a numeric factorization plus a selected inverse. One outer Hessian (\f$n_u = 3\f$ directions for one grouping, \f$4\f$ for crossed groupings, plus the selected inverse) costs 1.6 ms at one grouping with \f$G = 10^4\f$ (against about 2.1 s and 4.8 GB on `dense`), 17 ms at \f$G = 10^5\f$, and 0.21 s at \f$G = 10^6\f$ (where `dense` does not fit in memory). For crossed groupings (\f$n_u = 4\f$ directions), the parts cost 6.7 ms (numeric factorization), 17.4 ms (selected inverse), 22.3 ms (one derivative direction), and 0.50 ms (one contraction) at \f$G = 10^3\f$, and 49.6 ms, 0.192 s, 0.260 s, and 4.0 ms at \f$G = 3 \times 10^3\f$. Complete outer fits on gcc (12 threads) give the same criterion and outer point to the last digit on both routes; time and peak working set of the process:
 
 | Case | `dense` | `selected` |
 |---|---|---|
 | One grouping, \f$G = 10^4\f$ | 12.8 s, 4.06 GB | 0.20 s, 0.07 GB |
 | One grouping, \f$G = 10^5\f$ | does not fit | 1.73 s, 0.64 GB |
 | One grouping, \f$G = 10^6\f$ | does not fit | 17.6 s, 6.3 GB |
-| Crossed groupings, \f$G = 10^3\f$ | 13.0 s, 0.48 GB | 17.4 s, 0.08 GB |
-| Crossed groupings, \f$G = 3 \times 10^3\f$ | 569 s, 4.08 GB | 585 s, 0.37 GB |
+| Crossed groupings, \f$G = 10^3\f$ | 7.19 s, 0.50 GB | 1.16 s, 0.10 GB |
+| Crossed groupings, \f$G = 3 \times 10^3\f$ | 205 s, 4.15 GB | 10.8 s, 0.50 GB |
 
-On crossed groupings `selected` takes 1.0 to 1.3 times as long as `dense` with a sixth to a tenth of the memory. For the inner fit from the start on gcc (12 threads), handing over the checked curvature factor instead of factorizing each curvature again reduces time and factorizations from 1.90 s (28 factorizations) to 1.13 s (16 factorizations) for crossed groupings at \f$G = 10^3\f$ (\f$N = 3004\f$), from 96.4 s (40 factorizations) to 58.3 s (23 factorizations) at \f$G = 3 \times 10^3\f$ (\f$N = 9004\f$), and from 16 ms (4 factorizations) to 13 ms (2 factorizations) for one grouping at \f$G = 10^4\f$, the curvature being factorized twice only where the observed information failed the check and Newton factorized the expected one (2 of 14 and 3 of 20 curvatures). On the \f$10^6\f$-row gamma model with logistic curve, a complete outer fit takes 3.83 s on gcc, against 4.13–4.17 s before the selected inverse and the handed factor were introduced, with the same criterion and iterations.
+On crossed groupings `selected` is about 6 times faster than `dense` at \f$G = 10^3\f$ and about 19 times faster at \f$G = 3 \times 10^3\f$, with a fifth and about an eighth of the memory. For the inner fit from the start on gcc (12 threads), crossed groupings take 0.156 s at \f$G = 10^3\f$ (\f$N = 3004\f$) and 1.33 s at \f$G = 3 \times 10^3\f$ (\f$N = 9004\f$); for one grouping at \f$G = 10^4\f$, handing over the checked curvature factor instead of factorizing each curvature again reduces time and factorizations from 16 ms (4 factorizations) to 13 ms (2 factorizations). On the \f$10^6\f$-row gamma model with logistic curve, a complete outer fit takes 3.83 s on gcc, against 4.13–4.17 s before the selected inverse and the handed factor were introduced, with the same criterion and iterations.
 
 ## Example
 

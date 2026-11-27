@@ -89,11 +89,55 @@ endif()
 
 # Sparse linear algebra (laplace::sparse, include/laplace/sparse/sparse_ldlt.hpp):
 # the same arrangement, one source with the Eigen code, never compiled by nvcc.
-add_library(laplace_sparse STATIC src/sparse/eigen_sparse_backend.cpp)
+# The supernodal route (src/sparse/supernodal_ldlt.cpp) runs its dense blocks through one of two
+# realizations of the dense kernels, chosen here: the environment's LAPACK and BLAS by their Fortran
+# symbols (given by hand in LAPLACE_LAPACK_LIBRARIES, or found by find_package(LAPACK)), or kernels of
+# our own on Eigen when no LAPACK is found.
+set(LAPLACE_DENSE_KERNELS "auto" CACHE STRING "Dense kernels of the supernodal factorization: auto, lapack or eigen")
+set_property(CACHE LAPLACE_DENSE_KERNELS PROPERTY STRINGS auto lapack eigen)
+set(LAPLACE_LAPACK_LIBRARIES "" CACHE STRING "Libraries providing LAPACK and BLAS; empty: find_package(LAPACK)")
+set(laplace_lapack_link "")
+if(NOT LAPLACE_DENSE_KERNELS STREQUAL "eigen")
+  if(LAPLACE_LAPACK_LIBRARIES)
+    set(laplace_lapack_link ${LAPLACE_LAPACK_LIBRARIES})
+  else()
+    if(LAPLACE_DENSE_KERNELS STREQUAL "lapack")
+      find_package(LAPACK REQUIRED)
+    else()
+      find_package(LAPACK QUIET)
+    endif()
+    if(LAPACK_FOUND)
+      set(laplace_lapack_link LAPACK::LAPACK)
+    endif()
+  endif()
+endif()
+if(laplace_lapack_link)
+  set(laplace_dense_kernels_source src/sparse/lapack_dense_kernels.cpp)
+  message(STATUS "Laplace: dense kernels of the supernodal factorization from LAPACK (${laplace_lapack_link})")
+else()
+  set(laplace_dense_kernels_source src/sparse/eigen_dense_kernels.cpp)
+  message(STATUS "Laplace: dense kernels of the supernodal factorization on Eigen (no LAPACK linked)")
+endif()
+# OpenMP is optional: without it the loops of the supernodal route run on one thread
+find_package(OpenMP COMPONENTS CXX)
+if(OpenMP_CXX_FOUND)
+  message(STATUS "Laplace: the supernodal factorization uses OpenMP")
+else()
+  message(STATUS "Laplace: no OpenMP, the supernodal factorization runs its loops on one thread")
+endif()
+add_library(laplace_sparse STATIC src/sparse/eigen_sparse_backend.cpp src/sparse/supernodal_ldlt.cpp
+  ${laplace_dense_kernels_source})
 add_library(Laplace::sparse ALIAS laplace_sparse)
 target_include_directories(laplace_sparse PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-target_compile_definitions(laplace_sparse PRIVATE EIGEN_MPL2_ONLY EIGEN_DONT_PARALLELIZE)
+target_compile_definitions(laplace_sparse PRIVATE EIGEN_MPL2_ONLY)
+# one thread per Eigen decomposition, except in the Eigen dense kernels, whose products use OpenMP
+set_source_files_properties(src/sparse/eigen_sparse_backend.cpp src/sparse/supernodal_ldlt.cpp
+  PROPERTIES COMPILE_DEFINITIONS EIGEN_DONT_PARALLELIZE)
+target_link_libraries(laplace_sparse PRIVATE ${laplace_lapack_link})
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(laplace_sparse PRIVATE OpenMP::OpenMP_CXX)
+endif()
 if(LAPLACE_EIGEN_INCLUDE)
   target_include_directories(laplace_sparse SYSTEM PRIVATE ${LAPLACE_EIGEN_INCLUDE})
 else()

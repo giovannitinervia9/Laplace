@@ -15972,3 +15972,153 @@ the selected route there costs about what the dense route costs.
 every level (the value, the gradient and the outer Hessian); the dense route is used only when it is
 asked for. On crossed groupings this costs up to a third more time at $G = 10^3$ for a sixth of the
 memory.
+
+## The supernodal route of sparse_ldlt: a dense trailing supernode (2026-11-27)
+
+**What.** A second route inside `laplace::sparse::sparse_ldlt` for factors whose trailing columns form
+one dense supernode, with its selected inverse and the derivative of the selected inverse. The
+interface is unchanged; `sparse_ldlt_route` (`automatic`, `simplicial`, `supernodal`) with
+`set_route()` and `route()` chooses or reports the route. The case that motivates it: the inner
+curvature $H$ of a model with crossed groupings. Under approximate minimum degree its factor is $2G$
+two-column supernodes and one dense trailing block of $m \approx 0.96\,G$ columns, which holds 87 to 98
+per cent of the entries of $L$ and 96 to 99.4 per cent of the flops ($G = 10^3$ to $10^4$). Eliminating
+the second grouping first fills about four times more, the natural order fills completely, and no
+ordering tried reduced the block. It is structural: the bipartite graph of two crossed groupings with
+random assignment is an expander, so the Schur complement on the second grouping is dense. Eigen's
+simplicial $L D L^\top$ runs at 3 to 5 Gflop/s on such a factor.
+
+**How.** The pattern is ordered by approximate minimum degree (the ordering of the simplicial route),
+then analyzed: elimination tree (Liu), column counts by row subtrees, and the trailing dense supernode
+$T$, the last $m$ columns whose counts are $m, m - 1, \dots, 1$. The leading columns $B$ are factorized
+as $L D L^\top$ with unit $L$ by an up-looking sparse recursion; the rows of $T$ get their $B$ part the
+same way. The Schur complement
+
+$$S = A_{TT} - L_{TB} D_B L_{TB}^\top$$
+
+is formed dense, in parallel over its columns, and factorized as $S = R R^\top$ by a dense Cholesky.
+$\log|\det A| = \sum_{j \in B} \log D_j + 2 \sum_{t \in T} \log R_{tt}$; the pivots reported are $D_j$
+and $R_{tt}^2$. The selected inverse is $Z_{TT} = S^{-1}$, dense (the inverse from the Cholesky
+factor), followed by Takahashi's recursion on the $B$ columns reading $Z_{TT}$. It runs in parallel over
+the subtrees of the elimination tree that hang below $T$, which are independent given $Z_{TT}$.
+
+The derivative along $\dot A$ on the pattern of $A$:
+
+- $\dot L$ and $\dot D$ on the $B$ columns, by the up-looking recursion differentiated. With
+  $y_i = L_{ki} D_i$ the value before the division, $\dot y$ follows the same triangular recursion,
+  $\dot L_{ki} = (\dot y_i - L_{ki} \dot D_i)/D_i$ and $\dot D_k = \dot A_{kk} - \sum_i (\dot L_{ki} y_i + L_{ki} \dot y_i)$.
+- $\dot S = \dot A_{TT} - (\dot L_{TB} D_B L_{TB}^\top + L_{TB} \dot D_B L_{TB}^\top + L_{TB} D_B \dot L_{TB}^\top)$, dense.
+- One symmetric product $Q = \dot S Z_{TT}$. Then $\dot Z_{TT} = -Z_{TT} \dot S Z_{TT} = -Z_{TT} Q$ is
+  read entry by entry, $\dot Z_{ab} = -Z_{TT}(:,a)^\top Q(:,b)$, only where it is needed: the pairs of
+  $T$ rows of each $B$ column, and the pattern of $A_{TT}$ in the contraction. So one product of size
+  $m$ per direction, not two.
+- Takahashi's recursion differentiated on the $B$ columns, as on the simplicial route. For the pairs
+  with both rows in $T$, $\sum_k \dot Z_{ik} L_{kj} = -Z_{TT}(:,i)^\top u$ with
+  $u = \sum_k Q(:,k) L_{kj}$, so a column costs $O(c\,m)$ rather than $O(c^2 m)$ for its $c$ rows in $T$.
+
+The dense blocks go through one internal interface of dense kernels with two realizations, chosen when
+the library is configured (`LAPLACE_DENSE_KERNELS` = `auto`, `lapack` or `eigen`):
+
+- the environment's LAPACK and BLAS by their standard Fortran symbols (`dpotrf`, `dpotri`, `dpotrs`,
+  `dsymm`; 32-bit integers, so an ILP64 library must not be linked), given in
+  `LAPLACE_LAPACK_LIBRARIES` or found by CMake;
+- kernels of our own on Eigen when no LAPACK is found.
+
+With an OpenMP-built BLAS a call on a small block runs on one thread: `dpotrf` below 1024 columns,
+`dpotri` and `dpotrs` below 2048, `dsymm` below 128. On 12 threads `dpotri` at $m = 960$ took 0.046 s,
+against 0.011 s on one. The loops of the route run serially below $10^5$ factor entries. A block that
+is not positive definite, in $D_B$ or in the Cholesky of $S$, ends the factorization with
+`not_positive_definite`. After that outcome the pivots and $\log|\det|$ are not available on either
+route (NaN on the supernodal one).
+
+**Accuracy.** Against the simplicial route (`tests/sparse/test_supernodal_ldlt.cpp`: a dense matrix, a
+forest, a random pattern with fill, with and without a shift, crossed groupings up to $n = 1102$, a
+refactorization on the same pattern, and indefinite matrices on both routes). Largest relative
+differences:
+
+| quantity | gcc, LAPACK | gcc, Eigen kernels | CUDA build (MSVC, Eigen kernels) | bound |
+|---|---|---|---|---|
+| $\log|\det|$ | $1.0 \cdot 10^{-15}$ | $1.0 \cdot 10^{-15}$ | $1.0 \cdot 10^{-15}$ | $10^{-14}$ |
+| pivots | $2.2 \cdot 10^{-16}$ | $2.2 \cdot 10^{-16}$ | $4.4 \cdot 10^{-16}$ | $2 \cdot 10^{-15}$ |
+| solve | $7 \cdot 10^{-16}$ | $8 \cdot 10^{-16}$ | $8 \cdot 10^{-16}$ | $10^{-14}$ |
+| $Z$ on the pattern | $9.7 \cdot 10^{-16}$ | $1.2 \cdot 10^{-15}$ | $9.3 \cdot 10^{-16}$ | $10^{-14}$ |
+| $\dot Z$ on the pattern | $1.2 \cdot 10^{-15}$ | $1.5 \cdot 10^{-15}$ | $1.4 \cdot 10^{-15}$ | $10^{-14}$ |
+| contraction | $3.1 \cdot 10^{-15}$ | $3.1 \cdot 10^{-15}$ | $1.3 \cdot 10^{-15}$ | $5 \cdot 10^{-14}$ |
+
+On the inner curvature of the crossed model (12 threads, LAPACK) the routes agree in $\log|\det|$ to
+$1.3 \cdot 10^{-15}$ ($G = 10^3$) and $8 \cdot 10^{-16}$ ($3 \cdot 10^3$), and in $Z$ on the pattern of
+$H$ plus 20000 entries of $T \times T$ to $1.5 \cdot 10^{-16}$ and $3.1 \cdot 10^{-16}$ of
+$\max|Z| = 1$. At $G = 10^4$ (the start-point $H$ shifted by 100, which makes it positive definite) the
+agreement is $1.0 \cdot 10^{-14}$, $1.5 \cdot 10^{-14}$ and $2.7 \cdot 10^{-14}$ relative in
+$\log|\det|$, $Z$ and $\dot Z$.
+
+**Cost** (gcc, OpenBLAS, 12 threads unless stated, quiet machine; the dumped inner curvature of the
+crossed model of `benchmarks/engine_scale.cpp`; seconds):
+
+| $G$ | $m$ | factorization, simplicial / supernodal | selected inverse | one derivative direction |
+|---|---|---|---|---|
+| $10^3$ | 960 | 0.062 / 0.009 (1 thread) | 0.34 / 0.022 (4 threads) | 0.43 / 0.025 |
+| $3 \cdot 10^3$ | 2878 | 2.3 / 0.052 | 9.0 / 0.16 (4 threads) | 12.5 / 0.28 |
+| $10^4$ | 9585 | 105 / 0.79 | 333 / 4.2 | 445 / 6.6 |
+
+The factorization at $10^4$ (0.79 s) is the Schur update in parallel over the columns of $S$ plus a
+`dpotrf` of size 9585.
+
+**The threshold of `automatic`.** The supernodal route is taken when the trailing dense supernode has at
+least 64 columns. Both routes were measured on matrices of the same structure (crossed groupings with
+$G$ from 5 to 1000; one grouping with $G$ from $10^2$ to $10^5$), on 1 and 12 threads, with both
+realizations of the dense kernels. At a width of about 40 the two routes cost the same:
+factorization, selected inverse and one derivative direction are within 0.95 to 1.2 of each other.
+At about 80 the supernodal route is 1.1 to 2.7 times faster. At $G = 1000$ it is 6 to 20 times
+faster with LAPACK and 3.4 to 6.4 with the Eigen kernels. On one grouping (a trailing block of about 5
+columns) it is 0.5 to 0.9 times as fast. Near the crossover the simplicial route is kept.
+
+**Complete REML fits** (`fit_marginal` on the crossed model, selected route, outer Newton; gcc, 12
+threads, quiet machine; the same counts on both routes: 5 outer iterations, 6 inner fits, 24 derivative
+directions):
+
+| $G$ | simplicial | supernodal (automatic) | peak working set |
+|---|---|---|---|
+| $10^3$ | 15.2 s | 1.16 s | 0.079 / 0.106 GB |
+| $3 \cdot 10^3$ | 459 s | 11.1 s | 0.37 / 0.51 GB |
+| $10^4$ | not run | 190.8 s | 4.2 GB (supernodal) |
+
+The criterion value and the outer point agree to all 15 printed digits. At $3 \cdot 10^3$ the
+supernodal fit spends 6.8 s in the 24 derivative directions, 2.3 s in the inner fits, 1.1 s in the 6
+selected inverses and 0.63 s in the 12 factorizations of the criterion. At $10^4$ the fit spends 131.9 s
+in the directions, 26.1 s in the inner fits (3 of their 39 curvatures fell back to the expected
+information), 22.9 s in the selected inverses and 7.9 s in the factorizations. One direction there
+costs 5.6 s: 2.5 s in the symmetric product and 3.0 s in the differentiated recursion on the $B$
+columns, which reads about 25 columns of $Q$ and of $Z_{TT}$ for each $B$ column and is limited by
+memory bandwidth.
+
+With the supernodal route in `sparse_ldlt`, `benchmarks/engine_scale.cpp` on the crossed model (gcc,
+12 threads; both latent-inverse routes of the criterion; time and peak working set):
+
+| case | `dense` | `selected` |
+|---|---|---|
+| $G = 10^3$, one evaluation of value and gradient | 1.06 s | 0.204 s |
+| $G = 10^3$, complete fit | 7.19 s, 0.50 GB | 1.16 s, 0.10 GB |
+| $G = 3 \cdot 10^3$, complete fit | 205 s, 4.15 GB | 10.8 s, 0.50 GB |
+
+The criterion and the outer point are the same on both routes. Its parts at $G = 10^3$ and
+$3 \cdot 10^3$ (second call): numeric factorization 6.7 ms and 49.6 ms, selected inverse 17.4 ms and
+0.192 s, one derivative direction 22.3 ms and 0.260 s, one contraction 0.50 ms and 4.0 ms, inner fit
+from the start 0.156 s and 1.33 s. The contraction reads each entry of $A_{TT}$ as a dot product of
+length $m$; on the simplicial route it took 64 µs at $10^3$. On the CUDA build (MSVC host code, the Eigen
+kernels for the dense blocks) one evaluation of value and gradient at $G = 10^3$ takes 1.56 s on
+`dense` and 0.435 s on `selected`.
+
+**Limits.** One dense supernode, the trailing one. Factors with wide supernodes below the root (2-D and
+3-D grids, the structures of spatial and space-time terms) gain only on the root:
+
+- on a 3-D grid of $30^3$ points, 28 supernodes of width at least 64 below the root hold 52 per cent
+  of the flops, and the route is 4.4 times faster than the simplicial one on the factorization and 2.1
+  times on the selected inverse;
+- on 2-D grids up to $400^2$ it is 1.0 to 1.2 times faster.
+
+A general supernodal factorization over the whole tree is deferred until such terms enter the engine.
+The work and memory of the block grow as $m^3$ and $8 m^2$ bytes per copy, and the route holds about
+four copies. On 31 GB this limits crossed models to about $G = 3 \cdot 10^4$.
+
+**Default.** `automatic` takes the supernodal route from a trailing block of 64 columns; with a LAPACK
+found by CMake the dense blocks use it, otherwise the Eigen kernels.

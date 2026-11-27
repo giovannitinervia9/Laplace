@@ -12,10 +12,13 @@
 // The pattern is analyzed (fill-reducing ordering, symbolic factorization)
 // the first time and again only when it changes; factorize() reads the values.
 // The Eigen code (SimplicialLDLT with its approximate minimum degree ordering)
-// lives in src/sparse/eigen_sparse_backend.cpp, compiled as C++ and never by
-// nvcc, so this header holds no Eigen type.
+// lives in src/sparse/eigen_sparse_backend.cpp, the supernodal route in
+// src/sparse/supernodal_ldlt.cpp with its dense kernels in src/sparse/*_dense_kernels.cpp,
+// all compiled as C++ and never by nvcc, so this header holds no Eigen type.
 //
-// positive_definite means that every pivot of D is positive and finite.
+// positive_definite means that every pivot of D is positive and finite. After an outcome other than
+// positive_definite, the pivots and log |det| are not available on either route (the simplicial route
+// leaves those of its factor, the supernodal route NaN); factor_nonzeros() stays defined.
 
 #include <memory>
 
@@ -35,13 +38,34 @@ enum class sparse_ldlt_outcome : int {
 
 /**
  * \ingroup sparse
+ * \brief The algorithm that sparse_ldlt runs on a pattern.
+ *
+ * `simplicial` is Eigen's column-by-column \f$L D L^\top\f$. `supernodal` factorizes the leading columns
+ * as sparse \f$L D L^\top\f$ and the trailing dense supernode of the factor through dense kernels.
+ * `automatic` chooses `supernodal` when the trailing dense supernode has at least 64 columns and
+ * `simplicial` otherwise.
+ *
+ * \see sparse_ldlt, \ref sparse
+ */
+enum class sparse_ldlt_route : int {
+  automatic,   ///< Chosen from the symbolic structure of the factor.
+  simplicial,  ///< Eigen's simplicial \f$L D L^\top\f$.
+  supernodal,  ///< Sparse leading columns and a dense trailing supernode.
+};
+
+/**
+ * \ingroup sparse
  * \brief Host-only sparse \f$L D L^\top\f$ factorization of a symmetric matrix given by its lower triangle.
  *
- * Wraps Eigen's `SimplicialLDLT` with approximate minimum degree (AMD) ordering inside the compiled
- * static library `laplace_sparse` (`Laplace::sparse`), keeping Eigen types out of the header.
- * Analyzes the sparsity pattern once and reuses the symbolic factorization until the pattern changes.
+ * Compiled inside `laplace_sparse` (`Laplace::sparse`) so no Eigen or LAPACK types appear in the header,
+ * it orders the pattern once by approximate minimum degree (AMD) and reuses the symbolic analysis until
+ * the pattern or requested route changes. It runs either `simplicial` (Eigen's `SimplicialLDLT`) or
+ * `supernodal` (an up-looking sparse \f$L D L^\top\f$ on the leading columns and a dense Cholesky
+ * factorization on the trailing dense supernode, parallelized with OpenMP). Under `automatic`, the
+ * default, factorize() takes `supernodal` when the trailing dense supernode has at least 64 columns and
+ * `simplicial` otherwise.
  *
- * \see sparse_ldlt_outcome, \ref sparse
+ * \see sparse_ldlt_outcome, sparse_ldlt_route, \ref sparse
  */
 class sparse_ldlt {
  public:
@@ -86,6 +110,18 @@ class sparse_ldlt {
    */
   sparse_ldlt_outcome factorize(int n, const int* col_ptr, const int* row_idx, const double* values,
                                 double shift = 0.0);
+  /**
+   * \ingroup sparse
+   * \brief Sets the route requested for the next analysis; a change forces the pattern to be analyzed again.
+   * \param route The requested route (`automatic` by default).
+   */
+  void set_route(sparse_ldlt_route route);
+  /**
+   * \ingroup sparse
+   * \brief The route of the last analysis: `simplicial` or `supernodal` (`automatic` before the first analysis or after set_route() changes the requested route).
+   * \return The route in use.
+   */
+  sparse_ldlt_route route() const;
   /**
    * \ingroup sparse
    * \brief Solves \f$(A + \lambda I) z = b\f$ in place using the last factorization.
