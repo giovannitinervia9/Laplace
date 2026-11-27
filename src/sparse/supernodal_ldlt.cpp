@@ -17,6 +17,7 @@ namespace laplace::sparse::detail {
 
 void supernodal_factor::analyze(int n, const int* col_ptr, const int* row_idx) {
   n_ = n;
+  block_.reset();
   factorized_ = false;
   have_selected_ = false;
   const int nnz = col_ptr[n];
@@ -128,6 +129,15 @@ void supernodal_factor::analyze(int n, const int* col_ptr, const int* row_idx) {
     std::vector<int> next(subtree_ptr_.begin(), subtree_ptr_.end() - 1);
     for (int j = nB_ - 1; j >= 0; --j) subtree_nodes_[next[index[root[j]]]++] = j;
   }
+  // groups of consecutive B columns whose rows in T are the same (a supernode of B, such as the pair of
+  // coordinates of one level of a grouping): the derivative reads the columns of Q and Z_TT once per group
+  group_ptr_.assign(1, 0);
+  for (int j = 0; j < nB_; ++j) {
+    const bool joins = j > 0 && parent_[j - 1] == j && Lp_[j] - t_start_[j - 1] == Lp_[j + 1] - t_start_[j] &&
+                       std::equal(Li_.begin() + t_start_[j - 1], Li_.begin() + Lp_[j], Li_.begin() + t_start_[j]);
+    if (j > 0 && !joins) group_ptr_.push_back(j);
+  }
+  if (nB_ > 0) group_ptr_.push_back(nB_);
   Lx_.assign(Li_.size(), 0.0);
   D_.assign(nB_, 0.0);
   scatter_.assign(nnz, 0.0);
@@ -198,7 +208,8 @@ sparse_ldlt_outcome supernodal_factor::factorize(const double* values, double sh
   }
   for (int k = 0; k < m; ++k)
     if (!std::isfinite(S[static_cast<std::size_t>(k) * m + k])) return sparse_ldlt_outcome::non_finite;
-  if (dense_cholesky_lower(m, S, m) != 0) return sparse_ldlt_outcome::not_positive_definite;
+  if (!block_) block_ = make_dense_root_block(m);
+  if (block_->factorize(m, S) != 0) return sparse_ldlt_outcome::not_positive_definite;
   min_pivot_ = n > 0 ? std::numeric_limits<double>::infinity() : 0.0;
   max_pivot_ = n > 0 ? -std::numeric_limits<double>::infinity() : 0.0;
   log_abs_det_ = 0.0;
@@ -223,7 +234,7 @@ bool supernodal_factor::solve(double* b) const {
   for (int r = 0; r < n; ++r) x[inv_[r]] = b[r];
   for (int j = 0; j < nB; ++j)
     for (long q = Lp_[j]; q < Lp_[j + 1]; ++q) x[Li_[q]] -= Lx_[q] * x[j];
-  dense_cholesky_solve_lower(m, 1, S_.data(), m, x.data() + nB, n);
+  block_->solve(m, S_.data(), x.data() + nB);
   for (int j = 0; j < nB; ++j) x[j] /= D_[j];
   for (int j = nB - 1; j >= 0; --j)
     for (long q = Lp_[j]; q < Lp_[j + 1]; ++q) x[j] -= Lx_[q] * x[Li_[q]];
@@ -239,8 +250,8 @@ bool supernodal_factor::compute_selected_inverse() {
   if (!factorized_) return false;
   const int n = n_, nB = nB_, m = m_;
   have_derivative_ = false;
-  Z_ = S_;
-  if (dense_cholesky_inverse_lower(m, Z_.data(), m) != 0) return false;
+  Z_.resize(static_cast<std::size_t>(m) * m);
+  if (block_->invert(m, S_.data(), Z_.data()) != 0) return false;
   // Z_TT held whole (both triangles), so that its columns can be read contiguously
 #pragma omp parallel for schedule(dynamic, 16) if (parallel_)
   for (int c = 0; c < m; ++c)
@@ -357,16 +368,52 @@ bool supernodal_factor::compute_selected_inverse_derivative(const double* dvalue
     for (int r = c + 1; r < m; ++r) dS[static_cast<std::size_t>(r) * m + c] = dS[static_cast<std::size_t>(c) * m + r];
   // Q = dS Z_TT, so that dZ_TT = -Z_TT dS Z_TT = -Z_TT Q
   Q_.resize(static_cast<std::size_t>(m) * m);
-  dense_symmetric_product_right(m, Z_.data(), m, dS, m, Q_.data(), m);
+  block_->symmetric_product(m, Z_.data(), dS, Q_.data());
+  // the pairs with i and k in T, for every B column j: t_ij = sum_k (dZ_ik L_kj + Z_ik dL_kj)
+  // = -Z_TT(:, i)' u_j + sum_k Z_ik dL_kj with u_j = sum_k Q(:, k) L_kj; the columns of a group share
+  // their rows k, i in T, so each column of Q and of Z_TT is read once per group
+  const double* Z = Z_.data();
+  const double* Q = Q_.data();
+  dtt_.assign(Li_.size(), 0.0);
+  const int n_groups = static_cast<int>(group_ptr_.size()) - 1;
+#pragma omp parallel if (parallel_)
+  {
+    std::vector<double> ug;
+#pragma omp for schedule(dynamic, 8)
+    for (int g = 0; g < n_groups; ++g) {
+      const int j0 = group_ptr_[g], width = group_ptr_[g + 1] - j0;
+      const long c = Lp_[j0 + 1] - t_start_[j0];  // rows in T, the same for every column of the group
+      if (c == 0) continue;
+      ug.assign(static_cast<std::size_t>(width) * m, 0.0);
+      for (long r = 0; r < c; ++r) {
+        const double* qk = Q + static_cast<std::size_t>(Li_[t_start_[j0] + r] - nB) * m;
+        for (int v = 0; v < width; ++v) {
+          const double lkj = Lx_[t_start_[j0 + v] + r];
+          double* u = ug.data() + static_cast<std::size_t>(v) * m;
+          for (int a = 0; a < m; ++a) u[a] += qk[a] * lkj;
+        }
+      }
+      for (long r = 0; r < c; ++r) {
+        const int i = Li_[t_start_[j0] + r];
+        const double* zi = Z + static_cast<std::size_t>(i - nB) * m;
+        for (int v = 0; v < width; ++v) {
+          const long pT = t_start_[j0 + v];
+          const double* u = ug.data() + static_cast<std::size_t>(v) * m;
+          double acc = 0.0;
+          for (int a = 0; a < m; ++a) acc -= zi[a] * u[a];
+          for (long t = 0; t < c; ++t) acc += zi[Li_[pT + t] - nB] * dl_[pT + t];
+          dtt_[pT + r] = acc;
+        }
+      }
+    }
+  }
   // Takahashi's recursion differentiated on the B columns, in parallel over the subtrees
   dzl_.assign(Li_.size(), 0.0);
   dzd_.assign(nB, 0.0);
-  const double* Z = Z_.data();
-  const double* Q = Q_.data();
   const int n_subtrees = static_cast<int>(subtree_ptr_.size()) - 1;
 #pragma omp parallel if (parallel_)
   {
-    std::vector<double> w(n, 0.0), lj(n, 0.0), dlj(n, 0.0), u(m, 0.0);
+    std::vector<double> w(n, 0.0), lj(n, 0.0), dlj(n, 0.0);
     std::vector<char> in(n, 0);
 #pragma omp for schedule(dynamic, 4)
     for (int s = 0; s < n_subtrees; ++s)
@@ -386,23 +433,7 @@ bool supernodal_factor::compute_selected_inverse_derivative(const double* dvalue
             w[k] += dzl_[q] * lj[r] + zl_[q] * dlj[r];
           }
         }
-        if (pT < p1) {
-          // the pairs with i and k in T: sum_k dZ_ik L_kj = -Z_TT(:, i)' u with u = sum_k Q(:, k) L_kj
-          std::fill(u.begin(), u.end(), 0.0);
-          for (long p = pT; p < p1; ++p) {
-            const double* qk = Q + static_cast<std::size_t>(Li_[p] - nB) * m;
-            const double lkj = Lx_[p];
-            for (int c = 0; c < m; ++c) u[c] += qk[c] * lkj;
-          }
-          for (long q = pT; q < p1; ++q) {
-            const int i = Li_[q];
-            const double* zi = Z + static_cast<std::size_t>(i - nB) * m;
-            double acc = 0.0;
-            for (int c = 0; c < m; ++c) acc -= zi[c] * u[c];
-            for (long p = pT; p < p1; ++p) acc += zi[Li_[p] - nB] * dl_[p];
-            w[i] += acc;
-          }
-        }
+        for (long q = pT; q < p1; ++q) w[Li_[q]] += dtt_[q];  // the pairs in T, computed by groups above
         double d = -dd_[j] / (D_[j] * D_[j]);
         for (long p = p0; p < p1; ++p) {
           dzl_[p] = -w[Li_[p]];

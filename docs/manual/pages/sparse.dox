@@ -1,7 +1,7 @@
 /**
 \addtogroup sparse
 
-The `laplace::sparse` module provides a host-only sparse symmetric \f$L D L^\top\f$ factorization, linear solver, selected inverse, and selected-inverse derivative in `<laplace/sparse/sparse_ldlt.hpp>`. Under one public interface, \ref laplace::sparse::sparse_ldlt "sparse_ldlt" runs either a `simplicial` route (Eigen's `SimplicialLDLT`) or a `supernodal` route with a dense trailing supernode (parallelized with OpenMP). Like \ref dense "the dense module", the Eigen backend (Guennebaud and others, 2010) and optional LAPACK kernels are compiled into the static library `laplace_sparse` (CMake target `Laplace::sparse`) as standard C++ and never by `nvcc`, so the public header includes no Eigen or LAPACK types. Functions in this module are not marked `LAPLACE_HD`; the `simplicial` route runs on one host thread per call, while the `supernodal` route parallelizes its dense block updates and subtree recursions with OpenMP when available.
+The `laplace::sparse` module provides a sparse symmetric \f$L D L^\top\f$ factorization, linear solver, selected inverse, and selected-inverse derivative in `<laplace/sparse/sparse_ldlt.hpp>`. Under one public interface, \ref laplace::sparse::sparse_ldlt "sparse_ldlt" runs either a `simplicial` route (Eigen's `SimplicialLDLT`) or a `supernodal` route with a dense trailing supernode parallelized with OpenMP. Like \ref dense "the dense module", the Eigen backend (Guennebaud and others, 2010), optional LAPACK kernels, and optional device kernels are compiled into `laplace_sparse` (CMake target `Laplace::sparse`) as standard C++ and never by `nvcc`, so the public header includes no Eigen or LAPACK types. Functions in this module are not marked `LAPLACE_HD`; `simplicial` runs on one host thread per call, while `supernodal` uses OpenMP when available and offloads large trailing dense blocks to the GPU via cuSOLVER and cuBLAS in CUDA builds.
 
 ## Matrix format
 
@@ -12,18 +12,18 @@ The `laplace::sparse` module provides a host-only sparse symmetric \f$L D L^\top
 
 ## Routes and symbolic analysis
 
-Both routes analyze the sparsity pattern (`n`, `col_ptr`, `row_idx`) on the first call to \ref laplace::sparse::sparse_ldlt::factorize "factorize()" using Eigen's approximate minimum degree (AMD) fill-reducing ordering (Amestoy, Davis and Duff, 1996; Guennebaud and others, 2010). Repeated factorizations with the same pattern reuse the symbolic ordering and analysis and read only the numerical values.
+Both routes analyze the sparsity pattern (`n`, `col_ptr`, `row_idx`) on the first call to \ref laplace::sparse::sparse_ldlt::factorize "factorize()" using Eigen's approximate minimum degree (AMD) fill-reducing ordering (Amestoy, Davis and Duff, 1996; Guennebaud and others, 2010). Repeated factorizations with the same pattern reuse that symbolic analysis and read only `values`.
 
-The route is controlled by \ref laplace::sparse::sparse_ldlt_route "sparse_ldlt_route", which has three values: `automatic` (the default), `simplicial`, and `supernodal`. Under `automatic`, the symbolic analysis inspects the width \f$m\f$ of the trailing dense supernode and chooses `supernodal` when \f$m \ge 64\f$ and `simplicial` otherwise. Measured across matrices with that block structure (two crossed groupings with \f$G\f$ from \f$5\f$ to \f$1000\f$, and one grouping with \f$G\f$ from \f$10^2\f$ to \f$10^5\f$, on \f$1\f$ and \f$12\f$ threads with both dense-kernel realizations), the two routes cost nearly the same at a width of about \f$40\f$ (factorization, selected inverse, and one derivative direction within a factor of \f$0.95\f$ to \f$1.2\f$), while at a width of about \f$80\f$ the `supernodal` route is \f$1.1\f$ to \f$2.7\f$ times faster; the threshold \f$64\f$ keeps `simplicial` near the crossover.
+The route is controlled by \ref laplace::sparse::sparse_ldlt_route "sparse_ldlt_route": `automatic` (the default), `simplicial`, or `supernodal`. Under `automatic`, symbolic analysis inspects the width \f$m\f$ of the trailing dense supernode and chooses `supernodal` when \f$m \ge 64\f$. Across crossed-grouping matrices (\f$G\f$ from \f$5\f$ to \f$1000\f$) and single-grouping matrices (\f$G\f$ from \f$10^2\f$ to \f$10^5\f$) on \f$1\f$ and \f$12\f$ threads with both host dense-kernel realizations, the two routes cost within a factor of \f$0.95\f$ to \f$1.2\f$ at width \f$40\f$. At width \f$80\f$, `supernodal` is \f$1.1\f$ to \f$2.7\f$ times faster, so \f$64\f$ keeps `simplicial` near the crossover.
 
-Calling \ref laplace::sparse::sparse_ldlt::set_route "set_route()" sets the requested route for subsequent analyses, and changing the requested route forces the next `factorize()` call to re-analyze the pattern. Calling \ref laplace::sparse::sparse_ldlt::route "route()" reports the route selected by the last analysis (`simplicial` or `supernodal`), or `automatic` before the first factorization and after `set_route()` changes the requested route. The public interface (`factorize()`, `solve()`, `min_pivot()`, `max_pivot()`, `log_abs_determinant()`, `factor_nonzeros()`, `compute_selected_inverse()`, `selected_inverse_entry()`, `compute_selected_inverse_derivative()`, `selected_inverse_derivative_entry()`, and `selected_inverse_derivative_dot()`) is the same on both routes.
+Calling \ref laplace::sparse::sparse_ldlt::set_route "set_route()" sets the requested route and forces the next `factorize()` call to re-analyze the pattern. Calling \ref laplace::sparse::sparse_ldlt::route "route()" reports the route selected by the last analysis (`simplicial` or `supernodal`), or `automatic` before the first factorization and after `set_route()` changes the request. Both routes provide the same public member functions.
 
 The outcome of `factorize()` is reported as a \ref laplace::sparse::sparse_ldlt_outcome "sparse_ldlt_outcome":
-- `positive_definite`: the factorization succeeded, all pivots are finite, and every pivot is strictly positive.
-- `not_positive_definite`: Eigen's factorization failed or returned a zero or negative pivot (on `simplicial`), or a pivot in the leading columns was not positive or the dense Cholesky factorization of the trailing Schur complement failed (on `supernodal`).
+- `positive_definite`: the factorization succeeded and every pivot is finite and strictly positive.
+- `not_positive_definite`: Eigen's factorization failed or found a non-positive pivot (`simplicial`), or a pivot in the leading columns was non-positive or the dense Cholesky factorization of the Schur complement failed (`supernodal`).
 - `non_finite`: an entry of `values` or a computed pivot is non-finite.
 
-After any outcome other than `positive_definite`, the pivots and the log determinant are unavailable on both routes (the `supernodal` route sets them to quiet NaN), while \ref laplace::sparse::sparse_ldlt::factor_nonzeros "factor_nonzeros()" remains defined and returns the number of stored entries of \f$L\f$ strictly below its unit diagonal (\f$0\f$ before the first analysis). After a `positive_definite` factorization, \ref laplace::sparse::sparse_ldlt::solve "solve()" solves \f$(A + \lambda I) z = b\f$ in place on a host array `b` of length \f$n\f$ (returning `false` if no valid factorization is stored), \ref laplace::sparse::sparse_ldlt::min_pivot "min_pivot()" and \ref laplace::sparse::sparse_ldlt::max_pivot "max_pivot()" return the smallest and largest pivots (\f$0.0\f$ for \f$n = 0\f$), and \ref laplace::sparse::sparse_ldlt::log_abs_determinant "log_abs_determinant()" returns \f$\log|\det(A + \lambda I)|\f$ (\f$0.0\f$ for \f$n = 0\f$).
+After any outcome other than `positive_definite`, pivots and the log determinant are unavailable (quiet NaN on `supernodal`), while \ref laplace::sparse::sparse_ldlt::factor_nonzeros "factor_nonzeros()" remains defined and returns the number of entries of \f$L\f$ strictly below its unit diagonal (\f$0\f$ before the first analysis). After `positive_definite`, \ref laplace::sparse::sparse_ldlt::solve "solve()" solves \f$(A + \lambda I) z = b\f$ in place on a host array `b` of length \f$n\f$ (returning `false` if unfactorized). \ref laplace::sparse::sparse_ldlt::min_pivot "min_pivot()" and \ref laplace::sparse::sparse_ldlt::max_pivot "max_pivot()" return the extreme pivots (\f$0.0\f$ for \f$n = 0\f$), and \ref laplace::sparse::sparse_ldlt::log_abs_determinant "log_abs_determinant()" returns \f$\log|\det(A + \lambda I)|\f$ (\f$0.0\f$ for \f$n = 0\f$).
 
 ## Simplicial route
 
@@ -31,86 +31,94 @@ On the `simplicial` route, \ref laplace::sparse::sparse_ldlt::factorize "factori
 
 ## Supernodal route
 
-On the `supernodal` route, the symbolic analysis applies the same AMD permutation \f$P\f$, builds the elimination tree (Liu, 1990) and column counts by row subtrees, and identifies the trailing dense supernode \f$T\f$: the last \f$m\f$ columns in the permuted ordering whose column counts are \f$m, m - 1, \dots, 1\f$. Every column in \f$T\f$ holds all rows below it in the factor. Write \f$B\f$ for the leading \f$n - m\f$ columns in the permuted ordering, and write \f$A\f$ in the permuted formulas below for the permuted shifted matrix \f$P (A + \lambda I) P^\top\f$.
+On the `supernodal` route, symbolic analysis applies the same AMD permutation \f$P\f$, builds the elimination tree (Liu, 1990) and column counts by row subtrees, and identifies the trailing dense supernode \f$T\f$: the last \f$m\f$ columns whose column counts are \f$m, m - 1, \dots, 1\f$. Write \f$B\f$ for the leading \f$n - m\f$ columns and \f$A\f$ for the permuted shifted matrix \f$P (A + \lambda I) P^\top\f$.
 
-The leading columns \f$B\f$ are factorized as \f$L D L^\top\f$ with unit lower-triangular \f$L\f$ and diagonal \f$D_B\f$ by an up-looking sparse recursion, which also computes the rows of \f$T\f$ in columns \f$B\f$, denoted \f$L_{TB}\f$. The dense \f$m \times m\f$ Schur complement
+An up-looking sparse recursion factorizes \f$B\f$ as \f$L D_B L^\top\f$ with unit lower-triangular \f$L\f$ and diagonal \f$D_B\f$, and computes the \f$T\f$-rows of those columns, \f$L_{TB}\f$. The dense \f$m \times m\f$ Schur complement
 \f[
 S = A_{TT} - L_{TB} D_B L_{TB}^\top
 \f]
-is assembled densely, in parallel over its columns, and factorized as \f$S = R R^\top\f$ by a dense Cholesky factorization, where \f$R\f$ is lower triangular. The log absolute determinant and pivots follow as
+is assembled densely in parallel over its columns and factorized as \f$S = R R^\top\f$ by dense Cholesky, where \f$R\f$ is lower triangular. Then
 \f[
 \log|\det(A + \lambda I)| = \sum_{j \in B} \log D_j + 2 \sum_{t \in T} \log R_{tt},
 \f]
-with pivots \f$D_j\f$ for \f$j \in B\f$ and \f$R_{tt}^2\f$ for \f$t \in T\f$. Calling \ref laplace::sparse::sparse_ldlt::solve "solve()" applies \f$P\f$, solves through \f$L\f$ on \f$B\f$, runs a dense Cholesky solve with \f$R\f$ on \f$T\f$, scales \f$B\f$ by \f$D_B^{-1}\f$, solves through \f$L^\top\f$ on \f$B\f$, and reverses \f$P\f$.
-
-The route treats only the trailing dense supernode \f$T\f$ densely; any wide supernodes below \f$T\f$ in the elimination tree are factorized as sparse columns.
+with pivots \f$D_j\f$ for \f$j \in B\f$ and \f$R_{tt}^2\f$ for \f$t \in T\f$. Calling \ref laplace::sparse::sparse_ldlt::solve "solve()" applies \f$P\f$, solves through \f$L\f$ on \f$B\f$, solves densely with \f$R\f$ on \f$T\f$, scales \f$B\f$ by \f$D_B^{-1}\f$, solves through \f$L^\top\f$ on \f$B\f$, and reverses \f$P\f$. Only \f$T\f$ is treated densely; wide supernodes below \f$T\f$ stay sparse.
 
 ## Dense kernels and build configuration
 
-Operations on the dense block \f$S\f$ go through one internal dense-kernel interface compiled into `laplace_sparse`. At CMake configure time, the cache variable `LAPLACE_DENSE_KERNELS` (`auto`, `lapack`, or `eigen`; default `auto`) selects one of two realizations:
-- The environment's LAPACK and BLAS by their standard Fortran symbols (`dpotrf`, `dpotri`, `dpotrs`, and `dsymm`; Anderson and others, 1999), supplied in `LAPLACE_LAPACK_LIBRARIES` or found by `find_package(LAPACK)`. These declarations use 32-bit integers (the LP64 interface), so a 64-bit-integer (ILP64) BLAS or LAPACK library must not be linked.
-- Dense kernels implemented on Eigen otherwise.
+Operations on the dense block \f$S\f$ go through an internal interface compiled into `laplace_sparse`. At CMake configure time, `LAPLACE_DENSE_KERNELS` (`auto`, `lapack`, or `eigen`; default `auto`) selects the host realization:
+- The environment's LAPACK and BLAS via standard Fortran symbols (`dpotrf`, `dpotri`, `dpotrs`, and `dsymm`; Anderson and others, 1999), from `LAPLACE_LAPACK_LIBRARIES` or `find_package(LAPACK)`. Because these use 32-bit integers (LP64), an ILP64 library must not be linked.
+- Dense kernels on Eigen otherwise.
 
-Under `auto`, CMake selects LAPACK when `LAPLACE_LAPACK_LIBRARIES` is set or `find_package(LAPACK)` succeeds, and Eigen otherwise; the configure log reports which realization is compiled. OpenMP is optional at configure time: without it, the supernodal loops run on one thread, and with it, loops still run serially when the factor has fewer than \f$10^5\f$ entries. With an OpenMP-built BLAS, calls on small blocks run on one thread (`dpotrf` for \f$m < 1024\f$, `dpotri` and `dpotrs` for \f$m < 2048\f$, and `dsymm` for \f$m < 128\f$).
+Under `auto`, CMake picks LAPACK when `LAPLACE_LAPACK_LIBRARIES` is set or `find_package(LAPACK)` succeeds, and Eigen otherwise; the configure log prints the choice. OpenMP is optional: without it loops run serially, and with it loops run on one thread below \f$10^5\f$ factor entries. With OpenMP BLAS, small-block calls run on one thread (`dpotrf` for \f$m < 1024\f$, `dpotri` and `dpotrs` for \f$m < 2048\f$, and `dsymm` for \f$m < 128\f$).
+
+## Dense root block on the device
+
+In a CUDA build, the `supernodal` route runs the trailing dense operations on the GPU through cuSOLVER and cuBLAS: the Cholesky factorization \f$S = R R^\top\f$, the solve with \f$R\f$, the inverse \f$Z_{TT} = S^{-1}\f$ from \f$R\f$, and the symmetric product \f$Q = \dot S Z_{TT}\f$. Both \f$R\f$ and \f$Z_{TT}\f$ stay resident on the device between calls. Each factorization copies \f$S\f$ up to the device and the diagonal of \f$R\f$ back to the host. Each solve copies the right-hand vector of length \f$m\f$ up to the device and the solution back. Each selected inverse copies \f$R\f$ to \f$Z_{TT}\f$ on the device and copies \f$Z_{TT}\f$ back after inversion so Takahashi's recursion on \f$B\f$ can read it on the host. Each derivative direction copies \f$\dot S\f$ up and \f$Q\f$ back for the differentiated recursion on \f$B\f$. All calls run on the current device's default stream from host code outside any parallel region, compiled as standard C++ and never by `nvcc`.
+
+The CMake option `LAPLACE_DENSE_KERNELS_DEVICE` (`auto`, `cuda`, or `OFF`; default `auto`) enables the device block: `auto` compiles it in a CUDA build of Kokkos when cuSOLVER and cuBLAS are found and builds host-only otherwise, `cuda` requires them, and `OFF` omits it. While the `supernodal` route starts at \f$m \ge 64\f$ columns, root blocks with \f$m \ge 256\f$ go to the device and smaller blocks use the host kernels of the same build. On crossed-grouping models (RTX 4070 SUPER, FP64 at \f$1/64\f$ of FP32, \f$12\f$ host threads) against the MSVC Eigen host block, each device call costs about \f$0.12\f$ ms regardless of size; factorization, selected inverse, and one derivative direction break even near width \f$150\f$, and the device is faster from about \f$290\f$.
+
+Creating a device block allocates \f$4 m^2\f$ doubles plus workspaces after checking free device memory with `cudaMemGetInfo`; a block that does not fit or fails allocation runs on the host kernels and increments a fallback counter. Two simultaneous blocks hold \f$8 m^2\f$ doubles (\f$5.9\f$ GB at \f$m = 9585\f$), so on a \f$12\f$ GB card the second falls back from about \f$m = 13500\f$. A non-positive-definite leading minor returns `not_positive_definite` as on the host; any other CUDA, cuSOLVER, or cuBLAS error throws `std::runtime_error`, and a later `factorize()` starts over. The routines called are `cusolverDnXpotrf`, `cusolverDnXpotrs`, `cusolverDnDpotri`, and `cublasDsymm_64`. cuSOLVER and cuBLAS are under NVIDIA's CUDA EULA and are linked dynamically; nothing of them is part of Laplace.
+
+At crossed \f$G = 10^4\f$ on the RTX 4070 SUPER (FP64 at \f$1/64\f$ of FP32, \f$12\f$ host threads), steady-state factorization, selected inverse, and one derivative direction take \f$0.68\f$ s, \f$3.80\f$ s, and \f$5.29\f$ s on the device against \f$26.8\f$ s, \f$42.3\f$ s, and \f$85.2\f$ s on the host kernels of the same build. The gcc build with OpenBLAS takes \f$0.72\f$ s, \f$3.78\f$ s, and \f$4.04\f$ s, so on this card the device costs about what the host costs with an optimized BLAS.
 
 ## Selected inverse
 
-For a factorization \f$P (A + \lambda I) P^\top = L D L^\top\f$ (or the equivalent block factorization on the `supernodal` route), write \f$Z = (A + \lambda I)^{-1}\f$. Calling \ref laplace::sparse::sparse_ldlt::compute_selected_inverse "compute_selected_inverse()" computes the entries of \f$Z\f$ on the sparsity pattern of \f$L + L^\top\f$ only (fill included). On the `simplicial` route, Takahashi's recursion (Takahashi, Fagan and Chin, 1973; Erisman and Tinney, 1975) sweeps over columns \f$j = n - 1, \dots, 0\f$ in the permuted ordering:
+Write \f$Z = (A + \lambda I)^{-1}\f$. Calling \ref laplace::sparse::sparse_ldlt::compute_selected_inverse "compute_selected_inverse()" computes \f$Z\f$ on the sparsity pattern of \f$L + L^\top\f$ (fill included). On `simplicial`, Takahashi's recursion (Takahashi, Fagan and Chin, 1973; Erisman and Tinney, 1975) sweeps over columns \f$j = n - 1, \dots, 0\f$ in the permuted ordering:
 \f[
 Z_{ij} = -\sum_{k \in \mathcal{J}_j} Z_{ik} L_{kj} \quad (i \in \mathcal{J}_j), \qquad
 Z_{jj} = \frac{1}{D_j} - \sum_{k \in \mathcal{J}_j} L_{kj} Z_{kj},
 \f]
-where \f$\mathcal{J}_j\f$ is the set of row indices of the nonzeros in column \f$j\f$ of \f$L\f$ below the diagonal. Every entry \f$Z_{ik}\f$ read by the sums lies in the pattern because the rows in \f$\mathcal{J}_j\f$ are pairwise joined in the pattern of \f$L\f$; in particular, every stored entry of \f$A\f$ and its transpose lies in the pattern. The recursion costs of the order of one numeric factorization and stores one `double` per entry of \f$L\f$ below the diagonal plus \f$n\f$ diagonal entries.
+where \f$\mathcal{J}_j\f$ is the set of row indices below the diagonal in column \f$j\f$ of \f$L\f$. Every \f$Z_{ik}\f$ read lies in the pattern because rows in \f$\mathcal{J}_j\f$ are pairwise joined in \f$L\f$. The recursion costs about one numeric factorization and stores one `double` per subdiagonal entry of \f$L\f$ plus \f$n\f$ diagonal entries.
 
-On the `supernodal` route, the dense trailing inverse \f$Z_{TT} = S^{-1}\f$ is computed from the Cholesky factor \f$R\f$, and Takahashi's recursion runs over the \f$B\f$ columns reading \f$Z_{TT}\f$, in parallel over the independent subtrees of the elimination tree below \f$T\f$.
+On `supernodal`, \f$Z_{TT} = S^{-1}\f$ is formed from \f$R\f$, and Takahashi's recursion runs over \f$B\f$ in parallel across independent subtrees below \f$T\f$.
 
-`compute_selected_inverse()` returns `false` when no factorization is stored, and any later `factorize()` call discards the computed selected inverse. Calling \ref laplace::sparse::sparse_ldlt::selected_inverse_entry "selected_inverse_entry(i, j)" takes original (unpermuted) indices in either order and throws `std::out_of_range` if `(i, j)` lies outside the pattern of \f$L + L^\top\f$ or if `compute_selected_inverse()` has not run since the last factorization. In `tests/sparse/test_selected_inverse.cpp`, every entry of the pattern of \f$L + L^\top\f$ (including fill) is compared against `laplace::dense::spd_solve()` on a \f$1 \times 1\f$ matrix, a tridiagonal matrix, an arrowhead matrix, random sparse matrices (with shift \f$0\f$ and \f$0.75\f$), and a matrix from two crossed groupings; the largest error is \f$8.0 \times 10^{-16} \max_{i,j} |Z_{ij}|\f$ on gcc and \f$6.0 \times 10^{-16} \max_{i,j} |Z_{ij}|\f$ on CUDA (the host code compiled by gcc and by MSVC), within the test bound of \f$10^{-13} \max_{i,j} |Z_{ij}|\f$.
+`compute_selected_inverse()` returns `false` if unfactorized, and a later `factorize()` discards it. \ref laplace::sparse::sparse_ldlt::selected_inverse_entry "selected_inverse_entry(i, j)" takes original indices in either order and throws `std::out_of_range` outside \f$L + L^\top\f$ or when uncomputed. In `tests/sparse/test_selected_inverse.cpp`, every pattern entry is compared against `laplace::dense::spd_solve()` on six matrices (\f$1 \times 1\f$, tridiagonal, arrowhead, random sparse at shifts \f$0\f$ and \f$0.75\f$, and crossed groupings); the largest error is \f$8.0 \times 10^{-16} \max_{i,j} |Z_{ij}|\f$ on gcc and \f$6.0 \times 10^{-16} \max_{i,j} |Z_{ij}|\f$ on CUDA (gcc and MSVC hosts), within \f$10^{-13} \max_{i,j} |Z_{ij}|\f$.
 
 ## Derivative of the selected inverse
 
-Calling \ref laplace::sparse::sparse_ldlt::compute_selected_inverse_derivative "compute_selected_inverse_derivative(dvalues)" computes the directional derivative \f$\dot Z = -Z \dot A Z\f$ on the sparsity pattern of \f$L + L^\top\f$. Here \f$\dot A\f$ is a symmetric matrix given by its lower triangle on the pattern of the last factorized matrix, with `dvalues` aligned with `col_ptr` and `row_idx`. On the `simplicial` route, a left-looking sweep in the permuted ordering first gives the factor derivatives \f$\dot L\f$ and \f$\dot D\f$ on the pattern of \f$L\f$ (with \f$L_{jj} = 1\f$ and \f$\dot L_{jj} = 0\f$):
+Calling \ref laplace::sparse::sparse_ldlt::compute_selected_inverse_derivative "compute_selected_inverse_derivative(dvalues)" computes \f$\dot Z = -Z \dot A Z\f$ on the pattern of \f$L + L^\top\f$, where \f$\dot A\f$ is symmetric with lower-triangular `dvalues` aligned with `col_ptr` and `row_idx`. On `simplicial`, a left-looking sweep in the permuted ordering gives \f$\dot L\f$ and \f$\dot D\f$ on the pattern of \f$L\f$ (\f$L_{jj} = 1\f$, \f$\dot L_{jj} = 0\f$):
 \f[
 \dot L_{ij} D_j + L_{ij} \dot D_j = \dot A_{ij} - \sum_{k < j} \left(\dot L_{ik} L_{jk} D_k + L_{ik} \dot L_{jk} D_k + L_{ik} L_{jk} \dot D_k\right), \qquad i \ge j.
 \f]
-Then the derivative of Takahashi's recursion over columns \f$j = n - 1, \dots, 0\f$ in the permuted ordering yields \f$\dot Z\f$ on the pattern of \f$L + L^\top\f$:
+Differentiating Takahashi's recursion over \f$j = n - 1, \dots, 0\f$ yields \f$\dot Z\f$ on \f$L + L^\top\f$:
 \f[
 \dot Z_{ij} = -\sum_{k \in \mathcal{J}_j} \left(\dot Z_{ik} L_{kj} + Z_{ik} \dot L_{kj}\right) \quad (i \in \mathcal{J}_j), \qquad
 \dot Z_{jj} = -\frac{\dot D_j}{D_j^2} - \sum_{k \in \mathcal{J}_j} \left(\dot L_{kj} Z_{kj} + L_{kj} \dot Z_{kj}\right).
 \f]
-Both sweeps read only entries on the pattern. Each direction takes time of the order of one numeric factorization plus one selected inverse, measured in `docs/numerics.md` at \f$0.65\f$ to \f$1.1\f$ times their sum. The derivative storage uses three arrays of the size of \f$L\f$.
+Each direction costs \f$0.65\f$ to \f$1.1\f$ times the sum of a numeric factorization and selected inverse, using three arrays of the size of \f$L\f$.
 
-On the `supernodal` route, the derivative along \f$\dot A\f$ proceeds in four steps:
-1. The up-looking recursion is differentiated on the \f$B\f$ columns (and on the \f$B\f$-columns of rows in \f$T\f$). Writing \f$y_i = L_{ki} D_i\f$ for the intermediate value at row \f$k\f$ and column \f$i < k\f$ before division by \f$D_i\f$, its derivative \f$\dot y_i\f$ follows the same triangular recursion, giving
+On `supernodal`, the derivative proceeds in four steps:
+1. The up-looking recursion is differentiated on \f$B\f$ and the \f$B\f$-columns of \f$T\f$. With \f$y_i = L_{ki} D_i\f$, its derivative \f$\dot y_i\f$ follows the same triangular recursion, giving
    \f[
    \dot L_{ki} = \frac{\dot y_i - L_{ki} \dot D_i}{D_i}, \qquad
    \dot D_k = \dot A_{kk} - \sum_{i} \left(\dot L_{ki} y_i + L_{ki} \dot y_i\right).
    \f]
-2. The dense Schur-complement derivative \f$\dot S\f$ is formed as
+2. The dense Schur-complement derivative is formed as
    \f[
    \dot S = \dot A_{TT} - \left(\dot L_{TB} D_B L_{TB}^\top + L_{TB} \dot D_B L_{TB}^\top + L_{TB} D_B \dot L_{TB}^\top\right).
    \f]
-3. One dense symmetric matrix product computes \f$Q = \dot S Z_{TT}\f$, so that \f$\dot Z_{TT} = -Z_{TT} \dot S Z_{TT} = -Z_{TT} Q\f$. Individual entries \f$\dot Z_{ab} = -Z_{TT}(:, a)^\top Q(:, b)\f$ for \f$a, b \in T\f$ are read entry by entry only where needed: on pairs of \f$T\f$-rows in each \f$B\f$-column and on the pattern of \f$A_{TT}\f$ in the contraction.
-4. Takahashi's recursion differentiated runs on the \f$B\f$ columns in parallel over the subtrees below \f$T\f$. For a column \f$j \in B\f$ with \f$c\f$ rows in \f$T\f$, the pairs with both rows in \f$T\f$ are evaluated via an intermediate vector \f$u\f$ of length \f$m\f$,
+3. One dense symmetric product computes \f$Q = \dot S Z_{TT}\f$, so \f$\dot Z_{TT} = -Z_{TT} Q\f$. Entries \f$\dot Z_{ab} = -Z_{TT}(:, a)^\top Q(:, b)\f$ for \f$a, b \in T\f$ are read where needed.
+4. Differentiated Takahashi recursion runs in parallel over subtrees below \f$T\f$. For a column \f$j \in B\f$ with \f$c\f$ rows in \f$T\f$, pairs with both rows in \f$T\f$ use an intermediate vector \f$u\f$ of length \f$m\f$,
    \f[
    \sum_{k \in \mathcal{J}_j \cap T} \dot Z_{ik} L_{kj} = -Z_{TT}(:, i)^\top u, \qquad
    u = \sum_{k \in \mathcal{J}_j \cap T} Q(:, k) L_{kj},
    \f]
-   costing \f$O(c\, m)\f$ operations instead of \f$O(c^2 m)\f$.
+   evaluated in parallel across groups of consecutive \f$B\f$-columns with the same \f$T\f$-rows so each column of \f$Q\f$ and \f$Z_{TT}\f$ is read once per group, costing \f$O(c\, m)\f$ operations instead of \f$O(c^2 m)\f$.
 
-`compute_selected_inverse_derivative()` requires `compute_selected_inverse()` to have run since the last factorization and returns `false` otherwise; a later `factorize()` call discards the stored derivative and another call replaces it. Calling \ref laplace::sparse::sparse_ldlt::selected_inverse_derivative_entry "selected_inverse_derivative_entry(i, j)" takes original indices in either order and throws `std::out_of_range` if `(i, j)` lies outside the pattern of \f$L + L^\top\f$ or if no derivative is stored. Calling \ref laplace::sparse::sparse_ldlt::selected_inverse_derivative_dot "selected_inverse_derivative_dot(values)" takes a symmetric matrix \f$V\f$ given by its lower triangle on the pattern of the factorized matrix, aligned like `dvalues`. It returns \f$s = \sum_{i,j} \dot Z_{ij} V_{ij} = -\operatorname{tr}(Z \dot A Z V)\f$, counting each entry below the diagonal twice, and throws `std::out_of_range` when no derivative is stored. In `tests/sparse/test_selected_inverse.cpp`, on the same six matrices, a random symmetric \f$\dot A\f$ and a random symmetric \f$V\f$ on the pattern of \f$A\f$ are checked against dense \f$-Z \dot A Z\f$ and \f$-\operatorname{tr}(Z \dot A Z V)\f$. The largest entrywise error is \f$1.5 \times 10^{-15} \max_{i,j} |\dot Z_{ij}|\f$ and the contraction error is within \f$8 \times 10^{-15}\f$, identical on gcc and CUDA. Both satisfy the test bounds of \f$10^{-12} \max_{i,j} |\dot Z_{ij}|\f$ and \f$10^{-11}(1 + |s|)\f$.
+`compute_selected_inverse_derivative()` returns `false` unless `compute_selected_inverse()` ran since the last factorization; a new `factorize()` discards it and another call replaces it. \ref laplace::sparse::sparse_ldlt::selected_inverse_derivative_entry "selected_inverse_derivative_entry(i, j)" takes original indices in either order and throws `std::out_of_range` outside the pattern or when uncomputed. \ref laplace::sparse::sparse_ldlt::selected_inverse_derivative_dot "selected_inverse_derivative_dot(values)" takes a symmetric \f$V\f$ aligned like `dvalues`, returns \f$s = \sum_{i,j} \dot Z_{ij} V_{ij} = -\operatorname{tr}(Z \dot A Z V)\f$ (counting subdiagonal entries twice), and throws `std::out_of_range` when uncomputed. On the six test matrices with random \f$\dot A\f$ and \f$V\f$, errors against dense \f$-Z \dot A Z\f$ and \f$-\operatorname{tr}(Z \dot A Z V)\f$ are at most \f$1.5 \times 10^{-15} \max_{i,j} |\dot Z_{ij}|\f$ and \f$8 \times 10^{-15}\f$ on gcc and CUDA, within bounds \f$10^{-12} \max_{i,j} |\dot Z_{ij}|\f$ and \f$10^{-11}(1 + |s|)\f$.
 
 ## Accuracy
 
-In addition to the dense reference checks in `tests/sparse/test_selected_inverse.cpp` above, `tests/sparse/test_supernodal_ldlt.cpp` compares the `supernodal` route against the `simplicial` route on a \f$1 \times 1\f$ matrix, a tridiagonal matrix (\f$n = 60\f$), a dense matrix (\f$n = 40\f$, where the whole matrix forms \f$T\f$), a two-block forest (\f$n = 30\f$), a random sparse matrix with fill (\f$n = 200\f$, at shifts \f$0\f$ and \f$0.75\f$), two matrices from crossed groupings (\f$150 \times 150\f$ and \f$400 \times 300\f$ levels, up to \f$n = 1102\f$), a refactorization on the same pattern, and indefinite matrices with a negative pivot in \f$B\f$ or in \f$T\f$. The table reports the largest relative differences across those tests (with bounds scaled by \f$1 + |\log|\det||\f$ for the log determinant, \f$\max_i |x_i|\f$ for the solve, \f$\max_{i,j} |Z_{ij}|\f$ for \f$Z\f$, \f$\max_{i,j} |\dot Z_{ij}|\f$ for \f$\dot Z\f$, and \f$1 + |s|\f$ for the contraction; see `docs/numerics.md`):
+In addition to `tests/sparse/test_selected_inverse.cpp`, `tests/sparse/test_supernodal_ldlt.cpp` compares `supernodal` against `simplicial` on \f$13\f$ matrices: a \f$1 \times 1\f$ matrix, tridiagonal (\f$n = 60\f$), dense (\f$n = 40\f$, all in \f$T\f$), a two-block forest (\f$n = 30\f$), random sparse (\f$n = 200\f$, shifts \f$0\f$ and \f$0.75\f$), dense roots of \f$63\f$, \f$64\f$, \f$255\f$, and \f$256\f$ columns, and three crossed groupings (\f$60 \times 50\f$, \f$150 \times 150\f$, and \f$400 \times 300\f$ levels, up to \f$n = 1102\f$). It also checks refactorization on the same pattern and negative pivots in \f$B\f$ or \f$T\f$. During comparisons, the device threshold is lowered to one column so every root runs on the device in a CUDA build; at the default threshold, the test verifies that \f$255\f$ columns stay on the host and \f$256\f$ use the device, and verifies the fallback under a one-byte cap. The table reports each largest error over its bound's scale (\f$1 + |\log|\det||\f$, \f$\max_i |x_i|\f$, \f$\max_{i,j} |Z_{ij}|\f$, \f$\max_{i,j} |\dot Z_{ij}|\f$, \f$1 + |s|\f$; pivots are relative; see `docs/numerics.md`). The \f$255\f$- and \f$256\f$-column dense roots give the largest solve, \f$Z\f$, and \f$\dot Z\f$ errors.
 
-| Quantity | gcc, LAPACK | gcc, Eigen kernels | CUDA build (MSVC, Eigen kernels) | Test bound |
+| Quantity | gcc, LAPACK | gcc, Eigen kernels | CUDA build, device block | Test bound |
 |---|---|---|---|---|
 | \f$\log|\det|\f$ | \f$1.0 \times 10^{-15}\f$ | \f$1.0 \times 10^{-15}\f$ | \f$1.0 \times 10^{-15}\f$ | \f$10^{-14}\f$ |
-| Pivots | \f$2.2 \times 10^{-16}\f$ | \f$2.2 \times 10^{-16}\f$ | \f$4.4 \times 10^{-16}\f$ | \f$2 \times 10^{-15}\f$ |
-| Solve | \f$7 \times 10^{-16}\f$ | \f$8 \times 10^{-16}\f$ | \f$8 \times 10^{-16}\f$ | \f$10^{-14}\f$ |
-| \f$Z\f$ on the pattern | \f$9.7 \times 10^{-16}\f$ | \f$1.2 \times 10^{-15}\f$ | \f$9.3 \times 10^{-16}\f$ | \f$10^{-14}\f$ |
-| \f$\dot Z\f$ on the pattern | \f$1.2 \times 10^{-15}\f$ | \f$1.5 \times 10^{-15}\f$ | \f$1.4 \times 10^{-15}\f$ | \f$10^{-14}\f$ |
-| Contraction | \f$3.1 \times 10^{-15}\f$ | \f$3.1 \times 10^{-15}\f$ | \f$1.3 \times 10^{-15}\f$ | \f$5 \times 10^{-14}\f$ |
+| Pivots | \f$4.4 \times 10^{-16}\f$ | \f$4.4 \times 10^{-16}\f$ | \f$6.7 \times 10^{-16}\f$ | \f$2 \times 10^{-15}\f$ |
+| Solve | \f$2.0 \times 10^{-15}\f$ | \f$2.0 \times 10^{-15}\f$ | \f$2.0 \times 10^{-15}\f$ | \f$2 \times 10^{-14}\f$ |
+| \f$Z\f$ on the pattern | \f$2.4 \times 10^{-15}\f$ | \f$3.2 \times 10^{-15}\f$ | \f$3.3 \times 10^{-15}\f$ | \f$3 \times 10^{-14}\f$ |
+| \f$\dot Z\f$ on the pattern | \f$4.7 \times 10^{-15}\f$ | \f$7.0 \times 10^{-15}\f$ | \f$7.0 \times 10^{-15}\f$ | \f$7 \times 10^{-14}\f$ |
+| Contraction | \f$3.1 \times 10^{-15}\f$ | \f$3.1 \times 10^{-15}\f$ | \f$1.9 \times 10^{-15}\f$ | \f$5 \times 10^{-14}\f$ |
 
 ## Speed
 
@@ -118,9 +126,9 @@ Measured on gcc with OpenBLAS (\f$12\f$ threads unless noted) on crossed-groupin
 
 | \f$G\f$ | \f$m\f$ | Factorization, simplicial | Factorization, supernodal | Selected inverse, simplicial | Selected inverse, supernodal | Derivative direction, simplicial | Derivative direction, supernodal |
 |---|---|---|---|---|---|---|---|
-| \f$10^3\f$ | \f$960\f$ | 0.062 s | 0.009 s (1 thread) | 0.34 s | 0.022 s (4 threads) | 0.43 s | 0.025 s |
-| \f$3 \times 10^3\f$ | \f$2878\f$ | 2.3 s | 0.052 s | 9.0 s | 0.16 s (4 threads) | 12.5 s | 0.28 s |
-| \f$10^4\f$ | \f$9585\f$ | 105 s | 0.79 s | 333 s | 4.2 s | 445 s | 6.6 s |
+| \f$10^3\f$ | \f$960\f$ | 0.062 s | 0.009 s (1 thread) | 0.34 s | 0.022 s (4 threads) | 0.43 s | 0.016 s |
+| \f$3 \times 10^3\f$ | \f$2878\f$ | 2.3 s | 0.052 s | 9.0 s | 0.16 s (4 threads) | 12.5 s | 0.21 s |
+| \f$10^4\f$ | \f$9585\f$ | 105 s | 0.79 s | 333 s | 4.2 s | 445 s | 4.0 s |
 
 ## Example
 

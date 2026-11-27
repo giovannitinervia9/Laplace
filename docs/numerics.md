@@ -16122,3 +16122,147 @@ four copies. On 31 GB this limits crossed models to about $G = 3 \cdot 10^4$.
 
 **Default.** `automatic` takes the supernodal route from a trailing block of 64 columns; with a LAPACK
 found by CMake the dense blocks use it, otherwise the Eigen kernels.
+
+## The derivative of the supernodal selected inverse: pairs of the dense block by groups of columns (2026-11-27)
+
+**What.** In the derivative of the selected inverse on the supernodal route, the differentiated
+recursion on the $B$ columns needs, for every column $j$ and each of its rows $i \in T$, the sum
+$t_{ij} = \sum_{k \in \mathcal J_j \cap T} (\dot Z_{ik} L_{kj} + Z_{ik} \dot L_{kj})
+= -Z_{TT}(:,i)^\top u_j + \sum_k Z_{ik} \dot L_{kj}$ with $u_j = \sum_k Q(:,k) L_{kj}$. For each column
+this reads $c$ columns of $Q$ and $c$ columns of $Z_{TT}$, each of length $m$, where $c$ is the number
+of the column's rows in $T$. At $G = 10^4$ (about 25 rows in $T$ per column, $m = 9585$) that is about
+80 GB of memory traffic per direction, and it took 54 per cent of a direction.
+
+**How.** The analysis forms groups of consecutive $B$ columns with the same rows in $T$: $j$ joins
+$j - 1$ when $j$ is the parent of $j - 1$ and their rows in $T$ are equal. In crossed models these are
+the two coordinates of one level of the first grouping. Before the recursion, $t_{ij}$ is computed for
+all the columns of a group at once, the groups in parallel, so that each column of $Q$ and of $Z_{TT}$
+is read once per group. The recursion then adds the stored $t_{ij}$.
+
+**Accuracy.** `tests/sparse/test_supernodal_ldlt.cpp` against the simplicial route is unchanged within
+its bounds on gcc (LAPACK and Eigen kernels) and on the CUDA build.
+
+**Cost** (gcc, OpenBLAS, 12 threads; old and new binaries interleaved in one quiet run, on the
+dumped inner curvature of the crossed model):
+
+| $G$ | one direction before | after | the part changed, before | after |
+|---|---|---|---|---|
+| $3 \cdot 10^3$ | 0.273 s | 0.191 s | 0.170 s | 0.092 s |
+| $10^4$ | 7.29 to 7.46 s | 5.48 to 5.73 s | 3.34 to 3.42 s | 1.54 to 1.67 s |
+
+That run was on a slower machine state than the earlier measurements: the unchanged symmetric
+product took 3.8 to 3.9 s at $10^4$, against 2.4 to 2.5 s otherwise. With the machine at its usual
+speed (symmetric product 2.43 s), one direction takes 0.0156 s at $10^3$, 0.213 s at $3 \cdot 10^3$
+and 4.04 s at $10^4$.
+
+`benchmarks/engine_scale.cpp` on the crossed model (gcc, 12 threads, `selected`): one derivative
+direction 11.9 ms at $G = 10^3$ and 0.195 s at $3 \cdot 10^3$; one contraction 0.38 ms and 3.5 ms;
+complete fits 0.91 s (0.105 GB) at $10^3$ and 9.12 s (0.51 GB) at $3 \cdot 10^3$. A complete REML fit
+at $G = 10^4$ (`fit_marginal`, selected route) takes 158.8 s, against 190.8 s before, with the same
+criterion value and outer point; its 24 directions take 99.2 s instead of 131.9 s. The other phases
+are unchanged: inner fits 27.1 s, selected inverses 22.2 s, factorizations 8.3 s.
+On the crossed model a direction then costs 0.5 times ($10^3$) and 0.8 times ($3 \cdot 10^3$) a numeric
+factorization plus a selected inverse.
+
+## The dense root block on the device: cuSOLVER and cuBLAS (2026-11-27)
+
+**What.** A device realization of the dense root block of the supernodal route of `sparse_ldlt`: the
+Cholesky factorization $S = R R^\top$, the solve with $R$, the inverse $Z_{TT} = S^{-1}$ and the
+product $Q = \dot S Z_{TT}$ of the derivative run on the GPU through cuSOLVER and cuBLAS. $R$ and
+$Z_{TT}$ stay resident on the device between calls. cuSOLVER and cuBLAS are under NVIDIA's CUDA EULA;
+they are linked dynamically, and nothing of them is copied into or redistributed with the
+repository. Laplace stays MIT.
+
+**How.**
+- The routines are taken from the CUDA 13.1 headers and NVIDIA's documentation:
+  - the 64-bit generic `cusolverDnXpotrf` (with `cusolverDnXpotrf_bufferSize`) and `cusolverDnXpotrs`;
+  - the 32-bit `cusolverDnDpotri` for the inverse from the factor, since the 64-bit API has no potri.
+    Its `int` arguments allow $m \le 46340$, beyond what the memory check admits;
+  - `cublasDsymm_64`.
+- A positive info of `Xpotrf` (a leading minor that is not positive definite) gives
+  `not_positive_definite`, as on the host; any other failure of a CUDA, cuSOLVER or cuBLAS call throws
+  `std::runtime_error` naming the routine. A throw leaves the factor without a factorization, and a
+  later `factorize()` starts over.
+- Copies per operation: one block up per factorization (and $R$'s diagonal down); one block on the
+  device and one down per selected inverse (the recursion on the $B$ columns reads $Z_{TT}$ on the
+  host); one block up and one down per derivative direction (the recursion reads $Q$ on the host).
+- Device memory: $4 m^2$ doubles per block ($R$, $Z_{TT}$, $\dot S$, $Q$) plus workspaces, all
+  allocated when the block is created. The free memory is checked first (`cudaMemGetInfo`); a block
+  that does not fit, or whose allocation fails, uses the host realization of the same build, and the
+  fallback is counted. A REML fit holds two blocks, one for the inner solver and one for the criterion,
+  so $8 m^2$ doubles: 5.9 GB at $m = 9585$. On a 12 GB card the second falls back from about
+  $m = 13500$.
+- The calls run on the default stream of the current device, from host code outside any Kokkos or
+  OpenMP parallel region. The realization is host C++, compiled by the host compiler, never by nvcc.
+
+**Default.**
+- The build option `LAPLACE_DENSE_KERNELS_DEVICE` is `auto` (the default), `cuda` or `OFF`. `auto`
+  compiles the device realization in a CUDA build of Kokkos when the toolkit's cuSOLVER and cuBLAS
+  are found, and builds host-only otherwise; a build without CUDA is unchanged.
+- A root block of at least 256 columns goes to the device, a smaller one to the host block. The
+  supernodal route itself starts at 64 columns.
+- The threshold comes from the device block against the host block of the same MSVC build (Eigen
+  kernels; RTX 4070 SUPER, FP64 at 1/64 of FP32; 12 host threads; crossed models). Sum of
+  factorization, selected inverse and one derivative direction, steady state:
+
+| crossed $G$ (root width about $0.96\,G$) | device | host block |
+|---|---|---|
+| 40 | 0.53 ms | 0.17 ms |
+| 80 | 1.15 ms | 0.69 ms |
+| 150 | 3.06 ms | 2.80 ms |
+| 300 | 4.43 ms | 6.05 ms |
+| 600 | 13.1 ms | 38.9 ms |
+| 1000 | 31.2 ms | 160 ms |
+
+  Each device call costs about 0.12 ms however small the block. The two cost the same at a width of
+  about 150, and the device is faster from about 290.
+
+**Cost at larger sizes** (the dumped inner curvature of the crossed model, 12 host threads, steady
+state):
+
+| $G$ | | device | host block, MSVC with Eigen kernels | gcc with OpenBLAS |
+|---|---|---|---|---|
+| $10^3$ | factorization | 0.0049 s | 0.017 s | 0.0066 s |
+| | selected inverse | 0.0118 s | 0.063 s | 0.0167 s |
+| | one direction | 0.019 s | 0.080 s | 0.0156 s |
+| $3 \cdot 10^3$ | factorization | 0.027 s | 0.36 s | 0.050 s |
+| | selected inverse | 0.111 s | 1.20 s | 0.184 s |
+| | one direction | 0.217 s | 1.85 s | 0.213 s |
+| $10^4$ | factorization | 0.68 s | 26.8 s | 0.72 s |
+| | selected inverse | 3.80 s | 42.3 s | 3.78 s |
+| | one direction | 5.29 s | 85.2 s | 4.04 s |
+
+- One-time costs: about 0.1 s of cuSOLVER initialization at the first factorization of a process,
+  0.5 ms to create a block after that, and about 0.02 s more for the first inverse.
+- On this card the device costs what gcc with OpenBLAS costs; against the host block of the CUDA
+  build, where no MSVC-linkable LAPACK is installed, it is 3 to 40 times faster.
+- A complete REML fit at crossed $G = 10^4$ on the device build takes 187.2 s, against 158.8 s with
+  gcc and OpenBLAS, with the same criterion value and outer point. Both blocks of the fit were on the
+  device (device memory from 1.45 GB to at most 8.05 GB used, read with nvidia-smi).
+
+**Accuracy.** `tests/sparse/test_supernodal_ldlt.cpp` against the simplicial route on its 13
+matrices, among them dense roots of 255 and 256 columns. The threshold is lowered to one column
+during the comparisons, so on the CUDA build every root block of the test runs on the device. A
+root of 255 columns goes to the host block and one of 256 to the device at the default threshold.
+The fallback is checked under a cap of one byte. Largest relative differences over all the matrices,
+each error over the scale its bound uses ($1 + |\log|\det||$, $\max|x|$, $\max|Z|$, $\max|\dot Z|$,
+$1 + |s|$):
+
+| quantity | gcc, LAPACK | gcc, Eigen kernels | CUDA build, device block | bound |
+|---|---|---|---|---|
+| $\log|\det|$ | $1.0 \cdot 10^{-15}$ | $1.0 \cdot 10^{-15}$ | $1.0 \cdot 10^{-15}$ | $10^{-14}$ |
+| pivots | $4.4 \cdot 10^{-16}$ | $4.4 \cdot 10^{-16}$ | $6.7 \cdot 10^{-16}$ | $2 \cdot 10^{-15}$ |
+| solve | $2.0 \cdot 10^{-15}$ | $2.0 \cdot 10^{-15}$ | $2.0 \cdot 10^{-15}$ | $2 \cdot 10^{-14}$ |
+| $Z$ on the pattern | $2.4 \cdot 10^{-15}$ | $3.2 \cdot 10^{-15}$ | $3.3 \cdot 10^{-15}$ | $3 \cdot 10^{-14}$ |
+| $\dot Z$ on the pattern | $4.7 \cdot 10^{-15}$ | $7.0 \cdot 10^{-15}$ | $7.0 \cdot 10^{-15}$ | $7 \cdot 10^{-14}$ |
+| contraction | $3.1 \cdot 10^{-15}$ | $3.1 \cdot 10^{-15}$ | $1.9 \cdot 10^{-15}$ | $5 \cdot 10^{-14}$ |
+
+The largest solve, $Z$ and $\dot Z$ errors come from the dense roots of 255 and 256 columns on every
+build.
+
+The bounds of the test are about ten times these maxima.
+
+With the default of a CUDA build (the device block from 256 columns), one evaluation of the value and
+gradient of the crossed model at $G = 10^3$ (`benchmarks/engine_scale.cpp`, the root block of 960
+columns on the device, the one-time initialization included) takes 1.23 s on `dense` and 0.146 s on
+`selected`, against 1.56 s and 0.435 s with the host block of the same build.

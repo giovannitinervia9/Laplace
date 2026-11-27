@@ -12,6 +12,9 @@
 
 #include <laplace/sparse/sparse_ldlt.hpp>
 
+#include "dense_root_block.hpp"
+
+#include <memory>
 #include <vector>
 
 namespace laplace::sparse::detail {
@@ -62,6 +65,8 @@ class supernodal_factor {
   std::vector<int> row_col_;
   // the subtrees of the elimination tree within B, each listed from its root down (descending)
   std::vector<int> subtree_ptr_, subtree_nodes_;
+  // groups of consecutive B columns with the same rows in T, as first columns (the last entry is nB)
+  std::vector<int> group_ptr_;
   // the dense block: S, then its factor R (lower triangle), m x m column-major; Z_TT (lower triangle)
   std::vector<double> scatter_, S_, Z_;
   std::vector<double> zl_, zd_;  // the selected inverse on the B columns, aligned with Lx_ and D_
@@ -69,9 +74,12 @@ class supernodal_factor {
   // the user's lower triangle its place in the factor: >= 0 a position in the B columns, -1 - j the
   // diagonal j of B, -1 - n an entry of T x T (built once per pattern)
   std::vector<double> dscatter_, dl_, dd_, dzl_, dzd_, dS_, Q_;
+  std::vector<double> dtt_;  // the derivative's sums over pairs in T of each B column, aligned with Li_
   std::vector<long> a_position_;
   bool factorized_ = false, have_selected_ = false, have_derivative_ = false;
-  bool parallel_ = false;  // whether the loops run in OpenMP regions (a large enough factor)
+  bool parallel_ = false;
+  // the root block's dense operations (on the host or the device), created at the first factorization
+  std::unique_ptr<dense_root_block> block_;  // whether the loops run in OpenMP regions (a large enough factor)
   double min_pivot_ = 0.0, max_pivot_ = 0.0, log_abs_det_ = 0.0;
 };
 

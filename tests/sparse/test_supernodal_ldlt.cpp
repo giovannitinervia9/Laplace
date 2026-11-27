@@ -6,9 +6,12 @@
 
 #include <laplace/sparse/sparse_ldlt.hpp>
 
+#include "../../src/sparse/detail/dense_root_block.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <string>
 #include <random>
 #include <stdexcept>
 #include <utility>
@@ -126,12 +129,14 @@ void check_routes(const lower_matrix& a, double shift, std::mt19937& rng) {
           r.dot_value);
   CHECK(r.nonzeros_supernodal == r.nonzeros_simplicial);
   CHECK(r.outside == 0);
-  // bounds: about ten times the largest error measured on gcc (2026-11-27)
+  // bounds: about ten times the largest error measured over all the matrices on gcc (LAPACK and Eigen
+  // kernels) and on the CUDA build with the device block (2026-11-27); the dense roots of 255 and 256
+  // columns give the largest solve, Z and dZ errors
   CHECK(r.log_det_error <= 1e-14 * (1.0 + std::abs(r.log_det)));
   CHECK(r.pivot_error <= 2e-15);
-  CHECK(r.solve_error <= 1e-14 * r.max_x);
-  CHECK(r.z_error <= 1e-14 * r.max_z);
-  CHECK(r.dz_error <= 1e-14 * r.max_dz);
+  CHECK(r.solve_error <= 2e-14 * r.max_x);
+  CHECK(r.z_error <= 3e-14 * r.max_z);
+  CHECK(r.dz_error <= 7e-14 * r.max_dz);
   CHECK(r.dot_error <= 5e-14 * (1.0 + std::abs(r.dot_value)));
 }
 
@@ -152,7 +157,16 @@ lower_matrix crossed(int G1, int G2, int cells, std::mt19937& rng) {
 
 }  // namespace
 
+// In a build with the device realization, the small matrices of these tests go to the device too: the
+// threshold of 256 columns is lowered to 1 for the duration of a test case and restored afterwards.
+struct device_on_small_blocks {
+  int previous;
+  device_on_small_blocks() : previous(laplace::sparse::detail::dense_root_block_set_device_min_width(1)) {}
+  ~device_on_small_blocks() { laplace::sparse::detail::dense_root_block_set_device_min_width(previous); }
+};
+
 TEST_CASE("sparse_ldlt supernodal route against the simplicial route") {
+  const device_on_small_blocks device_forced;
   std::mt19937 rng(20261127);
   std::uniform_real_distribution<double> unif(-1.0, 1.0);
 
@@ -240,5 +254,66 @@ TEST_CASE("sparse_ldlt supernodal route against the simplicial route") {
       std::vector<double> b(a.n, 1.0);
       CHECK_FALSE(f.solve(b.data()));
     }
+  }
+}
+
+TEST_CASE("sparse_ldlt supernodal route: the threshold of automatic, and the dense root block") {
+  const device_on_small_blocks device_forced;
+  std::mt19937 rng(20261128);
+  std::uniform_real_distribution<double> unif(-1.0, 1.0);
+  namespace lsd = laplace::sparse::detail;
+  const std::string realization = lsd::make_dense_root_block(8)->realization();
+  MESSAGE("dense root block realization (device forced on small blocks): ", realization);
+
+  SUBCASE("a dense matrix of 63 columns stays simplicial under automatic, one of 64 goes supernodal") {
+    for (const int n : {63, 64}) {
+      lower_matrix a;
+      a.n = n;
+      for (int r = 1; r < n; ++r)
+        for (int c = 0; c < r; ++c) a.add(r, c, unif(rng));
+      a = dominant(a, 0.5);
+      std::vector<int> cp, ri;
+      std::vector<double> vx;
+      a.csc(cp, ri, vx);
+      ls::sparse_ldlt f;
+      REQUIRE(f.factorize(n, cp.data(), ri.data(), vx.data()) == ls::sparse_ldlt_outcome::positive_definite);
+      CHECK(f.route() == (n >= 64 ? ls::sparse_ldlt_route::supernodal : ls::sparse_ldlt_route::simplicial));
+      check_routes(a, 0.0, rng);  // both routes forced, root block of 63 and 64 columns
+    }
+  }
+  SUBCASE("a root block that does not fit in the device memory goes to the host, and says so") {
+    const long before = lsd::dense_root_block_device_fallbacks();
+    lsd::dense_root_block_device_memory_cap(1);  // one byte: no block fits
+    const std::string fallback = lsd::make_dense_root_block(8)->realization();
+    check_routes(crossed(60, 50, 500, rng), 0.0, rng);
+    lsd::dense_root_block_device_memory_cap(0);
+    const long sent = lsd::dense_root_block_device_fallbacks() - before;
+    MESSAGE("under the cap: ", fallback, "; blocks sent to the host ", sent);
+    if (lsd::dense_root_block_device_available()) {
+      CHECK(fallback != "cuda");
+      CHECK(sent >= 2);
+    } else {
+      CHECK(fallback == realization);
+      CHECK(sent == 0);
+    }
+  }
+}
+
+TEST_CASE("sparse_ldlt supernodal route: root blocks below and at the device threshold of 256 columns") {
+  // the default threshold, not lowered: 255 columns stay on the host block, 256 go to the device in a build
+  // that has it
+  namespace lsd = laplace::sparse::detail;
+  std::mt19937 rng(20261129);
+  std::uniform_real_distribution<double> unif(-1.0, 1.0);
+  for (const int n : {255, 256}) {
+    const std::string r = lsd::make_dense_root_block(n)->realization();
+    MESSAGE("root of ", n, " columns: ", r);
+    if (lsd::dense_root_block_device_available() && n >= 256) CHECK(r == "cuda");
+    else CHECK(r != "cuda");
+    lower_matrix a;
+    a.n = n;
+    for (int row = 1; row < n; ++row)
+      for (int c = 0; c < row; ++c) a.add(row, c, unif(rng));
+    check_routes(dominant(a, 0.5), 0.0, rng);
   }
 }
