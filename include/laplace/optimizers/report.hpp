@@ -266,6 +266,16 @@ struct optimizer_report {
   int eigen_modified_iterations = 0;
   /**
    * \ingroup optimizers
+   * \brief Iterations of proximal Newton on a sparse curvature whose \f$H\f$ took the floor \f$H + \delta I\f$; \f$0\f$ otherwise (default \f$0\f$).
+   */
+  int floored_iterations = 0;
+  /**
+   * \ingroup optimizers
+   * \brief Iterations of proximal Newton on a sparse curvature whose \f$H\f$ took the scaled shift \f$H + t D\f$; \f$0\f$ otherwise (default \f$0\f$).
+   */
+  int shifted_iterations = 0;
+  /**
+   * \ingroup optimizers
    * \brief Whether `decrement` is proximal Newton's fallback measure (default `false`).
    *
    * True when proximal Newton reports the proximal gradient mapping measure in

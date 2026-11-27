@@ -563,7 +563,8 @@ class row_model_objective {
  * \brief Inner objective with penalties that have kinks, as a composite objective for `optimizers::proximal_newton_optimizer`.
  *
  * Splits the penalty terms by their kinks: the smooth ones go with the likelihood into the smooth
- * part, a dense row_model_objective, which gives the value, the gradient and the curvature; those
+ * part, a row_model_objective (sparse curvature by default, dense with `optimizers::dense_curvature_matrix`),
+ * which gives the value, the gradient and the curvature; those
  * with kinks form the non-smooth part, with their value and proximal operator. Each coordinate of a
  * separable kinked penalty (a lasso through a product of univariate laws, SCAD, MCP) is a block of its
  * own, so the optimizer runs coordinate descent on its subproblem; any other kinked penalty (a group
@@ -573,16 +574,17 @@ class row_model_objective {
  * replicates that share a coordinate, and a held coordinate that a kinked penalty reads.
  *
  * \tparam List distrib_list of the distribs the model may name.
+ * \tparam Curvature `optimizers::sparse_curvature_matrix` (default) or `optimizers::dense_curvature_matrix`.
  * \see fit_inner(), row_model_objective, penalty_term, \ref optimizers_proximal "Proximal methods", \ref engine
  */
-template <class List>
+template <class List, class Curvature = optimizers::sparse_curvature_matrix>
 class row_model_composite_objective {
  public:
   /**
    * \ingroup engine
-   * \brief Curvature matrix type of the smooth part (dense, as required by `optimizers::proximal_newton_optimizer`).
+   * \brief Curvature matrix type of the smooth part (dense or sparse).
    */
-  using curvature_type = optimizers::dense_curvature_matrix;
+  using curvature_type = Curvature;
 
   /**
    * \ingroup engine
@@ -635,7 +637,7 @@ class row_model_composite_objective {
   /**
    * \ingroup engine
    * \brief Returns the smooth part of the composite objective.
-   * \return Const reference to the dense `row_model_objective`.
+   * \return Const reference to the `row_model_objective`.
    */
   const row_model_objective<List, curvature_type>& smooth() const { return smooth_; }
   /**
@@ -673,10 +675,10 @@ class row_model_composite_objective {
   }
   /**
    * \ingroup engine
-   * \brief Evaluates the smooth part at `x`, its gradient in `g`, and its dense curvature in `H`.
+   * \brief Evaluates the smooth part at `x`, its gradient in `g`, and its curvature in `H`.
    * \param x Host coordinate vector of length \f$N\f$.
    * \param g Writable host vector of length \f$N\f$ receiving the gradient.
-   * \param H Dense curvature matrix populated for the smooth part.
+   * \param H Curvature matrix populated for the smooth part.
    * \return Value of the smooth part.
    */
   double value_gradient_curvature(const optimizers::optimizer_point& x, const optimizers::optimizer_vector& g,

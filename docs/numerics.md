@@ -16266,3 +16266,75 @@ With the default of a CUDA build (the device block from 256 columns), one evalua
 gradient of the crossed model at $G = 10^3$ (`benchmarks/engine_scale.cpp`, the root block of 960
 columns on the device, the one-time initialization included) takes 1.23 s on `dense` and 0.146 s on
 `selected`, against 1.56 s and 0.435 s with the host block of the same build.
+
+## Proximal Newton on a sparse curvature: the scaled shift for an indefinite Hessian (2026-11-27)
+
+**What.** `proximal_newton_optimizer` runs on a curvature stored as `sparse_curvature_matrix`
+(the lower triangle in compressed columns) as well as on a dense one, and
+`row_model_composite_objective` takes the storage as its second template argument, sparse by
+default whatever the size (the dense one on request), so that an inner fit with a kinked penalty
+(a lasso or a group lasso on group effects) no longer forms an N x N matrix. The algorithm is the same; what reads H changes, and so does the
+correction of an H without a Cholesky factor, since a sparse H has no eigendecomposition.
+
+**How.** Coordinate descent reads column j of H to keep u = H(z - x) up to date, and FISTA forms
+H(w - x) and the Gershgorin bound; on a sparse H both read a full symmetric index of the columns,
+built from the lower triangle once per pattern, so a sweep costs nnz(H) instead of N^2. The factor of
+H on the free coordinates (the decrement and the inner measure without a factor of H) is a sparse
+factorization of the principal submatrix; `sparse_ldlt` analyses the pattern again only when the
+free set changes. When H has no factor, with gamma = max_j |H_jj|:
+
+1. H + delta I, delta = `sparse_floor` gamma (1e-8): a singular positive semidefinite H, which the
+   dense eigenvalue rule leaves untouched; the decrement stays defined;
+2. otherwise H + t D, D = diag(max(|H_jj|, delta)), t = `sparse_shift_start` (1e-6) multiplied by
+   `sparse_shift_growth` (10) until the factorization succeeds; the decrement of that iteration is
+   NaN, as after the dense eigenvalue correction.
+
+The matrix taken is written into H and read by everything after. `floored_iterations` and
+`shifted_iterations` in the report count the two stages. The dense route is unchanged.
+
+**Why the shift is scaled.** An identity shift tau I with tau a fraction of gamma was measured first
+(with a cap and the expected information as the last stage) and failed on a group lasso: gamma is
+set by the coordinates that every row touches (the intercepts and the coefficients of the scale)
+and was 10^5 times the curvature of a group effect, which sees about twenty rows; the first shift
+10^-3 gamma was then 97 (G = 10^3) to 281 (G = 3 x 10^3) times the group effects' curvature in the
+median, while the negative curvature itself was about one such curvature, and the iterates crawled
+(3 failures in 9 group-lasso fits). Scaled by each coordinate's own curvature (Marquardt's scaling),
+the shift converged on every fit.
+
+**Measured** (tests, gcc and CUDA; the measurements on gcc, 12 threads, both build slots held, no
+other job running). Model: y ~ N(mu, sigma), mu = b_0 + b_1 x + u_g, log sigma = c_0 + c_1 w, n = 20G
+rows, a lasso (laplace1 of scale 0.05) or a group lasso (mvpowerexp1, sigma = 0.1, shape 1/2, blocks of
+five) on the G group effects, starts s0 (c_0 = -1.5, where H is indefinite) and s1, s2 (s0 plus
+N(0, 1) or N(0, 3) on every coordinate). Iterations of the sparse optimizer (the dense one where it
+ran), all at the dense optimizer's value:
+
+| case | G = 10^3, s0 / s1 / s2 | G = 3 x 10^3 | G = 10^4 |
+|---|---|---|---|
+| lasso | 9 / 10 / 14 (dense 9 / 12 / 14) | 9 / 10 / 14 | 10 / 11 / 14 |
+| group lasso | 8 / 10 / 15 (dense 10 / 21 / 18) | 9 / 11 / 16 | 26 / 32 / 34 |
+
+The tests (`tests/engine/test_inner_fit.cpp`): on `lasso_spec` the sparse optimizer reaches the
+dense one's point within 1.4e-10 (lasso) and 6.2e-9 (group lasso) with the same zeros; on the
+location-scale lasso of 100 group effects from c_0 = -1.5, where neither H, H + delta I nor
+H + 10^-6 D has a factor at the start, 9 iterations (floored 2 to 8, shifted 1) against the dense
+8 or 9, the same 75 zeros, the point within 2.2e-8, the optimality conditions within 8.8e-8 of
+the penalty's slope (bound 1e-6); the group lasso of the same effects, 8 or 9 iterations against
+9 to 17, the point within 9.5e-8, stationarity up to 9.6e-7 (bound 1e-5). The figures are the
+largest over gcc at 8 and 24 threads and two CUDA runs: near the solution H is singular, and whether a
+curvature takes the floor depends on the order of the kernels' sums.
+
+**Time and memory, dense against sparse** (the measurements behind the sparse default; the
+location-scale lasso, the whole fit): N = 34, 0.005
+against 0.006 s; N = 104, 0.013 against 0.007 s; N = 304, 0.14 against 0.009 s; N = 1004, 3.1 against
+0.021 s; N = 3004, 175 against 0.25 s, peak working set 0.59 against 0.020 GB; N = 10004, sparse only,
+0.14 s and 0.049 GB. Two crossed groupings (Gaussian priors on one, a lasso on the other, fill of the
+factor 0.11 to 0.39): N = 94, 0.024 against 0.009 s; N = 904, 10.1 against 0.086 s; N = 3004, 935
+against 0.42 s, 0.60 against 0.035 GB; N = 9004, sparse only, 7.6 s and 0.15 GB. The dense route also
+pays its eigendecomposition at every indefinite curvature and takes more iterations there (15 to 20
+against 8 to 11 on the crossed model).
+
+**Open.** On the group lasso at G = 10^4 the three fits end by the stall rule (a step below the
+rounding of x), at the optimality conditions within 1.6e-7 of the slope: FISTA's inner solve on a
+singular H misses its target, so no convergence verdict comes; every other fit ends converged. Without
+the floor stage the scaled shift alone reaches the same points in the same iterations within one, but
+10 of 18 fits then end by the stall rule, since the decrement after a shift is NaN.

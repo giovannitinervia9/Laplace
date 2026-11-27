@@ -57,6 +57,22 @@
 // decrement it gives was this measure (Giovanni, 2026-11-18). NaN only when H
 // is not finite.
 //
+// A sparse curvature (sparse_curvature_matrix, Giovanni, 2026-11-27, plan 7.13
+// step 3): the same algorithm on the lower triangle in compressed columns.
+// Coordinate descent and FISTA read the columns of a full symmetric index built
+// from it once per pattern; the free-coordinate factor is a sparse factorization
+// of the principal submatrix, analysed again only when the free set changes.
+// There is no eigendecomposition: when H has no factor, the rule takes
+// H + delta I, delta = sparse_floor gamma (gamma = max_j |H_jj|), and when that has
+// none either H + t D, D = diag(max(|H_jj|, delta)), for t = sparse_shift_start
+// multiplied by sparse_shift_growth until the factorization succeeds (a shift
+// scaled by each coordinate's own curvature, as Marquardt's; an identity shift
+// set by gamma was hundreds of times what the coordinates with few rows needed,
+// and stalled the group lasso). The matrix taken is written into H; the
+// decrement stays defined after the floor (a singular positive semidefinite H,
+// which the dense rule leaves as it is) and is NaN after the scaled shift (the
+// observed H was indefinite). Measured in note/engine/step3_curvature.md.
+//
 // The step x + s d is accepted on Armijo's condition on the full objective
 // (Lee, Sun and Saunders 2014),
 //
@@ -72,6 +88,7 @@
 #include "laplace/optimizers/objective.hpp"
 #include "laplace/optimizers/proximal_gradient.hpp"
 #include "laplace/optimizers/report.hpp"
+#include "laplace/optimizers/sparse_curvature_solver.hpp"
 #include "laplace/optimizers/stop_rules.hpp"
 
 #include <Kokkos_Core.hpp>
@@ -82,6 +99,7 @@
 #include <concepts>
 #include <limits>
 #include <optional>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -205,6 +223,12 @@ struct proximal_newton_optimizer {
   double rho_safety = 0.99;
   /// \brief Relative eigenvalue floor \f$\eta\f$ for an indefinite \f$H\f$ (default \f$10^{-8}\f$; infinite turns the correction off).
   double eigen_floor = 1e-8;
+  /// \brief Sparse curvature: relative floor \f$\delta / \gamma\f$, \f$\gamma = \max_j |H_{jj}|\f$, of the first stage of the rule for an \f$H\f$ without a factor (default \f$10^{-8}\f$; \f$0\f$ skips the stage).
+  double sparse_floor = 1e-8;
+  /// \brief Sparse curvature: first \f$t\f$ of the scaled shift \f$H + t D\f$, \f$D = \operatorname{diag}(\max(|H_{jj}|, \delta))\f$ (default \f$10^{-6}\f$).
+  double sparse_shift_start = 1e-6;
+  /// \brief Sparse curvature: factor between two tries of the scaled shift (default \f$10\f$).
+  double sparse_shift_growth = 10.0;
   /// \brief Optional per-iteration trace callback (default empty).
   optimizer_trace trace;
 
@@ -216,7 +240,14 @@ struct proximal_newton_optimizer {
    * positive semidefinite singular matrices untouched. Corrected iterations report quiet NaN `decrement` and increment
    * `eigen_modified_iterations`.
    *
-   * \tparam O Composite objective type satisfying `composite_objective`, `curvature_objective`, and `dense_curvature_matrix` curvature.
+   * With a `sparse_curvature_matrix` curvature the same algorithm reads compressed columns, and an \f$H\f$ without a
+   * factor is replaced by \f$H + \delta I\f$ (\f$\delta =\f$ `sparse_floor` \f$\gamma\f$), else by \f$H + t D\f$ with
+   * \f$D = \operatorname{diag}(\max(|H_{jj}|, \delta))\f$ and \f$t\f$ from `sparse_shift_start` multiplied by
+   * `sparse_shift_growth` until the factorization succeeds (header comment); the report counts these iterations in
+   * `floored_iterations` and `shifted_iterations`, and `decrement` is quiet NaN after the scaled shift.
+   *
+   * \tparam O Composite objective type satisfying `composite_objective` and `curvature_objective`, with a
+   * `dense_curvature_matrix` or `sparse_curvature_matrix` curvature.
    * \param objective Composite objective \f$f = s + r\f$.
    * \param x0 Starting point \f$x_0\f$; \f$f(x_0)\f$ must be finite.
    * \return An `optimizer_report` with `decrement` equal to \f$\frac{1}{2} d^\top H d\f$ (quiet NaN on an eigenvalue-corrected iteration or when \f$H\f$ is not finite, and falling back to the `proximal_gradient_optimizer` measure at `point` when \f$H\f$ is finite, uncorrected, and the free curvature block lacks a Cholesky factor), `decrement_from_prox_mapping`, `gradient` equal to \f$\nabla s\f$ at `point`, `final_factorization`, `damped_coordinates`, and `eigen_modified_iterations`.
@@ -225,19 +256,78 @@ struct proximal_newton_optimizer {
    */
   template <class O>
     requires composite_objective<O> && curvature_objective<O> &&
-             std::same_as<typename O::curvature_type, dense_curvature_matrix>
+             (std::same_as<typename O::curvature_type, dense_curvature_matrix> ||
+              std::same_as<typename O::curvature_type, sparse_curvature_matrix>)
   optimizer_report run(O& objective, const optimizer_point& x0) const {
+    using matrix_type = typename O::curvature_type;
+    constexpr bool sparse = std::same_as<matrix_type, sparse_curvature_matrix>;
     const auto start = std::chrono::steady_clock::now();
     const int n = static_cast<int>(x0.extent(0));
     constexpr double nan = std::numeric_limits<double>::quiet_NaN();
     optimizer_report report;
     optimizer_vector x("x", n), g("g", n), z("z", n), u("u", n), x_trial("x_trial", n), x_previous("x_previous", n),
-        w("w", n), w_old("w_old", n), v("v", n), h("h", n), g_previous("g_previous", n);
-    dense_curvature_matrix H("H", n, n);
-    typename curvature_solver_for<dense_curvature_matrix>::type solver(n);
-    Kokkos::View<double*, Kokkos::HostSpace> eigenvalues("eigenvalues", n);
-    dense_curvature_matrix eigenvectors("eigenvectors", n, n);
+        w("w", n), w_old("w_old", n), v("v", n), h("h", n), g_previous("g_previous", n), y("y", n);
+    matrix_type H("H", n, n);
+    typename curvature_solver_for<matrix_type>::type solver(n);
+    Kokkos::View<double*, Kokkos::HostSpace> eigenvalues("eigenvalues", sparse ? 0 : n);
+    dense_curvature_matrix eigenvectors("eigenvectors", sparse ? 0 : n, sparse ? 0 : n);
     Kokkos::deep_copy(x, x0);
+
+    // A sparse H: the full symmetric columns, as positions in H.values (both triangles), built from the
+    // lower triangle once per pattern (the pattern of the last index is kept and compared entry by entry,
+    // O(nnz) per curvature); full_col_ptr is empty until the first curvature.
+    std::vector<int> full_col_ptr, full_row, full_position, pattern_col_ptr, pattern_row;
+    auto index_columns = [&]() {
+      if constexpr (sparse) {
+        if (pattern_col_ptr == H.col_ptr && pattern_row == H.row_idx) return;
+        pattern_col_ptr = H.col_ptr, pattern_row = H.row_idx;
+        std::vector<int> count(static_cast<std::size_t>(n) + 1, 0);
+        for (int c = 0; c < n; ++c)
+          for (int q = H.col_ptr[c]; q < H.col_ptr[c + 1]; ++q) {
+            ++count[std::size_t(c) + 1];
+            if (H.row_idx[q] != c) ++count[std::size_t(H.row_idx[q]) + 1];
+          }
+        for (int c = 0; c < n; ++c) count[std::size_t(c) + 1] += count[std::size_t(c)];
+        full_col_ptr = count;
+        full_row.assign(std::size_t(count[std::size_t(n)]), 0);
+        full_position.assign(std::size_t(count[std::size_t(n)]), 0);
+        for (int c = 0; c < n; ++c)
+          for (int q = H.col_ptr[c]; q < H.col_ptr[c + 1]; ++q) {
+            const int r = H.row_idx[q];
+            full_row[std::size_t(count[std::size_t(c)])] = r, full_position[std::size_t(count[std::size_t(c)]++)] = q;
+            if (r != c) full_row[std::size_t(count[std::size_t(r)])] = c, full_position[std::size_t(count[std::size_t(r)]++)] = q;
+          }
+      }
+    };
+    // H_jj, and f(i, H_ij) over the entries of column j (all n rows for a dense H)
+    auto diagonal = [&](int j) {
+      if constexpr (sparse) return H.values[std::size_t(H.col_ptr[j])];
+      else return H(j, j);
+    };
+    auto for_column = [&](int j, auto&& f) {
+      if constexpr (sparse) {
+        for (int q = full_col_ptr[std::size_t(j)]; q < full_col_ptr[std::size_t(j) + 1]; ++q)
+          f(full_row[std::size_t(q)], H.values[std::size_t(full_position[std::size_t(q)])]);
+      } else {
+        for (int i = 0; i < n; ++i) f(i, H(i, j));
+      }
+    };
+    // out = H (a - x)
+    auto product = [&](const optimizer_point& a, const optimizer_vector& out) {
+      if constexpr (sparse) {
+        for (int i = 0; i < n; ++i) out(i) = 0.0;
+        for (int j = 0; j < n; ++j) {
+          const double aj = a(j) - x(j);
+          if (aj != 0.0) for_column(j, [&](int i, double hij) { out(i) += hij * aj; });
+        }
+      } else {
+        for (int i = 0; i < n; ++i) {
+          double s = 0.0;
+          for (int j = 0; j < n; ++j) s += H(i, j) * (a(j) - x(j));
+          out(i) = s;
+        }
+      }
+    };
 
     // block of each coordinate (-1: unpenalized), its offset in the block, its rho
     std::vector<int> block(static_cast<std::size_t>(n), -1), local(static_cast<std::size_t>(n), 0);
@@ -259,8 +349,14 @@ struct proximal_newton_optimizer {
 
     double s_x = objective.value_gradient_curvature(x, g, H);
     ++report.value_evaluations, ++report.gradient_evaluations, ++report.curvature_evaluations;
+    index_columns();
     double r_x = objective.nonsmooth_value(x);
     double f = s_x + r_x, f_previous = f, last_step = 0.0;
+    // a sparse H: the factor of the free block, kept while the free set does not change (on a dense H
+    // these are placeholders, so that a dense run does not need Laplace::sparse)
+    std::vector<int> free_previous;
+    std::conditional_t<sparse, std::optional<sparse_curvature_solver>, int> sparse_free_solver{};
+    std::conditional_t<sparse, sparse_curvature_matrix, int> H_free_sparse{};
     // the largest secant ratio s's / s'y over the accepted steps, for the fallback measure
     double gamma_max = 0.0;
     auto finish = [&](optimizer_status status) {
@@ -275,26 +371,58 @@ struct proximal_newton_optimizer {
       report.final_factorization = solver.factorize(H);
       // an indefinite H gets its eigenvalues corrected (header comment); the report
       // keeps the factorization of the observed H
-      bool eigen_modified = false;
-      if (report.final_factorization == curvature_factorization::not_positive_definite && std::isfinite(eigen_floor) &&
-          laplace::dense::symmetric_eigen_decomposition(H, eigenvalues, eigenvectors).success) {
-        const double w_abs = std::max(std::abs(eigenvalues(0)), std::abs(eigenvalues(n - 1)));
-        const double floor = std::max(eigen_floor * w_abs, std::numeric_limits<double>::min());
-        if (eigenvalues(0) < -floor) {
-          eigen_modified = true;
-          ++report.eigen_modified_iterations;
-          for (int c = 0; c < n; ++c)
-            for (int r = c; r < n; ++r) {
-              double s = 0.0;
-              for (int k = 0; k < n; ++k)
-                s += eigenvectors(r, k) * std::max(std::abs(eigenvalues(k)), floor) * eigenvectors(c, k);
-              H(r, c) = H(c, r) = s;
-            }
+      bool eigen_modified = false;  // dense: eigenvalues corrected; sparse: the scaled shift
+      bool floored = false;         // sparse: H + delta I
+      if constexpr (!sparse) {
+        if (report.final_factorization == curvature_factorization::not_positive_definite && std::isfinite(eigen_floor) &&
+            laplace::dense::symmetric_eigen_decomposition(H, eigenvalues, eigenvectors).success) {
+          const double w_abs = std::max(std::abs(eigenvalues(0)), std::abs(eigenvalues(n - 1)));
+          const double floor = std::max(eigen_floor * w_abs, std::numeric_limits<double>::min());
+          if (eigenvalues(0) < -floor) {
+            eigen_modified = true;
+            ++report.eigen_modified_iterations;
+            for (int c = 0; c < n; ++c)
+              for (int r = c; r < n; ++r) {
+                double s = 0.0;
+                for (int k = 0; k < n; ++k)
+                  s += eigenvectors(r, k) * std::max(std::abs(eigenvalues(k)), floor) * eigenvectors(c, k);
+                H(r, c) = H(c, r) = s;
+              }
+          }
+        }
+      } else if (report.final_factorization == curvature_factorization::not_positive_definite) {
+        // the rule for a sparse H without a factor (header comment)
+        double gamma = 0.0;
+        for (int j = 0; j < n; ++j) gamma = std::max(gamma, std::abs(diagonal(j)));
+        const double delta = sparse_floor * gamma;
+        if (delta > 0.0 && solver.factorize_shifted(H, delta) == curvature_factorization::positive_definite) {
+          for (int j = 0; j < n; ++j) H.values[std::size_t(H.col_ptr[j])] += delta;  // the factor is of this H already
+          floored = true;
+          ++report.floored_iterations;
+        } else {
+          std::vector<double> d0(static_cast<std::size_t>(n));
+          for (int j = 0; j < n; ++j) d0[std::size_t(j)] = diagonal(j);
+          const double d_min = std::max(delta, std::numeric_limits<double>::min());
+          bool scaled = false;
+          for (double t_s = sparse_shift_start; !scaled && t_s > 0.0 && std::isfinite(t_s); t_s *= sparse_shift_growth) {
+            for (int j = 0; j < n; ++j)
+              H.values[std::size_t(H.col_ptr[j])] = d0[std::size_t(j)] + t_s * std::max(std::abs(d0[std::size_t(j)]), d_min);
+            scaled = solver.factorize(H) == curvature_factorization::positive_definite;
+            if (!(sparse_shift_growth > 1.0)) break;
+          }
+          if (scaled) {
+            ++report.shifted_iterations;  // the factor is of the scaled H already
+            eigen_modified = true;
+          } else {
+            for (int j = 0; j < n; ++j) H.values[std::size_t(H.col_ptr[j])] = d0[std::size_t(j)];
+          }
         }
       }
+      if constexpr (!sparse)
+        if (eigen_modified) (void)solver.factorize(H);
       const bool positive_definite =
-          eigen_modified ? solver.factorize(H) == curvature_factorization::positive_definite
-                         : report.final_factorization == curvature_factorization::positive_definite;
+          eigen_modified || floored ? solver.last_factorization() == curvature_factorization::positive_definite
+                                    : report.final_factorization == curvature_factorization::positive_definite;
 
       // the inner solve, from z = x; u = H(z - x) is kept up to date, so the
       // model's gradient at z is g + u
@@ -307,7 +435,7 @@ struct proximal_newton_optimizer {
       double L = 0.0;
       for (int i = 0; i < n; ++i) {
         double row = 0.0;
-        for (int j = 0; j < n; ++j) row += std::abs(H(i, j));
+        for_column(i, [&](int, double hji) { row += std::abs(hji); });  // H symmetric: row i is column i
         L = std::max(L, row);
       }
       if (rho > 0.0) L = std::max(L, rho / rho_safety);
@@ -340,11 +468,32 @@ struct proximal_newton_optimizer {
           if (!held) free.push_back(j);
         }
         const int m = static_cast<int>(free.size());
-        dense_curvature_matrix H_free("H_free", m, m);
-        for (int c = 0; c < m; ++c)
-          for (int r = 0; r < m; ++r) H_free(r, c) = H(free[std::size_t(r)], free[std::size_t(c)]);
-        free_solver.emplace(m);
-        return free_solver->factorize(H_free);
+        if constexpr (sparse) {
+          // the principal submatrix in the lower-triangle layout (diagonal first, rows sorted, as in H);
+          // a new solver, and so a new symbolic analysis, only when the free set changed
+          std::vector<int> position(static_cast<std::size_t>(n), -1);
+          for (int r = 0; r < m; ++r) position[std::size_t(free[std::size_t(r)])] = r;
+          H_free_sparse.n = m;
+          H_free_sparse.col_ptr.assign(std::size_t(m) + 1, 0);
+          H_free_sparse.row_idx.clear(), H_free_sparse.values.clear();
+          for (int c = 0; c < m; ++c) {
+            const int j = free[std::size_t(c)];
+            for (int q = H.col_ptr[j]; q < H.col_ptr[j + 1]; ++q)
+              if (position[std::size_t(H.row_idx[q])] >= 0) {
+                H_free_sparse.row_idx.push_back(position[std::size_t(H.row_idx[q])]);
+                H_free_sparse.values.push_back(H.values[std::size_t(q)]);
+              }
+            H_free_sparse.col_ptr[std::size_t(c) + 1] = static_cast<int>(H_free_sparse.row_idx.size());
+          }
+          if (!sparse_free_solver || free != free_previous) sparse_free_solver.emplace(m), free_previous = free;
+          return sparse_free_solver->factorize(H_free_sparse);
+        } else {
+          dense_curvature_matrix H_free("H_free", m, m);
+          for (int c = 0; c < m; ++c)
+            for (int r = 0; r < m; ++r) H_free(r, c) = H(free[std::size_t(r)], free[std::size_t(c)]);
+          free_solver.emplace(m);
+          return free_solver->factorize(H_free);
+        }
       };
       // The inner measure at z: with G = (z - prox_{t r}(z - t (g + u))) / t the
       // model's gradient mapping, (1/2) G'H^-1 G when H has a Cholesky factor (the
@@ -368,7 +517,10 @@ struct proximal_newton_optimizer {
             gf(r) = v(free[std::size_t(r)]);
             rest -= 0.5 * t * gf(r) * gf(r);
           }
-          if (free_solver->newton_direction(gf, hf)) return -0.5 * detail::dot(gf, hf) + rest;
+          bool solved = false;
+          if constexpr (sparse) solved = sparse_free_solver->newton_direction(gf, hf);
+          else solved = free_solver->newton_direction(gf, hf);
+          if (solved) return -0.5 * detail::dot(gf, hf) + rest;
         }
         return 0.5 * t * detail::dot(v, v);
       };
@@ -379,12 +531,12 @@ struct proximal_newton_optimizer {
       if constexpr (coordinate_composite_objective<O>) {
         if (use_cd) {
           double diag_max = 0.0;
-          for (int j = 0; j < n; ++j) diag_max = std::max(diag_max, std::abs(H(j, j)));
+          for (int j = 0; j < n; ++j) diag_max = std::max(diag_max, std::abs(diagonal(j)));
           const double floor = std::max(1e-8 * diag_max, std::numeric_limits<double>::min());
           for (int sweep = 0; sweep < max_inner_sweeps && !inner_met; ++sweep) {
             for (int j = 0; j < n; ++j) {
               const int b = block[std::size_t(j)];
-              double a = H(j, j);
+              double a = diagonal(j);
               if (b >= 0 && a <= rho_of[std::size_t(j)]) {
                 a = std::max(rho_of[std::size_t(j)] / rho_safety, floor);
                 ++report.damped_coordinates;
@@ -399,7 +551,7 @@ struct proximal_newton_optimizer {
               const double delta = zj - z(j);
               if (delta != 0.0) {
                 z(j) = zj;
-                for (int i = 0; i < n; ++i) u(i) += H(i, j) * delta;
+                for_column(j, [&](int i, double hij) { u(i) += hij * delta; });
               }
             }
             inner_met = inner_done();
@@ -412,20 +564,13 @@ struct proximal_newton_optimizer {
         Kokkos::deep_copy(w, x);
         double theta = 1.0;
         for (int it = 0; it < max_inner_sweeps && !inner_met; ++it) {
-          for (int i = 0; i < n; ++i) {
-            double s = 0.0;
-            for (int j = 0; j < n; ++j) s += H(i, j) * (w(j) - x(j));
-            v(i) = w(i) - t * (g(i) + s);
-          }
+          product(w, y);
+          for (int i = 0; i < n; ++i) v(i) = w(i) - t * (g(i) + y(i));
           Kokkos::deep_copy(w_old, z);
           objective.nonsmooth_prox(v, t, z);
           double restart = 0.0;
           for (int i = 0; i < n; ++i) restart += (w(i) - z(i)) * (z(i) - w_old(i));
-          for (int i = 0; i < n; ++i) {
-            double s = 0.0;
-            for (int j = 0; j < n; ++j) s += H(i, j) * (z(j) - x(j));
-            u(i) = s;
-          }
+          product(z, u);
           inner_met = inner_done();
           const double theta_next = restart > 0.0 ? 1.0 : 0.5 * (1.0 + std::sqrt(1.0 + 4.0 * theta * theta));
           for (int i = 0; i < n; ++i)
@@ -509,6 +654,7 @@ struct proximal_newton_optimizer {
       Kokkos::deep_copy(g_previous, g);
       s_x = objective.value_gradient_curvature(x, g, H);
       ++report.value_evaluations, ++report.gradient_evaluations, ++report.curvature_evaluations;
+      index_columns();
       r_x = objective.nonsmooth_value(x);
       f = s_x + r_x;
       {

@@ -8,11 +8,14 @@
 #include <doctest/doctest.h>
 
 #include <laplace/engine/inner_fit.hpp>
+#include <laplace/sparse/sparse_ldlt.hpp>
 
 #include "engine_models.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -236,7 +239,7 @@ TEST_CASE("engine inner fit: a lasso on the location, proximal Newton, against t
   const auto m = le::build_row_model(s, 2);
   const double scale = 1.0 / 60.0;
   const std::vector<le::penalty_term> pen = {univariate_prior(laplace::distrib::laplace1_distrib{}, 1, 6, 1, {-1}, {scale})};
-  le::row_model_composite_objective<engine_distribs> obj(m, pen);
+  le::row_model_composite_objective<engine_distribs, lo::dense_curvature_matrix> obj(m, pen);
   CHECK(obj.nonsmooth_block_count() == 6);
   const std::vector<double> x0(9, 0.0);
   const auto r = le::fit_inner(obj, point(x0), tight_proximal());
@@ -272,7 +275,7 @@ TEST_CASE("engine inner fit: a group lasso on the location, proximal Newton, aga
   const double log_sigma = std::log(0.01);
   const auto pen = le::make_penalty_term(laplace::penalty::distrib_penalty<pe>{pe(I)}, {{1, 2, 3, 4, 5, 6}}, {-1, -1},
                                          {log_sigma, 0.5});
-  le::row_model_composite_objective<engine_distribs> obj(m, {pen});
+  le::row_model_composite_objective<engine_distribs, lo::dense_curvature_matrix> obj(m, {pen});
   CHECK(obj.nonsmooth_block_count() == 1);
   CHECK(!obj.nonsmooth_block_separable(0));
   const std::vector<double> x0(9, 0.0);
@@ -387,4 +390,266 @@ TEST_CASE("engine inner fit: Newton takes the factor of the checked curvature fr
     (void)obj.value_gradient_curvature(point({0.0, 0.0, 0.0, 0.0, std::log(10.0)}), g, H);
     CHECK(obj.factorized_curvature() == nullptr);
   }
+}
+
+// ------------------------------------------------------------------ proximal Newton on a sparse curvature
+// (plan 7.13 step 3): row_model_composite_objective with sparse_curvature_matrix against the dense one on
+// the same model and start, the same point and zeros, the optimality conditions, and the three stages of
+// the rule for an indefinite sparse H (floor, shift, expected information) read from the report.
+
+namespace {
+
+using sparse_composite = le::row_model_composite_objective<engine_distribs, lo::sparse_curvature_matrix>;
+using dense_composite = le::row_model_composite_objective<engine_distribs, lo::dense_curvature_matrix>;
+// the composite takes the sparse curvature unless the dense one is named
+static_assert(std::is_same_v<le::row_model_composite_objective<engine_distribs>::curvature_type, lo::sparse_curvature_matrix>);
+
+struct proximal_pair {
+  lo::optimizer_report dense, sparse;
+  double dx = 0.0;  // largest |x_sparse - x_dense| / (1 + |x_dense|)
+  int zeros_dense = 0, zeros_sparse = 0, zeros_differ = 0;
+};
+
+proximal_pair fit_both(const le::row_model& m, const std::vector<le::penalty_term>& pen, const std::vector<double>& x0,
+                       int first, int count, const lo::proximal_newton_optimizer<>& pn) {
+  proximal_pair p;
+  dense_composite od(m, pen);
+  sparse_composite os(m, pen);
+  p.dense = le::fit_inner(od, point(x0), pn).optimizer;
+  p.sparse = le::fit_inner(os, point(x0), pn).optimizer;
+  for (std::size_t j = 0; j < x0.size(); ++j)
+    p.dx = std::max(p.dx, std::abs(p.sparse.point(j) - p.dense.point(j)) / (1.0 + std::abs(p.dense.point(j))));
+  for (int j = first; j < first + count; ++j) {
+    const bool zd = p.dense.point(j) == 0.0, zs = p.sparse.point(j) == 0.0;
+    p.zeros_dense += zd, p.zeros_sparse += zs, p.zeros_differ += zd != zs;
+  }
+  return p;
+}
+
+// a lasso of scale s on [first, first + count): g_j + sign(b_j) / s = 0 where b_j != 0, |g_j| <= 1/s at 0,
+// g = 0 elsewhere (g the gradient of the smooth part); the largest violation relative to 1/s
+template <class O>
+double lasso_kkt(O& obj, const lo::optimizer_point& x, int first, int count, double s) {
+  const int n = static_cast<int>(x.extent(0));
+  lo::optimizer_vector g("g", n);
+  obj.value_gradient(x, g);
+  double e = 0.0;
+  for (int j = 0; j < n; ++j) {
+    const bool pen = j >= first && j < first + count;
+    if (!pen) e = std::max(e, std::abs(g(j)) * s);
+    else if (x(j) != 0.0) e = std::max(e, std::abs(g(j) + (x(j) > 0.0 ? 1.0 : -1.0) / s) * s);
+    else e = std::max(e, std::abs(g(j)) * s - 1.0);
+  }
+  return e;
+}
+
+lo::proximal_newton_optimizer<> tight_proximal_sparse() {
+  lo::proximal_newton_optimizer<> pn;
+  pn.stop_rule.tolerance = 1e-14;
+  return pn;
+}
+
+}  // namespace
+
+TEST_CASE("engine inner fit: proximal Newton on a sparse curvature against the dense one, lasso and group lasso") {
+  {
+    const auto s = lasso_spec(2000, 41);
+    const auto m = le::build_row_model(s, 2);
+    const double scale = 1.0 / 60.0;
+    const std::vector<le::penalty_term> pen = {univariate_prior(ld::laplace1_distrib{}, 1, 6, 1, {-1}, {scale})};
+    const auto p = fit_both(m, pen, std::vector<double>(9, 0.0), 1, 6, tight_proximal_sparse());
+    REQUIRE(lo::optimizer_succeeded(p.sparse.status));
+    sparse_composite os(m, pen);
+    const double kkt = lasso_kkt(os, p.sparse.point, 1, 6, scale);
+    MESSAGE("lasso: dx ", p.dx, ", zeros ", p.zeros_sparse, " (dense ", p.zeros_dense, "), iterations ", p.sparse.iterations,
+            " (dense ", p.dense.iterations, "), KKT ", kkt);
+    CHECK(p.dx <= 1e-7);
+    CHECK(p.zeros_differ == 0);
+    CHECK(p.zeros_sparse >= 1);
+    CHECK(kkt <= 1e-6);
+  }
+  {
+    const auto s = lasso_spec(2000, 42);
+    const auto m = le::build_row_model(s, 2);
+    using pe = ld::mvpowerexp1_distrib<laplace::pdmat::scaled_identity_pdmat>;
+    laplace::pdmat::scaled_identity_pdmat I;
+    I.dim = 6;
+    const double log_sigma = std::log(0.01);
+    const auto pen = le::make_penalty_term(laplace::penalty::distrib_penalty<pe>{pe(I)}, {{1, 2, 3, 4, 5, 6}}, {-1, -1},
+                                           {log_sigma, 0.5});
+    const auto p = fit_both(m, {pen}, std::vector<double>(9, 0.0), 1, 6, tight_proximal_sparse());
+    REQUIRE(lo::optimizer_succeeded(p.sparse.status));
+    sparse_composite os(m, {pen});
+    lo::optimizer_vector g("g", 9);
+    os.value_gradient(p.sparse.point, g);
+    double nb = 0.0;
+    for (int j = 1; j <= 6; ++j) nb += p.sparse.point(j) * p.sparse.point(j);
+    nb = std::sqrt(nb);
+    REQUIRE(nb > 0.0);
+    const double c = 1.0 / (2.0 * std::exp(log_sigma) * nb);
+    double e = 0.0;
+    for (int j = 0; j < 9; ++j) e = std::max(e, std::abs(g(j) + (j >= 1 && j <= 6 ? c * p.sparse.point(j) : 0.0)));
+    MESSAGE("group lasso: dx ", p.dx, ", iterations ", p.sparse.iterations, " (dense ", p.dense.iterations,
+            "), stationarity ", e);
+    CHECK(p.dx <= 1e-7);
+    CHECK(e <= 1e-6 / (2.0 * std::exp(log_sigma)));
+  }
+}
+
+// A lasso on the group effects of the Gaussian with its scale modelled (c0, c1 free), from c0 = -1.5: the
+// first curvatures are indefinite (the location-scale cross terms), and at the solution the smooth part's
+// H is singular (the intercept and the group effects are collinear in the likelihood, and the lasso has no
+// curvature off its kink). Each stage of the rule for a sparse H without a factor is exercised: the observed
+// H, the floor H + delta I (the singular H near the solution) and the scaled shift H + t D, whose first try
+// t = 1e-6 does not suffice at the start (read from the objective there), so it takes more than one.
+TEST_CASE("engine inner fit: sparse proximal Newton, an indefinite start and a singular H at the solution") {
+  const int G = 100;
+  const auto s = gauss_spec(20 * G, G, 43);
+  const auto m = le::build_row_model(s, 2);
+  const int N = m.n_coordinates();
+  const double scale = 0.05;
+  const std::vector<le::penalty_term> pen = {univariate_prior(ld::laplace1_distrib{}, s.n_global, G, 1, {-1}, {scale})};
+  std::vector<double> x0(N, 0.0);
+  x0[2] = -1.5;
+  const auto pn = tight_proximal_sparse();
+  {
+    // at the start: neither H, nor H + delta I, nor H + 1e-6 D has a factor
+    sparse_composite o(m, pen);
+    lo::optimizer_vector g("g", N);
+    lo::sparse_curvature_matrix H;
+    (void)o.value_gradient_curvature(point(x0), g, H);
+    double gamma = 0.0;
+    for (int j = 0; j < N; ++j) gamma = std::max(gamma, std::abs(H.values[H.col_ptr[j]]));
+    const double delta = pn.sparse_floor * gamma;
+    laplace::sparse::sparse_ldlt f;
+    const auto pd = laplace::sparse::sparse_ldlt_outcome::positive_definite;
+    CHECK(f.factorize(N, H.col_ptr.data(), H.row_idx.data(), H.values.data()) != pd);
+    CHECK(f.factorize(N, H.col_ptr.data(), H.row_idx.data(), H.values.data(), delta) != pd);
+    std::vector<double> v = H.values;
+    for (int j = 0; j < N; ++j) {
+      const double d = H.values[H.col_ptr[j]];
+      v[H.col_ptr[j]] = d + pn.sparse_shift_start * std::max(std::abs(d), delta);
+    }
+    CHECK(f.factorize(N, H.col_ptr.data(), H.row_idx.data(), v.data()) != pd);
+  }
+  const auto p = fit_both(m, pen, x0, s.n_global, G, pn);
+  REQUIRE(lo::optimizer_succeeded(p.sparse.status));
+  REQUIRE(lo::optimizer_succeeded(p.dense.status));
+  sparse_composite os(m, pen);
+  const double kkt = lasso_kkt(os, p.sparse.point, s.n_global, G, scale);
+  MESSAGE("dx ", p.dx, ", zeros ", p.zeros_sparse, " of ", G, " (dense ", p.zeros_dense, "), iterations ", p.sparse.iterations,
+          " (dense ", p.dense.iterations, ", eigen-corrected ", p.dense.eigen_modified_iterations, "), floored ",
+          p.sparse.floored_iterations, ", shifted ", p.sparse.shifted_iterations, ", status ",
+          static_cast<int>(p.sparse.status), ", KKT ", kkt);
+  CHECK(p.dense.eigen_modified_iterations >= 1);  // the start is indefinite
+  CHECK(p.sparse.shifted_iterations >= 1);
+  CHECK(p.sparse.floored_iterations >= 1);  // the singular H near the solution
+  CHECK(p.sparse.curvature_evaluations - p.sparse.shifted_iterations - p.sparse.floored_iterations >= 1);  // observed
+  CHECK(p.dx <= 1e-6);
+  CHECK(p.zeros_differ == 0);
+  CHECK(kkt <= 1e-6);
+  CHECK(p.sparse.iterations <= 2 * p.dense.iterations + 2);
+}
+
+// The group lasso on blocks of five group effects of the same model: FISTA on the subproblem, the scaled
+// shift on an indefinite start, the sparse optimizer against the dense one.
+TEST_CASE("engine inner fit: sparse proximal Newton, a group lasso on the group effects from an indefinite start") {
+  const int G = 100;
+  const auto s = gauss_spec(20 * G, G, 43);
+  const auto m = le::build_row_model(s, 2);
+  const int N = m.n_coordinates();
+  using pe = ld::mvpowerexp1_distrib<laplace::pdmat::scaled_identity_pdmat>;
+  laplace::pdmat::scaled_identity_pdmat I;
+  I.dim = 5;
+  std::vector<std::vector<int>> reps;
+  for (int b = 0; b + 5 <= G; b += 5) reps.push_back({4 + b, 5 + b, 6 + b, 7 + b, 8 + b});
+  const double log_sigma = std::log(0.1);
+  const auto pen = le::make_penalty_term(laplace::penalty::distrib_penalty<pe>{pe(I)}, reps, {-1, -1}, {log_sigma, 0.5});
+  std::vector<double> x0(N, 0.0);
+  x0[2] = -1.5;
+  const auto p = fit_both(m, {pen}, x0, s.n_global, G, tight_proximal_sparse());
+  REQUIRE(lo::optimizer_succeeded(p.sparse.status));
+  // stationarity: g_g + b_g / (2 sigma |b_g|) = 0 on a group with b_g != 0, |g_g| <= 1 / (2 sigma) at 0, g = 0
+  // on the unpenalized coordinates; the largest violation relative to 1 / (2 sigma)
+  sparse_composite os(m, {pen});
+  lo::optimizer_vector g("g", N);
+  os.value_gradient(p.sparse.point, g);
+  const double unit = 1.0 / (2.0 * std::exp(log_sigma));
+  double e = 0.0;
+  for (int j = 0; j < 4; ++j) e = std::max(e, std::abs(g(j)) / unit);
+  for (const auto& r : reps) {
+    double nb = 0.0, ng = 0.0;
+    for (int c : r) nb += p.sparse.point(c) * p.sparse.point(c), ng += g(c) * g(c);
+    nb = std::sqrt(nb), ng = std::sqrt(ng);
+    if (nb > 0.0) {
+      double v2 = 0.0;
+      for (int c : r) v2 += std::pow(g(c) + unit * p.sparse.point(c) / nb, 2);
+      e = std::max(e, std::sqrt(v2) / unit);
+    } else {
+      e = std::max(e, ng / unit - 1.0);
+    }
+  }
+  MESSAGE("group lasso: dx ", p.dx, ", iterations ", p.sparse.iterations, " (dense ", p.dense.iterations, "), floored ",
+          p.sparse.floored_iterations, ", shifted ", p.sparse.shifted_iterations, ", status ",
+          static_cast<int>(p.sparse.status), ", stationarity ", e);
+  CHECK(p.sparse.shifted_iterations >= 1);
+  CHECK(p.dx <= 1e-6);
+  CHECK(p.zeros_differ == 0);
+  CHECK(e <= 1e-5);  // measured up to 9.6e-7 (the floor and shift counts move with the order of the sums)
+}
+
+namespace {
+
+// A quadratic f(x) = x'Ax/2 - b'x with A = [[2, 0.5, 0], [0.5, 2, 0], [0, 0, 2]], no penalty. Its curvature is
+// stored in one pattern, or (move) in two patterns of the same size alternating from one evaluation to the
+// next: (2, 1) as an explicit zero, then (2, 0) instead. An index of the columns kept from the first pattern
+// would read the second one's values at the wrong positions (the diagonal of column 1 as 0).
+struct moving_pattern_quadratic {
+  using curvature_type = lo::sparse_curvature_matrix;
+  bool move = true;
+  int calls = 0;
+  double value(const lo::optimizer_point& x) {
+    return 0.5 * (2.0 * x(0) * x(0) + x(0) * x(1) + 2.0 * x(1) * x(1) + 2.0 * x(2) * x(2)) - x(0) - x(1) - x(2);
+  }
+  double value_gradient(const lo::optimizer_point& x, const lo::optimizer_vector& g) {
+    g(0) = 2.0 * x(0) + 0.5 * x(1) - 1.0, g(1) = 0.5 * x(0) + 2.0 * x(1) - 1.0, g(2) = 2.0 * x(2) - 1.0;
+    return value(x);
+  }
+  double value_gradient_curvature(const lo::optimizer_point& x, const lo::optimizer_vector& g, curvature_type& H) {
+    H.n = 3;
+    if (!move || calls++ % 2 == 0) {
+      H.col_ptr = {0, 2, 4, 5}, H.row_idx = {0, 1, 1, 2, 2}, H.values = {2.0, 0.5, 2.0, 0.0, 2.0};
+    } else {
+      H.col_ptr = {0, 3, 4, 5}, H.row_idx = {0, 1, 2, 1, 2}, H.values = {2.0, 0.5, 0.0, 2.0, 2.0};
+    }
+    return value_gradient(x, g);
+  }
+  double nonsmooth_value(const lo::optimizer_point&) { return 0.0; }
+  void nonsmooth_prox(const lo::optimizer_point& v, double, const lo::optimizer_vector& z) {
+    for (std::size_t j = 0; j < v.extent(0); ++j) z(j) = v(j);
+  }
+  int nonsmooth_block_count() const { return 0; }
+  double weak_convexity_constant(int) { return 0.0; }
+};
+
+}  // namespace
+
+// The column index of a sparse H is rebuilt whenever the pattern changes, even at the same number of entries:
+// the same matrix stored in two alternating patterns gives the iterates of the same matrix in one pattern.
+// One FISTA step per subproblem, so every iteration's product enters the point.
+TEST_CASE("engine inner fit: sparse proximal Newton follows a curvature pattern that changes at the same size") {
+  auto pn = tight_proximal_sparse();
+  pn.max_inner_sweeps = 1;
+  moving_pattern_quadratic moving, fixed;
+  fixed.move = false;
+  const auto rm = lo::minimize(pn, moving, point({3.0, -2.0, 1.0}));
+  const auto rf = lo::minimize(pn, fixed, point({3.0, -2.0, 1.0}));
+  REQUIRE(lo::optimizer_succeeded(rm.status));
+  REQUIRE(lo::optimizer_succeeded(rf.status));
+  MESSAGE("moving pattern: iterations ", rm.iterations, ", fixed pattern: ", rf.iterations);
+  CHECK(rm.curvature_evaluations >= 2);  // the second pattern was read
+  CHECK(rm.iterations == rf.iterations);
+  for (int j = 0; j < 3; ++j) CHECK(rm.point(j) == rf.point(j));
+  CHECK(std::abs(rm.point(0) - 0.4) <= 1e-7);  // the minimizer, A x = 1: (0.4, 0.4, 0.5)
+  CHECK(std::abs(rm.point(2) - 0.5) <= 1e-7);
 }
